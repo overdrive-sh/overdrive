@@ -66,6 +66,9 @@ use overdrive_worker::mtls_intercept_worker::{
     MtlsInterceptInstallError, MtlsInterceptStopError, MtlsInterceptWorker,
 };
 
+type GuestNetworkProvisionerAndPool<'a> =
+    Option<(&'a dyn GuestNetworkProvisioner, &'a crate::guest_network::GuestAddressPool)>;
+
 /// Allocation-scoped lifecycle boundary for transparent mTLS interception.
 ///
 /// The action shim owns this boundary: callers await it before proceeding to
@@ -533,6 +536,17 @@ fn netns_provision_cause(err: &ShimError) -> Option<TransitionReason> {
     })
 }
 
+fn is_guest_network_admission_refusal(err: &ShimError) -> bool {
+    matches!(
+        err,
+        ShimError::GuestNetwork(
+            crate::guest_network::GuestNetworkError::AdmissionCapReached { .. }
+                | crate::guest_network::GuestNetworkError::LeaseRetiring { .. }
+                | crate::guest_network::GuestNetworkError::PoolExhausted { .. }
+        )
+    )
+}
+
 #[cfg(not(any(test, feature = "integration-tests")))]
 fn netns_provision_cause(err: &ShimError) -> Option<TransitionReason> {
     match err {
@@ -639,7 +653,7 @@ async fn fail_closed_on_mtls_install_with_guest(
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
     obs: &dyn ObservationStore,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
@@ -663,13 +677,14 @@ async fn fail_closed_on_mtls_install_with_guest(
             }
         }
     }
+    retire_guest_network_lease(&running_row.alloc_id, guest_network);
     let mtls_cleanup = mtls_lifecycle.stop_alloc(&running_row.alloc_id).await.err();
     let network_cleanup = teardown_for_dispatch(
         &running_row.alloc_id,
         None,
         net_slot_allocator,
         network_provisioner,
-        guest_provisioner,
+        guest_network,
     )
     .await
     .err();
@@ -731,7 +746,7 @@ async fn fail_closed_on_guest_network_activation(
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: &dyn GuestNetworkProvisioner,
+    guest_network: (&dyn GuestNetworkProvisioner, &crate::guest_network::GuestAddressPool),
     obs: &dyn ObservationStore,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
@@ -745,13 +760,14 @@ async fn fail_closed_on_guest_network_activation(
             Err(error) => return Err(error.into()),
         }
     }
+    retire_guest_network_lease(&running_row.alloc_id, Some(guest_network));
     let mtls_cleanup = mtls_lifecycle.stop_alloc(&running_row.alloc_id).await.err();
     let network_cleanup = teardown_for_dispatch(
         &running_row.alloc_id,
         None,
         net_slot_allocator,
         network_provisioner,
-        Some(guest_provisioner),
+        Some(guest_network),
     )
     .await
     .err();
@@ -1121,7 +1137,7 @@ async fn dispatch_with_network_provisioner_and_guest(
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
@@ -1147,7 +1163,7 @@ async fn dispatch_with_network_provisioner_and_guest(
             mtls_lifecycle,
             net_slot_allocator,
             network_provisioner,
-            guest_provisioner,
+            guest_network,
             host,
         ))
         .await;
@@ -1329,7 +1345,7 @@ async fn dispatch_with_network_owner(
         mtls_lifecycle,
         &state.dns_slots,
         &ProductionNetworkGuard,
-        Some(state.shared_guest_network.as_ref()),
+        Some((state.shared_guest_network.as_ref(), state.guest_pool.as_ref())),
         state.vm_host_state.as_ref(),
     )
     .await
@@ -1415,7 +1431,7 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
         mtls_lifecycle,
         &state.dns_slots,
         &HostNetworkProvisioner,
-        Some(provisioner),
+        Some((provisioner, state.guest_pool.as_ref())),
         state.vm_host_state.as_ref(),
     )
     .await;
@@ -1443,10 +1459,10 @@ async fn provision_and_inject_netns(
     spec: &mut AllocationSpec,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<Option<crate::guest_network::GuestNetworkPlan>, ShimError> {
-    if let Some(guest_provisioner) = guest_provisioner {
-        let plan = crate::guest_network::assign_action_plan(spec.alloc.clone())?;
+    if let Some((guest_provisioner, guest_pool)) = guest_network {
+        let plan = guest_pool.assign(spec.alloc.clone())?;
         guest_provisioner.provision(&plan).await?;
         spec.network = Some(plan.assignment().clone());
         return Ok(Some(plan));
@@ -1637,12 +1653,18 @@ fn teardown_and_release_netns(
 async fn teardown_guest_network(
     alloc_id: &AllocationId,
     guest_provisioner: &dyn GuestNetworkProvisioner,
+    guest_pool: &crate::guest_network::GuestAddressPool,
 ) -> Result<(), ShimError> {
-    let Some(plan) = crate::guest_network::action_plan(alloc_id) else {
+    let Some(plan) = guest_pool.snapshot().remove(alloc_id) else {
         return Ok(());
     };
     guest_provisioner.teardown(&plan).await?;
-    crate::guest_network::release_action_plan(alloc_id);
+    guest_pool.release(alloc_id);
+    tracing::info!(
+        name: "guest_network.lease_released",
+        alloc = %alloc_id,
+        "guest network lease released"
+    );
     Ok(())
 }
 
@@ -1667,10 +1689,10 @@ async fn teardown_for_dispatch(
     prior_workload_addr: Option<std::net::Ipv4Addr>,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<(), ShimError> {
-    if let Some(guest_provisioner) = guest_provisioner {
-        return teardown_guest_network(alloc_id, guest_provisioner).await;
+    if let Some((guest_provisioner, guest_pool)) = guest_network {
+        return teardown_guest_network(alloc_id, guest_provisioner, guest_pool).await;
     }
     #[cfg(not(any(test, feature = "integration-tests")))]
     {
@@ -1693,6 +1715,21 @@ async fn teardown_for_dispatch(
     }
 }
 
+fn retire_guest_network_lease(
+    alloc_id: &AllocationId,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
+) {
+    if let Some((_, guest_pool)) = guest_network
+        && guest_pool.retire(alloc_id)
+    {
+        tracing::info!(
+            name: "guest_network.lease_retired",
+            alloc = %alloc_id,
+            "guest network lease retired"
+        );
+    }
+}
+
 /// Abort cleanup for a successor that did not reach an accepted Running row.
 /// Driver quiescence precedes mTLS and structural teardown, and every effect
 /// is addressed by the successor's exact allocation identity.
@@ -1702,7 +1739,7 @@ async fn cleanup_restart_successor(
     alloc_id: &AllocationId,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<(), ShimError> {
     if let Some((driver, handle)) = driver {
         match driver.stop(handle).await {
@@ -1711,15 +1748,10 @@ async fn cleanup_restart_successor(
         }
         driver.release_supervision(&handle.alloc);
     }
+    retire_guest_network_lease(alloc_id, guest_network);
     mtls_lifecycle.stop_alloc(alloc_id).await?;
-    teardown_for_dispatch(
-        alloc_id,
-        None,
-        net_slot_allocator,
-        network_provisioner,
-        guest_provisioner,
-    )
-    .await?;
+    teardown_for_dispatch(alloc_id, None, net_slot_allocator, network_provisioner, guest_network)
+        .await?;
     Ok(())
 }
 
@@ -1735,8 +1767,9 @@ async fn cleanup_restart_predecessor(
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<(), ShimError> {
+    retire_guest_network_lease(&handle.alloc, guest_network);
     for driver in prior_drivers {
         if let Err(error) = driver.stop(handle).await
             && !matches!(error, DriverError::NotFound { .. })
@@ -1750,7 +1783,7 @@ async fn cleanup_restart_predecessor(
         prior_workload_addr,
         net_slot_allocator,
         network_provisioner,
-        guest_provisioner,
+        guest_network,
     )
     .await?;
     alloc_drivers.lock().remove(&handle.alloc);
@@ -1772,7 +1805,7 @@ async fn finish_restart(
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<(), ShimError> {
     let cleanup_outcome = cleanup_restart_predecessor(
         prior_drivers,
@@ -1782,7 +1815,7 @@ async fn finish_restart(
         mtls_lifecycle,
         net_slot_allocator,
         network_provisioner,
-        guest_provisioner,
+        guest_network,
     )
     .await;
     match (successor_outcome, cleanup_outcome) {
@@ -1833,7 +1866,7 @@ async fn dispatch_single(
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
     match action {
@@ -2111,13 +2144,14 @@ async fn dispatch_single(
             // only the still-owned one. On a process loss those process-local
             // owners die; boot reclamation makes an unsupervised VM terminal
             // before ordinary netns adoption/GC observes its structural residue.
+            retire_guest_network_lease(&row.alloc_id, guest_network);
             mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
             teardown_for_dispatch(
                 &row.alloc_id,
                 prior_workload_addr,
                 net_slot_allocator,
                 network_provisioner,
-                guest_provisioner,
+                guest_network,
             )
             .await?;
             let terminal_driver =
@@ -2199,30 +2233,43 @@ async fn dispatch_single(
                 &mut spec,
                 net_slot_allocator,
                 network_provisioner,
-                guest_provisioner,
+                guest_network,
             )
             .await
             {
                 Ok(plan) => plan,
                 Err(err) => {
-                    let Some(cause) = netns_provision_cause(&err) else {
+                    if is_guest_network_admission_refusal(&err) {
                         return Err(err);
-                    };
+                    }
                     // Assignment succeeded before the provision error, so unwind
                     // its structural ownership BEFORE making the Failed
                     // disposition durable. `raw` deliberately keeps the typed
                     // teardown error separate until the row write has had its
                     // existing precedence; it releases the slot only on teardown
                     // success.
+                    retire_guest_network_lease(&alloc_id, guest_network);
                     let network_cleanup = teardown_for_dispatch(
                         &alloc_id,
                         None,
                         net_slot_allocator,
                         network_provisioner,
-                        guest_provisioner,
+                        guest_network,
                     )
                     .await
                     .err();
+                    let Some(cause) = netns_provision_cause(&err) else {
+                        if let Some(cleanup_error) = &network_cleanup {
+                            tracing::error!(
+                                name: "start.provision.abort.cleanup.failed",
+                                alloc = %alloc_id,
+                                primary = %err,
+                                cleanup = %cleanup_error,
+                                "post-assignment provision failure could not complete structural cleanup"
+                            );
+                        }
+                        return Err(err);
+                    };
                     let failure_record = fail_closed_on_netns_provision(
                         obs,
                         bus,
@@ -2276,12 +2323,13 @@ async fn dispatch_single(
             )
             .await
             {
+                retire_guest_network_lease(&alloc_id, guest_network);
                 teardown_for_dispatch(
                     &alloc_id,
                     None,
                     net_slot_allocator,
                     network_provisioner,
-                    guest_provisioner,
+                    guest_network,
                 )
                 .await?;
                 return Err(issue_error);
@@ -2327,18 +2375,21 @@ async fn dispatch_single(
             }
             let (start_outcome, rejected_network_cleanup) = match start_outcome {
                 Ok(handle) => (Ok(handle), None),
-                Err(error) => (
-                    Err(error),
-                    teardown_for_dispatch(
-                        &alloc_id,
-                        None,
-                        net_slot_allocator,
-                        network_provisioner,
-                        guest_provisioner,
+                Err(error) => {
+                    retire_guest_network_lease(&alloc_id, guest_network);
+                    (
+                        Err(error),
+                        teardown_for_dispatch(
+                            &alloc_id,
+                            None,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_network,
+                        )
+                        .await
+                        .err(),
                     )
-                    .await
-                    .err(),
-                ),
+                }
             };
             let (handle_opt, state, reason, detail, source): (
                 Option<AllocationHandle>,
@@ -2506,6 +2557,7 @@ async fn dispatch_single(
                         driver.release_supervision(&handle.alloc);
                     }
                     if state == AllocState::Running {
+                        retire_guest_network_lease(&row.alloc_id, guest_network);
                         mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
                     }
                     if state == AllocState::Running {
@@ -2520,7 +2572,7 @@ async fn dispatch_single(
                             None,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await?;
                     }
@@ -2557,7 +2609,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                             obs,
                             bus,
                             tick,
@@ -2576,8 +2628,8 @@ async fn dispatch_single(
                         "installed allocation mTLS intercept"
                     );
                 }
-                if let (Some(plan), Some(guest_provisioner)) =
-                    (guest_plan.as_ref(), guest_provisioner)
+                if let (Some(plan), Some((guest_provisioner, guest_pool))) =
+                    (guest_plan.as_ref(), guest_network)
                     && let Err(activation_error) =
                         activate_guest_network(plan, guest_provisioner).await
                 {
@@ -2586,7 +2638,7 @@ async fn dispatch_single(
                         mtls_lifecycle,
                         net_slot_allocator,
                         network_provisioner,
-                        guest_provisioner,
+                        (guest_provisioner, guest_pool),
                         obs,
                         bus,
                         tick,
@@ -2655,12 +2707,12 @@ async fn dispatch_single(
                 &mut spec,
                 net_slot_allocator,
                 network_provisioner,
-                guest_provisioner,
+                guest_network,
             )
             .await;
             let successor_outcome = match provision_result {
                 Err(error) => {
-                    let Some(cause) = netns_provision_cause(&error) else {
+                    if is_guest_network_admission_refusal(&error) {
                         return finish_restart(
                             Err(error),
                             &prior_drivers,
@@ -2670,19 +2722,43 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await;
-                    };
+                    }
+                    retire_guest_network_lease(&successor_alloc_id, guest_network);
                     let successor_network_cleanup = teardown_for_dispatch(
                         &successor_alloc_id,
                         None,
                         net_slot_allocator,
                         network_provisioner,
-                        guest_provisioner,
+                        guest_network,
                     )
                     .await
                     .err();
+                    let Some(cause) = netns_provision_cause(&error) else {
+                        if let Some(cleanup_error) = &successor_network_cleanup {
+                            tracing::error!(
+                                name: "restart.provision.abort.cleanup.failed",
+                                alloc = %successor_alloc_id,
+                                primary = %error,
+                                cleanup = %cleanup_error,
+                                "successor provision failure could not complete structural cleanup"
+                            );
+                        }
+                        return finish_restart(
+                            Err(error),
+                            &prior_drivers,
+                            &predecessor_handle,
+                            prior_workload_addr,
+                            alloc_drivers,
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_network,
+                        )
+                        .await;
+                    };
                     let successor_record = fail_closed_on_netns_provision(
                         obs,
                         bus,
@@ -2730,7 +2806,7 @@ async fn dispatch_single(
                             &successor_alloc_id,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await
                         {
@@ -2751,7 +2827,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await;
                     }
@@ -2788,7 +2864,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await;
                     }
@@ -2804,7 +2880,7 @@ async fn dispatch_single(
                                 &successor_alloc_id,
                                 net_slot_allocator,
                                 network_provisioner,
-                                guest_provisioner,
+                                guest_network,
                             )
                             .await
                             .err();
@@ -2868,7 +2944,7 @@ async fn dispatch_single(
                                 mtls_lifecycle,
                                 net_slot_allocator,
                                 network_provisioner,
-                                guest_provisioner,
+                                guest_network,
                             )
                             .await;
                         }
@@ -2921,7 +2997,7 @@ async fn dispatch_single(
                                     mtls_lifecycle,
                                     net_slot_allocator,
                                     network_provisioner,
-                                    guest_provisioner,
+                                    guest_network,
                                 )
                                 .await;
                             }
@@ -2940,7 +3016,7 @@ async fn dispatch_single(
                                 &successor_alloc_id,
                                 net_slot_allocator,
                                 network_provisioner,
-                                guest_provisioner,
+                                guest_network,
                             )
                             .await;
                             if let Err(cleanup_error) = &successor_cleanup {
@@ -2961,7 +3037,7 @@ async fn dispatch_single(
                                 mtls_lifecycle,
                                 net_slot_allocator,
                                 network_provisioner,
-                                guest_provisioner,
+                                guest_network,
                             )
                             .await;
                         }
@@ -2982,7 +3058,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await;
                     }
@@ -3006,7 +3082,7 @@ async fn dispatch_single(
                             &successor_alloc_id,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await;
                         return finish_restart(
@@ -3018,7 +3094,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await;
                     }
@@ -3032,7 +3108,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                             obs,
                             bus,
                             tick,
@@ -3051,7 +3127,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            guest_network,
                         )
                         .await;
                     }
@@ -3061,8 +3137,8 @@ async fn dispatch_single(
                         driver = ?driver_kind,
                         "installed allocation mTLS intercept"
                     );
-                    if let (Some(plan), Some(guest_provisioner)) =
-                        (plan.as_ref(), guest_provisioner)
+                    if let (Some(plan), Some((guest_provisioner, guest_pool))) =
+                        (plan.as_ref(), guest_network)
                         && let Err(activation_error) =
                             activate_guest_network(plan, guest_provisioner).await
                     {
@@ -3071,7 +3147,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            guest_provisioner,
+                            (guest_provisioner, guest_pool),
                             obs,
                             bus,
                             tick,
@@ -3089,7 +3165,7 @@ async fn dispatch_single(
                             mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
-                            Some(guest_provisioner),
+                            guest_network,
                         )
                         .await;
                     }
@@ -3109,7 +3185,7 @@ async fn dispatch_single(
                 mtls_lifecycle,
                 net_slot_allocator,
                 network_provisioner,
-                guest_provisioner,
+                guest_network,
             )
             .await
         }
@@ -3151,13 +3227,14 @@ async fn dispatch_single(
             // guarded by its real ownership token and network teardown is
             // guarded by the retained slot. The durable terminal row is
             // written only after all of them have converged.
+            retire_guest_network_lease(&alloc_id, guest_network);
             mtls_lifecycle.stop_alloc(&alloc_id).await?;
             teardown_for_dispatch(
                 &alloc_id,
                 prior_row.workload_addr,
                 net_slot_allocator,
                 network_provisioner,
-                guest_provisioner,
+                guest_network,
             )
             .await?;
             let terminal_driver =
@@ -4915,7 +4992,6 @@ mod admission_refusal_acceptance {
     /// `guest_network.admission_refused` event naming the allocation, held,
     /// retiring, and the cap.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-03 (S-ND295-05E)"]
     async fn admission_refusal_writes_nothing_and_reports_held_and_retiring() {
         let fixture = AdmissionFixture::build().await;
         fixture.fill_to_the_cap_with_one_retiring();
@@ -4978,7 +5054,6 @@ mod admission_refusal_acceptance {
     /// row, no lifecycle occurrence, and no lifecycle event, and the one
     /// refusal event names it.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-03 (S-ND295-05E)"]
     async fn a_refused_restart_successor_still_cleans_up_its_predecessor_once() {
         let fixture = AdmissionFixture::build().await;
         fixture.fill_to_the_cap_with_one_retiring();

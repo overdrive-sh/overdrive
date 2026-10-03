@@ -388,11 +388,9 @@ pub struct AppState {
     )]
     pub(crate) guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
     /// The one node-wide guest address pool used by dispatch and hydration.
-    #[allow(
-        dead_code,
-        reason = "threaded into the state now; admission consumes it in DELIVER 06-03"
-    )]
     pub(crate) guest_pool: Arc<guest_network::GuestAddressPool>,
+    /// Read-port projection backed by the same per-server pool used at dispatch.
+    pub(crate) guest_attachment_view: guest_network::GuestPoolAttachmentView,
     /// DNS reply-source fallback allocator. It is retained only by the DNS
     /// responder's source-pinning adapter; guest attachment ownership lives in
     /// `SharedGuestNetworkOwner`.
@@ -743,6 +741,9 @@ impl AppState {
             identity,
             mtls_worker,
             guest_network_exec,
+            guest_attachment_view: guest_network::GuestPoolAttachmentView::new(Arc::clone(
+                &guest_pool,
+            )),
             guest_pool,
             // Default-construct the per-host slot allocator INSIDE the
             // constructor (transparent-mtls-enrollment D-TME-12 G3, step

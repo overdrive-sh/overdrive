@@ -116,8 +116,8 @@ use overdrive_control_plane::guest_network::{
     SharedGuestNetworkAuditError, SharedGuestNetworkOwner, TapActivation, TapQuiescence,
 };
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
-    derive_workload_netns_plan, responder_addr_for_slot,
+    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan, derive_workload_netns_plan,
+    responder_addr_for_slot,
 };
 
 use overdrive_core::UnixInstant;
@@ -132,7 +132,7 @@ use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
-    DriverStartFailure, DriverType, Resources,
+    DriverStartFailure, DriverType, GuestNetworkAssignment, Resources,
 };
 use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnectionId, MtlsEnforcement, MtlsEnforcementError, MtlsLimits,
@@ -1256,7 +1256,6 @@ fn assert_running_write_rejection_retires_then_releases(
 /// retires the lease before its attachment's teardown and releases it last.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 06-03 (S-ND295-06)"]
 async fn start_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last() {
     let outcome = drive_running_write_rejection_over_the_seam(Arm::Start).await;
     assert_running_write_rejection_retires_then_releases("fresh start", &outcome);
@@ -1268,7 +1267,6 @@ async fn start_running_write_rejection_retires_the_lease_before_teardown_and_rel
 /// follows the same retire-then-release unwind for the successor.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 06-03 (S-ND295-06)"]
 async fn restart_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last() {
     let outcome = drive_running_write_rejection_over_the_seam(Arm::Restart).await;
     assert_running_write_rejection_retires_then_releases("restart", &outcome);
@@ -2000,12 +1998,25 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let obs = build_obs();
     let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
+    worker.start_shared_owner().await.expect("the predecessor's shared owner is healthy");
     let stem = format!("restart-abort-{scenario:?}").to_ascii_lowercase();
     let predecessor = AllocationId::new(&format!("{stem}-0")).expect("valid predecessor alloc id");
     let successor = AllocationId::new(&format!("{stem}-1")).expect("valid successor alloc id");
     let workload = WorkloadId::new("svc-restart-abort").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
-    let prior_spec = build_spec(&predecessor);
+    let mut prior_spec = build_spec(&predecessor);
+    // A held predecessor has the assignment its original start received.
+    // The node-shared worker registers networked allocations only; an empty
+    // assignment would exercise its non-networked no-op instead of the
+    // retained-protection precondition this fixture promises.
+    prior_spec.network = Some(GuestNetworkAssignment {
+        address: Ipv4Addr::new(100, 95, 0, 2),
+        tap: "ovd-tp-0002".to_owned(),
+        mac: [0x02, 0x00, 100, 95, 0, 2],
+        gateway: Ipv4Addr::new(100, 95, 0, 1),
+        prefix: 16,
+        dns: Ipv4Addr::new(100, 95, 0, 1),
+    });
     worker.start_alloc(&prior_spec).await.expect("prior interception installs");
     assert!(worker.leg_c_addr(&predecessor).is_some(), "fixture owns a prior interception");
     seed_restart_predecessor(obs.as_ref(), &predecessor, &workload, &node).await;
@@ -2095,6 +2106,7 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
     };
     worker.stop_alloc(&successor).await.expect("successor fixture cleanup converges");
     worker.stop_alloc(&predecessor).await.expect("predecessor fixture cleanup converges");
+    worker.shutdown_owner().await.expect("the fixture's shared owner shuts down");
     outcome
 }
 

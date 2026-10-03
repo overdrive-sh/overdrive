@@ -200,7 +200,6 @@ fn first_address(started: &[AllocationSpec]) -> Option<Ipv4Addr> {
 /// the same roots starts with an empty pool, so the first guest-network
 /// assignment it makes is again the smallest free address, `100.95.0.2`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 06-03 (S-ND295-05A)"]
 async fn a_killed_restart_starts_with_an_empty_pool() {
     let roots = TempDir::new().expect("tempdir");
     let obs: Arc<dyn ObservationStore> =

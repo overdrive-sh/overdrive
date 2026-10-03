@@ -17,14 +17,16 @@ use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd as _;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ipnet::Ipv4Net;
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::GuestNetworkAssignment;
-use overdrive_core::traits::{GuestAttachmentObservation, GuestAttachmentView};
+use overdrive_core::traits::{
+    GuestAttachmentLease, GuestAttachmentObservation, GuestAttachmentView,
+};
 use overdrive_netlink::NetlinkError;
 
 #[cfg(target_os = "linux")]
@@ -515,15 +517,13 @@ pub struct GuestAddressPool {
 #[derive(Debug, Default)]
 struct GuestAddressPoolState {
     plans: BTreeMap<AllocationId, GuestNetworkPlan>,
+    leases: BTreeMap<AllocationId, GuestAttachmentLease>,
+    /// Retiring entries in `leases`; maintained to keep the admission check O(1).
+    retiring: u32,
     addresses: BTreeSet<u32>,
     next_candidate: u32,
 }
 
-#[allow(
-    dead_code,
-    clippy::unused_self,
-    reason = "GH #295 exact accepted scaffold; production construction lands in DELIVER"
-)]
 impl GuestAddressPool {
     /// Construct an empty pool over the node guest prefix, the bridge the
     /// shared owner is composed with, and the gateway and DNS addresses every
@@ -538,6 +538,8 @@ impl GuestAddressPool {
             dns,
             held: Arc::new(parking_lot::Mutex::new(GuestAddressPoolState {
                 plans: BTreeMap::new(),
+                leases: BTreeMap::new(),
+                retiring: 0,
                 addresses: BTreeSet::new(),
                 next_candidate: u32::from(node_prefix.network()).saturating_add(1),
             })),
@@ -547,8 +549,39 @@ impl GuestAddressPool {
     pub(crate) fn assign(&self, alloc: AllocationId) -> Result<GuestNetworkPlan> {
         let mut state = self.held.lock();
         if let Some(plan) = state.plans.get(&alloc) {
+            if state.leases.get(&alloc) == Some(&GuestAttachmentLease::Retiring) {
+                let occupancy = guest_pool_occupancy(&state);
+                drop(state);
+                tracing::info!(
+                    name: "guest_network.admission_refused",
+                    alloc = %alloc,
+                    held = occupancy.held,
+                    retiring = occupancy.retiring,
+                    cap = overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS,
+                    "guest network admission refused"
+                );
+                return Err(GuestNetworkError::LeaseRetiring { alloc });
+            }
             let plan = plan.clone();
             return Ok(plan);
+        }
+
+        let occupancy = guest_pool_occupancy(&state);
+        if occupancy.held >= overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS {
+            drop(state);
+            tracing::info!(
+                name: "guest_network.admission_refused",
+                alloc = %alloc,
+                held = occupancy.held,
+                retiring = occupancy.retiring,
+                cap = overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS,
+                "guest network admission refused"
+            );
+            return Err(GuestNetworkError::AdmissionCapReached {
+                held: occupancy.held,
+                retiring: occupancy.retiring,
+                cap: overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS,
+            });
         }
 
         let network = u32::from(self.node_prefix.network());
@@ -563,7 +596,17 @@ impl GuestAddressPool {
             }
         }
         let Some(address) = address else {
-            let held_count = u32::try_from(state.plans.len()).unwrap_or(u32::MAX);
+            let occupancy = guest_pool_occupancy(&state);
+            drop(state);
+            tracing::info!(
+                name: "guest_network.admission_refused",
+                alloc = %alloc,
+                held = occupancy.held,
+                retiring = occupancy.retiring,
+                cap = overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS,
+                "guest network admission refused"
+            );
+            let held_count = occupancy.held;
             return Err(GuestNetworkError::PoolExhausted { held: held_count, capacity });
         };
 
@@ -596,17 +639,24 @@ impl GuestAddressPool {
             address_u32.saturating_add(1)
         };
         state.addresses.insert(address_u32);
-        state.plans.insert(alloc, plan.clone());
+        state.plans.insert(alloc.clone(), plan.clone());
+        state.leases.insert(alloc, GuestAttachmentLease::Admitted);
         drop(state);
         Ok(plan)
     }
 
     pub(crate) fn release(&self, alloc: &AllocationId) {
-        let mut state = self.held.lock();
-        if let Some(plan) = state.plans.remove(alloc) {
-            let address = u32::from(plan.assignment.address);
-            state.addresses.remove(&address);
-            state.next_candidate = state.next_candidate.min(address);
+        {
+            let mut state = self.held.lock();
+            let lease = state.leases.remove(alloc);
+            if lease == Some(GuestAttachmentLease::Retiring) {
+                state.retiring -= 1;
+            }
+            if let Some(plan) = state.plans.remove(alloc) {
+                let address = u32::from(plan.assignment.address);
+                state.addresses.remove(&address);
+                state.next_candidate = state.next_candidate.min(address);
+            }
         }
     }
 
@@ -618,59 +668,61 @@ impl GuestAddressPool {
     /// An absent or already-Retiring lease returns `false` with no change, and
     /// Retiring never returns to Admitted. The lease still counts against the
     /// cap until [`Self::release`].
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-03")]
     pub(crate) fn retire(&self, alloc: &AllocationId) -> bool {
-        let _ = alloc;
-        todo!("RED scaffold: D-295-R7 GuestAddressPool::retire — DELIVER step 06-03")
+        {
+            let mut state = self.held.lock();
+            match state.leases.get_mut(alloc) {
+                Some(lease) if *lease == GuestAttachmentLease::Admitted => {
+                    *lease = GuestAttachmentLease::Retiring;
+                    state.retiring += 1;
+                    true
+                }
+                Some(_) | None => false,
+            }
+        }
     }
 
     /// Occupancy (Admitted plus Retiring held, and the Retiring subset) and the
     /// leases of `allocs`, read in one lock acquisition. Read-only.
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-03")]
     pub(crate) fn observe(&self, allocs: &[AllocationId]) -> GuestAttachmentObservation {
-        let _ = allocs;
-        todo!("RED scaffold: D-295-R8 GuestAddressPool::observe — DELIVER step 06-03")
+        let state = self.held.lock();
+        let occupancy = guest_pool_occupancy(&state);
+        let leases = allocs
+            .iter()
+            .filter_map(|alloc| state.leases.get(alloc).map(|lease| (alloc.clone(), *lease)))
+            .collect();
+        drop(state);
+        GuestAttachmentObservation { occupancy, leases }
+    }
+}
+
+fn guest_pool_occupancy(
+    state: &GuestAddressPoolState,
+) -> overdrive_core::guest_network::GuestAttachmentOccupancy {
+    overdrive_core::guest_network::GuestAttachmentOccupancy {
+        held: u32::try_from(state.leases.len()).unwrap_or(u32::MAX),
+        retiring: state.retiring,
     }
 }
 
 /// The production [`GuestAttachmentView`] the reconciler runtime lends each
 /// hydration context (D-295-R8, ADR-0134). Its `observe` delegates to the
-/// pool's one-snapshot `observe`.
-///
-/// RED scaffold (D-295-R8): until DELIVER 05-01 gives `AppState` the server's
-/// pool, it wraps the process's static action pool; nothing calls it before
-/// DELIVER step 07-03 hydrates occupancy through it.
-pub(crate) struct ActionPoolAttachmentView;
+/// server's pool observation.
+#[derive(Debug, Clone)]
+pub(crate) struct GuestPoolAttachmentView {
+    pool: Arc<GuestAddressPool>,
+}
 
-impl GuestAttachmentView for ActionPoolAttachmentView {
-    fn observe(&self, allocs: &[AllocationId]) -> GuestAttachmentObservation {
-        action_pool().observe(allocs)
+impl GuestPoolAttachmentView {
+    pub(crate) fn new(pool: Arc<GuestAddressPool>) -> Self {
+        Self { pool }
     }
 }
 
-static ACTION_POOL: OnceLock<GuestAddressPool> = OnceLock::new();
-
-fn action_pool() -> &'static GuestAddressPool {
-    ACTION_POOL.get_or_init(|| {
-        GuestAddressPool::new(
-            Ipv4Net::new_assert(Ipv4Addr::new(100, 95, 0, 0), 16),
-            "ovd-gbr0".to_owned(),
-            Ipv4Addr::new(100, 95, 0, 1),
-            Ipv4Addr::new(100, 95, 0, 1),
-        )
-    })
-}
-
-pub(crate) fn assign_action_plan(alloc: AllocationId) -> Result<GuestNetworkPlan> {
-    action_pool().assign(alloc)
-}
-
-pub(crate) fn release_action_plan(alloc: &AllocationId) {
-    action_pool().release(alloc);
-}
-
-pub(crate) fn action_plan(alloc: &AllocationId) -> Option<GuestNetworkPlan> {
-    action_pool().snapshot().remove(alloc)
+impl GuestAttachmentView for GuestPoolAttachmentView {
+    fn observe(&self, allocs: &[AllocationId]) -> GuestAttachmentObservation {
+        self.pool.observe(allocs)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11353,7 +11405,6 @@ mod pool_acceptance {
         /// Retiring replay, `retire` true only for Admitted -> Retiring, and
         /// `held = Admitted + Retiring` with `retiring` exact.
         #[test]
-        #[ignore = "pending DELIVER step 06-03 (S-ND295-04)"]
         fn assignment_replay_release_and_reuse_match_the_smallest_free_model(
             operations in prop::collection::vec(lease_op(), 1..256),
         ) {
@@ -11377,7 +11428,6 @@ mod pool_acceptance {
         /// address, after which a fresh `assign` of the same allocation takes
         /// the normal smallest-free path.
         #[test]
-        #[ignore = "pending DELIVER step 06-03 (S-ND295-04)"]
         fn retirement_is_monotonic_and_a_retiring_lease_still_counts(
             admitted in 1_u16..24,
             retire_mask in any::<u32>(),
@@ -11476,7 +11526,6 @@ mod pool_acceptance {
         /// held count of 16,385 cannot be produced through the pool's own
         /// operations, because `assign` refuses at 16,384.
         #[test]
-        #[ignore = "pending DELIVER step 06-03 (S-ND295-05A)"]
         fn admission_refuses_at_the_cap_over_held_leases_for_every_retiring_mix(
             retiring in prop_oneof![Just(0_usize), Just(CAP - 1), 1_usize..CAP - 1],
             offset in 0_usize..CAP - 1,

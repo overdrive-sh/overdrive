@@ -944,7 +944,6 @@ fn tick(counter: u64) -> TickContext {
 /// S-ND295-06 — Start publishes no partial attachment
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 06-03 (S-ND295-06)"]
 async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause() {
     const REFUSED: &str = "nd295-provision-refused";
     let fixture = SeamFixture::with_sim_owner().await;
