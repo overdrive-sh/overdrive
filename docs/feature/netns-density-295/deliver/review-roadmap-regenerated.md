@@ -562,3 +562,173 @@ All nine review findings are closed. The regenerated forward roadmap is
 **APPROVED** for its existing 24-step, 284-hour plan. Implementation remains a
 separate user-authorized DELIVER action governed by the unchanged per-step
 crafter/reviewer sequence and native evidence gates.
+
+
+---
+
+# Iteration 4 — 06-04 E23 Documentary Reconciliation
+
+## Metadata
+
+- Review type: independent bounded CROSS_WAVE roadmap re-review
+- Reviewer: independent `nw-acceptance-designer-reviewer`
+- Model: GPT 6.1 Sol (`gpt-6.1-sol`), extra-high (`xhigh`) reasoning
+- Reviewed and approved at: 2026-10-03T04:07:47+02:00
+- Scope: 06-04 criterion 5, its exact accepted E23 authority, normative
+  difference, approval provenance, and preservation of the approved roadmap
+- Inputs: the latest reconciliation in `roadmap-remediation-regenerated.md`,
+  `.context/distill-e23-06-04.md`, exact `feature-delta.md` contract sections,
+  and the prior three review iterations
+- Source-code and test-implementation inspection: none; mechanical hashes
+  were used only to preserve pre-existing dirty work
+
+## Iteration 4 verdict
+
+**APPROVED.** Criterion 5 now expresses both outcomes already accepted for
+E23: the same managed `Active` TAP is independently confirmed down through a
+realization requiring no new thread, or a genuinely refused required thread
+is exactly that TAP's typed `unconfirmed`/`Connect` entry. Neither permits
+vacuous success, an unconfirmed live TAP presented as confirmed, a host-level
+`Err`, panic, abort, blocking the awaiting task, or loss of the bound/repeat
+contract.
+
+The earlier criterion omitted an explicit accepted branch. Restoring that
+branch changes the derived wording without weakening the authoritative
+contract. No new approval or convenience-based waiver is inferred.
+`roadmap.validation` records `approved`, this reviewer/model, and the actual
+approval timestamp. This is roadmap approval, not a review or completion of
+06-04's partial production/test implementation.
+
+## Independent authority and approval-provenance verification
+
+The decisive clause is the existing E23 row at `feature-delta.md:6174`:
+
+> the host `quiesce_managed_taps` over one `Active` TAP returns `Ok`, with that TAP confirmed down by a realization that needs no thread or listed `unconfirmed` with `Connect`, and never aborts. A control run without the limit confirms the TAP down
+
+The same row specifies a real Lima-root cgroup with `pids.max` equal to the
+test process's current task count. It distinguishes the host-netlink bridge's
+real spawn refusal from quiescence performed without creating a thread.
+
+The recorded user approval at `feature-delta.md:15308` states:
+
+> **Decision 2, USER-APPROVED 2026-09-30:** no owner, kill, or supervisor call panics; a refused OS thread is the call's typed failure, `NetlinkError::Connect` from the host netlink bridge and so one TAP's `unconfirmed` entry under DR-08 (b)-A
+
+The user's direct invariant is also recorded at `feature-delta.md:5722-5723`:
+
+> OUR CODE MUST NEVER PANIC. IT MUST ALWAYS BE RECOVERABLE AND/OR SELF HEALING.
+
+Independent `git blame` of both lines 6174 and 15308 identifies commit
+`3d1bce2373f33005164d93896a29232820188cc3`, authored by Marcus Schack
+Abildskov on 2026-09-30 at 22:50:55 +0200. Its commit message records the
+three user decisions, including typed thread-refusal handling. The feature
+delta has no worktree diff. These are pre-existing accepted records, not
+approval text created by this reconciliation.
+
+The owner contract independently requires set-down plus read-back for each
+`Active` allocation, confirmed allocations moving to `QuiescedActive`, and
+empty `unconfirmed` meaning full quiescence (`feature-delta.md:1771-1783`).
+Every host failure, including inability to obtain a required thread/session,
+remains one TAP's `Netlink { operation: TapSetDown, source }` entry and the
+pass continues with no host `Err` (`:1795-1808`). The no-blocking-wait, bound,
+ambient-runtime/no-thread realization, and repeat-while-latched clauses remain
+normative (`:1821-1847`).
+
+The later DISTILL summary (`feature-delta.md:16185-16187`) mentions only the
+refusal outcome. It supplies no explicit revocation or user approval removing
+the E23 confirmed-down branch. Its incomplete summary cannot replace the
+explicit accepted outcome and owner partition. The roadmap correction follows
+those exact existing authorities.
+
+## Normative contract-diff assessment
+
+| Contract element | Previous derived wording / current correction | Assessment |
+|---|---|---|
+| Real starvation stimulus | Formerly “under real pids.max refusal”; now the same accepted real cgroup cap at current task count, with independent refusal-counter evidence when refusal occurs. | Restores E23's exact stimulus without requiring an implementation to manufacture an unnecessary thread. |
+| No-thread realization | Omitted from the prior criterion; now requires the same real TAP independently confirmed down. | Explicitly accepted at FD:6174 and FD:1836-1838; no new permitted DESIGN state. |
+| Genuine required-thread refusal | Previously abbreviated `unconfirmed/Connect`; now exactly one TAP's `Netlink { operation: TapSetDown, source: Connect { source } }`, real `EAGAIN`/`WouldBlock`, and rising pids refusal counter. | Preserves typed source and singleton owner partition; fabricated refusal or another outcome cannot pass. |
+| Empty `unconfirmed` | Now requires the same TAP down and no thread refusal; up, absent, replaced, and unverified TAPs are explicitly excluded. | Preserves full-quiescence meaning and eliminates vacuous success. |
+| Positive control | Now explicitly requires the uncapped control to confirm the TAP down. | Already required at FD:6174. |
+| Panic/abort, host `Err`, bound, repeat, blocking wait | Every prohibition/requirement remains explicit; criteria 1-4 and 6 are unchanged. | No `never`, `must`, failure partition, lifecycle state, or security outcome is relaxed. |
+| API/design/ownership | No signature, type, variant, port, wire/persisted format, ownership, or realization mechanism is added by the correction. | Documentary translation only; exact architecture remains unchanged. |
+
+Only criterion 5 and validation status/timestamp differ from the approved
+roadmap at `HEAD` before this review. Implementation notes and every
+verification command are unchanged. The review adds only approval metadata and
+this append.
+
+## Reproduced-evidence disposition
+
+The completed DISTILL report records the original assertion's failing run
+`cf938bfc-2cb1-448b-bc2d-f1eb078653a3`: the production owner returned `Ok`
+with empty `unconfirmed`, and the refusal-only assertion failed. Its corrected
+real Lima run `940f67fa-5064-4be7-b154-480d01b25830` reports:
+
+```text
+[E23] pids.max=10; pids.current=10; refused=0->0; TAP=ovd-tp-f2e5; before=(490, up); after=(490, false); unconfirmed={}
+```
+
+That report supplies independent kernel identity/state and the already
+accepted no-thread outcome, rather than treating empty `unconfirmed` alone
+as success. It separately records real bridge `EAGAIN`/`WouldBlock` refusal
+and unchanged bound-miss/per-TAP-session-failure checks. It does not claim that
+this native quiescence run exercised a refused quiescence thread.
+
+This reviewer verified the report against the exact documentary contract and
+commit provenance. The reported tests were not rerun, and their implementation
+was not inspected in this bounded review. Dedicated 06-04 implementation
+review remains responsible for the crafter's production changes and test
+honesty. The reported result matches an explicit accepted DESIGN branch;
+it does not falsify a DESIGN premise or authorize a new mechanism.
+
+## Every prior finding and current disposition
+
+| Finding | Iteration 4 disposition | Basis |
+|---|---|---|
+| RRR-01 | **CLOSED — retained** | Accepted goal/protocol and ADR references are unchanged; all 35 design references still exist. |
+| RRR-02 | **CLOSED — retained** | Frozen phases 01-04 are unchanged, and the forward dependency structure is preserved. |
+| RRR-03 | **CLOSED — retained** | The existing 08-01 native-falsification gate is unchanged; this E23 outcome is already accepted rather than a contradicted DESIGN premise. |
+| RRR-04 | **CLOSED — retained** | E18 measurements, bound-selection gates, and receipt/value-record boundaries are unchanged. |
+| RRR-05 | **CLOSED — bounded E23 correction independently verified** | All three cells and commands remain. The 06-04 cell now accurately includes FD:6174's confirmed-down branch while retaining real-refusal typed failure, full-quiescence meaning, safety, bound, and repeat requirements. |
+| RRR-06 | **CLOSED — retained** | Every verification command is unchanged; zero bare nextest commands occur in forward verification lists. |
+| RRR-07 | **CLOSED — retained** | Authored-body inventories and ownership are unchanged. The correction retains the existing E23 scenario/body identity. |
+| RRR-08 | **CLOSED — retained** | The DISTILL-owned receipt harness and its accepted boundary are unchanged. |
+| RRR-09 | **CLOSED — retained** | The exact in-process walking-skeleton driving ports and binary/subprocess prohibition are unchanged. |
+
+No previous finding is reopened. No new documentary blocker or architectural
+requirement is introduced. Cosmetic length warnings remain nonblocking.
+
+## Verification and preservation
+
+- Reused the role/skills already loaded for the preceding bounded roadmap
+  review; read only the necessary documentary correction, authority,
+  governance, prior review, and report sections.
+- Independently compared parsed `HEAD` and worktree roadmaps: only 06-04
+  criterion 5 and validation status/timestamp had changed before this review.
+  All other criteria, implementation notes, steps, dependencies, and commands
+  are identical.
+- Confirmed 24 forward steps, 284 estimated hours, all 35 design references
+  present, and zero missing step/phase dependency targets.
+- Confirmed frozen phases 01-04 remain equal to `HEAD`; sorted pretty-JSON
+  SHA-256 remains
+  `968fc70be56d5d1037d60246192cacc499843f5ef463e6d0dec92b13cbb1b05b`.
+- Ran `PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity
+  docs/feature/netns-density-295/deliver --roadmap-only`: exit 0,
+  `Roadmap format OK`, no validator errors. Execution-log validation was
+  intentionally skipped; no DES event was written.
+- Ran `git diff --check`: exit 0, clean.
+- Preserved all three previous review iterations byte-for-byte as the prefix
+  of this artifact. The dirty `AGENTS.md`, four pre-existing dirty
+  production/test files, active `execution-log.json`, and architect's
+  remediation record retain their pre-review hashes. The execution log is
+  already dirty from the active step and is preserved at that exact state,
+  not replaced with `HEAD`.
+- Changed only this review append and `roadmap.validation` approval metadata;
+  no step content, source, test, design, evidence report, log event, staging,
+  or commit was changed by the reviewer.
+
+## Final disposition
+
+**APPROVED** for the corrected 06-04 E23 criterion within the existing
+24-step, 284-hour roadmap. The original 06-04 DELIVER sequence and dedicated
+implementation review remain in force; this bounded review performs no
+implementation or advancement.

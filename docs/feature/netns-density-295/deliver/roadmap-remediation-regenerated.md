@@ -88,3 +88,67 @@ and top-level metadata before DELIVER may execute 05-00.
   A JSON/hash check confirmed the bare command is absent, the exact metal
   command remains, phases 01-04 match their pre-edit state and `HEAD`, and
   the execution-log and review-artifact bytes match their pre-edit hashes.
+
+## 2026-10-03 — 06-04 E23 documentary reconciliation
+
+### Prior approval and exact authority
+
+The accepted E23 clause at `feature-delta.md:6174` states:
+
+> the host `quiesce_managed_taps` over one `Active` TAP returns `Ok`, with that TAP confirmed down by a realization that needs no thread or listed `unconfirmed` with `Connect`, and never aborts. A control run without the limit confirms the TAP down
+
+`git blame -L 6174,6174` identifies this existing clause as commit
+`3d1bce237` by Marcus Schack Abildskov, 2026-09-30. The recorded approval at
+`feature-delta.md:15308` states:
+
+> **Decision 2, USER-APPROVED 2026-09-30:** no owner, kill, or supervisor call panics; a refused OS thread is the call's typed failure, `NetlinkError::Connect` from the host netlink bridge and so one TAP's `unconfirmed` entry under DR-08 (b)-A
+
+The accompanying accepted owner contract requires confirmed TAPs to move to
+`QuiescedActive`, an empty `unconfirmed` result to mean full quiescence,
+every host failure to remain one TAP's entry with no host `Err`, and the pass
+to continue (`feature-delta.md:1771-1808`). Its bound, cancellation,
+no-blocking-wait, no-thread realization, and repeat-while-latched clauses
+remain required (`feature-delta.md:1821-1847`). No security or owner-state
+contract is changed by this correction.
+
+### Correction and evidence
+
+Only 06-04 criterion 5 was reconciled to the two outcomes already named by
+the accepted E23 clause. The previous derived criterion omitted the
+confirmed-down realization. It now preserves the real `pids.max` cap at the
+test process's current task count, the independently observed same-TAP
+confirmed-down result, and the exact per-TAP `Connect` result with the real
+refusal source and counter when a required thread is refused. Empty
+`unconfirmed` cannot pass with a live/up, absent, replaced, or unverified TAP.
+The uncapped control and the existing partition, bound, repeat, no-host-`Err`,
+no-blocking-wait, and no-panic/no-abort requirements remain explicit.
+
+The completed isolated DISTILL report `.context/distill-e23-06-04.md`
+records the correction of the same authored body and a real Lima run with
+`pids.max=10`, `pids.current=10`, refusal count `0->0`, the same ifindex
+`490` observed up then down, and empty `unconfirmed`. That evidence is the
+already accepted no-thread realization. The report separately preserves
+real-refusal `EAGAIN`/`WouldBlock` source evidence from the existing bridge
+test and the existing bound-miss/per-TAP-session-failure evidence. This
+documentary correction introduces no production, test, API, or design change
+and records no new approval or waiver.
+
+### Review state and preservation
+
+Validation is `pending` for an independent bounded review of this correction;
+`approved_at` is cleared. The prior reviewer identity remains recorded in
+the roadmap. Its previous approval was iteration 3 at
+`2026-10-02T17:11:27+02:00`; the independent review history is preserved.
+All other criteria and steps, counts, estimates, dependencies, phases 01-04,
+the existing 06-04 production/test changes, `AGENTS.md`, and the execution log
+are preserved. No DES phase event or commit is created by this reconciliation.
+
+### Mechanical verification
+
+- `PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity docs/feature/netns-density-295/deliver --roadmap-only`:
+  pass, `Roadmap format OK`, no validator errors.
+- `git diff --check`: pass.
+- JSON/hash comparison: every roadmap field outside criterion 5 and the
+  requested validation status/timestamp is unchanged; phases 01-04 and every
+  other step are preserved. Execution-log and independent-review bytes match
+  their pre-edit hashes. No source or test implementation was read.

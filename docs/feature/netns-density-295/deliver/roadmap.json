@@ -1019,7 +1019,7 @@
             "SharedGuestNetworkOwner::quiesce_managed_taps's rustdoc states the port partition, the bound property, and the repeat clause; the host classifies every failure (Connect included) per TAP and returns no Err; the host call makes no synchronous blocking wait on the awaiting task.",
             "The sim owner surface exposes the activation/quiescence contract (script_quiesce_outcome) for seeded bodies without a cross-crate GuestNetworkPlan constructor.",
             "S-ND295-50 (a_condemned_allocation_leaves_every_later_audit_and_restore_universe), 51 (with the per-TAP Connect, repeat-while-latched, and bound-miss bodies), 52 (the gate-wait and lease bodies, its two retained bodies staying active), 53, and 72 ((i1) at activate and the reserved set's Condemned exclusion) are activated with no body weakened, replaced, or re-authored.",
-            "E23's DISTILL-authored quiesce_managed_taps_never_aborts_when_a_thread_is_refused runs Lima-root over one managed Active TAP under real pids.max refusal and returns Ok with that TAP unconfirmed/Connect, never panic or abort.",
+            "E23's DISTILL-authored quiesce_managed_taps_never_aborts_when_a_thread_is_refused runs Lima-root over one managed Active TAP in a real pids.max cgroup capped at its current task count and returns Ok, with that same TAP independently confirmed down by a realization that needs no new thread or exactly that TAP listed unconfirmed with Netlink { operation: TapSetDown, source: Connect { source } } from a real refused required thread (EAGAIN/WouldBlock and an increased pids refusal counter), and never panics or aborts. Empty unconfirmed requires the same real TAP confirmed down and no thread refusal, never an up, absent, replaced, or unverified TAP; a control run without the limit confirms the TAP down. The per-TAP failure partition, host no-Err contract, bound, repeat clause, and no synchronous blocking wait on the awaiting task remain required.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings are clean."
           ],
           "test_file": "crates/overdrive-sim/tests/acceptance/netns_density_activation_order.rs",
@@ -1725,7 +1725,7 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "Independent nw-acceptance-designer-reviewer; GPT 6.1 Sol (gpt-6.1-sol), extra-high (xhigh) reasoning; regenerated roadmap review iteration 3",
-    "approved_at": "2026-10-02T17:11:27+02:00"
+    "reviewer": "Independent nw-acceptance-designer-reviewer; GPT 6.1 Sol (gpt-6.1-sol), extra-high (xhigh) reasoning; regenerated roadmap review iteration 4",
+    "approved_at": "2026-10-03T04:07:47+02:00"
   }
 }
