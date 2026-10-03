@@ -1,5 +1,5 @@
 //! netns-density-295 E14 — intercept-marked guest TCP fails closed
-//! (S-ND295-62/63/64; D-295-R18, R19, conditional on this native RED).
+//! (S-ND295-62/63/64; D-295-R18; D-295-R19 ordering withdrawn 2026-10-03).
 //!
 //! Authorized defensive testing of the platform's OWN firewall on an isolated
 //! native host: a test-owned guest microVM sends TCP SYNs toward host
@@ -27,19 +27,10 @@
 //! guard's default-drop counter is unchanged. A run whose TAP was already
 //! quiesced is void, not GREEN.
 //!
-//! Most bodies observe R18/R19 fail-closure, which is not on the production
-//! path until DELIVER step 08-01 decides R18/R19 from this native RED, so each
-//! of those is `#[ignore = "pending DELIVER step 08-01 (S-ND295-xx)"]` and
-//! fails today for the right reason: before the 05-03 fd handoff the confined
-//! VMM opens the guest TAP by name, CH v53's `Tap::enable` (`SIOCSIFFLAGS`)
-//! returns EPERM, and the allocation settles `Failed` /
-//! `VmGuestExitUnreported` without ever reaching the Running precondition each
-//! body polls for (`red-classification.md` Phase G, the guest-boot baseline).
-//! The one exception is
-//! [`both_time_wait_controls_prove_the_substate_and_sequence_gates`]: it is a
-//! door-independent kernel pin on a test-owned veth peer namespace under
-//! `TestCidrLease`, needs no guest and no production change beyond what exists,
-//! and is therefore ACTIVE (no marker) — it must pass today.
+//! Step 08-01 activates the native R18 program-loss and guard-only bodies plus
+//! the retained-order listener and TIME_WAIT cases. R18 remains required after
+//! its reproduced IP-program-loss exposure; the conditional R19 rule reorder
+//! was withdrawn on native evidence, and no body assumes or installs it.
 //!
 //! The R18 hazard body reads no guard-table presence: its healthy baseline
 //! asserts only that each probe SYN receives a SYN-ACK at the guest's TAP and
