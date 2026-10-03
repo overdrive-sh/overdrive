@@ -105,7 +105,7 @@ Cited from run 0007; 0008 is equivalent (A=10 / B=9 wire packets, VIP=0, both
 |---|------|---------|----------------------|
 | 1 | Guest dials a VIP; module asks the agent over vsock; agent logs the resolve request + chosen backend | PASS | guest `[resolve] agent chose backend 192.168.204.1:6443 … rewriting connect dst`; relay `RELAY[c1] resolve service=svc-a backends(by Ord)[…=healthy …=healthy] -> chose 192.168.204.1:6443 (first-healthy, MtlsResolve-style)` |
 | 2 | Connection lands on the chosen backend — serving backend log AND the wire; req/resp byte-exact | PASS | `PEER[A:6443#1] tx … IGKM-D-RESP-svca-c1 from-A …`; guest `lb-c1 read(52) PLAINTEXT: IGKM-D-RESP-svca-c1 from-A … lb-connect-1`; wire 10 pkts to :6443 |
-| 3 | mTLS holds: TLS 1.3 only, plaintext 0×, kTLS ULP, SVID key 0× on vsock, expected-peer matches backend | PASS | `SCAN tls streams: 3641 bytes, marker(IGKM-D-) occurrences=0` (`unframed_bytes=0` all streams); `/proc/net/tls_stat TlsTxSw=2 TlsRxSw=2`; custody `client/guest-server SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0`; `RESOLVE-MATCH … match=1` |
+| 3 | mTLS holds: TLS 1.3 only, plaintext 0×, kTLS ULP, SVID key 0× on vsock, expected-peer observed to match backend (`match=1`; logged, not enforced — see Design implications) | PASS | `SCAN tls streams: 3641 bytes, marker(IGKM-D-) occurrences=0` (`unframed_bytes=0` all streams); `/proc/net/tls_stat TlsTxSw=2 TlsRxSw=2`; custody `client/guest-server SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0`; `RESOLVE-MATCH … match=1` |
 | 4 | Freshness: mark first-choice unhealthy → next connect selects the other, byte-exact | PASS | `RELAY[c3] resolve … backends(by Ord)[192.168.204.1:6443=unhealthy 192.168.204.1:6444=healthy] -> chose 192.168.204.1:6444`; guest `lb-c2 read(72) PLAINTEXT: IGKM-D-RESP-svca-c2 from-B … after-health-toggle`; `PEER[B:6444#1] …` |
 | 5 | Deny: resolve for a policy-denied service fails connect, no app bytes on the wire | PASS | guest `connect VIP 10.80.0.9:9443 FAILED errno=13 (Permission denied)`, `DENY-CASE OK … no TCP SYN, no application bytes`; `packets to any VIP 10.80.0.x: 0` |
 | 6 | Which shape + rewrite mechanism + vsock resolve frame | PASS | Shape 2 (resolve at connect time + sockaddr rewrite before `orig_connect`); frames RESOLVE 0x09 / RESOLVED 0x0a |
@@ -146,8 +146,14 @@ construction.
   unchanged).
 - **The agent stays the single policy + identity + resolution authority.** It already
   held the SVID key and decided handshake policy; D4 adds service→backend resolution
-  and the expected-peer identity to the same channel, and the module checks the
-  handshake peer matches what resolution promised (`RESOLVE-MATCH`).
+  and the expected-peer identity to the same channel. **Honest scope:** the module only
+  *logs* whether the handshake peer matches what resolution promised (`RESOLVE-MATCH
+  match=%d`, `match=1` in every run here, `igkmd_mtls.c:604`) — it does **not yet
+  enforce** it; a `match=0` is logged, not rejected, and kTLS is already installed by
+  that point. mTLS itself is still enforced (the handshake peer is an identity the
+  relay authenticated), but binding the connection to the *resolved* peer — intended-peer
+  pinning — is production work, the same concern deferred in the transparent-mtls arc
+  (#236). (Surfaced in PR #306 review, finding 2.)
 - **Health is an input the agent reads at resolve time** (here a flag file; production
   reads `service_backends.healthy`). Because Shape 2 resolves per connect, health
   changes take effect on the next connect with no cached-answer staleness.
@@ -157,9 +163,11 @@ construction.
 - **Open items (inherited from Spike C, unchanged by D4):** the `accept()`/inbound
   path, non-blocking/epoll readiness, IPv6 (`tcpv6_prot`), robust per-socket teardown +
   safe `rmmod`, the `sockptr.h:49` fortify warning on kernel-context kTLS install. D4
-  adds: the resolve round trip adds one vsock hop to `connect()` latency before the
-  handshake's hops, and the agent needs the production service registry + health feed
-  (from `service_backends`) rather than a flag-file/stub. Shape 2 assumes the module
+  adds: **enforce `RESOLVE-MATCH`** (reject a handshake-peer ≠ resolved-peer mismatch
+  rather than only logging it — intended-peer pinning, #236); the resolve round trip
+  adds one vsock hop to `connect()` latency before the handshake's hops; and the agent
+  needs the production service registry + health feed (from `service_backends`) rather
+  than a flag-file/stub. Shape 2 assumes the module
   can rewrite the connect destination on the pinned 6.18 appliance kernel; proven here
   on the stock 7.0.0-29 test kernel (the ADR-0068 §4 pinned-kernel boot is still unrun,
   same caveat as Spike C).

@@ -191,7 +191,9 @@ enters the hook.
 ## Edge cases / notes
 
 - **`sockptr.h:49` fortify `WARN_ONCE`** fires once per boot on the first `TLS_TX` install, exactly as Spike C documented — expected, non-fatal; not fixed (out of scope).
-- **Teardown debt (unchanged class from Spike C).** The module overwrites global `tcp_prot` function pointers and swaps per-socket `->ops`; a kTLS socket's close bypasses the `tcp_prot` hook, so entries are evicted lazily on `sk`-pointer reuse (the fix above) rather than on close. A production module needs real per-socket lifecycle (a close/ULP hook or `tls`-proto-aware teardown) and a safe `rmmod` that cannot race in-flight holds or leave a socket pointing at the module's `->ops`/`->poll`. The spike reboots the guest, so `rmmod` safety was not exercised.
+- **Teardown debt (unchanged class from Spike C).** The module overwrites global `tcp_prot` function pointers and swaps per-socket `->ops`; a kTLS socket's close bypasses the `tcp_prot` hook, so entries are evicted lazily on `sk`-pointer reuse (the fix above) rather than on close. A production module needs real per-socket lifecycle (a close/ULP hook or `tls`-proto-aware teardown) and a safe `rmmod` that cannot race in-flight holds or leave a socket pointing at the module's `->ops`/`->poll`. The spike reboots the guest, so `rmmod` safety was not exercised. A sharper instance of the same debt: the background handshake kthread (`spawn_driver` → `igkm_drive`, `igkmd_mtls.c:730`) is handed a bare `struct sock *` with no `sock_hold`/refcount and no close-time join, so a workload that closes a non-blocking mesh socket *mid-handshake* can leave the kthread dereferencing freed memory — a guest-kernel use-after-free. Production needs a socket reference held across the handshake plus a close-time join. (Surfaced in PR #306 review, finding 3; same class as the run-0021 stale-`sk` panic.)
+- **Fail closed on table exhaustion (not yet done).** The per-socket table is a fixed 64 slots; when it is full `tbl_add` returns NULL and `hooked_connect` (`igkmd_mtls.c:882`) still returns `orig_connect`'s result with **no entry installed** — so that socket's send/recv fall through to the original TCP handlers and a mesh connection could carry application **plaintext with no mTLS**. The probe never fills 64 slots, so no verdict here is affected, but a production module MUST fail the connection closed when no slot can be reserved (never fall through to plaintext) and carry a real-sized table. (Surfaced in PR #306 review, finding 1.)
+- **The runner's exit code does not gate the verdict.** `run-fc.sh` / `capture.sh` can record `exit_code=0` for a run that timed out or whose wire scan failed (the plaintext/custody checks only print). The verdicts in this doc rest on the **pasted evidence** cross-checked against the committed `runs/` captures, not on the runner's exit status; a production test harness would make the required checks determine the exit code. (Surfaced in PR #306 review, finding 4.)
 - **One-edge-per-record** was not exercised (burst arrival drained all records in one ET edge); completeness (every byte) was.
 - Still deferred (unchanged from Spike C): IPv6 (`tcpv6_prot`), and the Cloud-Hypervisor VMM variant (#305).
 
@@ -207,7 +209,8 @@ enters the hook.
 
 **PROMOTE.** The Linux kernel-module mechanism is proven end-to-end for client and
 server, blocking and non-blocking/epoll, on the stock pinned-ABI kernel, with a clean
-host. Remaining items are hardening (per-socket teardown / safe `rmmod`, IPv6
-`tcpv6_prot`, the CH VMM variant #305, KeyUpdate on kTLS #229, and bounding the
-per-connection kthread), not feasibility — suitable for the D1/D2 design decision and
-a production walking skeleton, not another feasibility spike.
+host. Remaining items are hardening (per-socket teardown / safe `rmmod` including the
+close-mid-handshake kthread use-after-free, fail-closed on table exhaustion / never
+fall through to plaintext, IPv6 `tcpv6_prot`, the CH VMM variant #305, KeyUpdate on
+kTLS #229, and bounding the per-connection kthread), not feasibility — suitable for the
+D1/D2 design decision and a production walking skeleton, not another feasibility spike.
