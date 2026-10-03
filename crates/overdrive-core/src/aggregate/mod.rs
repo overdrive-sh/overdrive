@@ -884,16 +884,20 @@ impl ServiceV1 {
     /// listener-port set, in declaration order (D-BLOCKER1
     /// one-source/two-readers, GH #241).
     ///
-    /// `self.listeners[].port` is the canonical declaration the
-    /// inbound-TPROXY path keys on. Both the reconciler producer
-    /// (`overdrive_reconcilers::project_service_listen_ports`, the
-    /// Service arm) and the Slice 05 liveness-restart spec path read
-    /// through this one method, so the projected set stays structurally
-    /// identical across the two readers — a future filter / dedup / sort
-    /// lives here and cannot diverge between them.
+    /// The projection keeps TCP listeners only, emits each port once, and
+    /// preserves the order of each port's first TCP listener. Both the
+    /// reconciler producer (`overdrive_reconcilers::project_service_listen_ports`,
+    /// the Service arm) and the Slice 05 liveness-restart spec path read
+    /// through this one method, so the inbound-TPROXY projection is identical
+    /// across the two readers.
     #[must_use]
     pub fn listen_ports(&self) -> Vec<std::num::NonZeroU16> {
-        self.listeners.iter().map(|l| l.port).collect()
+        let mut seen = std::collections::BTreeSet::new();
+        self.listeners
+            .iter()
+            .filter(|listener| listener.protocol == crate::dataplane::Proto::Tcp)
+            .filter_map(|listener| seen.insert(listener.port).then_some(listener.port))
+            .collect()
     }
 
     /// Project a persisted `Service` plus its platform-issued VIP onto

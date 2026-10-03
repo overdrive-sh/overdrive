@@ -1788,8 +1788,8 @@ pub fn project_probe_descriptors(
 /// Per-variant projection:
 ///
 /// - [`overdrive_core::aggregate::WorkloadIntent::Service(svc)`] →
-///   `svc.listen_ports()` — the operator's declared listener ports in
-///   declaration order, read through the single
+///   `svc.listen_ports()` — TCP listener ports only, each emitted once in
+///   first-TCP-listener order, read through the single
 ///   [`overdrive_core::aggregate::Service::listen_ports`] source (D-BLOCKER1).
 /// - [`overdrive_core::aggregate::WorkloadIntent::Job(_)`] → empty vec (Job-kind has
 ///   no listener surface; the canonical-address inbound path is a
@@ -2025,7 +2025,6 @@ mod project_service_listen_ports_tests {
     /// deduplicates TCP ports, and excludes UDP listeners.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 07-01 (S-ND295-21)"]
     fn service_projection_keeps_first_tcp_order_deduplicates_tcp_and_excludes_udp() {
         use overdrive_core::aggregate::Listener;
         use overdrive_core::dataplane::Proto;

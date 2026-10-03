@@ -1158,11 +1158,18 @@ impl Client {
     /// # Errors
     ///
     /// [`NetlinkError`] on a route-dump failure.
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 07-01")]
-    #[allow(clippy::unused_async, reason = "RED scaffold — DELIVER step 07-01")]
     pub async fn local_route_present(&self, table: u32, oif: &str) -> Result<bool, NetlinkError> {
-        let _ = (table, oif);
-        todo!("RED scaffold: D-295-R15 local_route_present — DELIVER step 07-01")
+        let index = self.require_index(oif).await?;
+        let mut stream =
+            self.handle.route().get(RouteMessageBuilder::<Ipv4Addr>::new().build()).execute();
+        while let Some(route) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("local-get", err))?
+        {
+            if local_route_matches(&route, table, index) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Delete the unique local-default route through `oif` in `table`.

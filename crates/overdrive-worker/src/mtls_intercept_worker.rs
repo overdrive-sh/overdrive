@@ -139,7 +139,11 @@ pub enum MtlsInterceptStopError {
     /// order the attempt tore them down, with its exact error. Element removal
     /// was not attempted; the failed handles, the drain with its element
     /// guards, and the Retiring record are retained.
-    #[error("allocation {alloc_id}: enforced-handle teardown failed for {} handle(s)", failures.len())]
+    #[error(
+        "allocation {alloc_id}: enforced-handle teardown failed for {count} handle(s): {details}",
+        count = .failures.len(),
+        details = format_handle_teardown_failures(.failures),
+    )]
     HandleTeardown {
         /// Allocation whose retirement remains incomplete.
         alloc_id: AllocationId,
@@ -149,7 +153,7 @@ pub enum MtlsInterceptStopError {
     /// Every handle teardown in this attempt succeeded and
     /// `remove_allocation_elements` returned `Err`; `source` is that error. The
     /// drain, its element guards, and the Retiring record are retained.
-    #[error("allocation {alloc_id}: shared intercept element removal failed")]
+    #[error("allocation {alloc_id}: shared intercept element removal failed: {source}")]
     ElementRemoval {
         /// Allocation whose retirement remains incomplete.
         alloc_id: AllocationId,
@@ -157,6 +161,14 @@ pub enum MtlsInterceptStopError {
         #[source]
         source: Arc<InterceptError>,
     },
+}
+
+fn format_handle_teardown_failures(failures: &[HandleTeardownFailure]) -> String {
+    failures
+        .iter()
+        .map(|failure| format!("{}: {}", failure.connection, failure.source))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// One enforced-connection handle whose teardown failed in a retirement
@@ -802,6 +814,7 @@ struct CapabilityDrain {
     handles: Vec<EnforcedConnection>,
     relays: Vec<JoinHandle<()>>,
     elements: CapabilityElements,
+    removal: Option<(Ipv4Addr, Vec<SocketAddrV4>)>,
     completed: bool,
 }
 
@@ -1142,6 +1155,7 @@ impl CapabilityRetirement {
                         handles: Vec::new(),
                         relays: Vec::new(),
                         elements: CapabilityElements { outbound: None, inbound: Vec::new() },
+                        removal: None,
                         completed: false,
                     };
                 };
@@ -1156,18 +1170,30 @@ impl CapabilityRetirement {
                             &mut record.elements,
                             CapabilityElements { outbound: None, inbound: Vec::new() },
                         ),
+                        (
+                            record.capability.source_addr,
+                            record
+                                .capability
+                                .allowed_ports
+                                .iter()
+                                .map(|port| {
+                                    SocketAddrV4::new(record.capability.source_addr, port.get())
+                                })
+                                .collect(),
+                        ),
                     ))
                 } else {
                     None
                 }
             };
-            if let Some((handles, relays, elements)) = ready {
+            if let Some((handles, relays, elements, removal)) = ready {
                 return CapabilityDrain {
                     inner: Arc::clone(&self.inner),
                     key: self.key,
                     handles,
                     relays,
                     elements,
+                    removal: Some(removal),
                     completed: false,
                 };
             }
@@ -1843,9 +1869,12 @@ impl StopCompletion {
         Self { inner: Arc::new(StopCompletionInner { started: Mutex::new(false), complete }) }
     }
 
-    #[cfg(any(test, feature = "integration-tests"))]
     fn is_complete(&self) -> bool {
         *self.inner.complete.borrow()
+    }
+
+    fn complete(&self) {
+        self.inner.complete.send_replace(true);
     }
 
     fn start_with<F, Fut>(&self, work: F)
@@ -1921,6 +1950,9 @@ pub struct MtlsInterceptWorker {
     /// The one node-owned listener/rule owner. Allocation records refer to
     /// this owner; they never own or replace its sockets.
     shared_owner: Mutex<SharedOwnerState>,
+    /// Serializes allocation element installs and removals with shared member
+    /// audit and repair operations.
+    element_effects: tokio::sync::Mutex<()>,
     /// Per-alloc teardown bookkeeping (D-MTLS-16). `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice" — the
     /// set is drained deterministically on stop.
@@ -1946,6 +1978,10 @@ pub struct MtlsInterceptWorker {
     /// worker to stop the same allocation again.
     #[cfg(any(test, feature = "integration-tests"))]
     stop_alloc_calls: AtomicU64,
+    /// Completed-stop witness retained only for test observation after
+    /// production stopping entries are removed on convergence.
+    #[cfg(any(test, feature = "integration-tests"))]
+    completed_stops: Mutex<BTreeSet<AllocationId>>,
 }
 
 impl Drop for MtlsInterceptWorker {
@@ -1997,6 +2033,7 @@ impl MtlsInterceptWorker {
             intercept,
             capabilities: CapabilityRegistry::new(),
             shared_owner: Mutex::new(SharedOwnerState::new()),
+            element_effects: tokio::sync::Mutex::new(()),
             intercepts: Mutex::new(BTreeMap::new()),
             pending_allocations: Mutex::new(BTreeSet::new()),
             stopping: Mutex::new(BTreeMap::new()),
@@ -2004,6 +2041,8 @@ impl MtlsInterceptWorker {
             shutdown: Arc::new(OwnerStop::new()),
             #[cfg(any(test, feature = "integration-tests"))]
             stop_alloc_calls: AtomicU64::new(0),
+            #[cfg(any(test, feature = "integration-tests"))]
+            completed_stops: Mutex::new(BTreeSet::new()),
         }
     }
 
@@ -2369,8 +2408,11 @@ impl MtlsInterceptWorker {
                 allowed_ports,
             )?;
             self.pending_allocations.lock().insert(spec.alloc.clone());
+            #[cfg(any(test, feature = "integration-tests"))]
+            self.completed_stops.lock().remove(&spec.alloc);
             pending
         };
+        let element_effects = self.element_effects.lock().await;
         let effects = (|| {
             // Shared allocations register source/destination set elements
             // against the node-scoped constant program. Passing the TAP name
@@ -2395,6 +2437,7 @@ impl MtlsInterceptWorker {
             self.pending_allocations.lock().remove(&spec.alloc);
             return Err(source);
         }
+        drop(element_effects);
         // Let a concurrent stop/shutdown owner transfer retirement before the
         // Pending -> Active linearization.  The effect acquisition remains
         // synchronous, but activation is the explicit handoff boundary.
@@ -2410,18 +2453,18 @@ impl MtlsInterceptWorker {
             if *lifecycle == WorkerLifecycle::Shutdown {
                 let _ = self.capabilities.begin_retire(&spec.alloc);
             }
-            pending.activate()
+            let activation = pending.activate();
+            if activation == ActivationDisposition::Activated {
+                self.pending_allocations.lock().remove(&spec.alloc);
+                self.intercepts.lock().insert(spec.alloc.clone(), AllocIntercept { leg_c_addr });
+            }
+            activation
         };
         if activation == ActivationDisposition::Retired {
             return Err(MtlsInterceptInstallError::RegistrationRetired {
                 alloc_id: spec.alloc.clone(),
             });
         }
-        self.pending_allocations.lock().remove(&spec.alloc);
-        self.intercepts.lock().insert(
-            spec.alloc.clone(),
-            AllocIntercept { leg_c_addr },
-        );
         Ok(())
     }
 
@@ -2433,135 +2476,139 @@ impl MtlsInterceptWorker {
         self: &Arc<Self>,
         alloc_id: &AllocationId,
     ) -> Result<(), MtlsInterceptStopError> {
-        match self.begin_stop_alloc(alloc_id) {
-            Some(stop) => stop.wait().await,
-            None => Ok(()),
+        if let Some(stop) = self.begin_stop_alloc(alloc_id) {
+            return stop.wait().await;
+        }
+        let shutdown_started = *self.lifecycle.read() == WorkerLifecycle::Shutdown;
+        if !shutdown_started {
+            return Ok(());
+        }
+        match self.shutdown_owner().await {
+            Ok(()) => Ok(()),
+            Err(shutdown) => shutdown
+                .failures
+                .into_iter()
+                .find(|failure| stop_error_alloc_id(failure) == alloc_id)
+                .map_or(Ok(()), Err),
         }
     }
 
     fn begin_stop_alloc(self: &Arc<Self>, alloc_id: &AllocationId) -> Option<Arc<AllocStop>> {
         let lifecycle = self.lifecycle.read();
-        let has_intercept = self.intercepts.lock().remove(alloc_id).is_some();
-        if !has_intercept {
-            if self.pending_allocations.lock().contains(alloc_id) {
-                return self.begin_pending_stop(alloc_id);
-            }
-            let previous =
-                self.stopping.lock().get(alloc_id).and_then(|stops| stops.last()).cloned();
-            let previous = previous?;
-            let retry_handles = previous.retry_handles.lock().drain(..).collect::<Vec<_>>();
-            if retry_handles.is_empty() {
-                return Some(previous);
-            }
-            let Some(drain) = previous.retry_drain.lock().take() else {
-                return Some(previous);
-            };
-            let retry = Arc::new(AllocStop::new());
-            self.stopping.lock().entry(alloc_id.clone()).or_default().push(Arc::clone(&retry));
-            start_capability_drain_retry(
-                &retry,
-                Arc::clone(&self.enforcement),
-                alloc_id.clone(),
-                drain,
-                retry_handles,
-            );
-            return Some(retry);
+        if *lifecycle == WorkerLifecycle::Shutdown {
+            return None;
         }
-        #[cfg(any(test, feature = "integration-tests"))]
-        self.stop_alloc_calls.fetch_add(1, Ordering::SeqCst);
-        let stop = Arc::new(AllocStop::new());
-        self.stopping.lock().entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
-        let enforcement = Arc::clone(&self.enforcement);
-        let capabilities = self.capabilities.clone();
-        let alloc_id = alloc_id.clone();
-        let stop_for_work = Arc::clone(&stop);
-        stop.fence.start_with(move || async move {
-            let Some(retirement) = capabilities.begin_retire(&alloc_id) else {
-                *stop_for_work.result.lock() = Some(Ok(()));
-                return;
-            };
-            let mut drain = retirement.wait_for_claims().await;
-            stop_cleartext_relays(drain.take_relays()).await;
-            let handles = drain.take_handles();
-            let mut failures = Vec::new();
-            let mut retry_handles = Vec::new();
-            for handle in handles {
-                let id = handle.id().clone();
-                let retry_handle = handle.clone();
-                if let Err(source) = enforcement.teardown(handle).await {
-                    failures.push(HandleTeardownFailure {
-                        connection: id,
-                        source: Arc::new(source),
-                    });
-                    retry_handles.push(retry_handle);
+        let mut intercepts = self.intercepts.lock();
+        let mut pending_allocations = self.pending_allocations.lock();
+        let mut stopping = self.stopping.lock();
+
+        if let Some(previous) = stopping.get(alloc_id).and_then(|stops| stops.last()).cloned() {
+            let previous_result = previous.result.lock().clone();
+            match previous_result {
+                None => return Some(previous),
+                Some(Ok(())) => {
+                    stopping.remove(alloc_id);
+                }
+                Some(Err(_)) if !previous.fence.is_complete() => return Some(previous),
+                Some(Err(_)) => {
+                    let retry_handles = std::mem::take(&mut *previous.retry_handles.lock());
+                    let Some(drain) = previous.retry_drain.lock().take() else {
+                        return Some(previous);
+                    };
+                    let retry = Arc::new(AllocStop::new());
+                    stopping.entry(alloc_id.clone()).or_default().push(Arc::clone(&retry));
+                    drop(stopping);
+                    drop(pending_allocations);
+                    drop(intercepts);
+                    drop(lifecycle);
+                    start_capability_drain_retry(
+                        self,
+                        &retry,
+                        alloc_id.clone(),
+                        drain,
+                        retry_handles,
+                    );
+                    return Some(retry);
                 }
             }
-            *stop_for_work.retry_handles.lock() = retry_handles;
-            if failures.is_empty() {
-                drop(drain.take_elements());
-                drain.complete();
-            } else {
-                *stop_for_work.retry_drain.lock() = Some(drain);
-            }
-            *stop_for_work.result.lock() = Some(if failures.is_empty() {
-                Ok(())
-            } else {
-                Err(MtlsInterceptStopError::HandleTeardown { alloc_id, failures })
-            });
-        });
-        drop(lifecycle);
-        Some(stop)
+        }
+
+        if intercepts.remove(alloc_id).is_some() {
+            #[cfg(any(test, feature = "integration-tests"))]
+            self.stop_alloc_calls.fetch_add(1, Ordering::SeqCst);
+            #[cfg(any(test, feature = "integration-tests"))]
+            self.completed_stops.lock().remove(alloc_id);
+            let stop = Arc::new(AllocStop::new());
+            let retirement = self.capabilities.begin_retire(alloc_id);
+            stopping.entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
+            drop(stopping);
+            drop(pending_allocations);
+            drop(intercepts);
+            drop(lifecycle);
+            start_capability_retirement(self, &stop, alloc_id.clone(), retirement, false);
+            return Some(stop);
+        }
+
+        if pending_allocations.contains(alloc_id) {
+            let retirement = self.capabilities.begin_retire(alloc_id)?;
+            pending_allocations.remove(alloc_id);
+            #[cfg(any(test, feature = "integration-tests"))]
+            self.completed_stops.lock().remove(alloc_id);
+            let stop = Arc::new(AllocStop::new());
+            stopping.entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
+            drop(stopping);
+            drop(pending_allocations);
+            drop(intercepts);
+            drop(lifecycle);
+            start_capability_retirement(self, &stop, alloc_id.clone(), Some(retirement), true);
+            return Some(stop);
+        }
+        None
     }
 
     /// Transfer retirement ownership for a shared registration that is still
-    /// acquiring its per-allocation effects.  The registry keeps the address
-    /// reservation and pending-owner bit until the installer either activates
-    /// or drops its `PendingCapability`; the stop owner therefore cannot return
-    /// before the exact partial-effect set has been drained.
+    /// acquiring its per-allocation effects. The registry keeps its address
+    /// reservation and pending-owner bit until the pending owner handoff.
     #[allow(clippy::significant_drop_in_scrutinee)]
     fn begin_pending_stop(self: &Arc<Self>, alloc_id: &AllocationId) -> Option<Arc<AllocStop>> {
-        if let Some(previous) =
-            self.stopping.lock().get(alloc_id).and_then(|stops| stops.last()).cloned()
-        {
+        let lifecycle = self.lifecycle.read();
+        let intercepts = self.intercepts.lock();
+        let mut pending_allocations = self.pending_allocations.lock();
+        let mut stopping = self.stopping.lock();
+        if let Some(previous) = stopping.get(alloc_id).and_then(|stops| stops.last()).cloned() {
             return Some(previous);
         }
+        if !pending_allocations.contains(alloc_id) {
+            return None;
+        }
         let retirement = self.capabilities.begin_retire(alloc_id)?;
-        self.pending_allocations.lock().remove(alloc_id);
+        pending_allocations.remove(alloc_id);
+        #[cfg(any(test, feature = "integration-tests"))]
+        self.completed_stops.lock().remove(alloc_id);
         let stop = Arc::new(AllocStop::new());
-        self.stopping.lock().entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
-        let enforcement = Arc::clone(&self.enforcement);
-        let alloc_id = alloc_id.clone();
-        let stop_for_work = Arc::clone(&stop);
-        stop.fence.start_with(move || async move {
-            let mut drain = retirement.wait_for_claims().await;
-            // Give the activation caller a bounded handoff window to return
-            // `RegistrationRetired` and let its action-shim owner quiesce the
-            // driver before this retirement owner tears down the acquired
-            // mTLS elements. No clock, retry, or external control-plane hook
-            // is introduced; this is only executor scheduling at the existing
-            // Pending-owner linearization.
-            for _ in 0..32 {
-                tokio::task::yield_now().await;
-            }
-            stop_cleartext_relays(drain.take_relays()).await;
-            let handles = drain.take_handles();
-            let mut failures = Vec::new();
-            for handle in handles {
-                let id = handle.id().clone();
-                if let Err(source) = enforcement.teardown(handle).await {
-                    failures
-                        .push(HandleTeardownFailure { connection: id, source: Arc::new(source) });
-                }
-            }
-            drop(drain.take_elements());
-            drain.complete();
-            *stop_for_work.result.lock() = Some(if failures.is_empty() {
-                Ok(())
-            } else {
-                Err(MtlsInterceptStopError::HandleTeardown { alloc_id, failures })
-            });
-        });
+        stopping.entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
+        drop(stopping);
+        drop(pending_allocations);
+        drop(intercepts);
+        drop(lifecycle);
+        start_capability_retirement(self, &stop, alloc_id.clone(), Some(retirement), true);
         Some(stop)
+    }
+
+    fn remove_successful_stop(&self, alloc_id: &AllocationId, stop: &Arc<AllocStop>) {
+        let mut stopping = self.stopping.lock();
+        let removed = stopping
+            .get(alloc_id)
+            .and_then(|stops| stops.last())
+            .is_some_and(|current| Arc::ptr_eq(current, stop));
+        if removed {
+            stopping.remove(alloc_id);
+        }
+        drop(stopping);
+        #[cfg(any(test, feature = "integration-tests"))]
+        if removed {
+            self.completed_stops.lock().insert(alloc_id.clone());
+        }
     }
 
     /// Number of calls made to [`Self::stop_alloc`]. Test-only observation
@@ -2587,7 +2634,7 @@ impl MtlsInterceptWorker {
             stop.fence.is_complete()
                 && matches!(*stop.result.lock(), Some(Ok(())))
                 && stop.retry_handles.lock().is_empty()
-        })
+        }) || self.completed_stops.lock().contains(alloc_id)
     }
 
     /// Invalidate the complete userspace dataplane owned by this worker and
@@ -2629,17 +2676,26 @@ impl MtlsInterceptWorker {
                     state.lifecycle = SharedOwnerLifecycle::ShuttingDown;
                     state.owner.take()
                 };
-                let active = std::mem::take(&mut *owner.intercepts.lock());
+                let active_allocations = std::mem::take(&mut *owner.intercepts.lock());
                 let in_progress = owner
                     .stopping
                     .lock()
                     .values()
                     .filter_map(|stops| stops.last().cloned())
                     .collect::<Vec<_>>();
+                let mut stopping = owner.stopping.lock();
+                let active = active_allocations
+                    .into_keys()
+                    .map(|alloc_id| {
+                        let stop = Arc::new(AllocStop::new());
+                        stopping.entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
+                        (alloc_id, stop)
+                    })
+                    .collect::<Vec<_>>();
+                drop(stopping);
                 let pending = owner.pending_allocations.lock().iter().cloned().collect::<Vec<_>>();
                 (active, pending, in_progress, shared)
             };
-
             let mut failures = Vec::new();
             let pending_stops = pending
                 .iter()
@@ -2656,39 +2712,40 @@ impl MtlsInterceptWorker {
                     std::mem::forget(guard);
                 }
             }
-            for alloc_id in active.into_keys() {
-                if let Some(retirement) = owner.capabilities.begin_retire(&alloc_id) {
+            for (alloc_id, stop) in active {
+                let result = if let Some(retirement) = owner.capabilities.begin_retire(&alloc_id) {
                     let mut drain = retirement.wait_for_claims().await;
                     stop_cleartext_relays(drain.take_relays()).await;
                     let handles = drain.take_handles();
-                    let mut teardown_failures = Vec::new();
-                    for handle in handles {
-                        let id = handle.id().clone();
-                        if let Err(source) = owner.enforcement.teardown(handle).await {
-                            teardown_failures.push(HandleTeardownFailure {
-                                connection: id,
-                                source: Arc::new(source),
-                            });
-                        }
-                    }
-                    drop(drain.take_elements());
-                    drain.complete();
-                    if !teardown_failures.is_empty() {
-                        failures.push(MtlsInterceptStopError::HandleTeardown {
-                            alloc_id,
-                            failures: teardown_failures,
-                        });
-                    }
+                    run_capability_stop_attempt(
+                        &stop,
+                        alloc_id.clone(),
+                        drain,
+                        handles,
+                        Arc::clone(&owner.enforcement),
+                        Arc::clone(&owner.intercept),
+                        &owner.element_effects,
+                    )
+                    .await
+                } else {
+                    *stop.result.lock() = Some(Ok(()));
+                    Ok(())
+                };
+                if result.is_ok() {
+                    owner.remove_successful_stop(&alloc_id, &stop);
+                } else if let Err(failure) = result {
+                    push_stop_failure_once(&mut failures, failure);
                 }
+                stop.fence.complete();
             }
             for stop in in_progress {
                 if let Err(source) = stop.wait().await {
-                    failures.push(source);
+                    push_stop_failure_once(&mut failures, source);
                 }
             }
             for stop in pending_stops {
                 if let Err(source) = stop.wait().await {
-                    failures.push(source);
+                    push_stop_failure_once(&mut failures, source);
                 }
             }
             *attempt_for_work.result.lock() = Some(if failures.is_empty() {
@@ -2816,38 +2873,175 @@ impl MtlsInterceptWorker {
     }
 }
 
-fn start_capability_drain_retry(
+fn start_capability_retirement(
+    owner: &Arc<MtlsInterceptWorker>,
     stop: &Arc<AllocStop>,
-    enforcement: Arc<dyn MtlsEnforcement>,
+    alloc_id: AllocationId,
+    retirement: Option<CapabilityRetirement>,
+    pending_handoff: bool,
+) {
+    let owner = Arc::clone(owner);
+    let stop = Arc::clone(stop);
+    let stop_for_work = Arc::clone(&stop);
+    stop.fence.start_with(move || async move {
+        let result = if let Some(retirement) = retirement {
+            let mut drain = retirement.wait_for_claims().await;
+            if pending_handoff {
+                // Give the activation caller a bounded handoff window to
+                // return RegistrationRetired and let its action-shim owner
+                // quiesce the driver before the retirement owner tears down
+                // the acquired mTLS elements.
+                for _ in 0..32 {
+                    tokio::task::yield_now().await;
+                }
+            }
+            stop_cleartext_relays(drain.take_relays()).await;
+            let handles = drain.take_handles();
+            run_capability_stop_attempt(
+                &stop_for_work,
+                alloc_id.clone(),
+                drain,
+                handles,
+                Arc::clone(&owner.enforcement),
+                Arc::clone(&owner.intercept),
+                &owner.element_effects,
+            )
+            .await
+        } else {
+            *stop_for_work.result.lock() = Some(Ok(()));
+            Ok(())
+        };
+        if result.is_ok() {
+            owner.remove_successful_stop(&alloc_id, &stop_for_work);
+        }
+    });
+}
+
+fn start_capability_drain_retry(
+    owner: &Arc<MtlsInterceptWorker>,
+    stop: &Arc<AllocStop>,
+    alloc_id: AllocationId,
+    drain: CapabilityDrain,
+    handles: Vec<EnforcedConnection>,
+) {
+    let owner = Arc::clone(owner);
+    let stop = Arc::clone(stop);
+    let stop_for_work = Arc::clone(&stop);
+    stop.fence.start_with(move || async move {
+        let result = run_capability_stop_attempt(
+            &stop_for_work,
+            alloc_id.clone(),
+            drain,
+            handles,
+            Arc::clone(&owner.enforcement),
+            Arc::clone(&owner.intercept),
+            &owner.element_effects,
+        )
+        .await;
+        if result.is_ok() {
+            owner.remove_successful_stop(&alloc_id, &stop_for_work);
+        }
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_capability_stop_attempt(
+    stop: &Arc<AllocStop>,
     alloc_id: AllocationId,
     mut drain: CapabilityDrain,
     handles: Vec<EnforcedConnection>,
-) {
-    let stop_for_work = Arc::clone(stop);
-    stop.fence.start_with(move || async move {
-        let mut failures = Vec::new();
-        let mut retry_handles = Vec::new();
-        for handle in handles {
-            let id = handle.id().clone();
-            let retry_handle = handle.clone();
-            if let Err(source) = enforcement.teardown(handle).await {
-                failures.push(HandleTeardownFailure { connection: id, source: Arc::new(source) });
-                retry_handles.push(retry_handle);
-            }
+    enforcement: Arc<dyn MtlsEnforcement>,
+    intercept: Arc<dyn MtlsIntercept>,
+    element_effects: &tokio::sync::Mutex<()>,
+) -> Result<(), MtlsInterceptStopError> {
+    let mut failures = Vec::new();
+    let mut retry_handles = Vec::new();
+    for handle in handles {
+        let id = handle.id().clone();
+        let retry_handle = handle.clone();
+        if let Err(source) = enforcement.teardown(handle).await {
+            failures.push(HandleTeardownFailure { connection: id, source: Arc::new(source) });
+            retry_handles.push(retry_handle);
         }
-        *stop_for_work.retry_handles.lock() = retry_handles;
-        if failures.is_empty() {
+    }
+
+    let result = if failures.is_empty() {
+        if let Some((source_addr, destinations)) = drain.removal.clone() {
+            let _element_effects = element_effects.lock().await;
+            match remove_allocation_elements_blocking(
+                Arc::clone(&intercept),
+                source_addr,
+                destinations,
+            )
+            .await
+            {
+                Ok(_) => {
+                    drop(drain.take_elements());
+                    drain.complete();
+                    Ok(())
+                }
+                Err(source) => {
+                    *stop.retry_drain.lock() = Some(drain);
+                    Err(MtlsInterceptStopError::ElementRemoval {
+                        alloc_id,
+                        source: Arc::new(source),
+                    })
+                }
+            }
+        } else {
             drop(drain.take_elements());
             drain.complete();
-        } else {
-            *stop_for_work.retry_drain.lock() = Some(drain);
-        }
-        *stop_for_work.result.lock() = Some(if failures.is_empty() {
             Ok(())
-        } else {
-            Err(MtlsInterceptStopError::HandleTeardown { alloc_id, failures })
-        });
-    });
+        }
+    } else {
+        *stop.retry_drain.lock() = Some(drain);
+        Err(MtlsInterceptStopError::HandleTeardown { alloc_id, failures })
+    };
+    *stop.retry_handles.lock() = retry_handles;
+    *stop.result.lock() = Some(result.clone());
+    result
+}
+
+async fn remove_allocation_elements_blocking(
+    intercept: Arc<dyn MtlsIntercept>,
+    source_addr: Ipv4Addr,
+    destinations: Vec<SocketAddrV4>,
+) -> std::result::Result<crate::mtls_intercept_port::InterceptState, InterceptError> {
+    match tokio::task::spawn_blocking(move || {
+        intercept.remove_allocation_elements(source_addr, &destinations)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(source) => Err(InterceptError::NftElementUpdateFailed {
+            set: crate::mtls_intercept::InterceptSet::ManagedGuestIps,
+            operation: crate::mtls_intercept::InterceptElementOperation::Delete,
+            key: crate::mtls_intercept::InterceptElementKey::Address(source_addr),
+            source: crate::mtls_intercept::NetlinkError::nft(
+                "shared-element-remove",
+                std::io::Error::other(format!("blocking removal task failed: {source}")),
+            ),
+        }),
+    }
+}
+
+const fn stop_error_alloc_id(error: &MtlsInterceptStopError) -> &AllocationId {
+    match error {
+        MtlsInterceptStopError::HandleTeardown { alloc_id, .. }
+        | MtlsInterceptStopError::ElementRemoval { alloc_id, .. } => alloc_id,
+    }
+}
+
+fn push_stop_failure_once(
+    failures: &mut Vec<MtlsInterceptStopError>,
+    failure: MtlsInterceptStopError,
+) {
+    if failures
+        .iter()
+        .all(|existing| stop_error_alloc_id(existing) != stop_error_alloc_id(&failure))
+    {
+        failures.push(failure);
+    }
 }
 
 /// The OUTBOUND per-connection decision (the C1 3-arm action — a 1:1 projection
@@ -2926,12 +3120,12 @@ fn spawn_cleartext_passthrough(
             Ok(stream) => stream,
             Err(source) => {
                 tracing::warn!(
-                    name: "health.mtls.passthrough_leg_failed",
-                    alloc = %alloc,
-                    error = %source,
-                "cleartext pass-through could not adopt captured leg"
-            );
-            return;
+                        name: "health.mtls.passthrough_leg_failed",
+                        alloc = %alloc,
+                        error = %source,
+                    "cleartext pass-through could not adopt captured leg"
+                );
+                return;
             }
         };
         let mut upstream = match tokio::net::TcpStream::connect(orig_dst).await {
@@ -3316,7 +3510,7 @@ mod tests {
             Some(crate::mtls_intercept_port::InterceptState {
                 program,
                 policy_route: true,
-                intercept_mark_guard: true,
+                intercept_mark_guard: false,
                 members: self.members.lock().members.clone(),
             })
         }
@@ -3625,10 +3819,7 @@ mod tests {
         ) -> overdrive_core::traits::mtls_enforcement::Result<EnforcedConnection> {
             self.calls.lock().push(());
             let sequence = self.counter.fetch_add(1, Ordering::SeqCst);
-            Ok(EnforcedConnection::new(EnforcedConnectionId::new(
-                connection.alloc,
-                sequence,
-            )))
+            Ok(EnforcedConnection::new(EnforcedConnectionId::new(connection.alloc, sequence)))
         }
 
         fn liveness(&self, _handle: &EnforcedConnection) -> PumpLiveness {
@@ -4153,7 +4344,6 @@ mod tests {
     /// listener (`TestSharedIntercept::script_accept`), one after the other, so
     /// the teardown order is the publication order.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     async fn allocation_stop_surfaces_teardown_failure_and_retry_converges() {
         let enforcement = RetryingSharedEnforcement::failing_first(2);
         let (first_leg, orig_dst, _first_client) = accepted_leg_f();
@@ -4408,7 +4598,6 @@ mod tests {
     /// installed), and a retried stop runs exactly one new removal and releases
     /// the address (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the `remove_allocation_elements` contract, and why the typed sources are shared through `Arc`)).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     async fn element_removal_failure_keeps_the_retiring_record_until_a_retry_converges() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);
@@ -4470,7 +4659,6 @@ mod tests {
     /// allocation — whose sources are `Arc::ptr_eq`, and the attempt called
     /// `remove_allocation_elements` once.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     async fn callers_joined_on_one_failed_stop_receive_equal_failures_with_shared_sources() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);
@@ -4549,7 +4737,6 @@ mod tests {
     /// asked; a caller arriving after the attempt ended would be the first stop
     /// after a failure and would rightly begin its own.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     #[allow(
         clippy::too_many_lines,
         reason = "one repeated-race narrative keeps each round's claim count, both callers' \
@@ -4695,7 +4882,6 @@ mod tests {
     /// shutdown result's entry for `a` (pointer-equal source); `stop_alloc(b)`
     /// returns `Ok(())` because the owner shutdown's teardown of `b` succeeded.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     #[allow(
         clippy::too_many_lines,
         reason = "one owner-shutdown narrative keeps the retained failure, the in-flight \

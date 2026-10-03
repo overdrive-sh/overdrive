@@ -432,6 +432,9 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// # Edge cases
     /// Partial, foreign, duplicate, malformed, or generation-unstable state is
     /// a typed error, never a projection.
+    /// Until DELIVER 08-01, the returned `intercept_mark_guard` is `false` to
+    /// mean the guard has not been observed present and exact, not that a read
+    /// found it absent.
     ///
     /// # Observable invariants
     /// Performs no kernel mutation.
@@ -451,6 +454,9 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// `Ok(None)` without any write when the owned table is absent.
     /// `Ok(Some(state))` only after a read-back whose members equal `expected`,
     /// with the program and the foreign complement unchanged.
+    /// Until DELIVER 08-01, the returned `intercept_mark_guard` is `false` to
+    /// mean the guard has not been observed present and exact, not that a read
+    /// found it absent.
     ///
     /// # Edge cases
     /// A batch rejection preserves the pre-state. A post-commit read failure
@@ -475,6 +481,9 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// absent, and every other member, the program, and the foreign complement
     /// unchanged. Every process-local element token for the requested keys is
     /// retired, so their guards' `Drop` performs no effect.
+    /// Until DELIVER 08-01, the returned `intercept_mark_guard` is `false` to
+    /// mean the guard has not been observed present and exact, not that a read
+    /// found it absent.
     ///
     /// # Edge cases
     /// Members already absent before the call are simply missing from the
@@ -509,6 +518,9 @@ pub struct InterceptState {
     /// and table 100's `local 0.0.0.0/0 dev lo` route (review finding F18).
     pub policy_route: bool,
     /// Whether the D-295-R18 intercept-mark guard table is present and exact.
+    /// Until DELIVER 08-01, every producer sets this to `false` to mean the
+    /// guard has not been observed present and exact; it does not mean a read
+    /// found the guard absent.
     pub intercept_mark_guard: bool,
     /// The dynamic members.
     pub members: InterceptMembers,
@@ -1195,14 +1207,96 @@ impl MtlsIntercept for HostMtlsIntercept {
         todo!("RED scaffold: D-295-R12 converge_allocation_elements — DELIVER step 08-02")
     }
 
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 07-01")]
     fn remove_allocation_elements(
         &self,
         source_addr: Ipv4Addr,
         destinations: &[SocketAddrV4],
     ) -> Result<InterceptState> {
-        let _ = (source_addr, destinations);
-        todo!("RED scaffold: D-295-R10 remove_allocation_elements — DELIVER step 07-01")
+        let mut seen = BTreeSet::new();
+        if let Some(rejected) = destinations
+            .iter()
+            .find(|destination| destination.port() == 0 || !seen.insert(**destination))
+        {
+            return Err(InterceptError::NftElementUpdateFailed {
+                set: crate::mtls_intercept::InterceptSet::InboundDestinations,
+                operation: crate::mtls_intercept::InterceptElementOperation::Delete,
+                key: crate::mtls_intercept::InterceptElementKey::Destination(*rejected),
+                source: NetlinkError::nft(
+                    "shared-element-remove",
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "duplicate or zero-port destination",
+                    ),
+                ),
+            });
+        }
+
+        let mut counts = self.elements.counts.lock();
+        let expected =
+            self.program.lock().clone().ok_or(InterceptError::SharedProgramNotConverged)?;
+        let observed =
+            overdrive_netlink::nft::observe_shared_ip_intercept_state().map_err(|source| {
+                InterceptError::NftElementUpdateFailed {
+                    set: crate::mtls_intercept::InterceptSet::ManagedGuestIps,
+                    operation: crate::mtls_intercept::InterceptElementOperation::ReadBack,
+                    key: crate::mtls_intercept::InterceptElementKey::Address(source_addr),
+                    source,
+                }
+            })?;
+        let observed_program =
+            observed.as_ref().map(|state| postcondition_from_shared_identity(state.identity()));
+        let expected_program = postcondition_from_shared_identity(&expected);
+        if observed_program.as_ref() != Some(&expected_program) {
+            return Err(InterceptError::PostconditionMismatch {
+                expected: expected_program,
+                observed: observed_program,
+            });
+        }
+
+        let state = overdrive_netlink::nft::delete_shared_ip_intercept_elements_atomically(
+            &expected,
+            Some(source_addr),
+            destinations,
+        )
+        .map_err(|source| InterceptError::NftElementUpdateFailed {
+            set: crate::mtls_intercept::InterceptSet::ManagedGuestIps,
+            operation: crate::mtls_intercept::InterceptElementOperation::Delete,
+            key: crate::mtls_intercept::InterceptElementKey::Address(source_addr),
+            source,
+        })?;
+        let policy_route = crate::mtls_intercept::observe_shared_policy_route()?;
+
+        let members = InterceptMembers {
+            managed_guest_ips: state.managed_guest_ips().clone(),
+            outbound_sources: state.outbound_sources().clone(),
+            inbound_destinations: state.inbound_destinations().clone(),
+        };
+        let result = InterceptState {
+            program: postcondition_from_shared_identity(state.identity()),
+            policy_route,
+            intercept_mark_guard: false,
+            members,
+        };
+
+        for key in [
+            SharedElementKey::Address {
+                set: SharedElementSet::ManagedGuestIps,
+                address: source_addr,
+            },
+            SharedElementKey::Address {
+                set: SharedElementSet::OutboundSources,
+                address: source_addr,
+            },
+        ]
+        .into_iter()
+        .chain(destinations.iter().copied().map(SharedElementKey::Destination))
+        {
+            counts.remove(&key);
+        }
+        self.elements.pending_sources.lock().remove(&source_addr);
+        self.elements.pending_destinations.lock().remove(&source_addr);
+        drop(counts);
+        Ok(result)
     }
 }
 
@@ -2079,7 +2173,6 @@ mod shared_program_rollback_acceptance {
     /// requested members is observed on a real kernel by
     /// `tests/integration/shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state`.
     #[test]
-    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     fn remove_allocation_elements_deletes_only_present_requested_members() {
         let source_addr = Ipv4Addr::new(100, 95, 0, 2);
         let requested = SocketAddrV4::new(source_addr, 8443);

@@ -4394,43 +4394,26 @@ mod shared_ip {
             }
         }
         let before = state_for(expected)?;
-        if let Some(source) = source
-            && (!before.managed_guest_ips.contains(&source)
-                || !before.outbound_sources.contains(&source))
-        {
-            return Err(invalid_shared_ip("shared IP outbound group is incomplete"));
-        }
-        if inbound.iter().any(|destination| !before.inbound_destinations.contains(destination)) {
-            return Err(invalid_shared_ip("shared IP inbound member is absent"));
-        }
         let ids = set_ids()?;
-        let mut mutations = Vec::new();
-        if let Some(source) = source {
-            let key = source.octets().to_vec();
-            mutations.push(ElementMutation {
-                set: ElementSet::ManagedGuestIps,
-                set_id: *ids.get(&ElementSet::ManagedGuestIps).expect("managed set id"),
-                key: key.clone(),
-                add: false,
-            });
-            mutations.push(ElementMutation {
-                set: ElementSet::OutboundSources,
-                set_id: *ids.get(&ElementSet::OutboundSources).expect("outbound set id"),
-                key,
-                add: false,
-            });
-        }
-        for destination in inbound {
-            mutations.extend(member_mutations(&ids, [], [ElementKey::Destination(*destination)])?);
-        }
+        let mut removals = Vec::new();
         let mut expected_after = before.clone();
         if let Some(source) = source {
-            expected_after.managed_guest_ips.remove(&source);
-            expected_after.outbound_sources.remove(&source);
+            if before.managed_guest_ips.contains(&source) {
+                removals.push(ElementKey::ManagedGuest(source));
+                expected_after.managed_guest_ips.remove(&source);
+            }
+            if before.outbound_sources.contains(&source) {
+                removals.push(ElementKey::OutboundSource(source));
+                expected_after.outbound_sources.remove(&source);
+            }
         }
         for destination in inbound {
-            expected_after.inbound_destinations.remove(destination);
+            if before.inbound_destinations.contains(destination) {
+                removals.push(ElementKey::Destination(*destination));
+                expected_after.inbound_destinations.remove(destination);
+            }
         }
+        let mutations = member_mutations(&ids, [], removals)?;
         mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
     }
 
@@ -4594,7 +4577,6 @@ mod shared_ip {
         /// — commits nothing, so the adapter returns that error after exactly one
         /// send, with no observation and no inverse.
         #[test]
-        #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
         fn a_rejected_batch_returns_its_error_after_one_send_with_no_observation_or_inverse() {
             let id = identity();
             let before = state(&id, &[Ipv4Addr::new(10, 0, 0, 2)]);
@@ -4626,7 +4608,6 @@ mod shared_ip {
         /// (every mutation inverted) and one verification, and — when the
         /// verification reads the pre-state back — return the primary error.
         #[test]
-        #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
         fn a_failed_or_mismatched_read_back_restores_once_and_returns_the_primary() {
             let id = identity();
             let before = state(&id, &[Ipv4Addr::new(10, 0, 0, 2)]);
@@ -4675,7 +4656,6 @@ mod shared_ip {
         /// adapter returns an error that retains BOTH causes (the primary
         /// read-back failure and the restoration failure) as sources.
         #[test]
-        #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
         fn a_failed_restoration_retains_both_the_primary_and_the_restoration_cause() {
             type Script = (
                 Vec<Result<(), NetlinkError>>,
@@ -4741,7 +4721,6 @@ mod shared_ip {
         /// R10 happy read-back (H14 contrast): a post-commit read-back that equals
         /// the expected new state returns it with no inverse batch.
         #[test]
-        #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
         fn a_matching_read_back_returns_the_new_state_with_no_inverse() {
             let id = identity();
             let before = state(&id, &[Ipv4Addr::new(10, 0, 0, 2)]);

@@ -273,7 +273,6 @@ fn chain_carries_errno(error: &(dyn std::error::Error + 'static), errno: i32) ->
               the body is one boot-deploy-fault-shutdown narrative"
 )]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
 async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability() {
     const TICK: Duration = Duration::from_millis(100);
 

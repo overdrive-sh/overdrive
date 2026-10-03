@@ -1079,7 +1079,6 @@ async fn retiring_cleanup_schedule(seed: u64) {
 /// S-ND295-07 — Stop removes the predecessor completely before its address is reused.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-07)"]
 async fn a_failed_element_removal_keeps_the_address_until_a_retry_converges() {
     for seed in seeds() {
         eprintln!(

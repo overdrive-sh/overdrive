@@ -2433,7 +2433,6 @@ fn failed_successor_detail(outcome: &FailedSuccessorStopOutcome) -> &str {
 /// whole pinned rendering (DR-06; the pinned `MtlsInterceptStopError`
 /// `Display`, which `restart_abort_cleanup_detail` carries unchanged).
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
 async fn restart_abort_detail_names_every_failed_handle_teardown_cause() {
     let outcome =
         drive_restart_abort_with_failed_successor_stop(SuccessorStopFault::HandleTeardown).await;
@@ -2460,7 +2459,6 @@ async fn restart_abort_detail_names_every_failed_handle_teardown_cause() {
 /// failed: <the InterceptError's Display>` (DR-06, ElementRemoval naming its
 /// cause, user-approved 2026-09-30).
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
 async fn restart_abort_detail_names_the_element_removal_cause() {
     let outcome =
         drive_restart_abort_with_failed_successor_stop(SuccessorStopFault::ElementRemoval).await;

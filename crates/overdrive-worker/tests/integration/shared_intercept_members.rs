@@ -376,7 +376,6 @@ const REMOVAL_SURVIVING_DESTINATION: SocketAddrV4 =
 /// S-ND295-54 — Protection removal is convergent and its failures are typed.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
 fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state() {
     assert!(is_root(), "S-ND295-54 Lima evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-54");
@@ -552,7 +551,6 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
 /// S-ND295-54 — Protection removal is convergent and its failures are typed.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
 fn removal_is_refused_when_the_recorded_program_was_replaced_out_of_band() {
     assert!(is_root(), "S-ND295-54 Lima evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-54-recorded-vs-observed");

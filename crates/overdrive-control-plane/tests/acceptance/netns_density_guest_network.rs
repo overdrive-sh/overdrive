@@ -996,7 +996,6 @@ async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_own
 /// S-ND295-07 — Stop removes the predecessor completely before its address is reused
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-07)"]
 async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse() {
     const PREDECESSOR: &str = "nd295-predecessor";
     let fixture = SeamFixture::with_sim_owner().await;

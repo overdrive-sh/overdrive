@@ -486,7 +486,7 @@ impl ElementFaultIntercept {
         Ok(Some(overdrive_worker::mtls_intercept_port::InterceptState {
             program,
             policy_route: true,
-            intercept_mark_guard: true,
+            intercept_mark_guard: false,
             members,
         }))
     }
@@ -1215,7 +1215,6 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-07B)"]
 async fn shared_element_cleanup_failure_deletion_rejected_retains_retirement_and_address() {
     Box::pin(prove_fallible_element_cleanup(LowerCleanupFault::DeletionRejected)).await;
 }
@@ -1230,7 +1229,6 @@ async fn shared_element_cleanup_failure_deletion_rejected_retains_retirement_and
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-01 (S-ND295-07B)"]
 async fn shared_element_cleanup_failure_readback_failed_retains_retirement_and_address() {
     Box::pin(prove_fallible_element_cleanup(LowerCleanupFault::ReadBackFailed)).await;
 }

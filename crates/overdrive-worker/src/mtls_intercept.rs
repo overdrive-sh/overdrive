@@ -1016,6 +1016,21 @@ pub(crate) fn ensure_local_route() -> Result<()> {
     }
 }
 
+/// Read the two node-wide policy-route objects without mutating routing state.
+/// The error variants match the existing ownership of the fwmark rule and
+/// local route operations.
+pub(crate) fn observe_shared_policy_route() -> Result<bool> {
+    let rule_present = block_on_host_netlink(|| async {
+        Client::new()?.fib_rule_fwmark_present(TPROXY_FWMARK, TPROXY_RT_TABLE).await
+    })
+    .map_err(|source| InterceptError::IpRuleAddFailed { source })?;
+    let route_present = block_on_host_netlink(|| async {
+        Client::new()?.local_route_present(TPROXY_RT_TABLE, "lo").await
+    })
+    .map_err(|source| InterceptError::IpRouteLocalAddFailed { source })?;
+    Ok(rule_present && route_present)
+}
+
 // ---- sync → async netlink bridge (ADR-0085 D5) ------------------------------
 //
 // The `install_*_tproxy` / `ensure_shared_routing_infra` surface is SYNC
