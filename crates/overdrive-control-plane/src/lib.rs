@@ -7453,32 +7453,17 @@ pub async fn run_server_with_obs_and_drivers(
         mtls_resolve_after_frontend_rebuild = Arc::clone(&resolve);
         mtls_resolve_owner = service_backends_resolve;
 
-        // The per-alloc intercept-INSTALL port. `HostMtlsIntercept` is
-        // stateless and delegates one-for-one to the same
-        // `crate::mtls_intercept` free functions `start_alloc` called
-        // before this port existed, so wiring it changes no production
-        // behaviour. Deliberately NOT probe-gated (ADR-0076 § Decision 4):
-        // `CAP_NET_ADMIN` is already proven per-deploy at the upstream
-        // netns-provision seam, so a boot probe would buy a better
-        // diagnosis, not a new safety property — out of GH #250's scope.
-        let intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept> =
-            Arc::new(overdrive_worker::mtls_intercept_port::HostMtlsIntercept::new());
-
         // (4) construct the worker with all four ports as REQUIRED params
-        // (mandatory `new()`, no builder). As of step 04-01 (ADR-0071 Path
-        // A) the worker holds no `MtlsDataplane` and no cgroup root — the
-        // OUTBOUND egress nft-TPROXY rule is installed per-alloc by
-        // `start_alloc` against the host-veth NAME carried on
-        // `AllocationSpec.host_veth` (set at the action-shim C3 provision
-        // seam, JOIN-6). As of step 04-02 the worker also holds the
-        // probed-Ok `MtlsResolve` adapter — the outbound accept loop
-        // resolves each captured connection's recovered `orig_dst` through
-        // it (the C1 3-arm decision).
+        // (mandatory `new()`, no builder). `ServerConfig` owns the intercept
+        // adapter: production supplies `HostMtlsIntercept`; in-process
+        // compositions can supply `SimMtlsIntercept` through the same port.
+        // The worker uses it for the node-shared listeners and program as
+        // well as allocation element registration.
         Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
             enforcement,
             resolve,
             config.clock.clone(),
-            intercept,
+            config.mtls_intercept.clone(),
         ))
     };
 
