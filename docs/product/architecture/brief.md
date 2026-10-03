@@ -941,6 +941,16 @@ resync**, not merely under edge-triggering. #265 remains a separate track.
 
 ### Accepted shared-bridge microVM network (GH #295)
 
+**Current validation — 2026-10-03:** the R19 rule-order acceptance, its
+ordinary-listener exposure explanation, listener-only non-quiescence rationale,
+and dependent ADR-summary/index projections below are **PENDING**. The native
+E14(c)/(d) results fail closed under the existing mark-before-TPROXY program;
+E14(e) remains unresolved. This annotation does not invalidate independent
+R18/R14/R15 contracts or relax any security outcome. The exact dependency map
+is the #295 feature delta's *Native falsification register*; the proposed
+replacement is
+[R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
+
 **Status: Accepted baseline — user-ratified and approved by system design
 review iteration 5 on 2026-09-16. D-295-7 and D-295-9 remain unchanged
 accepted-contract constraints. DESIGN REOPENED on 2026-09-23 under the
@@ -11447,6 +11457,14 @@ The L1/L2 diagrams are in
 ---
 
 ## Shared-bridge microVM application architecture (GH #295; stage 3)
+
+**Current validation — 2026-10-03:** only the R19 ordering and its dependent
+listener-loss/canonical-identity assertions in this section are **PENDING**
+under the #295 feature delta's *Native falsification register*. The intercept
+owner row's R18 guard, R10/R12/R15 responsibilities, existing C4 topology,
+component boundaries, public shapes, and security outcomes remain accepted.
+No listener quiescence classification is selected before E14(e) completes and
+the bounded replacement receives independent review.
 
 ### Correctness-recovery replacement (accepted 2026-09-24)
 

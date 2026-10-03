@@ -56,6 +56,18 @@ Three parts of the Decision below are rewritten to user rulings:
 
 ## Context
 
+**Current validation — 2026-10-03:** only the ADR-0140-dependent listener-loss
+rationale and the Decision's pure-listener non-quiescence validation are
+**PENDING**. Native E14(c)/(d) fail closed under the current mark-before-TPROXY
+order; the required R19 ordinary exposure does not reproduce. E14(e)'s guest
+TIME_WAIT gate remains independent and unresolved. This annotation preserves
+the single-loss confidentiality outcome, DNS classification, EXEC closure,
+exact-port repair, Clock bounds, full audit/restore condition, and every
+per-TAP/per-VM kill rule. It selects no new quiescence behavior. The complete
+dependency map is the #295 feature delta's *Native falsification register*;
+the proposed replacement is
+[R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
+
 The shared bridge, leg-F/leg-C listeners, DNS loop, TCX links/maps/pins, and nft
 guard/routing state affect every local microVM. Startup probes do not detect a
 later task exit or kernel-state loss. Keeping new guest command release open

@@ -5,7 +5,73 @@
 correctness-recovery replacement DESIGN (application/components scope, Propose
 mode, all priorities) was **accepted by the user on 2026-09-24**.
 **Interaction mode:** Propose
-**Current status (2026-09-24): REPLACEMENT DESIGN ACCEPTED (D-295-R1 to
+**Current validation (2026-10-03): R19-dependent DESIGN and DELIVER roadmap PENDING.**
+Native E14(c) and E14(d) reproduce healthy controls and fail-closed behavior
+with the existing mark-before-TPROXY implementation, contrary to D-295-R19's
+required exposure premise. Every validation or rejection that depends on that
+premise is non-operative pending a separate exact replacement DESIGN and
+independent review. This includes the R19 rule-order amendment and the
+listener-loss classification rationale derived from it; unrelated accepted
+outcomes and independently supported R18 are not weakened. DELIVER is stopped
+before 08-01 GREEN. E14(e)'s guest TIME_WAIT setup remains unresolved and is
+not evidence for either outcome.
+
+### Native falsification register — 2026-10-03
+
+- Evidence: [.context/distill-native-08-01.md](../../../.context/distill-native-08-01.md),
+  final physical-native receipt `5e43658a-438a-40b8-ae5e-3a27a1875bfa`.
+- R19 closed-listener: 36 post-fault guest SYNs, Intercept delta 42, complete
+  capture through real quiescence, zero matching SYN-ACKs and wildcard accepts.
+- R19 killed mode: 3942 post-kill guest SYNs, Intercept delta 3982, TAP live,
+  unchanged program/members and policy route, zero matching SYN-ACKs and accepts.
+- R18 table loss: 1972 forwarded SYNs with zero capture drops; the table-loss
+  exposure reproduces. No R18 production implementation is approved by this
+  status update.
+- Reopened alternatives: retaining mark-before-TPROXY and the listener-loss
+  choices rejected or not chosen on R19's exposure premise. No alternative is
+  selected here. No field, error, effect, rule order, quiescence, or security
+  outcome is removed or relaxed.
+- Required next gate: map all affected validations, record an exact replacement
+  DESIGN with any required user decision, independently review it, then resume
+  the original 08-01 evidence gate. Preserve frozen phases 01-04 and the
+  append-only execution log.
+
+#### R19-dependent validation scope
+
+The following approvals, assertions, and rejections are **PENDING / non-operative**
+for their R19-dependent portion. The quotations identify the exact clauses;
+historical text elsewhere is retained as provenance. This register does not
+select a replacement or broaden invalidation to an entire component or ADR.
+The bounded replacement proposal is
+[R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
+
+| Dependent clause / projection | Exact affected assertion or decision | Validation scope |
+|---|---|---|
+| D-295-R19 in the replacement decision list and Decisions Table; ADR-0140 Decision | "Both TPROXY rules order their tail as" TPROXY, policy-route mark, accept | Rule-order acceptance only; the eight-rule program, three sets, target ports, and owner remain accepted |
+| Driven port — intercept element release…: Hazard 2, healthy-path explanation, R19 contract | "the `0x1` policy route delivers it to any host listener bound to `0.0.0.0`"; "This is the path R19 closes" | The claimed ordinary outbound exposure and the remedy's justification; native E14(c)/(d) disprove the required premise under the reproduced conditions |
+| Same section: `observe_shared_state`; Boot ordering step 6.5; `IpRules` matrix row; startup-boundary ordering | "including the D-295-R19 rule order"; "in the R19 rule order" | The canonical-order value only; generation-bracketed observation, atomic target replacement/rollback, policy route, R18 guard, zero-member checks, and typed failure shapes stay accepted |
+| Runtime shared-network supervisor: `LegF` / `LegC` matrix row and Quiescence; ADR-0124 listener clauses | "**no**, only because R19 makes a missing listener fail closed"; "Pure `LegF`, `LegC`, or `Dns` failures never quiesce" | The LegF/LegC non-quiescence decision and its R19 rationale await a replacement and the independent E14(e) result. The Dns portion, detection, exact-port repair, EXEC closure, bounds, restore gate, and kill scope stay accepted |
+| ADR-0124 amendment's ADR-0140 pointer, Decision, and FD Changed Assumptions 22 | "new connects or DNS queries fail while their socket owner is absent"; "A pure listener failure does not quiesce TAPs or existing commands" | The outbound ordinary-listener explanation and listener-only non-quiescence validation; the security outcome is preserved, not relaxed |
+| ADR-0088/0089 accepted amendment 2026-09-24, item 2; FD Changed Assumptions 23; Freeze/inventory pointer registers | "socket lookup delivers guest TCP to any host listener bound to the wildcard address" and the ADR-0140 replacement pointer | Only the #295 listener-loss correction and conditional ordering amendment. The zero-frame contract, queue/fd attachment, lifecycle, and independent B-6/B-7 pins stay accepted; no general claim about the historical per-netns topology is inferred |
+| ADR-0125 amendment's ADR-0140 pointer; FD Changed Assumptions 17 | "both TPROXY rules order TPROXY, then the policy-route mark, then accept" | The order-only amendment. Constant cardinality, R10 removal, R12 member convergence, R15 audit/repair, and R18 guard remain accepted |
+| ADR-0140 Alternatives considered | "Keep the mark before TPROXY" rejected; quiesce on every listener loss "Not chosen while this decision stands"; independent R18 guard rejected "as a substitute" | Reopened where the rejection rests on the ordinary R19 exposure. R18 is still required for reproduced IP-program loss; its guard is not newly claimed to solve listener loss |
+| ADR-0140 Consequences; FD Fresh boot that finds the old rule order, Required downstream changes, environment matrix, and 08-01 planning row | "The canonical program identity changes"; "pre-R19 order" schema conflict and one-time cleanup | R19-induced identity change, old-order refusal rationale, and cleanup precondition only. Existing exact-identity refusal for genuine foreign/noncanonical state remains accepted |
+| FD Reuse Analysis and application/security/evidence projections; brief shared-bridge sections and ADR index; `c4-diagrams.md` correctness-recovery L2 and supervisor narrative | "**EXTEND** by reordering its expressions"; "a missing TPROXY listener fails closed through the PROPOSED D-295-R19 rule order"; "TPROXY-before-mark rules"; "listener/DNS loss does not down TAPs" | Reordering classification, R19 threat/remedy assertions, and accepted-summary/C4 projections are PENDING under this register. The listener portion of the C4 narrative is pending; DNS is independent. No new component, port, runtime, or evidence lane is authorized |
+| ADR-0139 Context and Consequences (R19 cross-reference only) | "the TPROXY-before-mark rule order of ADR-0140 (D-295-R19) keeps that true for outbound TCP"; "covers that path" | Only the claim that R19 covers ordinary missing-listener traffic. The reproduced R18 premise, independent guard mechanism, exact field/error/effects, cardinality, and zero outcomes are not invalidated |
+| FD Evidence Classification source-derived R19 exposure; R19 ordinary RED-first declarations and E14 row; DISTILL requirement/scenario/step projections | "each is withdrawn if its RED does not reproduce" | E14(c)/(d)'s exposure prerequisite has not reproduced and the no-change withdrawal branch must be recorded before DELIVER. Their no-SYN-ACK/no-accept oracles remain required; genuine R18 RED remains valid |
+| ADR-0140 TIME_WAIT consequence; FD TIME_WAIT side door, E14(e), Open Question 2, and boundary scenario 5 | "E14 case (e), the `TIME_WAIT` side door, is judged separately" | Independent native gate remains unresolved. Neither ordinary R19 pass decides the guest TIME_WAIT door, its listener-loss classification, nor any killed-mode residual acceptance |
+
+**Independent contracts preserved.** R18's field, error, two doc-hidden
+effects, guard identity, boot/runtime obligations, and forwarding/host-local
+zero outcomes remain accepted under their now-reproduced premise. R14's
+per-TAP/per-VM kill partition, R15's complete bounded audit and repair,
+Clock-owned deadlines, the held-lease cap, zero pre-event frames, no-cleartext
+escape, and every other independent decision remain operative. Pending
+listener classification never permits traffic that an accepted security
+outcome forbids. E14(e) is an unresolved hypothesis gate, not a reproduced
+exception to that outcome.
+
+**Historical status (2026-09-24; superseded for R19-dependent validation): REPLACEMENT DESIGN ACCEPTED (D-295-R1 to
 D-295-R22, ADR-0127 to ADR-0143). DELIVER remains stopped until DISTILL is
 rewritten against it and the roadmap is re-validated.** Reproduced evidence had
 falsified several accepted premises
@@ -3846,6 +3912,11 @@ startup with a distinct typed cause" and ADR-0122 already state this shape, so
 no ADR changes.
 
 **Intercept-mark fail-closure (R18 and R19, both conditional on native RED).**
+**Current validation 2026-10-03:** Hazard 2, the R19 ordering contract, and
+their dependent validations below are PENDING under the native falsification
+register. R18's table-loss exposure independently reproduces. The conditional
+without-R19 shape and the separate TIME_WAIT gate are retained for replacement
+review; no withdrawal is applied by this annotation.
 The mechanism is chosen on evidence, below; it is not a user decision (review
 finding F4).
 
@@ -5184,6 +5255,12 @@ a live workload (research F7.1, F7.2). The divergence from Cilium's default
 hitless restore follows from #295's no-adoption rule, not from this ordering.
 
 ### [REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)
+
+**Current validation 2026-10-03:** the `LegF`/`LegC` non-quiescence row and
+its R19 rationale are PENDING. Only the R19 canonical-order value in the
+`IpRules` row is PENDING. Every independent component, call, Clock bound,
+owner, restore condition, and kill rule remains accepted; E14(e) must finish
+before a listener classification is selected.
 
 | Component | Owner (repair) | Detection | TAP quiescence | Repair call per attempt |
 |---|---|---|---|---|

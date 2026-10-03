@@ -38,6 +38,15 @@ shared inbound-TPROXY routing reconciler.
 
 ## Context
 
+**Current validation — 2026-10-03:** the ADR-0140 ordering-amendment pointer
+above is **PENDING**, because native E14(c)/(d) fail closed under the existing
+mark-before-TPROXY order and its required R19 exposure does not reproduce.
+Only that order change and its R19-induced canonical-identity consequence
+are invalidated. This ADR's eight-rule/three-set ownership, R10/R12/R15
+contracts, and the independently reproduced R18 guard decision remain
+accepted. See the #295 feature delta's *Native falsification register* and
+[R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
+
 Valid Services carry an unbounded listener vector. The current intercept appends
 one outbound rule and two inbound rules per projected port, producing
 allocation-and-port-linear rule traversal and cleanup. It also projects UDP

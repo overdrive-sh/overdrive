@@ -39,6 +39,16 @@ netns/attach/lifecycle ownership.
 
 ## Context
 
+**Current validation — 2026-10-03:** item 2 of the *Accepted amendment
+2026-09-24* is **PENDING** only for its #295 ordinary-listener exposure claim
+and ADR-0140 ordering replacement. Native E14(c)/(d) fail closed in the current
+#295 mark-before-TPROXY program. This result does not decide the historical
+per-workload-netns topology. Item 1's inherited queue/fd attachment, the
+zero-frame contract, lifecycle, and independent B-6/B-7 pins remain accepted.
+E14(e) is still unresolved. See the #295 feature delta's *Native falsification
+register* and
+[R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
+
 ADR-0088 fixes WHAT the guest wire looks like. This ADR fixes WHO builds each
 piece and WHERE the seams sit. The pieces: tap creation inside the per-alloc
 netns; tap addressing + `ip_forward` + the host return route; carrying the

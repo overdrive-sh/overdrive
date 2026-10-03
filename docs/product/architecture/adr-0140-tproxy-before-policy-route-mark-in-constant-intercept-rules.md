@@ -2,6 +2,30 @@
 
 ## Status
 
+**Pending (2026-10-03) — native falsification of the R19 exposure premise.**
+The reproduced physical-native E14(c)/(d) results are fail-closed with the
+existing mark-before-TPROXY order, with valid positive controls, live guest
+SYNs, unchanged program/members, policy route, and complete captures. The
+rule-order decision and its dependent listener-loss rationale cannot authorize
+DELIVER until an exact replacement DESIGN and independent review are recorded.
+The mark-before-TPROXY alternative is reopened. E14(e) remains unproved; no
+security outcome or listener-loss behavior is changed by this status record.
+See the feature delta's 2026-10-03 native falsification register and
+`.context/distill-native-08-01.md` for the primary receipts.
+
+The pending scope includes this ADR's ordinary outbound-exposure assertion,
+its order change, the rejection of mark-before-TPROXY, listener-only
+non-quiescence rationale, and R19-induced canonical-identity/cleanup consequence.
+Those premises cannot remain accepted through pointers in ADR-0088, ADR-0089,
+ADR-0124, ADR-0125, or the architecture brief. The independent TIME_WAIT
+hypothesis still needs E14(e); ordinary R19 passes neither prove nor disprove it.
+The accepted single-loss fail-closed outcome is preserved. See
+[the bounded replacement proposal](../../../.context/r19-replacement-design.md)
+for the exact proposed contract and prior conditional-withdrawal provenance.
+
+Historical conditional acceptance, retained as provenance rather than current
+execution authority:
+
 **Accepted (2026-09-24), conditional on reproduction.** GH #295
 correctness-recovery replacement DESIGN, decision D-295-R19. Proposed
 2026-09-24; reviewed by independent DESIGN review rounds 4 and 5 and the

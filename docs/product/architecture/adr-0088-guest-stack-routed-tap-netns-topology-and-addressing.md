@@ -22,6 +22,15 @@ neither `rp_filter=0` nor `ethtool tx off`).
 
 ## Context
 
+**Current validation — 2026-10-03:** item 2 of the *Accepted amendment
+2026-09-24* is **PENDING** only for its #295 ordinary-listener exposure claim
+and ADR-0140 ordering replacement. Native E14(c)/(d) fail closed in the current
+#295 mark-before-TPROXY program. This result does not decide the historical
+per-workload-netns topology. The zero-frame contract and item 1's inherited
+queue/activation realization remain accepted. E14(e) is still unresolved.
+See the #295 feature delta's *Native falsification register* and
+[R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
+
 A microVM terminates TCP in the GUEST kernel. The host sees only virtio-net
 frames at a tap — no host `struct sock` — so `cgroup_connect4`/sockops are
 structurally blind. The prior-art recon and the increment-n spike proved the

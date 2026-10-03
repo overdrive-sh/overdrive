@@ -1724,8 +1724,8 @@
     ]
   },
   "validation": {
-    "status": "approved",
-    "reviewer": "Independent nw-acceptance-designer-reviewer; GPT 6.1 Sol (gpt-6.1-sol), extra-high (xhigh) reasoning; regenerated roadmap review iteration 4",
-    "approved_at": "2026-10-03T04:07:47+02:00"
+    "status": "pending",
+    "reviewer": "Native falsification 2026-10-03: E14(c)/(d) fail closed under existing mark-before-TPROXY, contradicting R19 exposure premise. Pending exact R19-dependent replacement DESIGN and independent review; original08-01 remains before GREEN. Evidence .context/distill-native-08-01.md, receipt5e43658a-438a-40b8-ae5e-3a27a1875bfa.",
+    "approved_at": null
   }
 }

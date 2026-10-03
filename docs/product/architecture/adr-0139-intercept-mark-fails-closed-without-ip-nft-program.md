@@ -119,6 +119,15 @@ charter forbids.
 
 ## Consequences
 
+**R19 cross-reference validation — 2026-10-03:** this ADR's statements that
+ADR-0140's TPROXY-before-mark order covers the present-program/absent-listener
+path are **PENDING** under the #295 native falsification register. Native
+E14(c)/(d) fail closed with the existing order. This annotation changes no
+R18 decision, field, error, effect, guard rule, outcome, or ownership: its
+IP-program-loss exposure independently reproduces. E14(e) remains unresolved;
+the guard is not claimed to solve that hypothesis. See
+[R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
+
 Positive: single-loss fail-closure holds for the IP program, for both
 forwarding and host-local delivery, as it already does for the classifier and
 the guard.
