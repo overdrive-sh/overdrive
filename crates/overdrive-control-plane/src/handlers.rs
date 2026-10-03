@@ -175,8 +175,8 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             restart_count: row.restart_count,
             last_terminated,
             terminal: row.terminal,
-            // RED scaffold (D-295-R20): consumed in DELIVER step 07-04, which
-            // derives it from the allocation's lease and row state.
+            // The status handler derives this from the live guest-network
+            // lease and row state at read time.
             network_cleanup_pending: false,
         }
     }
@@ -1191,6 +1191,8 @@ pub async fn alloc_status(
         .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?;
     let workload_rows: Vec<AllocStatusRow> =
         raw_rows.into_iter().filter(|row| row.workload_id == workload_id).collect();
+    let alloc_ids: Vec<_> = workload_rows.iter().map(|row| row.alloc_id.clone()).collect();
+    let observed_leases = state.guest_pool.observe(&alloc_ids).leases;
 
     // Per ADR-0037 §4: derive the RestartBudget from the durable
     // `AllocStatusRow.terminal` field rather than from a recomputed
@@ -1227,14 +1229,23 @@ pub async fn alloc_status(
     let rows: Vec<api::AllocStatusRowBody> = workload_rows
         .into_iter()
         .map(|row| {
+            let network_cleanup_pending = observed_leases
+                .get(&row.alloc_id)
+                .is_some_and(|lease| lease.cleanup_pending(row.state));
             let mut body = api::AllocStatusRowBody::from(row);
             body.resources = resources_body;
+            body.network_cleanup_pending = network_cleanup_pending;
             body
         })
         .collect();
-    let replicas_running =
-        u32::try_from(rows.iter().filter(|r| matches!(r.state, AllocStateWire::Running)).count())
-            .unwrap_or(u32::MAX);
+    let replicas_running = u32::try_from(
+        rows.iter()
+            .filter(|row| {
+                matches!(row.state, AllocStateWire::Running) && !row.network_cleanup_pending
+            })
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
 
     // Per ADR-0047 §1 / step 02-02 [D4]: read the workload-kind
     // discriminator from the dedicated `workloads/<id>/kind` intent record.

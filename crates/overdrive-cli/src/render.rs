@@ -528,6 +528,22 @@ fn render_last_terminated_detail(
     }
 }
 
+/// Append the lifecycle state beneath a cleanup-pending allocation row.
+/// Presence-guarded so rows without pending network cleanup render unchanged.
+fn render_network_cleanup_pending_detail(
+    out: &mut String,
+    row: &overdrive_control_plane::api::AllocStatusRowBody,
+) {
+    use std::fmt::Write as _;
+    if row.network_cleanup_pending {
+        let _ = writeln!(
+            out,
+            "    network cleanup: pending (lifecycle state: {})",
+            state_label(row.state),
+        );
+    }
+}
+
 /// Append the operator-facing `Memory:` line to `out` IFF the workload's
 /// first allocation row carries a non-zero declared `memory_bytes` — the
 /// `[resources] memory_bytes` single source of truth.
@@ -677,6 +693,13 @@ const fn state_label(state: AllocStateWire) -> &'static str {
         // future variants verbatim rather than panicking.
         _ => "(unknown)",
     }
+}
+
+/// State cell shared by the Service allocation table and Job attempt table.
+const fn allocation_status_state_label(
+    row: &overdrive_control_plane::api::AllocStatusRowBody,
+) -> &'static str {
+    if row.network_cleanup_pending { "CleanupPending" } else { state_label(row.state) }
 }
 
 /// Render a [`CliError`] as an operator-facing multi-line error block.
@@ -1053,11 +1076,12 @@ pub fn format_job_alloc_status_attempts_table(
             s,
             "{:<8} {:<12} {:<6} {:<20} {:<10}",
             i + 1,
-            state_label(row.state),
+            allocation_status_state_label(row),
             exit_cell,
             started,
             duration,
         );
+        render_network_cleanup_pending_detail(&mut s, row);
         // ADR-0078 § D5: the per-attempt column set
         // (`Attempt / State / Exit / Started / Duration`) is UNCHANGED — it
         // is pinned by the KPI-K3 byte-equality assertions. The restart
@@ -1126,10 +1150,11 @@ fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
                     out,
                     "{:<24} {:<12} {:<10} {:<20}",
                     row.alloc_id,
-                    state_label(row.state),
+                    allocation_status_state_label(row),
                     row.restart_count,
                     since,
                 );
+                render_network_cleanup_pending_detail(out, row);
                 if matches!(
                     row.terminal.as_ref(),
                     Some(overdrive_core::transition_reason::TerminalCondition::Stable { .. })

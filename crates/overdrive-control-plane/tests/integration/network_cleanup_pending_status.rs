@@ -488,7 +488,6 @@ fn vm_job(id: &str) -> SubmitSpecInput {
 /// excluded from `replicas_running`; once the removal succeeds on a retry the
 /// allocation is `Terminated` and no longer pending.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 07-04 (S-ND295-59)"]
 async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica() {
     let node = Node::boot().await;
     node.submit(vm_service("cleanup-svc")).await;
@@ -566,7 +565,6 @@ async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica()
 /// already-Retiring lease emits `lease_retired` again is not pinned, so the
 /// retired events are not counted exactly; the release is.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 07-04 (S-ND295-59)"]
 async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
     // Installed before boot so no lease event is missed.
     lease_event_log();

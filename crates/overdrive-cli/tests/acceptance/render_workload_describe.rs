@@ -1340,7 +1340,6 @@ fn nd295_expected_pending_render(baseline: &str, row_key: &str, label: &str) -> 
 /// other row, section, or Job verdict moves. A pending Job attempt keeps
 /// its row-state verdict.
 #[test]
-#[ignore = "pending DELIVER step 07-04 (S-ND295-60)"]
 fn a_cleanup_pending_allocation_renders_cleanup_pending_with_its_lifecycle_state() {
     for arm in &ND295_ARMS {
         let baseline = overdrive_cli::render::workload_describe(&(arm.describe)());

@@ -55,7 +55,6 @@ const fn expected_cleanup_pending(lease: GuestAttachmentLease, row: AllocState) 
 /// allocation.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 07-04 (S-ND295-58)"]
 fn cleanup_pending_matches_the_lease_and_row_state_table() {
     let mut rows = Vec::with_capacity(ALL_LEASES.len() * ALL_ROW_STATES.len());
     for lease in ALL_LEASES {

@@ -39,8 +39,10 @@ impl GuestAttachmentLease {
     /// allocation whose row is terminal (its VMM exited; cleanup has not begun).
     #[must_use]
     pub const fn cleanup_pending(self, row_state: AllocState) -> bool {
-        let _ = (self, row_state);
-        panic!("RED scaffold: D-295-R20 cleanup_pending — DELIVER step 07-04")
+        match self {
+            Self::Retiring => true,
+            Self::Admitted => row_state.is_terminal(),
+        }
     }
 }
 
