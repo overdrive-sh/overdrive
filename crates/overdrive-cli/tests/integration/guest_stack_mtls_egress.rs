@@ -989,18 +989,18 @@ struct KtlsSocketEvidence {
 }
 
 #[derive(Debug)]
-struct CapturedFrame {
+pub(super) struct CapturedFrame {
     /// Kernel packet-event time from `SCM_TIMESTAMPNS`. Missing ancillary
     /// data remains `None`, so unprovable ordering is classified pre-ready.
-    kernel_event_at: Option<KernelRealtime>,
-    ifindex: u32,
+    pub(super) kernel_event_at: Option<KernelRealtime>,
+    pub(super) ifindex: u32,
     protocol: u16,
     packet_type: u8,
     wire_len: usize,
-    truncated: bool,
-    control_truncated: bool,
+    pub(super) truncated: bool,
+    pub(super) control_truncated: bool,
     aux: Option<PacketAuxData>,
-    bytes: Vec<u8>,
+    pub(super) bytes: Vec<u8>,
 }
 
 #[repr(C)]
@@ -1017,27 +1017,27 @@ struct PacketAuxData {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-struct PacketStatistics {
+pub(super) struct PacketStatistics {
     packets: u32,
-    drops: u32,
+    pub(super) drops: u32,
 }
 
 #[derive(Debug)]
-struct CaptureBatch {
-    frames: Vec<CapturedFrame>,
-    statistics: PacketStatistics,
+pub(super) struct CaptureBatch {
+    pub(super) frames: Vec<CapturedFrame>,
+    pub(super) statistics: PacketStatistics,
     /// One entry per pending `ENETDOWN` the socket reported, in order: the
     /// number of frames already captured when it was reported. A capture bound
     /// while its device is down reports exactly one, at zero frames.
-    link_down_reports: Vec<usize>,
+    pub(super) link_down_reports: Vec<usize>,
     /// The bound ifindex stopped resolving after a link-down report, so the
     /// kernel had unhooked the socket for good and reading ended early.
-    interface_removed: bool,
+    pub(super) interface_removed: bool,
 }
 
 /// Nanoseconds in the shared `SO_TIMESTAMPNS` / `CLOCK_REALTIME` domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct KernelRealtime(i128);
+pub(super) struct KernelRealtime(pub(super) i128);
 
 #[derive(Debug)]
 struct InterceptReadiness {
@@ -1170,7 +1170,7 @@ struct GuestTcpAttempt {
     saw_fin: bool,
 }
 
-struct WireCapture {
+pub(super) struct WireCapture {
     stop: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<CaptureBatch>>,
     port: u16,
@@ -1236,7 +1236,7 @@ impl WireCapture {
     /// bytes (the E3 12-byte zero prefix) is visible rather than hidden by the
     /// kernel's L3 datagram view. Close-on-exec keeps the capture out of every
     /// child the in-process `serve` spawns.
-    fn start_link_layer(ifindex: u32) -> Self {
+    pub(super) fn start_link_layer(ifindex: u32) -> Self {
         let fd = open_packet_socket(ifindex, libc::SOCK_RAW | libc::SOCK_CLOEXEC)
             .expect("open the exact-ifindex link-layer AF_PACKET capture");
         let stop = Arc::new(AtomicBool::new(false));
@@ -1248,7 +1248,7 @@ impl WireCapture {
     /// Stop and return the batch; kernel-reported loss, a counted frame the
     /// reader never read, and a failed capture thread are evidence the caller
     /// asserts, never a panic here (see [`capture_is_fully_accounted`]).
-    fn stop_accounted(mut self) -> Result<CaptureBatch, String> {
+    pub(super) fn stop_accounted(mut self) -> Result<CaptureBatch, String> {
         self.stop.store(true, Ordering::SeqCst);
         let handle = self.handle.take().ok_or("the capture thread was already joined")?;
         let capture = handle.join().map_err(|payload| {

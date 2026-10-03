@@ -67,32 +67,37 @@
     reason = "Tier-3 native fixtures fail fast, and CONTRACT_SHAPE lines use exact mandated tokens"
 )]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
 use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use tracing::field::{Field, Visit};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_control_plane::api::AllocStateWire;
+use overdrive_core::id::AllocationId;
+use overdrive_core::vm::config::VmRunDir;
 use overdrive_dataplane::guest_tcx::{GuestTcxCounter, read_counter};
 use overdrive_netlink::nft::bridge::{BridgeGuardSpec, observe as observe_bridge_guard};
 use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_testing::vm_fixture::VmFixture;
 
 use super::guest_stack_mtls_egress::{
-    MESH_NAME, SERVICE_PORT, build_mesh_peer, build_static_binary, observe_shared_intercept_state,
-    service_toml,
+    MESH_NAME, SERVICE_PORT, WireCapture, build_mesh_peer, build_static_binary, interface_index,
+    observe_shared_intercept_state, service_toml,
 };
 use super::serve_lifetime_support::kill_serve_owner;
 use super::vm_walking_skeleton::{
     TeardownBound, config_path, guard_default_drop_packets, poll_until_running,
     poll_until_terminal, shared_staging_root, spawn_vm_server_mtls_composed,
-    stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
+    stage_rootfs_with_extra_binaries, stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
 };
 
 // ---------------------------------------------------------------------------
@@ -120,13 +125,15 @@ const TERMINAL_BOUND: Duration = Duration::from_secs(30);
 /// The window a probe guest keeps dialing so the host observes across a fault.
 const PROBE_WINDOW: Duration = Duration::from_secs(20);
 /// The base sequence number the TIME_WAIT guest crafts its reconnect SYNs at —
-/// above any plausible old `rcv_nxt`, so the door's in-run witness can require
-/// a captured SYN whose sequence is at or above it (E14 (e): "a sequence above
-/// the old `rcv_nxt`"). Shared between the guest source and the witness.
+/// retained lower bound for the authored in-run witness. The actual base is
+/// selected above the real FIN-derived `rcv_nxt` under TCP's modulo comparison.
 const TW_CRAFT_SEQ_BASE: u32 = 0x5000_0000;
 /// The base TSval the TIME_WAIT guest stamps its crafted reconnect SYNs with —
-/// newer than the entry's `ts_recent`, so PAWS accepts the reconnect.
+/// retained lower bound; the actual TSval is selected newer than the real FIN.
 const TW_CRAFT_TSVAL_BASE: u32 = 0x0100_0000;
+/// Test-private host-to-guest event gate, used only after the guest has
+/// completed its close and the actual serve owner has entered killed mode.
+const TW_CONTROL_PORT: u16 = 41_064;
 /// The cgroup slice every VM allocation's scope lives under; the killed-server
 /// residue guard reaps the scopes that appeared under it.
 const WORKLOADS_SLICE: &str = "/sys/fs/cgroup/overdrive.slice/workloads.slice";
@@ -138,12 +145,86 @@ const TCX_LINK_PIN_DIR: &str = "/sys/fs/bpf/overdrive/mtls-endpoints/links";
 // Probe guest and mesh service
 // ---------------------------------------------------------------------------
 
-/// Build a guest binary that dials, in a loop for the whole probe window, the
-/// mesh peer by name and the gateway, the real host interface address, and an
-/// external address at `HOST_WILDCARD_PORT`, so the host can observe whether
-/// any SYN is answered or forwarded while a fault holds. Every dial is a
-/// plaintext `TcpStream` with a short connect timeout (the workload is
-/// identity-unaware). `host` is the real host interface address the R18 (b)
+/// E14 prescribes scripted SYNs, not a completed application connection.
+/// Completing a TcpStream handshake would make the healthy intercept dial
+/// the wildcard backend and invalidate the healthy zero-accept control.
+const SYN_PROBE_RAW_SOURCE: &str = r#"
+extern "C" {
+    fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+    fn sendto(fd: i32, buf: *const u8, len: usize, flags: i32, addr: *const u8, alen: u32) -> isize;
+    fn close(fd: i32) -> i32;
+}
+
+fn checksum(bytes: &[u8]) -> u16 {
+    let mut sum = 0_u32;
+    for pair in bytes.chunks(2) {
+        sum += u32::from(u16::from_be_bytes([pair[0], *pair.get(1).unwrap_or(&0)]));
+    }
+    while sum >> 16 != 0 { sum = (sum & 0xffff) + (sum >> 16); }
+    !(sum as u16)
+}
+
+fn scripted_syns(targets: &[std::net::SocketAddrV4], window: u64) {
+    let route = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    // A connect selects the source address without sending a UDP packet.
+    route.connect(targets[0]).unwrap();
+    let source = match route.local_addr().unwrap() {
+        std::net::SocketAddr::V4(v4) => *v4.ip(),
+        _ => std::process::exit(31),
+    };
+    let fd = unsafe { socket(2, 3, 255) }; // AF_INET/SOCK_RAW/IPPROTO_RAW, IP_HDRINCL
+    if fd < 0 { std::process::exit(21); }
+    let deadline = Instant::now() + Duration::from_secs(window);
+    let mut n = 0_u32;
+    while Instant::now() < deadline {
+        for (index, target) in targets.iter().enumerate() {
+            let mut tcp = [0_u8; 20];
+            // Each ordinary probe is a fresh TCP 4-tuple, as with the original
+            // connect attempts. Only E14(e) deliberately reuses a source port.
+            let source_port = 41_000_u16 + (n as u16 * targets.len() as u16) + index as u16;
+            tcp[0..2].copy_from_slice(&source_port.to_be_bytes());
+            tcp[2..4].copy_from_slice(&target.port().to_be_bytes());
+            tcp[4..8].copy_from_slice(&0x295a_0000_u32.wrapping_add(n * 4_000).to_be_bytes());
+            tcp[12] = 0x50;
+            tcp[13] = 0x02;
+            tcp[14..16].copy_from_slice(&64_240_u16.to_be_bytes());
+            let mut pseudo = Vec::new();
+            pseudo.extend_from_slice(&source.octets());
+            pseudo.extend_from_slice(&target.ip().octets());
+            pseudo.extend_from_slice(&[0, 6, 0, 20]);
+            pseudo.extend_from_slice(&tcp);
+            tcp[16..18].copy_from_slice(&checksum(&pseudo).to_be_bytes());
+            let mut packet = [0_u8; 40];
+            packet[0] = 0x45;
+            packet[2..4].copy_from_slice(&40_u16.to_be_bytes());
+            packet[8] = 64;
+            packet[9] = 6;
+            packet[12..16].copy_from_slice(&source.octets());
+            packet[16..20].copy_from_slice(&target.ip().octets());
+            let check = checksum(&packet[..20]);
+            packet[10..12].copy_from_slice(&check.to_be_bytes());
+            packet[20..].copy_from_slice(&tcp);
+            let mut address = [0_u8; 16];
+            address[0] = 2;
+            address[2..4].copy_from_slice(&target.port().to_be_bytes());
+            address[4..8].copy_from_slice(&target.ip().octets());
+            let sent = unsafe { sendto(fd, packet.as_ptr(), packet.len(), 0, address.as_ptr(), 16) };
+            if sent != packet.len() as isize { unsafe { close(fd); } std::process::exit(22); }
+        }
+        n += 1;
+        // The original full probe window is unchanged. This workload cadence
+        // lets both named SYNs occur during the owner's actual live exposure;
+        // it neither postpones nor changes the owner's quiescence.
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    unsafe { close(fd); }
+}
+"#;
+
+/// Build the probe guest. Its active R18/R19 modes send scripted TCP SYNs
+/// from fresh source ports across the whole window to the exact case's
+/// peer/gateway/host-interface or gateway/external destinations. `host` is
+/// the real host interface address the R18 (b)
 /// "another host interface address" case dials; it is read from the kernel at
 /// test time (never a literal).
 fn build_syn_probe_guest(tmp: &Path, host: Ipv4Addr) -> PathBuf {
@@ -151,6 +232,8 @@ fn build_syn_probe_guest(tmp: &Path, host: Ipv4Addr) -> PathBuf {
         r#"
 use std::net::TcpStream;
 use std::time::{{Duration, Instant}};
+
+{raw_probe}
 
 fn dial(target: &str) {{
     if let Ok(mut stream) = TcpStream::connect_timeout(
@@ -168,12 +251,29 @@ fn dial(target: &str) {{
 }}
 
 fn main() {{
+    // E14(a) names the actual peer allocation address, not the Service VIP
+    // returned by its mesh name. The host supplies that observed address.
+    let peer = std::env::args().nth(1).unwrap_or_else(|| "{mesh}:{svc}".to_owned());
+    let r18 = std::env::args().nth(2).as_deref() == Some("r18");
+    let r19 = std::env::args().nth(1).as_deref() == Some("r19");
+    if r18 || r19 {{
+        let targets = if r18 {{
+            vec![peer, "{gw}:{port}".to_owned(), "{host}:{port}".to_owned()]
+        }} else {{
+            vec!["{gw}:{port}".to_owned(), "{ext}:{port}".to_owned()]
+        }};
+        let targets = targets.iter().map(|target| target.parse().unwrap()).collect::<Vec<_>>();
+        scripted_syns(&targets, {window});
+        return;
+    }}
     let deadline = Instant::now() + Duration::from_secs({window});
     while Instant::now() < deadline {{
-        dial("{mesh}:{svc}");
+        dial(&peer);
         dial("{gw}:{port}");
         dial("{host}:{port}");
-        dial("{ext}:{port}");
+        // E14(a)/(b)'s control universe is peer, gateway, and host interface.
+        // The external address belongs to the independent R19 cases.
+        if !r18 {{ dial("{ext}:{port}"); }}
         std::thread::sleep(Duration::from_millis(200));
     }}
 }}
@@ -185,6 +285,7 @@ fn main() {{
         host = host,
         ext = EXTERNAL,
         port = HOST_WILDCARD_PORT,
+        raw_probe = SYN_PROBE_RAW_SOURCE,
     );
     build_static_binary(tmp, "nd295-syn-probe", &source)
 }
@@ -202,11 +303,18 @@ fn tap_for(addr: Ipv4Addr) -> String {
     format!("ovd-tp-{:04x}", u16::from_be_bytes([o[2], o[3]]))
 }
 
-async fn deploy_probe_guest(cfg: &Path, dir: &Path, kernel: &Path, rootfs: &Path) -> DeployedGuest {
+async fn deploy_probe_guest_with_args(
+    cfg: &Path,
+    dir: &Path,
+    kernel: &Path,
+    rootfs: &Path,
+    args: &[String],
+) -> DeployedGuest {
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     let spec = write_toml(
         dir,
         "nd295-probe.toml",
-        &vm_job_toml("nd295-probe", "/sbin/nd295-syn-probe", &[], kernel, rootfs),
+        &vm_job_toml("nd295-probe", "/sbin/nd295-syn-probe", &args, kernel, rootfs),
     );
     let output = deploy(DeployArgs { spec, config_path: cfg.to_path_buf() })
         .await
@@ -389,6 +497,28 @@ fn tap_is_up(tap: &str) -> bool {
         .is_some_and(|flags| flags & 0x1 == 0x1)
 }
 
+/// Use the kernel packet timestamps' CLOCK_REALTIME domain for cuts around
+/// externally applied faults. A dequeue time must never relabel a healthy
+/// pre-fault packet as a fault-period response.
+fn packet_clock_now() -> i128 {
+    let mut now: libc::timespec = unsafe { std::mem::zeroed() };
+    // SAFETY: `now` is writable timespec storage for the duration of the call.
+    let rc = unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut now) };
+    assert_eq!(rc, 0, "read the packet timestamp clock: {}", std::io::Error::last_os_error());
+    i128::from(now.tv_sec) * 1_000_000_000 + i128::from(now.tv_nsec)
+}
+
+/// Confirm the same production TAP's state without raising it. Two successive
+/// up samples bound packet-event timestamps conservatively. The actual owner
+/// quiesces this TAP once after listener loss and cannot restore it while the
+/// exact-port thief holds the failed leg, so a down sample ends the exposure;
+/// observation nevertheless continues for the original complete probe window.
+fn tap_state_sample(tap: &str, ifindex: u32) -> (i128, bool) {
+    assert_eq!(interface_index(tap), ifindex, "the capture still names the same production TAP");
+    let up = tap_is_up(tap);
+    (packet_clock_now(), up)
+}
+
 /// An AF_PACKET capture on one interface counting TCP SYN frames toward
 /// `dst_port`; its Drop closes the socket.
 struct SynCapture {
@@ -451,70 +581,6 @@ impl SynCapture {
             if read > 0 {
                 let length = usize::try_from(read).expect("positive recv length");
                 if is_syn_to_port(&frame[..length], self.dst_port) {
-                    matched += 1;
-                }
-                continue;
-            }
-            if read == 0 {
-                return matched;
-            }
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::WouldBlock {
-                return matched;
-            }
-            panic!("SYN capture recv failed: {error}");
-        }
-    }
-
-    /// Drain every queued frame, counting IPv4 TCP SYNs to `self.dst_port`
-    /// whose IPv4 source address is `source` — a forwarded guest frame on the
-    /// interface this capture is bound to (E14 (a): zero of these on the peer's
-    /// TAP once the intercept program is gone).
-    fn drain_forwarded_syns(&self, source: Ipv4Addr) -> usize {
-        let mut matched = 0;
-        loop {
-            let mut frame = [0_u8; 2048];
-            // SAFETY: `frame` is a live writable buffer; `self.fd` is owned.
-            let read = unsafe {
-                libc::recv(self.fd, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
-            };
-            if read > 0 {
-                let length = usize::try_from(read).expect("positive recv length");
-                let slice = &frame[..length];
-                if is_syn_to_port(slice, self.dst_port) && frame_ipv4_src(slice) == Some(source) {
-                    matched += 1;
-                }
-                continue;
-            }
-            if read == 0 {
-                return matched;
-            }
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::WouldBlock {
-                return matched;
-            }
-            panic!("SYN capture recv failed: {error}");
-        }
-    }
-
-    /// Drain every queued frame, counting IPv4 TCP SYNs to `self.dst_port`
-    /// whose TCP sequence number is at or above `seq_floor` — the guest door's
-    /// in-run witness that the crafted newer-sequence reconnect SYNs (base
-    /// [`TW_CRAFT_SEQ_BASE`], above the old `rcv_nxt`) reached the guest's TAP.
-    fn drain_newer_seq_syns(&self, seq_floor: u32) -> usize {
-        let mut matched = 0;
-        loop {
-            let mut frame = [0_u8; 2048];
-            // SAFETY: `frame` is a live writable buffer; `self.fd` is owned.
-            let read = unsafe {
-                libc::recv(self.fd, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
-            };
-            if read > 0 {
-                let length = usize::try_from(read).expect("positive recv length");
-                let slice = &frame[..length];
-                if is_syn_to_port(slice, self.dst_port)
-                    && syn_seq_to_port(slice, self.dst_port).is_some_and(|seq| seq >= seq_floor)
-                {
                     matched += 1;
                 }
                 continue;
@@ -627,23 +693,6 @@ fn frame_ipv4_src(frame: &[u8]) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::new(frame[26], frame[27], frame[28], frame[29]))
 }
 
-/// The TCP sequence number of an Ethernet/IPv4/TCP SYN to `dst_port`, else
-/// `None`.
-fn syn_seq_to_port(frame: &[u8], dst_port: u16) -> Option<u32> {
-    if frame.len() < 14 + 20 + 20 || u16::from_be_bytes([frame[12], frame[13]]) != 0x0800 {
-        return None;
-    }
-    let ihl = usize::from(frame[14] & 0x0f) * 4;
-    if frame[23] != 0x06 || frame.len() < 14 + ihl + 20 {
-        return None;
-    }
-    let tcp = &frame[14 + ihl..];
-    if u16::from_be_bytes([tcp[2], tcp[3]]) != dst_port {
-        return None;
-    }
-    Some(u32::from_be_bytes([tcp[4], tcp[5], tcp[6], tcp[7]]))
-}
-
 /// `true` iff `frame` is an Ethernet/IPv4/TCP SYN (SYN set, ACK clear) whose
 /// TCP destination port equals `dst_port`.
 fn is_syn_to_port(frame: &[u8], dst_port: u16) -> bool {
@@ -678,9 +727,40 @@ fn is_syn_ack_from_port(frame: &[u8], src_port: u16) -> bool {
         return false; // not TCP / too short
     }
     let tcp = &frame[14 + ihl..];
-    let port = u16::from_be_bytes([tcp[2], tcp[3]]);
+    let port = u16::from_be_bytes([tcp[0], tcp[1]]);
     let flags = tcp[13];
     port == src_port && (flags & 0x02) != 0 && (flags & 0x10) != 0
+}
+
+/// Exact request nonce for a guest SYN: destination, guest source port, and
+/// sequence. The source port is fresh for every ordinary E14 probe.
+fn probe_request(frame: &[u8], guest: Ipv4Addr, port: u16) -> Option<(Ipv4Addr, u16, u32)> {
+    if !is_syn_to_port(frame, port) || frame_ipv4_src(frame) != Some(guest) {
+        return None;
+    }
+    let tcp = &frame[14 + usize::from(frame[14] & 0x0f) * 4..];
+    Some((
+        Ipv4Addr::new(frame[30], frame[31], frame[32], frame[33]),
+        u16::from_be_bytes([tcp[0], tcp[1]]),
+        u32::from_be_bytes([tcp[4], tcp[5], tcp[6], tcp[7]]),
+    ))
+}
+
+/// Reject a delayed healthy reply as fault evidence. A fault-period SYN-ACK
+/// must acknowledge one exact guest SYN actually observed after the fault.
+fn probe_reply(
+    frame: &[u8],
+    port: u16,
+    requests: &BTreeSet<(Ipv4Addr, u16, u32)>,
+) -> Option<(Ipv4Addr, u16)> {
+    if !is_syn_ack_from_port(frame, port) {
+        return None;
+    }
+    let source = frame_ipv4_src(frame)?;
+    let tcp = &frame[14 + usize::from(frame[14] & 0x0f) * 4..];
+    let guest_port = u16::from_be_bytes([tcp[2], tcp[3]]);
+    let ack = u32::from_be_bytes([tcp[8], tcp[9], tcp[10], tcp[11]]);
+    requests.contains(&(source, guest_port, ack.wrapping_sub(1))).then_some((source, port))
 }
 
 /// The production shared **bridge** guard's default-drop counter (packets),
@@ -749,6 +829,55 @@ async fn wait_until(bound: Duration, mut predicate: impl FnMut() -> bool) -> boo
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// Positive control on the same production TAP and exact destinations before
+/// the fault. Scripted SYNs receive SYN-ACKs without completing a handshake.
+async fn assert_healthy_probe_synacks(tap: &str, targets: &[(Ipv4Addr, u16)]) {
+    let capture = SynCapture::open(tap, HOST_WILDCARD_PORT);
+    let mut answered = BTreeSet::new();
+    assert!(
+        wait_until(Duration::from_secs(8), || {
+            answered.extend(capture.syn_acks_seen(targets));
+            answered.len() == targets.len()
+        })
+        .await,
+        "healthy positive control: every exact R19 destination answers its SYN; {answered:?} of {targets:?}"
+    );
+    assert!(tap_is_up(tap), "the positive control runs on the live production TAP");
+    assert_eq!(capture.packet_drops(), 0, "the positive-control capture drops no packets");
+}
+
+/// R19's stated path is rule 1 -> rule 2 with the owned program, source
+/// membership, and fwmark/local route still present. A missing prerequisite
+/// must not be misreported as proof that the absent listener fails closed.
+async fn assert_r19_program_live(
+    source: Ipv4Addr,
+) -> overdrive_netlink::nft::SharedIpInterceptState {
+    let state = observe_shared_intercept_state()
+        .expect("read the R19 owned program")
+        .expect("the R19 program remains present");
+    assert!(state.managed_guest_ips().contains(&source), "the R19 source remains a managed guest");
+    assert!(
+        state.outbound_sources().contains(&source),
+        "the R19 source still selects outbound rule 1"
+    );
+    let client =
+        overdrive_netlink::Client::new().expect("open the existing typed host netlink reader");
+    assert!(
+        client.fib_rule_fwmark_present(1, 100).await.expect("read the fwmark rule"),
+        "R19 still has fwmark 0x1 lookup 100"
+    );
+    assert!(
+        client.local_route_present(100, "lo").await.expect("read the local route"),
+        "R19 still has table 100's local default route"
+    );
+    eprintln!(
+        "R19 owned-program prerequisite: source={source}, managed={}, outbound={}, fwmark_rule=true, local_route=true",
+        state.managed_guest_ips().contains(&source),
+        state.outbound_sources().contains(&source)
+    );
+    state
 }
 
 /// The per-run SYN-entered-host check every fault run adds (E14): while the
@@ -884,11 +1013,70 @@ fn intercept_ip_tables() -> BTreeSet<String> {
 struct KilledServerResidueGuard {
     baseline: HostResidue,
     label: String,
+    adopted_program: Option<overdrive_netlink::nft::SharedIpInterceptState>,
 }
 
 impl KilledServerResidueGuard {
     fn install(label: &str) -> Self {
-        Self { baseline: HostResidue::capture(), label: label.to_owned() }
+        Self { baseline: HostResidue::capture(), label: label.to_owned(), adopted_program: None }
+    }
+
+    fn record_owned_program(
+        &mut self,
+        program: &overdrive_netlink::nft::SharedIpInterceptState,
+        managed: BTreeSet<Ipv4Addr>,
+        inbound: BTreeSet<SocketAddrV4>,
+    ) {
+        assert_eq!(program.managed_guest_ips(), &managed, "exact test-owned managed sources");
+        assert_eq!(program.outbound_sources(), &managed, "exact test-owned outbound sources");
+        assert_eq!(
+            program.inbound_destinations(),
+            &inbound,
+            "exact test-owned registered destinations"
+        );
+        if self.baseline.intercept_tables.contains(INTERCEPT_TABLE) {
+            self.adopted_program = Some(program.clone());
+        }
+    }
+
+    fn release_adopted_members(
+        program: &overdrive_netlink::nft::SharedIpInterceptState,
+    ) -> Result<(), String> {
+        let observed = observe_shared_intercept_state()?;
+        if observed.as_ref() != Some(program) {
+            return Err(
+                "the witnessed test-owned program changed; cleanup refuses mutation".to_owned()
+            );
+        }
+        for source in program.managed_guest_ips() {
+            overdrive_netlink::nft::delete_shared_ip_intercept_elements_atomically(
+                program.identity(),
+                Some(*source),
+                &[],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        let destinations = program.inbound_destinations().iter().copied().collect::<Vec<_>>();
+        if !destinations.is_empty() {
+            overdrive_netlink::nft::delete_shared_ip_intercept_elements_atomically(
+                program.identity(),
+                None,
+                &destinations,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        let after = observe_shared_intercept_state()?
+            .ok_or_else(|| "cleanup removed the pre-existing constant program".to_owned())?;
+        if after.identity() != program.identity()
+            || !after.managed_guest_ips().is_empty()
+            || !after.outbound_sources().is_empty()
+            || !after.inbound_destinations().is_empty()
+        {
+            return Err(
+                "cleanup did not preserve the constant program with zero owned members".to_owned()
+            );
+        }
+        Ok(())
     }
 }
 
@@ -935,6 +1123,15 @@ impl Drop for KilledServerResidueGuard {
             let removed = std::fs::remove_file(Path::new(TCX_LINK_PIN_DIR).join(pin));
             log.push(format!("tcx pin {pin}: rm={removed:?}"));
         }
+        // A sealed normal shutdown retains an empty owned constant program.
+        // A later killed test can adopt that table, so table-name difference
+        // alone misses the members this test created. After its complete
+        // observation window, release only the exact witnessed test members;
+        // retain the same pre-existing program, targets, and foreign complement.
+        let adopted_cleanup = self.adopted_program.as_ref().map(Self::release_adopted_members);
+        if let Some(result) = &adopted_cleanup {
+            log.push(format!("adopted program: exact owned member release={result:?}"));
+        }
         for table in now.intercept_tables.difference(&self.baseline.intercept_tables) {
             let removed = overdrive_netlink::nft::delete_table(table);
             log.push(format!("nft table ip {table}: delete={removed:?}"));
@@ -948,6 +1145,11 @@ impl Drop for KilledServerResidueGuard {
         // On the success path, a genuine leak fails the test; during unwinding
         // we only log, so the guard never double-panics.
         if !std::thread::panicking() {
+            assert!(
+                adopted_cleanup.as_ref().is_none_or(Result::is_ok),
+                "{}: adopted constant program's test-owned member cleanup failed: {adopted_cleanup:?}",
+                self.label
+            );
             let after = HostResidue::capture();
             assert!(
                 after.ch_pids.difference(&self.baseline.ch_pids).next().is_none(),
@@ -1020,7 +1222,6 @@ fn wait_for_cgroup_drain(scope: &Path, bound: Duration) -> bool {
 /// R18) and again after (GREEN); its assertions encode the fail-closed (GREEN)
 /// outcome.
 #[tokio::test]
-#[ignore = "pending DELIVER step 08-01 (S-ND295-62)"]
 async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_intercept_program() {
     let _teardown = TeardownBound::arm();
     let forwarding = std::fs::read_to_string("/proc/sys/net/ipv4/ip_forward")
@@ -1038,9 +1239,14 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
         .expect("native tempdir");
     let peer = build_mesh_peer(tmp.path());
     let probe = build_syn_probe_guest(tmp.path(), host_addr);
-    let peer_rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &peer, "gti-peer");
-    let probe_rootfs =
-        stage_rootfs_with_extra_binary(tmp.path(), &fixture, &probe, "nd295-syn-probe");
+    // Both allocations clone this one immutable master, containing the exact
+    // authored peer and caller. A second single-binary staging call in this
+    // directory would replace rootfs.ext4 and erase the peer executable.
+    let rootfs = stage_rootfs_with_extra_binaries(
+        tmp.path(),
+        &fixture,
+        &[(&peer, "gti-peer"), (&probe, "nd295-syn-probe")],
+    );
     let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
 
@@ -1049,7 +1255,7 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
     let service_spec = write_toml(
         server_tmp.path(),
         "nd295-62-peer.toml",
-        &service_toml(&peer, &fixture.kernel_path, &peer_rootfs),
+        &service_toml(Path::new("/sbin/gti-peer"), &fixture.kernel_path, &rootfs),
     );
     let peer_out = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
@@ -1065,8 +1271,14 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
     let peer_tap = tap_for(peer_addr);
 
     let listener = WildcardListener::bind(HOST_WILDCARD_PORT);
-    let guest =
-        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    let guest = deploy_probe_guest_with_args(
+        &cfg,
+        server_tmp.path(),
+        &fixture.kernel_path,
+        &rootfs,
+        &[format!("{peer_addr}:{SERVICE_PORT}"), "r18".to_owned()],
+    )
+    .await;
     assert!(
         observe_shared_intercept_state().is_ok_and(|state| state.is_some()),
         "the intercept program is installed before the fault"
@@ -1105,17 +1317,21 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
     // Fault (a)/(b): delete the intercept program table.
     let intercept_before = intercept_counter();
     let guard_before = bridge_guard_drop_packets();
-    let peer_capture = SynCapture::open(&peer_tap, SERVICE_PORT);
+    let peer_ifindex = interface_index(&peer_tap);
+    let guest_ifindex = interface_index(&guest.tap);
+    let peer_capture = WireCapture::start_link_layer(peer_ifindex);
     // Positive witness for the peer-TAP zero-forwarded oracle: a capture on the
     // GUEST's own TAP counting its SERVICE_PORT (peer-dial) SYNs. If the guest
     // provably attempts the peer dial yet the peer's TAP sees zero forwarded
     // SYNs, the forwarding is blocked — the peer capture is not merely dead.
-    let guest_peer_dial = SynCapture::open(&guest.tap, SERVICE_PORT);
-    let witness = SynCapture::open(&guest.tap, HOST_WILDCARD_PORT);
-    let synack = SynCapture::open(&guest.tap, HOST_WILDCARD_PORT);
+    let guest_capture = WireCapture::start_link_layer(guest_ifindex);
     let accepts_before = listener.accepted();
+    let program_before_fault = observe_shared_intercept_state()
+        .expect("observe the exact owned program before the table-loss experiment")
+        .expect("the table-loss experiment begins with the owned program present");
     overdrive_netlink::nft::delete_table(INTERCEPT_TABLE)
         .expect("external actor deletes the intercept program table");
+    let fault_applied_at = packet_clock_now();
     // Fault-point witnesses (not only at the end): the captures bind on TAPs
     // that read back up, so each is live when the fault lands (never a capture
     // on a quiesced TAP); host forwarding is on, so a forward COULD happen; and
@@ -1143,6 +1359,9 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
 
     // The probe keeps dialing across the window; no host listener accepts.
     tokio::time::sleep(PROBE_WINDOW).await;
+    let peer_capture = peer_capture.stop_accounted().expect("lossless complete peer-TAP capture");
+    let guest_capture =
+        guest_capture.stop_accounted().expect("lossless complete sender-TAP capture");
     assert_eq!(
         listener.accepted(),
         accepts_before,
@@ -1162,9 +1381,70 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
     // and the peer capture dropped no frames (so zero is a real observation, not
     // a silent queue overflow).
     assert!(tap_is_up(&peer_tap), "E14 (a) live-capture witness: the peer's TAP {peer_tap} is up");
-    let forwarded = peer_capture.drain_forwarded_syns(guest.addr);
-    let peer_drops = peer_capture.packet_drops();
-    let guest_peer_syns = guest_peer_dial.drain_syns();
+    let fault_frames = |frame: &&super::guest_stack_mtls_egress::CapturedFrame| {
+        let at = frame.kernel_event_at.expect("every captured frame has its kernel event time").0;
+        assert!(
+            !frame.truncated && !frame.control_truncated,
+            "complete frame and timestamp evidence"
+        );
+        at >= fault_applied_at
+    };
+    let forwarded = peer_capture
+        .frames
+        .iter()
+        .filter(fault_frames)
+        .filter(|frame| {
+            assert_eq!(
+                frame.ifindex, peer_ifindex,
+                "the peer capture keeps its exact bound ifindex"
+            );
+            is_syn_to_port(&frame.bytes, SERVICE_PORT)
+                && frame_ipv4_src(&frame.bytes) == Some(guest.addr)
+        })
+        .count();
+    let peer_drops = peer_capture.statistics.drops;
+    let guest_peer_syns = guest_capture
+        .frames
+        .iter()
+        .filter(fault_frames)
+        .filter(|frame| {
+            assert_eq!(
+                frame.ifindex, guest_ifindex,
+                "the sender capture keeps its exact bound ifindex"
+            );
+            is_syn_to_port(&frame.bytes, SERVICE_PORT)
+                && frame_ipv4_src(&frame.bytes) == Some(guest.addr)
+        })
+        .count();
+    let mut replied = BTreeSet::new();
+    let mut host_local_syns = 0_usize;
+    let mut requests = BTreeSet::new();
+    for frame in guest_capture.frames.iter().filter(fault_frames) {
+        assert_eq!(frame.ifindex, guest_ifindex, "exact sender TAP for the local-delivery oracle");
+        if is_syn_to_port(&frame.bytes, HOST_WILDCARD_PORT)
+            && frame_ipv4_src(&frame.bytes) == Some(guest.addr)
+        {
+            host_local_syns += 1;
+            requests.insert(
+                probe_request(&frame.bytes, guest.addr, HOST_WILDCARD_PORT)
+                    .expect("the observed SYN carries its exact request nonce"),
+            );
+        }
+    }
+    for frame in guest_capture.frames.iter().filter(fault_frames) {
+        if let Some(reply) = probe_reply(&frame.bytes, HOST_WILDCARD_PORT, &requests) {
+            if host_local.contains(&reply) {
+                replied.insert(reply);
+            }
+        }
+    }
+    eprintln!(
+        "S-ND295-62 complete capture: peer_ifindex={peer_ifindex}, guest_ifindex={guest_ifindex}, \
+        peer_frames={}, guest_frames={}, peer_drops={peer_drops}, guest_peer_syns={guest_peer_syns}, \
+        host_local_syns={host_local_syns}, forwarded={forwarded}, replied={replied:?}",
+        peer_capture.frames.len(),
+        guest_capture.frames.len()
+    );
     assert!(
         guest_peer_syns >= 1,
         "the guest attempts the peer dial on its own TAP (captured {guest_peer_syns} SERVICE_PORT \
@@ -1174,20 +1454,69 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
         peer_drops, 0,
         "the peer-TAP capture dropped no frames, so its zero-forwarded count is a real observation"
     );
+    // Establish every ingress/control prerequisite before a fail-closed
+    // assertion can report the native RED that decides R18.
+    assert!(tap_is_up(&guest.tap), "the run is void, not GREEN: sender TAP was quiesced");
+    assert!(host_local_syns >= 1, "the host-local probe SYNs enter the exact sender TAP");
+    let intercepted = intercept_counter()
+        .checked_sub(intercept_before)
+        .expect("the Intercept counter does not decrease");
+    assert!(
+        intercepted >= (host_local_syns + guest_peer_syns) as u64,
+        "the TCX Intercept counter rises by at least every observed probe SYN: {intercepted}"
+    );
+    assert_eq!(
+        bridge_guard_drop_packets(),
+        guard_before,
+        "the bridge guard's default-drop counter is unchanged"
+    );
+    eprintln!(
+        "S-ND295-62 ingress prerequisites passed: intercept_delta={intercepted}, bridge_default_drop_unchanged=true"
+    );
     assert_eq!(
         forwarded, 0,
         "E14 (a): no marked guest SYN is forwarded to the peer's TAP without the program"
     );
     // E14 (b): no SYN-ACK reaches the guest for the gateway or host-address dial.
-    let replied =
-        synack.syn_acks_seen(&[(GATEWAY, HOST_WILDCARD_PORT), (host_addr, HOST_WILDCARD_PORT)]);
     assert!(
         replied.is_empty(),
         "E14 (b): no SYN-ACK reaches the guest for a host-local marked dial without the program; \
          replies from {replied:?}"
     );
-    // Per-run SYN-entered-host ingress witness on the guest's own TAP.
-    assert_syn_entered_host(&guest.tap, &witness, intercept_before, guard_before, 1);
+    // The complete fault window and every E14 assertion ended above. Restore
+    // only this experiment's deleted program, with its exact original targets
+    // and members, before ordinary production stop. R10 deliberately refuses
+    // element release while the observed program differs from the owner's
+    // recorded identity; it does not authorize stop to create a missing table.
+    overdrive_netlink::nft::replace_shared_ip_intercept_atomically(
+        None,
+        Some(program_before_fault.identity()),
+    )
+    .expect("restore only the deliberately deleted owned program at its original targets");
+    assert_eq!(
+        program_before_fault.managed_guest_ips(),
+        program_before_fault.outbound_sources(),
+        "the captured source membership is exactly paired"
+    );
+    for source in program_before_fault.outbound_sources() {
+        overdrive_netlink::nft::insert_shared_ip_intercept_outbound_elements_atomically(
+            program_before_fault.identity(),
+            *source,
+        )
+        .expect("restore exactly the experiment's original source members");
+    }
+    for destination in program_before_fault.inbound_destinations() {
+        overdrive_netlink::nft::insert_shared_ip_intercept_inbound_element_atomically(
+            program_before_fault.identity(),
+            *destination,
+        )
+        .expect("restore exactly the experiment's original inbound members");
+    }
+    assert_eq!(
+        observe_shared_intercept_state().expect("read back the restored owned program"),
+        Some(program_before_fault),
+        "fixture cleanup restores exactly the pre-fault program and all of its members"
+    );
 
     stop_and_await_terminal(&cfg, &guest.workload_id).await;
     stop_and_await_terminal(&cfg, &peer_out.workload_id).await;
@@ -1208,7 +1537,6 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
 /// and shows the intercept program alone still keeps a marked guest SYN out of
 /// every host wildcard listener.
 #[tokio::test]
-#[ignore = "pending DELIVER step 08-01 (S-ND295-62)"]
 async fn the_intercept_program_still_catches_marked_tcp_without_the_guard_table() {
     let _teardown = TeardownBound::arm();
     let host_addr = host_interface_address();
@@ -1224,8 +1552,18 @@ async fn the_intercept_program_still_catches_marked_tcp_without_the_guard_table(
     let cfg = config_path(server_tmp.path());
 
     let listener = WildcardListener::bind(HOST_WILDCARD_PORT);
-    let guest =
-        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    // This control emits the same scripted SYNs as the R18 hazard body. A
+    // completed application handshake would legitimately make the intercept
+    // connect the wildcard backend and invalidate the zero-accept control.
+    // There is no peer in this control: its first raw target is the real host.
+    let guest = deploy_probe_guest_with_args(
+        &cfg,
+        server_tmp.path(),
+        &fixture.kernel_path,
+        &probe_rootfs,
+        &[format!("{host_addr}:{HOST_WILDCARD_PORT}"), "r18".to_owned()],
+    )
+    .await;
 
     // Non-interference control: the guard table reads back present, and each
     // R18 dial still gets its SYN-ACK — the guard drops nothing on the healthy
@@ -1377,7 +1715,6 @@ fn leg_c_port() -> u16 {
 /// an external address at a wildcard host listener's port gets no SYN-ACK and
 /// that listener accepts nothing.
 #[tokio::test]
-#[ignore = "pending DELIVER step 08-01 (S-ND295-63)"]
 async fn outbound_tcp_to_a_closed_listener_is_dropped_not_delivered_locally() {
     let _teardown = TeardownBound::arm();
     let host_addr = host_interface_address();
@@ -1393,14 +1730,33 @@ async fn outbound_tcp_to_a_closed_listener_is_dropped_not_delivered_locally() {
     let cfg = config_path(server_tmp.path());
 
     let listener = WildcardListener::bind(HOST_WILDCARD_PORT);
-    let guest =
-        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    let guest = deploy_probe_guest_with_args(
+        &cfg,
+        server_tmp.path(),
+        &fixture.kernel_path,
+        &probe_rootfs,
+        &["r19".to_owned()],
+    )
+    .await;
 
+    assert_healthy_probe_synacks(
+        &guest.tap,
+        &[(GATEWAY, HOST_WILDCARD_PORT), (EXTERNAL, HOST_WILDCARD_PORT)],
+    )
+    .await;
+    assert_eq!(listener.accepted(), 0, "healthy scripted SYNs complete no host wildcard handshake");
+    listener.assert_healthy();
+    let program_before = assert_r19_program_live(guest.addr).await;
     let leg_f = leg_f_port();
     let intercept_before = intercept_counter();
     let guard_before = bridge_guard_drop_packets();
-    let witness = SynCapture::open(&guest.tap, HOST_WILDCARD_PORT);
-    let synack = SynCapture::open(&guest.tap, HOST_WILDCARD_PORT);
+    let ifindex = interface_index(&guest.tap);
+    assert!(tap_is_up(&guest.tap), "the sender TAP is up before listener destruction");
+    // This existing loss-accounted reader starts before the fault, continuously
+    // drains through the owner's real link-down notification, seals the socket,
+    // and requires every kernel-counted frame to have been read with zero loss.
+    // No late ENETDOWN is converted into zero packets.
+    let capture = WireCapture::start_link_layer(ifindex);
     let accepts_before = listener.accepted();
 
     // Destroy the exact leg-F LISTENING tuple from outside (sock-diag destroy of
@@ -1410,8 +1766,71 @@ async fn outbound_tcp_to_a_closed_listener_is_dropped_not_delivered_locally() {
     destroy_listening_tuple(Ipv4Addr::LOCALHOST, leg_f);
     let _thief = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, leg_f))
         .expect("re-occupy the leg-F port with a plain listener (port-theft)");
-
-    tokio::time::sleep(PROBE_WINDOW).await;
+    let fault_applied_at = packet_clock_now();
+    let mut tap_history = vec![tap_state_sample(&guest.tap, ifindex)];
+    assert!(tap_history[0].1, "the sender TAP is still up when listener loss is established");
+    let deadline = Instant::now() + PROBE_WINDOW;
+    while Instant::now() < deadline {
+        tap_history.push(tap_state_sample(&guest.tap, ifindex));
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    tap_history.push(tap_state_sample(&guest.tap, ifindex));
+    let captured =
+        capture.stop_accounted().expect("complete, lossless capture across owner quiescence");
+    assert!(!captured.interface_removed, "the production TAP's ifindex survives the observation");
+    let mut ingress = BTreeSet::new();
+    let mut replied = BTreeSet::new();
+    let targets = [(GATEWAY, HOST_WILDCARD_PORT), (EXTERNAL, HOST_WILDCARD_PORT)];
+    let mut captured_syns = 0_usize;
+    let mut requests = BTreeSet::new();
+    for frame in &captured.frames {
+        assert_eq!(frame.ifindex, ifindex, "every frame comes from the exact bound TAP");
+        assert!(
+            !frame.truncated && !frame.control_truncated,
+            "capture retains complete frame and clock evidence"
+        );
+        let at =
+            frame.kernel_event_at.expect("each frame carries its kernel packet-event timestamp").0;
+        if at < fault_applied_at {
+            continue;
+        }
+        let emitted_while_up = tap_history.windows(2).any(|samples| {
+            samples[0].1 && samples[1].1 && samples[0].0 <= at && at <= samples[1].0
+        });
+        if emitted_while_up
+            && is_syn_to_port(&frame.bytes, HOST_WILDCARD_PORT)
+            && frame_ipv4_src(&frame.bytes) == Some(guest.addr)
+        {
+            captured_syns += 1;
+            requests.insert(
+                probe_request(&frame.bytes, guest.addr, HOST_WILDCARD_PORT)
+                    .expect("the live SYN carries its request nonce"),
+            );
+            let dst =
+                Ipv4Addr::new(frame.bytes[30], frame.bytes[31], frame.bytes[32], frame.bytes[33]);
+            if targets.contains(&(dst, HOST_WILDCARD_PORT)) {
+                ingress.insert((dst, HOST_WILDCARD_PORT));
+            }
+        }
+    }
+    for frame in &captured.frames {
+        if frame.kernel_event_at.expect("each reply has its kernel event time").0
+            >= fault_applied_at
+        {
+            if let Some(reply) = probe_reply(&frame.bytes, HOST_WILDCARD_PORT, &requests) {
+                if targets.contains(&reply) {
+                    replied.insert(reply);
+                }
+            }
+        }
+    }
+    eprintln!(
+        "S-ND295-63c complete capture: ifindex={ifindex}, frames={}, link_down_reports={:?}, \
+         first_down={:?}, fault_at={fault_applied_at}, live_ingress={ingress:?}, replies={replied:?}",
+        captured.frames.len(),
+        captured.link_down_reports,
+        tap_history.iter().find(|sample| !sample.1).map(|sample| sample.0),
+    );
     assert_eq!(
         listener.accepted(),
         accepts_before,
@@ -1419,13 +1838,35 @@ async fn outbound_tcp_to_a_closed_listener_is_dropped_not_delivered_locally() {
     );
     listener.assert_healthy();
     // No SYN-ACK reaches the guest for the gateway or external dial.
-    let replied =
-        synack.syn_acks_seen(&[(GATEWAY, HOST_WILDCARD_PORT), (EXTERNAL, HOST_WILDCARD_PORT)]);
     assert!(
         replied.is_empty(),
         "no SYN-ACK reaches the guest for an outbound marked dial once leg F is gone; replies from {replied:?}"
     );
-    assert_syn_entered_host(&guest.tap, &witness, intercept_before, guard_before, 1);
+    assert!(
+        captured_syns >= 1 && ingress.len() == targets.len(),
+        "the run is void, not GREEN: each required gateway/external SYN must enter the exact TAP \
+         while it is up and leg F is absent; observed {captured_syns} live SYNs, {ingress:?} of {targets:?}"
+    );
+    let intercepted = intercept_counter()
+        .checked_sub(intercept_before)
+        .expect("the Intercept counter does not decrease");
+    assert!(
+        intercepted >= captured_syns as u64,
+        "the TCX Intercept counter rises by every live probe SYN"
+    );
+    assert_eq!(
+        bridge_guard_drop_packets(),
+        guard_before,
+        "the bridge guard's default-drop counter is unchanged"
+    );
+    let program_after = assert_r19_program_live(guest.addr).await;
+    assert_eq!(
+        program_after, program_before,
+        "R19's owned program and allocation members stay unchanged across listener loss"
+    );
+    eprintln!(
+        "S-ND295-63c ingress prerequisites passed: intercept_delta={intercepted}, captured_live_syns={captured_syns}, bridge_default_drop_unchanged=true"
+    );
 
     stop_and_await_terminal(&cfg, &guest.workload_id).await;
     handle.shutdown().await.expect("clean shutdown");
@@ -1440,7 +1881,6 @@ async fn outbound_tcp_to_a_closed_listener_is_dropped_not_delivered_locally() {
 /// to the gateway or external address gets no SYN-ACK and no host listener
 /// accepts it.
 #[tokio::test]
-#[ignore = "pending DELIVER step 08-01 (S-ND295-63)"]
 async fn outbound_tcp_after_a_killed_server_is_dropped_while_the_vm_lives() {
     let _teardown = TeardownBound::arm();
     let host_addr = host_interface_address();
@@ -1448,7 +1888,7 @@ async fn outbound_tcp_after_a_killed_server_is_dropped_while_the_vm_lives() {
     // killed server's residue (live VM, TAP, cgroup scope, bpffs pins, nft
     // tables) on every exit path, including the Running-precondition panic. No
     // second `serve` boot is relied on for cleanup.
-    let _residue = KilledServerResidueGuard::install("S-ND295-63d");
+    let mut residue = KilledServerResidueGuard::install("S-ND295-63d");
     let fixture = VmFixture::provision(&shared_staging_root()).expect("native VM fixture");
     let tmp = tempfile::Builder::new()
         .prefix("nd295-63d-")
@@ -1461,35 +1901,137 @@ async fn outbound_tcp_after_a_killed_server_is_dropped_while_the_vm_lives() {
     let cfg = config_path(server_tmp.path());
 
     let listener = WildcardListener::bind(HOST_WILDCARD_PORT);
-    let guest =
-        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    let guest = deploy_probe_guest_with_args(
+        &cfg,
+        server_tmp.path(),
+        &fixture.kernel_path,
+        &probe_rootfs,
+        &["r19".to_owned()],
+    )
+    .await;
 
+    assert_healthy_probe_synacks(
+        &guest.tap,
+        &[(GATEWAY, HOST_WILDCARD_PORT), (EXTERNAL, HOST_WILDCARD_PORT)],
+    )
+    .await;
+    assert_eq!(listener.accepted(), 0, "healthy scripted SYNs complete no host wildcard handshake");
+    listener.assert_healthy();
+    let program_before = assert_r19_program_live(guest.addr).await;
+    residue.record_owned_program(
+        &program_before,
+        [guest.addr].into_iter().collect(),
+        BTreeSet::new(),
+    );
     let intercept_before = intercept_counter();
     let guard_before = bridge_guard_drop_packets();
-    let witness = SynCapture::open(&guest.tap, HOST_WILDCARD_PORT);
-    let synack = SynCapture::open(&guest.tap, HOST_WILDCARD_PORT);
+    let ifindex = interface_index(&guest.tap);
+    let capture = WireCapture::start_link_layer(ifindex);
     let accepts_before = listener.accepted();
 
     // Killed mode: abandon the serve owner; Cloud Hypervisor and the TAP stay
     // up, so the guest keeps dialing but leg F is gone.
     kill_serve_owner(handle).await.expect("killed-mode serve abandons its owner");
+    let fault_applied_at = packet_clock_now();
     assert!(tap_is_up(&guest.tap), "the guest's TAP stays up after killed mode");
+    let program_at_fault = assert_r19_program_live(guest.addr).await;
+    assert_eq!(
+        program_at_fault, program_before,
+        "the killed-mode path retains R19's exact program and members"
+    );
 
     tokio::time::sleep(PROBE_WINDOW).await;
+    let capture = capture.stop_accounted().expect("complete lossless killed-mode observation");
+    assert!(
+        !capture.interface_removed && capture.link_down_reports.is_empty(),
+        "the same TAP stays live across the killed-mode window"
+    );
+    let mut replied = BTreeSet::new();
+    let mut ingress = BTreeSet::new();
+    let targets = [(GATEWAY, HOST_WILDCARD_PORT), (EXTERNAL, HOST_WILDCARD_PORT)];
+    let mut captured_syns = 0_usize;
+    let mut requests = BTreeSet::new();
+    for frame in &capture.frames {
+        assert_eq!(frame.ifindex, ifindex, "same exact production TAP after killed mode");
+        assert!(
+            !frame.truncated && !frame.control_truncated,
+            "complete frame and timestamp evidence"
+        );
+        if frame.kernel_event_at.expect("each packet has its kernel event time").0
+            < fault_applied_at
+        {
+            continue;
+        }
+        if is_syn_to_port(&frame.bytes, HOST_WILDCARD_PORT)
+            && frame_ipv4_src(&frame.bytes) == Some(guest.addr)
+        {
+            captured_syns += 1;
+            requests.insert(
+                probe_request(&frame.bytes, guest.addr, HOST_WILDCARD_PORT)
+                    .expect("the post-kill SYN carries its request nonce"),
+            );
+            let dst =
+                Ipv4Addr::new(frame.bytes[30], frame.bytes[31], frame.bytes[32], frame.bytes[33]);
+            if targets.contains(&(dst, HOST_WILDCARD_PORT)) {
+                ingress.insert((dst, HOST_WILDCARD_PORT));
+            }
+        }
+    }
+    for frame in &capture.frames {
+        if frame.kernel_event_at.expect("each reply has its kernel event time").0
+            >= fault_applied_at
+        {
+            if let Some(reply) = probe_reply(&frame.bytes, HOST_WILDCARD_PORT, &requests) {
+                if targets.contains(&reply) {
+                    replied.insert(reply);
+                }
+            }
+        }
+    }
+    eprintln!(
+        "S-ND295-63d complete capture: ifindex={ifindex}, frames={}, fault_at={fault_applied_at}, \
+        captured_syns={captured_syns}, live_ingress={ingress:?}, replies={replied:?}",
+        capture.frames.len()
+    );
     assert_eq!(
         listener.accepted(),
         accepts_before,
         "no host wildcard listener accepts an outbound guest SYN after killed mode"
     );
     listener.assert_healthy();
-    let replied =
-        synack.syn_acks_seen(&[(GATEWAY, HOST_WILDCARD_PORT), (EXTERNAL, HOST_WILDCARD_PORT)]);
     assert!(
         replied.is_empty(),
         "no SYN-ACK reaches the guest for an outbound marked dial after killed mode; replies from {replied:?}"
     );
-    assert_syn_entered_host(&guest.tap, &witness, intercept_before, guard_before, 1);
-    // The abandoned server left the VM live; `_residue` reaps it (and every
+    assert!(
+        tap_is_up(&guest.tap),
+        "the run is void, not GREEN: killed-mode sender TAP was quiesced"
+    );
+    assert!(
+        captured_syns >= 1 && ingress.len() == targets.len(),
+        "each exact R19 target receives guest-originated SYNs after killed mode; {ingress:?}"
+    );
+    let intercepted = intercept_counter()
+        .checked_sub(intercept_before)
+        .expect("the Intercept counter does not decrease");
+    assert!(
+        intercepted >= captured_syns as u64,
+        "the TCX Intercept counter rises by every post-kill probe SYN"
+    );
+    assert_eq!(
+        bridge_guard_drop_packets(),
+        guard_before,
+        "the bridge guard's default-drop counter is unchanged"
+    );
+    let program_after = assert_r19_program_live(guest.addr).await;
+    assert_eq!(
+        program_after, program_before,
+        "R19's owned program and allocation members stay unchanged across killed mode"
+    );
+    eprintln!(
+        "S-ND295-63d ingress prerequisites passed: intercept_delta={intercepted}, captured_live_syns={captured_syns}, bridge_default_drop_unchanged=true"
+    );
+    // The abandoned server left the VM live; `residue` reaps it (and every
     // other killed-server artifact) on drop — no `serve` reboot, no `let _ =`.
 }
 
@@ -1499,31 +2041,33 @@ async fn outbound_tcp_after_a_killed_server_is_dropped_while_the_vm_lives() {
 ///
 /// Inbound control (E14: "leg C closed; SYN to a registered destination is
 /// dropped by rule 4 under both orders"). A host-originated SYN would traverse
-/// OUTPUT, not PREROUTING, so it cannot test rule 4; this is a GUEST-originated
-/// SYN from the probe VM, through its TAP, to a PEER VM's registered inbound
-/// destination (the peer Service's declared TCP port on its guest address, via
-/// the mesh name). Leg C is made absent by a sock-diag destroy of its exact
+/// OUTPUT, not PREROUTING. A managed guest source is in `outbound_sources` and
+/// would select leg F first. This scenario sends from an unregistered source
+/// over its test-owned veth into PREROUTING to the peer Service's exact
+/// registered tuple. Leg C is made absent by a sock-diag destroy of its exact
 /// loopback listening tuple (verified killed) whose port is immediately
 /// occupied by a plain, non-transparent listener (the S-ND295-31B port-theft
 /// shape). Oracle: no SYN-ACK from the peer's registered destination reaches
-/// the probe's TAP, the peer's TAP carries no forwarded SYN, and the plain
+/// the inbound source, the peer's TAP carries no forwarded SYN, and the plain
 /// listener accepts nothing. Runs under the rule order the program has at this
-/// step; the R19 order (rule 3 → rule 4) is exercised once 08-01 lands R19.
+/// step: the retained mark → TPROXY → accept order. The R19 reorder is
+/// withdrawn on native E14 evidence; rule 4 remains the inbound fail-closed
+/// control.
 #[tokio::test]
-#[ignore = "pending DELIVER step 08-01 (S-ND295-63)"]
 async fn inbound_tcp_to_a_closed_listener_is_dropped() {
     let _teardown = TeardownBound::arm();
-    let host_addr = host_interface_address();
+    let owner_trace = InboundOwnerTrace::new();
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(owner_trace.clone()),
+    )
+    .expect("the inbound owner trace owns this nextest process's subscriber");
     let fixture = VmFixture::provision(&shared_staging_root()).expect("native VM fixture");
     let tmp = tempfile::Builder::new()
         .prefix("nd295-63i-")
         .tempdir_in(shared_staging_root())
         .expect("native tempdir");
     let peer = build_mesh_peer(tmp.path());
-    let probe = build_syn_probe_guest(tmp.path(), host_addr);
-    let peer_rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &peer, "gti-peer");
-    let probe_rootfs =
-        stage_rootfs_with_extra_binary(tmp.path(), &fixture, &probe, "nd295-syn-probe");
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &peer, "gti-peer");
     let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
 
@@ -1531,7 +2075,7 @@ async fn inbound_tcp_to_a_closed_listener_is_dropped() {
     let service_spec = write_toml(
         server_tmp.path(),
         "nd295-63i-peer.toml",
-        &service_toml(&peer, &fixture.kernel_path, &peer_rootfs),
+        &service_toml(Path::new("/sbin/gti-peer"), &fixture.kernel_path, &rootfs),
     );
     let peer_out = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
@@ -1545,45 +2089,403 @@ async fn inbound_tcp_to_a_closed_listener_is_dropped() {
         .workload_addr
         .expect("the peer publishes its guest address");
     let peer_tap = tap_for(peer_addr);
+    let registered_destination = SocketAddrV4::new(peer_addr, SERVICE_PORT);
+    let inbound_peer = InboundPeerTopology::provision(peer_addr);
 
-    // The probe VM dials the peer's registered destination by mesh name.
-    let guest =
-        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    // S-ND295-63's inbound clause is a separate unregistered ingress source.
+    // A production-managed source is in `outbound_sources` and would select
+    // leg F before the registered-destination leg-C rule. The peer Service is
+    // still the one live managed guest and owns the exact inbound destination.
+    let state = observe_shared_intercept_state()
+        .expect("read the existing shared intercept state")
+        .expect("the shared program is present");
+    assert!(
+        state.inbound_destinations().contains(&registered_destination),
+        "the running Service's declared tuple is registered for leg C"
+    );
+    assert!(!state.managed_guest_ips().contains(&inbound_peer.source_addr));
+    assert!(!state.outbound_sources().contains(&inbound_peer.source_addr));
+
+    // Healthy positive control: an unregistered source reaches the registered
+    // tuple while leg C is listening. The exact correlated SYN-ACK and the
+    // absence of that original source SYN on the peer TAP prove the packet
+    // reached the local transparent leg-C path instead of being forwarded.
+    let healthy_source_ifindex = interface_index(&inbound_peer.host_if);
+    let peer_ifindex = interface_index(&peer_tap);
+    let healthy_source_capture = WireCapture::start_link_layer(healthy_source_ifindex);
+    let healthy_peer_capture = WireCapture::start_link_layer(peer_ifindex);
+    let healthy_client_source = format!(
+        r#"
+use std::net::{{SocketAddr, TcpStream}};
+use std::time::Duration;
+
+fn main() {{
+    let destination: SocketAddr = "{registered_destination}".parse().expect("destination");
+    let stream = TcpStream::connect_timeout(&destination, Duration::from_secs(3))
+        .expect("healthy inbound connection reaches the registered destination");
+    std::thread::sleep(Duration::from_millis(100));
+    drop(stream);
+}}
+"#
+    );
+    let healthy_client =
+        build_static_binary(tmp.path(), "nd295-63-inbound-connect", &healthy_client_source);
+    let healthy_status = Command::new("ip")
+        .args(["netns", "exec", &inbound_peer.peer_ns])
+        .arg(&healthy_client)
+        .status();
+    let healthy_connected = healthy_status.as_ref().is_ok_and(std::process::ExitStatus::success);
+    let healthy_source_capture = healthy_source_capture
+        .stop_accounted()
+        .expect("lossless complete healthy inbound source capture");
+    let healthy_peer_capture = healthy_peer_capture
+        .stop_accounted()
+        .expect("lossless complete healthy inbound peer capture");
+    let mut healthy_requests = BTreeSet::new();
+    for frame in &healthy_source_capture.frames {
+        assert_eq!(frame.ifindex, healthy_source_ifindex, "exact healthy source veth");
+        assert!(!frame.truncated && !frame.control_truncated, "complete healthy source evidence");
+        if let Some(request) = probe_request(&frame.bytes, inbound_peer.source_addr, SERVICE_PORT)
+            .filter(|request| request.0 == peer_addr)
+        {
+            healthy_requests.insert(request);
+        }
+    }
+    let healthy_answered = healthy_source_capture
+        .frames
+        .iter()
+        .filter(|frame| {
+            is_syn_ack_from_port(&frame.bytes, SERVICE_PORT)
+                && frame_ipv4_src(&frame.bytes) == Some(peer_addr)
+        })
+        .filter(|frame| {
+            probe_reply(&frame.bytes, SERVICE_PORT, &healthy_requests)
+                == Some((peer_addr, SERVICE_PORT))
+        })
+        .count();
+    let healthy_forwarded = healthy_peer_capture
+        .frames
+        .iter()
+        .filter(|frame| {
+            assert_eq!(frame.ifindex, peer_ifindex, "exact healthy peer Service TAP");
+            is_syn_to_port(&frame.bytes, SERVICE_PORT)
+                && frame_ipv4_src(&frame.bytes) == Some(inbound_peer.source_addr)
+        })
+        .count();
+    eprintln!(
+        "S-ND295-63 healthy inbound leg-C control: connected={healthy_connected}, requests={}, correlated_synacks={healthy_answered}, original_source_forwarded={healthy_forwarded}",
+        healthy_requests.len()
+    );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    // Capture continuously before the fault. The source veth observes both
+    // inbound requests and any correlated response; the exact peer TAP proves
+    // whether the original source SYN was forwarded to the managed guest.
+    let source_ifindex = interface_index(&inbound_peer.host_if);
+    let peer_capture = WireCapture::start_link_layer(peer_ifindex);
+    let source_capture = WireCapture::start_link_layer(source_ifindex);
+    let guard_before = bridge_guard_drop_packets();
 
     // Make leg C absent: destroy its exact loopback listening tuple, then
     // occupy its port with a plain non-transparent listener (port-theft).
     let leg_c = leg_c_port();
     destroy_listening_tuple(Ipv4Addr::LOCALHOST, leg_c);
     let thief = WildcardListener::bind(leg_c);
-
-    let peer_capture = SynCapture::open(&peer_tap, SERVICE_PORT);
-    let probe_synack = SynCapture::open(&guest.tap, SERVICE_PORT);
+    let fault_applied_at = packet_clock_now();
     let thief_accepts_before = thief.accepted();
+    let peer_tap_up_at_fault = tap_is_up(&peer_tap);
+    let sampled_tap = peer_tap.clone();
+    let tap_samples = tokio::spawn(async move {
+        let mut samples = Vec::new();
+        for sample_number in 1..=4 {
+            tokio::time::sleep(PROBE_WINDOW / 5).await;
+            let flags = std::fs::read_to_string(format!("/sys/class/net/{sampled_tap}/flags"))
+                .ok()
+                .map(|value| value.trim().to_owned());
+            let ifindex = std::fs::read_to_string(format!("/sys/class/net/{sampled_tap}/ifindex"))
+                .ok()
+                .and_then(|value| value.trim().parse::<u32>().ok());
+            let up = flags
+                .as_deref()
+                .and_then(|text| u32::from_str_radix(text.trim_start_matches("0x"), 16).ok())
+                .is_some_and(|value| value & 0x1 == 0x1);
+            samples.push((sample_number, flags, ifindex, up));
+        }
+        samples
+    });
+
+    // Repeated distinct raw SYNs keep the same inbound packet class present
+    // throughout the original observation window. The namespace source is
+    // unregistered, so no TCX mark or outbound-source rule selects leg F.
+    let peer_ns = inbound_peer.peer_ns.clone();
+    let source_addr = inbound_peer.source_addr;
+    let raw_crafter = build_raw_syn_crafter(tmp.path());
+    let raw_crafter = raw_crafter.to_string_lossy().into_owned();
+    let peer_addr_arg = peer_addr.to_string();
+    let probe_sender = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+        let deadline = Instant::now() + PROBE_WINDOW;
+        let mut sent = 0_usize;
+        while Instant::now() < deadline {
+            let source_port = 62_000_u16
+                .checked_add(u16::try_from(sent).map_err(|error| error.to_string())?)
+                .ok_or_else(|| "inbound SYN source-port range overflowed".to_owned())?;
+            let sequence = 0x295a_0000_u32.wrapping_add((sent as u32).wrapping_mul(4_000));
+            let args = [
+                source_addr.to_string(),
+                source_port.to_string(),
+                peer_addr_arg.clone(),
+                SERVICE_PORT.to_string(),
+                sequence.to_string(),
+                "none".to_owned(),
+            ];
+            let status = Command::new("ip")
+                .args(["netns", "exec", &peer_ns])
+                .arg(&raw_crafter)
+                .args(&args)
+                .status()
+                .map_err(|error| format!("run inbound raw SYN crafter: {error}"))?;
+            if !status.success() {
+                return Err(format!("inbound raw SYN exited with {status}"));
+            }
+            sent += 1;
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        Ok(sent)
+    });
 
     tokio::time::sleep(PROBE_WINDOW).await;
-    // The peer's workload never receives the forwarded SYN.
-    assert!(tap_is_up(&peer_tap), "the peer's TAP {peer_tap} is up (live-capture witness)");
-    assert_eq!(
-        peer_capture.drain_forwarded_syns(guest.addr),
-        0,
-        "no guest SYN is forwarded to the peer's registered destination with leg C closed"
+    let sent_result = probe_sender.await.expect("join the inbound source's bounded raw-SYN loop");
+    let tap_samples = tap_samples.await.expect("join the four bounded TAP state samples");
+    let peer_capture =
+        peer_capture.stop_accounted().expect("lossless complete inbound peer capture");
+    let source_capture =
+        source_capture.stop_accounted().expect("lossless complete inbound source capture");
+    let fault_frames = |frame: &&super::guest_stack_mtls_egress::CapturedFrame| {
+        assert!(!frame.truncated && !frame.control_truncated, "complete inbound frame evidence");
+        frame.kernel_event_at.expect("every inbound frame has its kernel event time").0
+            >= fault_applied_at
+    };
+    let forwarded = peer_capture
+        .frames
+        .iter()
+        .filter(fault_frames)
+        .filter(|frame| {
+            assert_eq!(frame.ifindex, peer_ifindex, "the exact inbound peer TAP");
+            is_syn_to_port(&frame.bytes, SERVICE_PORT)
+                && frame_ipv4_src(&frame.bytes) == Some(source_addr)
+        })
+        .count();
+    let mut requests = BTreeSet::new();
+    for frame in source_capture.frames.iter().filter(fault_frames) {
+        assert_eq!(frame.ifindex, source_ifindex, "the exact unregistered inbound source veth");
+        if let Some(request) = probe_request(&frame.bytes, source_addr, SERVICE_PORT)
+            .filter(|request| request.0 == peer_addr)
+        {
+            requests.insert(request);
+        }
+    }
+    let answered = source_capture
+        .frames
+        .iter()
+        .filter(fault_frames)
+        .filter(|frame| {
+            is_syn_ack_from_port(&frame.bytes, SERVICE_PORT)
+                && frame_ipv4_src(&frame.bytes) == Some(peer_addr)
+        })
+        .count();
+    let fresh_answered = source_capture
+        .frames
+        .iter()
+        .filter(fault_frames)
+        .filter(|frame| {
+            probe_reply(&frame.bytes, SERVICE_PORT, &requests) == Some((peer_addr, SERVICE_PORT))
+        })
+        .count();
+    let peer_tap_up_after_window = tap_is_up(&peer_tap);
+    let bridge_guard_after = bridge_guard_drop_packets();
+    eprintln!(
+        "S-ND295-63 inbound complete capture: requests={}, sent={sent_result:?}, forwarded={forwarded}, answered={answered}, fresh_answered={fresh_answered}, peer_drops={}, source_drops={}",
+        requests.len(),
+        peer_capture.statistics.drops,
+        source_capture.statistics.drops
     );
-    // No SYN-ACK from the peer's registered destination reaches the probe.
-    assert!(
-        !probe_synack.syn_ack_from(peer_addr, SERVICE_PORT),
-        "no SYN-ACK from the registered destination reaches the probe with leg C closed"
-    );
-    // The plain port-theft listener on leg C accepts nothing.
-    assert_eq!(
-        thief.accepted(),
-        thief_accepts_before,
-        "the plain leg-C port-theft listener accepts no inbound guest SYN"
-    );
-    thief.assert_healthy();
+    eprintln!("S-ND295-63 peer TAP samples (step, flags, ifindex, up): {tap_samples:?}");
+    let owner_trace = owner_trace
+        .snapshot()
+        .into_iter()
+        .map(|event| format!("+{:?} {} {:?}", event.elapsed, event.name, event.fields))
+        .collect::<Vec<_>>()
+        .join("; ");
+    eprintln!("S-ND295-63 shared-owner trace: {owner_trace}");
+    // Preserve the exact failed oracle while still completing this body's
+    // ordinary production stop/shutdown. A failed observation must not leave
+    // its owned members behind and turn later cases into startup refusals.
+    let observation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert!(
+            healthy_connected,
+            "healthy unregistered inbound client reaches the registered tuple through leg C: {healthy_status:?}"
+        );
+        assert!(
+            !healthy_requests.is_empty() && healthy_answered > 0,
+            "healthy registered-destination control returns a correlated SYN-ACK: requests={}, replies={healthy_answered}",
+            healthy_requests.len()
+        );
+        assert_eq!(
+            healthy_forwarded, 0,
+            "healthy inbound control is locally intercepted, not forwarded from the test source"
+        );
+        assert!(
+            sent_result.as_ref().is_ok_and(|sent| *sent > 0),
+            "the full-window raw-SYN sender completes with at least one inbound request: {sent_result:?}"
+        );
+        assert!(
+            !requests.is_empty(),
+            "the unregistered source sends SYNs to the exact registered destination"
+        );
+        assert_eq!(
+            bridge_guard_after, guard_before,
+            "the bridge guard's default-drop counter is unchanged during the inbound fault"
+        );
+        // The peer's workload never receives the forwarded SYN.
+        assert!(peer_tap_up_at_fault, "the peer's TAP {peer_tap} is up at the listener-loss fault");
+        assert!(
+            peer_tap_up_after_window,
+            "the peer's TAP {peer_tap} stays up through the complete inbound fault window"
+        );
+        assert_eq!(
+            forwarded, 0,
+            "no inbound source SYN is forwarded to the peer's registered destination with leg C closed"
+        );
+        // No SYN-ACK from the registered destination reaches the inbound source.
+        assert_eq!(
+            answered, 0,
+            "no SYN-ACK from the registered destination reaches the inbound source with leg C closed"
+        );
+        // The plain port-theft listener on leg C accepts nothing.
+        assert_eq!(
+            thief.accepted(),
+            thief_accepts_before,
+            "the plain leg-C port-theft listener accepts no unregistered inbound SYN"
+        );
+        thief.assert_healthy();
+    }));
 
-    stop_and_await_terminal(&cfg, &guest.workload_id).await;
     stop_and_await_terminal(&cfg, &peer_out.workload_id).await;
     handle.shutdown().await.expect("clean shutdown");
+    if let Err(failure) = observation {
+        std::panic::resume_unwind(failure);
+    }
+}
+
+/// An unregistered inbound client connected to the host through a leased veth.
+/// The host-side veth is an actual PREROUTING ingress path; the source address
+/// is outside the production managed-guest and outbound-source sets.
+struct InboundPeerTopology {
+    _lease: TestCidrLease,
+    peer_ns: String,
+    host_if: String,
+    source_addr: Ipv4Addr,
+}
+
+#[derive(Debug, Clone)]
+struct InboundOwnerEvent {
+    elapsed: Duration,
+    name: String,
+    fields: BTreeMap<String, String>,
+}
+
+#[derive(Clone)]
+struct InboundOwnerTrace {
+    started: Instant,
+    events: Arc<std::sync::Mutex<Vec<InboundOwnerEvent>>>,
+}
+
+impl InboundOwnerTrace {
+    fn new() -> Self {
+        Self { started: Instant::now(), events: Arc::new(std::sync::Mutex::new(Vec::new())) }
+    }
+
+    fn snapshot(&self) -> Vec<InboundOwnerEvent> {
+        self.events.lock().expect("inbound owner trace lock").clone()
+    }
+}
+
+#[derive(Default)]
+struct InboundOwnerFields(BTreeMap<String, String>);
+
+impl Visit for InboundOwnerFields {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.0.insert(field.name().to_owned(), format!("{value:?}"));
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0.insert(field.name().to_owned(), value.to_owned());
+    }
+}
+
+impl<S: Subscriber> Layer<S> for InboundOwnerTrace {
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        let name = event.metadata().name();
+        if !name.starts_with("guest_network.shared_owner_") {
+            return;
+        }
+        let mut fields = InboundOwnerFields::default();
+        event.record(&mut fields);
+        self.events.lock().expect("inbound owner trace lock").push(InboundOwnerEvent {
+            elapsed: self.started.elapsed(),
+            name: name.to_owned(),
+            fields: fields.0,
+        });
+    }
+}
+
+impl InboundPeerTopology {
+    fn provision(destination: Ipv4Addr) -> Self {
+        let lease = TestCidrLease::acquire("nd295-63i-inbound")
+            .expect("acquire a CIDR for the unregistered inbound client");
+        let peer_ns = format!("nd63-{}", std::process::id());
+        let host_if = format!("{peer_ns}-h");
+        let peer_if = format!("{peer_ns}-p");
+        let source_addr = lease.workload_addr();
+        let host_gateway = lease.host_gateway();
+        // Construct the RAII owner before the first kernel mutation so a
+        // partial namespace/veth setup is still confined to this exact pair.
+        let topology = Self { _lease: lease, peer_ns, host_if, source_addr };
+
+        run(["ip", "netns", "add", &topology.peer_ns]);
+        run(["ip", "link", "add", &topology.host_if, "type", "veth", "peer", "name", &peer_if]);
+        run(["ip", "link", "set", &peer_if, "netns", &topology.peer_ns]);
+        let host_cidr = format!("{host_gateway}/24");
+        run(["ip", "addr", "add", &host_cidr, "dev", &topology.host_if]);
+        run(["ip", "link", "set", &topology.host_if, "up"]);
+        let source_cidr = format!("{source_addr}/24");
+        run(["ip", "-n", &topology.peer_ns, "addr", "add", &source_cidr, "dev", &peer_if]);
+        run(["ip", "-n", &topology.peer_ns, "link", "set", &peer_if, "up"]);
+        run(["ip", "-n", &topology.peer_ns, "link", "set", "lo", "up"]);
+        let destination_route = format!("{destination}/32");
+        let host_gateway = host_gateway.to_string();
+        run([
+            "ip",
+            "-n",
+            &topology.peer_ns,
+            "route",
+            "add",
+            &destination_route,
+            "via",
+            &host_gateway,
+            "dev",
+            &peer_if,
+        ]);
+
+        topology
+    }
+}
+
+impl Drop for InboundPeerTopology {
+    fn drop(&mut self) {
+        let _ = Command::new("ip").args(["link", "del", &self.host_if]).status();
+        let _ = Command::new("ip").args(["netns", "del", &self.peer_ns]).status();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1612,6 +2514,12 @@ async fn inbound_tcp_to_a_closed_listener_is_dropped() {
 /// it must pass today (it passed on metal ×3 in phase C).
 #[tokio::test]
 async fn both_time_wait_controls_prove_the_substate_and_sequence_gates() {
+    prove_time_wait_controls().await;
+}
+
+/// The same original negative-then-positive controls also run before each
+/// guest-door proof, so nextest's ordering cannot run the door first.
+async fn prove_time_wait_controls() {
     let lease = TestCidrLease::acquire("nd295-64-time-wait")
         .expect("acquire a named CIDR for the TIME_WAIT controls");
     // The namespace name also prefixes the veth ends (`<ns>-h`, `<ns>-p`),
@@ -1644,6 +2552,9 @@ async fn both_time_wait_controls_prove_the_substate_and_sequence_gates() {
         ReconnectReply::SynAck,
         "the newer-sequence probe reopens the TIME_WAIT entry with a SYN-ACK"
     );
+    eprintln!(
+        "S-ND295-64 independent controls completed before the guest: negative={negative:?}, positive={positive:?}"
+    );
 
     drop(topology);
     drop(lease);
@@ -1654,7 +2565,8 @@ async fn both_time_wait_controls_prove_the_substate_and_sequence_gates() {
 /// that connection from inside the guest — so the host's leg-F side enters the
 /// true `TIME_WAIT` substate — recording its source port, then for the whole
 /// probe window raw-crafts newer-sequence SYNs from that same source 4-tuple to
-/// the original destination. The host closes leg F meanwhile; a reconnect that
+/// the original destination. A test-private event gate releases the reconnect
+/// only after the host has observed TIME_WAIT and closed leg F; a reconnect that
 /// lands while leg F is absent is what the door test records.
 ///
 /// The guest is malicious by model (E14 (e)): it controls its source port, ISN,
@@ -1755,7 +2667,14 @@ fn main() {{
     //    TIME_WAIT. The kernel picks the source port; read it back.
     // Fail loud on every establish failure — a silent return would leave no
     // TIME_WAIT entry and make the door probe vacuous with no signal.
-    let target = ("{mesh}", {svc}).to_socket_addrs().ok().and_then(|mut a| a.next());
+    let args: Vec<String> = std::env::args().collect();
+    let target = args.get(1).and_then(|target| target.to_socket_addrs().ok()).and_then(|mut addresses| addresses.next());
+    let Some(nonce) = args.get(2) else {{ std::process::exit(23); }};
+    // Binding a test-owned UDP receiver sends no frame. Its one host-to-guest
+    // message later supplies values learned from the real FIN and releases
+    // the already-prescribed post-fault reconnect, independently of leg F.
+    let control = std::net::UdpSocket::bind(("0.0.0.0", {control_port})).unwrap();
+    control.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
     let Some(target) = target else {{ std::process::exit(23); }};
     let Ok(mut stream) = TcpStream::connect_timeout(&target, Duration::from_secs(2)) else {{
         std::process::exit(24);
@@ -1776,19 +2695,29 @@ fn main() {{
     // fail loud rather than leave the door probe vacuous.
     if stream.read(&mut byte).is_err() {{ std::process::exit(28); }}
     drop(stream); // clean close from the guest side
+    eprintln!("ND295-TW-CLOSED {{nonce}} {{sport}} {{target}}");
     let (dst, dport) = match target {{
         std::net::SocketAddr::V4(v4) => (*v4.ip(), v4.port()),
         std::net::SocketAddr::V6(_) => std::process::exit(25),
     }};
     // The guest's own address on its TAP.
     let Some(src) = local_ipv4() else {{ std::process::exit(26); }};
-    // 2. For the whole window, reconnect from the same source tuple with a
-    //    sequence above the old rcv_nxt and a newer TSval. A base seq/TSval is
-    //    fine: the host holds one TIME_WAIT entry and PAWS accepts a newer TS.
+    // 2. The host first materializes the exact TIME_WAIT tuple, observes the
+    //    actual guest FIN's sequence/TSval, and completes killed mode. Only
+    //    then may the same guest make any crafted reconnect attempt.
+    let mut command = [0_u8; 256];
+    let (length, sender) = control.recv_from(&mut command).unwrap();
+    if sender.ip().to_string() != "{gw}" {{ std::process::exit(23); }}
+    let command = std::str::from_utf8(&command[..length]).unwrap();
+    let fields: Vec<&str> = command.split_whitespace().collect();
+    if fields.len() != 3 || fields[0] != nonce {{ std::process::exit(23); }}
+    let seq_base: u32 = fields[1].parse().unwrap();
+    let tsval_base: u32 = fields[2].parse().unwrap();
+    eprintln!("ND295-TW-RECONNECT {{nonce}} {{sport}} {{seq_base}} {{tsval_base}}");
     let deadline = Instant::now() + Duration::from_secs({window});
     let mut n: u32 = 0;
     while Instant::now() < deadline {{
-        craft_syn(src, sport, dst, dport, {seq_base}u32.wrapping_add(n * 4_000), {tsval_base}u32 + n);
+        craft_syn(src, sport, dst, dport, seq_base.wrapping_add(n * 4_000), tsval_base.wrapping_add(n));
         n += 1;
         std::thread::sleep(Duration::from_millis(200));
     }}
@@ -1804,12 +2733,9 @@ fn local_ipv4() -> Option<Ipv4Addr> {{
     }}
 }}
 "#,
-        mesh = MESH_NAME,
-        svc = SERVICE_PORT,
         gw = GATEWAY,
         window = PROBE_WINDOW.as_secs() + 20,
-        seq_base = TW_CRAFT_SEQ_BASE,
-        tsval_base = TW_CRAFT_TSVAL_BASE,
+        control_port = TW_CONTROL_PORT,
     );
     build_static_binary(tmp, "nd295-tw-guest", &source)
 }
@@ -1832,33 +2758,34 @@ fn local_ipv4() -> Option<Ipv4Addr> {{
 /// the door it records depends on R19 (08-01, conditional), which if withdrawn
 /// makes every reconnect fall through to a drop, so it is marked 08-01.
 #[tokio::test]
-#[ignore = "pending DELIVER step 08-01 (S-ND295-64)"]
 async fn a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reopen_goes_to_the_user()
  {
     let _teardown = TeardownBound::arm();
+    prove_time_wait_controls().await;
     // The killed-mode residue guard: installed before any host state, so its
     // Drop reaps both VMs and their TAPs/scopes/pins/tables on every exit path.
-    let _residue = KilledServerResidueGuard::install("S-ND295-64-door");
+    let mut residue = KilledServerResidueGuard::install("S-ND295-64-door");
     let fixture = VmFixture::provision(&shared_staging_root()).expect("native VM fixture");
     let tmp = tempfile::Builder::new()
         .prefix("nd295-64e-")
         .tempdir_in(shared_staging_root())
         .expect("native tempdir");
     let peer = build_mesh_peer(tmp.path());
-    let peer_rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &peer, "gti-peer");
     let tw_guest = build_time_wait_guest(tmp.path());
-    let guest_rootfs =
-        stage_rootfs_with_extra_binary(tmp.path(), &fixture, &tw_guest, "nd295-tw-guest");
+    let rootfs = stage_rootfs_with_extra_binaries(
+        tmp.path(),
+        &fixture,
+        &[(&peer, "gti-peer"), (&tw_guest, "nd295-tw-guest")],
+    );
     let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
 
-    // The mesh peer the guest dials by name — polled to Running so the host
-    // learns the peer's registered destination address (the crafted SYN's
-    // destination and the wildcard listener's expected source).
+    // The actual Service peer is polled to Running. Its allocation address
+    // and the original named-Service destination are recorded separately.
     let service_spec = write_toml(
         server_tmp.path(),
         "nd295-64e-peer.toml",
-        &service_toml(&peer, &fixture.kernel_path, &peer_rootfs),
+        &service_toml(Path::new("/sbin/gti-peer"), &fixture.kernel_path, &rootfs),
     );
     let peer_out = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
@@ -1877,12 +2804,22 @@ async fn a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reop
     // handoff would deliver the reconnect to this listener; it must accept
     // nothing (fail-closed), and a SYN-ACK back to the guest is the reopen.
     let door_listener = WildcardListener::bind(SERVICE_PORT);
+    let nonce = tmp.path().file_name().expect("test tempdir nonce").to_string_lossy().into_owned();
+    // Preserve the named-Service journey. D is the address returned by the
+    // real guest resolver, which can differ from the peer allocation address.
+    let destination = format!("{MESH_NAME}:{SERVICE_PORT}");
 
     // The TIME_WAIT guest: establishing + reconnecting is its whole program.
     let guest_spec = write_toml(
         server_tmp.path(),
         "nd295-64e-guest.toml",
-        &vm_job_toml("nd295-tw", "/sbin/nd295-tw-guest", &[], &fixture.kernel_path, &guest_rootfs),
+        &vm_job_toml(
+            "nd295-tw",
+            "/sbin/nd295-tw-guest",
+            &[&destination, &nonce],
+            &fixture.kernel_path,
+            &rootfs,
+        ),
     );
     let guest_out = deploy(DeployArgs { spec: guest_spec, config_path: cfg.clone() })
         .await
@@ -1896,11 +2833,45 @@ async fn a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reop
         .workload_addr
         .expect("the Running guest publishes its address");
     let guest_tap = tap_for(guest_addr);
+    let guest_ifindex = interface_index(&guest_tap);
+    let close_capture = WireCapture::start_link_layer(guest_ifindex);
+    let alloc = AllocationId::new(&running.snapshot.rows.first().expect("guest row").alloc_id)
+        .expect("server allocation ID");
+    let console = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc).console_log();
+    let marker = format!("ND295-TW-CLOSED {nonce} ");
+    let mut source_port = None;
+    let mut original_destination = None;
+    assert!(
+        wait_until(Duration::from_secs(30), || {
+            let log = std::fs::read_to_string(&console).unwrap_or_default();
+            for fields in log
+                .lines()
+                .filter_map(|line| line.strip_prefix(&marker))
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+            {
+                if fields.len() == 2 {
+                    source_port = fields[0].parse::<u16>().ok().filter(|port| *port != 0);
+                    original_destination = fields[1]
+                        .parse::<SocketAddrV4>()
+                        .ok()
+                        .filter(|dest| dest.port() == SERVICE_PORT);
+                }
+            }
+            source_port.is_some() && original_destination.is_some()
+        })
+        .await,
+        "the actual guest reports its own completed close and nonzero source port; console={}",
+        console.display()
+    );
+    let source_port = source_port.expect("the completed-close marker carries the true source port");
+    let original_destination = original_destination
+        .expect("the same actual guest reports its real DNS-resolved original destination");
+    let original_addr = *original_destination.ip();
 
     // The guest establishes and closes its intercepted connection first; wait
     // for the host's leg-F socket to hold a TIME_WAIT entry keyed on the
     // ORIGINAL-destination 4-tuple. A TPROXY-accepted socket keeps the original
-    // destination (peer_addr:SERVICE_PORT) as its local address (IP_TRANSPARENT)
+    // destination (original_addr:SERVICE_PORT) as its local address (IP_TRANSPARENT)
     // and the guest as its remote — NOT `127.0.0.1:leg_f` — so the entry is
     // matched on `sport = :SERVICE_PORT` toward the guest's address.
     let host_time_wait_present = wait_until(Duration::from_secs(30), || {
@@ -1909,7 +2880,7 @@ async fn a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reop
                 "-tan",
                 "state",
                 "time-wait",
-                &format!("src {peer_addr} and sport = :{SERVICE_PORT} and dst {guest_addr}"),
+                &format!("src {original_addr} and sport = :{SERVICE_PORT} and dst {guest_addr} and dport = :{source_port}"),
             ])
             .output()
             .is_ok_and(|out| {
@@ -1921,25 +2892,156 @@ async fn a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reop
     assert!(
         host_time_wait_present,
         "the guest's closed intercepted connection leaves the host in TIME_WAIT on the \
-         original-destination 4-tuple ({peer_addr}:{SERVICE_PORT} <- {guest_addr})"
+         original-destination 4-tuple ({original_destination} <- {guest_addr}:{source_port})"
+    );
+    let close_capture =
+        close_capture.stop_accounted().expect("complete lossless close-sequence capture");
+    let (fin_frame, fin) = close_capture
+        .frames
+        .iter()
+        .find_map(|frame| {
+            assert_eq!(
+                frame.ifindex, guest_ifindex,
+                "close evidence comes from the exact guest TAP"
+            );
+            assert!(
+                !frame.truncated && !frame.control_truncated,
+                "complete close and timestamp evidence"
+            );
+            if frame_ipv4_src(&frame.bytes) != Some(guest_addr) {
+                return None;
+            }
+            let dst = frame.bytes.get(30..34)?;
+            if dst != original_addr.octets() {
+                return None;
+            }
+            tcp_segment_between(&frame.bytes, source_port, SERVICE_PORT)
+                .filter(|segment| segment.flags & 1 != 0)
+                .map(|segment| (frame, segment))
+        })
+        .expect("the guest's exact source tuple sends its FIN to the original destination");
+    let ihl = usize::from(fin_frame.bytes[14] & 15) * 4;
+    let tcp = &fin_frame.bytes[14 + ihl..];
+    let tcp_header = usize::from(tcp[12] >> 4) * 4;
+    let ip_total = usize::from(u16::from_be_bytes([fin_frame.bytes[16], fin_frame.bytes[17]]));
+    let payload = ip_total.checked_sub(ihl + tcp_header).expect("valid FIN packet lengths");
+    let rcv_nxt = fin.seq.wrapping_add(payload as u32).wrapping_add(1);
+    let old_tsval =
+        fin.tsval.expect("the actual FIN carries the established connection's timestamp");
+    let seq_base = rcv_nxt.wrapping_add(100_000).max(TW_CRAFT_SEQ_BASE);
+    let tsval_base = old_tsval.wrapping_add(1_000).max(TW_CRAFT_TSVAL_BASE);
+    assert!(
+        (seq_base.wrapping_sub(rcv_nxt) as i32) > 0,
+        "the crafted sequence is newer under TCP's modulo comparison"
+    );
+    assert!(
+        (tsval_base.wrapping_sub(old_tsval) as i32) > 0,
+        "the crafted timestamp is newer than the actual FIN's TSval"
+    );
+    assert!(tap_is_up(&guest_tap), "the completed-close witness runs on the live production TAP");
+    assert_eq!(
+        door_listener.accepted(),
+        0,
+        "the healthy intercepted connection never reaches the wildcard door"
+    );
+    door_listener.assert_healthy();
+    let materialized_at = packet_clock_now();
+    eprintln!(
+        "S-ND295-64 true TIME_WAIT materialized: tuple={original_destination}<-{guest_addr}:{source_port}, peer_allocation={peer_addr}, ifindex={guest_ifindex}, fin_seq={}, rcv_nxt={rcv_nxt}, old_tsval={old_tsval}, seq_base={seq_base}, tsval_base={tsval_base}, at={materialized_at}",
+        fin.seq
     );
 
-    // Two independent captures on the guest's TAP: one witnesses the crafted
-    // newer-sequence SYNs entering the host, the other records a reopen SYN-ACK.
-    let witness = SynCapture::open(&guest_tap, SERVICE_PORT);
-    let reopen = SynCapture::open(&guest_tap, SERVICE_PORT);
+    // One complete capture retains both the exact crafted request nonces and
+    // their replies, over the same original full exposure window.
+    let capture = WireCapture::start_link_layer(guest_ifindex);
+    let program_before = assert_r19_program_live(guest_addr).await;
+    residue.record_owned_program(
+        &program_before,
+        [peer_addr, guest_addr].into_iter().collect(),
+        [SocketAddrV4::new(peer_addr, SERVICE_PORT)].into_iter().collect(),
+    );
     // Close leg F from the host (killed mode) so the door is open per flow.
     kill_serve_owner(handle).await.expect("killed-mode serve abandons its owner");
+    let fault_applied_at = packet_clock_now();
     assert!(tap_is_up(&guest_tap), "the guest's TAP stays up after killed mode");
+    let program_at_fault = assert_r19_program_live(guest_addr).await;
+    assert_eq!(
+        program_at_fault, program_before,
+        "the actual program, members, and policy route survive the guest-door fault"
+    );
+    let tw_after_fault = Command::new("ss").args(["-tan", "state", "time-wait", &format!("src {original_addr} and sport = :{SERVICE_PORT} and dst {guest_addr} and dport = :{source_port}")]).output().expect("read the exact TIME_WAIT tuple after killed mode");
+    assert!(
+        tw_after_fault.status.success()
+            && String::from_utf8_lossy(&tw_after_fault.stdout).contains(&guest_addr.to_string()),
+        "the same true TIME_WAIT entry survives killed mode before any reconnect"
+    );
+    let control = UdpSocket::bind(SocketAddrV4::new(GATEWAY, 0))
+        .expect("bind the test-owned host event gate");
+    let command = format!("{nonce} {seq_base} {tsval_base}");
+    let released_at = packet_clock_now();
+    let sent =
+        control.send_to(command.as_bytes(), SocketAddrV4::new(guest_addr, TW_CONTROL_PORT)).expect(
+            "release the prescribed reconnect only after materialized TIME_WAIT and killed mode",
+        );
+    assert_eq!(sent, command.len(), "the complete test-private release reaches the guest");
 
     // The guest keeps reconnecting for the window.
     tokio::time::sleep(PROBE_WINDOW).await;
+    let capture = capture.stop_accounted().expect("complete lossless guest-door exposure capture");
+    assert!(
+        !capture.interface_removed && capture.link_down_reports.is_empty(),
+        "the same production TAP stays live over the full guest-door window"
+    );
 
     // In-run witness: the guest's crafted newer-sequence SYNs (base seq
     // TW_CRAFT_SEQ_BASE, above the old rcv_nxt) reached its own TAP while it was
     // up — the door probe is not vacuous.
     assert!(tap_is_up(&guest_tap), "the run is void, not GREEN: the guest's TAP was quiesced");
-    let crafted = witness.drain_newer_seq_syns(TW_CRAFT_SEQ_BASE);
+    let mut requests = BTreeSet::new();
+    let mut crafted = 0_usize;
+    let mut pre_fault_crafted = 0_usize;
+    for frame in &capture.frames {
+        assert_eq!(
+            frame.ifindex, guest_ifindex,
+            "all reconnect evidence names the same TAP ifindex"
+        );
+        assert!(
+            !frame.truncated && !frame.control_truncated,
+            "complete reconnect frame/clock evidence"
+        );
+        let at = frame.kernel_event_at.expect("the reconnect frame has its kernel event time").0;
+        if let Some(request) = probe_request(&frame.bytes, guest_addr, SERVICE_PORT) {
+            if request.0 == original_addr
+                && request.1 == source_port
+                && request.2 >= TW_CRAFT_SEQ_BASE
+            {
+                if at < fault_applied_at {
+                    pre_fault_crafted += 1;
+                    continue;
+                }
+                assert!(
+                    at >= released_at,
+                    "the guest makes no reconnect before the post-fault release"
+                );
+                assert!(
+                    (request.2.wrapping_sub(rcv_nxt) as i32) > 0,
+                    "every observed reconnect is newer than the original rcv_nxt"
+                );
+                let segment = tcp_segment_between(&frame.bytes, source_port, SERVICE_PORT)
+                    .expect("exact reconnect TCP tuple");
+                assert!(
+                    segment.tsval.is_some_and(|ts| (ts.wrapping_sub(old_tsval) as i32) > 0),
+                    "each crafted reconnect carries a newer timestamp"
+                );
+                requests.insert(request);
+                crafted += 1;
+            }
+        }
+    }
+    assert_eq!(
+        pre_fault_crafted, 0,
+        "zero crafted reconnects precede the required listener-loss fault"
+    );
     assert!(
         crafted >= 1,
         "the guest's crafted newer-sequence reconnect SYNs reached its TAP: captured {crafted} >= 1"
@@ -1947,13 +3049,27 @@ async fn a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reop
 
     // Record whether the reconnect is answered — a SYN-ACK from the original
     // destination back to the guest is the door reproduced.
-    let reopened = reopen.syn_ack_from(peer_addr, SERVICE_PORT);
+    let mut reopened = false;
+    for frame in &capture.frames {
+        if frame.kernel_event_at.expect("the reply carries its kernel time").0 >= released_at {
+            reopened |= probe_reply(&frame.bytes, SERVICE_PORT, &requests).is_some();
+        }
+    }
     eprintln!(
         "S-ND295-64 guest leg-F TIME_WAIT door: reopened={reopened} (SYN-ACK from \
-         {peer_addr}:{SERVICE_PORT} on {guest_tap}); door listener accepts={}",
+         {original_destination} on {guest_tap}); door listener accepts={}",
         door_listener.accepted()
     );
+    eprintln!(
+        "S-ND295-64 ordered door evidence: materialized_at={materialized_at}, fault_at={fault_applied_at}, release_at={released_at}, crafted={crafted}, pre_fault_crafted={pre_fault_crafted}, frames={}, source_port={source_port}",
+        capture.frames.len()
+    );
     door_listener.assert_healthy();
+    let program_after = assert_r19_program_live(guest_addr).await;
+    assert_eq!(
+        program_after, program_before,
+        "the actual guest-door program and members stay unchanged through the full window"
+    );
     assert_eq!(
         door_listener.accepted(),
         0,

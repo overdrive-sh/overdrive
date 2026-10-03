@@ -1494,6 +1494,48 @@ impl SharedNetworkSupervisorHandle {
         todo!("RED scaffold: D-295-R13 run_shared_network_supervisor — DELIVER step 09-01")
     }
 
+    fn listener_task_exit_leg(
+        error: &overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError,
+    ) -> Option<overdrive_worker::mtls_intercept::InterceptLeg> {
+        match error {
+            overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskReturned { leg }
+            | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskFailed {
+                leg,
+                ..
+            }
+            | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskPanicked { leg }
+            | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskCancelled {
+                leg,
+            } => Some(*leg),
+            _ => None,
+        }
+    }
+
+    /// Consume the task owner's terminal event after its non-mutating audit
+    /// reported the same dead listener task. The worker's exact-port repair
+    /// replaces only a consumed terminal slot; leaving the event queued makes
+    /// the completed task observer occupy that slot and turns a successful
+    /// rebind into `TaskObserverClosed`.
+    async fn consume_listener_task_exit(
+        mtls_worker: &overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker,
+        expected_leg: overdrive_worker::mtls_intercept::InterceptLeg,
+        shutdown: &CancellationToken,
+    ) -> std::result::Result<bool, overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError>
+    {
+        loop {
+            let error = tokio::select! {
+                biased;
+                () = shutdown.cancelled() => return Ok(false),
+                error = mtls_worker.wait_shared_owner_failure() => error,
+            };
+            match Self::listener_task_exit_leg(&error) {
+                Some(leg) if leg == expected_leg => return Ok(true),
+                Some(_) => {}
+                None => return Err(error),
+            }
+        }
+    }
+
     #[expect(
         clippy::collapsible_match,
         clippy::too_many_lines,
@@ -1507,6 +1549,15 @@ impl SharedNetworkSupervisorHandle {
         request_tx: tokio::sync::mpsc::Sender<overdrive_core::guest_network::ServeShutdownRequest>,
         shutdown: CancellationToken,
     ) -> std::result::Result<(), SharedNetworkSupervisorError> {
+        let requires_quiescence =
+            |component: overdrive_core::guest_network::SharedGuestNetworkComponent| {
+                !matches!(
+                    component,
+                    overdrive_core::guest_network::SharedGuestNetworkComponent::LegF
+                        | overdrive_core::guest_network::SharedGuestNetworkComponent::LegC
+                        | overdrive_core::guest_network::SharedGuestNetworkComponent::Dns
+                )
+            };
         let component_for =
             |error: &overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError| {
                 match error {
@@ -1581,9 +1632,9 @@ impl SharedNetworkSupervisorHandle {
                 () = clock.sleep(Duration::from_secs(1)) => {}
             }
 
-            let component = match mtls_worker.audit_shared_owner().await {
+            let (component, listener_task_exit) = match mtls_worker.audit_shared_owner().await {
                 Ok(()) => continue,
-                Err(source) => component_for(&source),
+                Err(source) => (component_for(&source), Self::listener_task_exit_leg(&source)),
             };
             if !exec.begin_recovery(component) {
                 return Ok(());
@@ -1593,21 +1644,56 @@ impl SharedNetworkSupervisorHandle {
                 component = ?component,
                 "shared guest-network owner entered bounded recovery"
             );
-            shared_guest_network.quiesce_managed_taps().await?;
+            if let Some(leg) = listener_task_exit {
+                match Self::consume_listener_task_exit(&mtls_worker, leg, &shutdown).await {
+                    Ok(true) => {}
+                    Ok(false) => return Ok(()),
+                    Err(source) => return Err(source.into()),
+                }
+            }
+            let mut quiesced = if requires_quiescence(component) {
+                shared_guest_network.quiesce_managed_taps().await?;
+                true
+            } else {
+                false
+            };
 
             loop {
-                tokio::select! {
-                    biased;
-                    () = shutdown.cancelled() => return Ok(()),
-                    () = clock.sleep(Duration::from_millis(250)) => {}
+                let retry_deadline = clock.now() + Duration::from_millis(250);
+                let mut supervisor_failure = None;
+                loop {
+                    let remaining = retry_deadline.saturating_duration_since(clock.now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    tokio::select! {
+                        biased;
+                        () = shutdown.cancelled() => return Ok(()),
+                        source = mtls_worker.wait_shared_owner_failure() => {
+                            if Self::listener_task_exit_leg(&source).is_none() {
+                                supervisor_failure = Some(source);
+                                break;
+                            }
+                        }
+                        () = clock.sleep(remaining) => break,
+                    }
                 }
 
-                let first_remaining = match mtls_worker.converge_shared_owner().await {
-                    Ok(()) => match mtls_worker.audit_shared_owner().await {
-                        Ok(()) => None,
-                        Err(source) => Some(component_for(&source)),
-                    },
-                    Err(source) => Some(component_for(&source)),
+                let first_remaining = if let Some(source) = supervisor_failure {
+                    Some((component_for(&source), None))
+                } else {
+                    match mtls_worker.converge_shared_owner().await {
+                        Ok(()) => match mtls_worker.audit_shared_owner().await {
+                            Ok(()) => None,
+                            Err(source) => Some((
+                                component_for(&source),
+                                Self::listener_task_exit_leg(&source),
+                            )),
+                        },
+                        Err(source) => {
+                            Some((component_for(&source), Self::listener_task_exit_leg(&source)))
+                        }
+                    }
                 };
                 if first_remaining.is_none() {
                     if exec.complete_attempt(None) {
@@ -1620,11 +1706,22 @@ impl SharedNetworkSupervisorHandle {
                     }
                     return Ok(());
                 }
-                let Some(component) = first_remaining else {
+                let Some((component, listener_task_exit)) = first_remaining else {
                     unreachable!("a failed recovery attempt always has a remaining component");
                 };
+                if let Some(leg) = listener_task_exit {
+                    match Self::consume_listener_task_exit(&mtls_worker, leg, &shutdown).await {
+                        Ok(true) => {}
+                        Ok(false) => return Ok(()),
+                        Err(source) => return Err(source.into()),
+                    }
+                }
                 if !exec.complete_attempt(Some(component)) {
                     return Ok(());
+                }
+                if !quiesced && requires_quiescence(component) {
+                    shared_guest_network.quiesce_managed_taps().await?;
+                    quiesced = true;
                 }
                 let Some(progress) = exec.recovery_progress() else {
                     return Ok(());
@@ -3788,6 +3885,296 @@ mod shared_network_task_owner_acceptance {
                 rig.recover(loss, offset, blocked).await;
                 rig.assert_single_reopen().await;
                 rig.finish().await;
+            }
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-63 — A pure leg-C listener loss keeps managed TAPs raised.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// This bounded seeded reproduction drives the currently composed
+    /// `run_mtls_owner` through its existing worker, listener, shared-owner,
+    /// clock, and cancellation ports. The surviving leg-C `accept` task gets
+    /// successful exact-port rebind, standing EADDRINUSE, and failed local_addr
+    /// audit conditions; no task abort or unreachable listener state is
+    /// manufactured. With one activated shared allocation, the accepted TAP
+    /// and quiescence outcomes stay visible across each recovery. Each seed
+    /// places the loss at a different offset within the audit period.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn current_mtls_owner_keeps_the_active_tap_up_after_leg_c_listener_loss() {
+        for (port_theft, local_addr_failure, branch) in [
+            (false, false, "successful-exact-port-rebind"),
+            (true, false, "EADDRINUSE-port-theft"),
+            (false, true, "ListenerLocalAddr-EBADF"),
+        ] {
+            for seed in supervisor_seeds() {
+                let loss = Loss::ListenerLost(InterceptLeg::C);
+                let mut schedule = Schedule::new(seed, loss_code(loss));
+                let offset = schedule.offset_within(super::SHARED_NETWORK_AUDIT_PERIOD);
+                let verdict = Repro::Seeded {
+                    seed,
+                    cell: format!("current-run-mtls-owner/LegC/{branch}/offset-{offset:?}"),
+                }
+                .verdict();
+
+                let clock = Arc::new(SimClock::new());
+                let owner = Arc::new(TestSharedOwner::new());
+                let intercept = Arc::new(S19Intercept::new(Arc::clone(&owner)));
+                let worker = s19_worker(Arc::clone(&intercept), Arc::clone(&clock));
+                worker.start_shared_owner().await.unwrap_or_else(|error| {
+                    panic!("{verdict}: publish both production listener tasks: {error}")
+                });
+
+                let plan = guest_pool().assign(alloc_id(LIVE_ALLOCATION)).unwrap_or_else(|error| {
+                    panic!("{verdict}: assign the live guest address: {error}")
+                });
+                crate::guest_network::GuestNetworkProvisioner::provision(&*owner, &plan)
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("{verdict}: provision the live guest TAP: {error}")
+                    });
+                worker.start_alloc(&shared_spec(&plan)).await.unwrap_or_else(|error| {
+                    panic!("{verdict}: register the live guest's mTLS elements: {error}")
+                });
+                crate::guest_network::GuestNetworkProvisioner::activate(&*owner, &plan)
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("{verdict}: activate the live guest TAP: {error}")
+                    });
+                let active_before = BTreeSet::from([plan.alloc().clone()]);
+                assert_eq!(
+                    owner.active(),
+                    active_before,
+                    "{verdict}: the guest TAP is up before loss"
+                );
+                assert!(!owner.latched(), "{verdict}: no quiescence is pending before loss");
+
+                let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
+                let gate = wiring.gate();
+                let exec = wiring.supervisor();
+                assert!(
+                    exec.open_after_boot(),
+                    "{verdict}: EXEC opens after the healthy boot audit"
+                );
+                let shutdown = CancellationToken::new();
+                let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
+                let supervisor = SharedNetworkSupervisorHandle::run_mtls_owner(
+                    Arc::clone(&owner) as Arc<dyn guest_network::SharedGuestNetworkOwner>,
+                    Arc::clone(&worker),
+                    Arc::clone(&exec),
+                    Arc::clone(&clock) as Arc<dyn Clock>,
+                    request_tx,
+                    shutdown.clone(),
+                );
+                let mut supervisor = Box::pin(supervisor);
+                let (pending_poll_tx, mut pending_polls) = tokio::sync::mpsc::unbounded_channel();
+                let poll_verdict = verdict.clone();
+                let task = tokio::spawn(std::future::poll_fn(move |context| {
+                    let polled = supervisor.as_mut().poll(context);
+                    if polled.is_pending() {
+                        pending_poll_tx.send(()).unwrap_or_else(|_| {
+                            panic!("{poll_verdict}: the composed owner remains scheduled")
+                        });
+                    }
+                    polled
+                }));
+                let supervisor = SharedNetworkSupervisorHandle::new(
+                    request_rx,
+                    task,
+                    Arc::clone(&exec),
+                    shutdown,
+                );
+                let server = s19_server_handle(supervisor, Arc::clone(&worker));
+
+                tokio::time::timeout(Duration::from_secs(5), pending_polls.recv())
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!("{verdict}: the owner registers its first audit wait")
+                    })
+                    .unwrap_or_else(|| panic!("{verdict}: the owner remains scheduled"));
+                clock.tick(super::SHARED_NETWORK_AUDIT_PERIOD);
+                tokio::time::timeout(Duration::from_secs(5), pending_polls.recv())
+                    .await
+                    .unwrap_or_else(|_| panic!("{verdict}: the healthy audit completes"))
+                    .unwrap_or_else(|| panic!("{verdict}: the owner remains scheduled"));
+                worker.audit_shared_owner().await.unwrap_or_else(|error| {
+                panic!(
+                    "{verdict}: the worker's production-owned listener audit is healthy: {error}"
+                )
+            });
+
+                clock.tick(offset);
+                let leg_c = intercept.listener_addresses()[1];
+                if port_theft {
+                    intercept.sim().script_bind_fault(SimInterceptFault::TransparentListener {
+                        errno: libc::EADDRINUSE,
+                    });
+                }
+                let initial_audit_error = if local_addr_failure {
+                    assert!(
+                        intercept.sim().script_local_addr_failure(leg_c, libc::EBADF),
+                        "{verdict}: script the existing leg-C local_addr port"
+                    );
+                    assert!(
+                        intercept.sim().parked_accepts(leg_c) > 0,
+                        "{verdict}: the real leg-C accept task remains live during the address error"
+                    );
+                    let error = worker
+                        .audit_shared_owner()
+                        .await
+                        .expect_err("the live-task audit reports the scripted EBADF");
+                    match error {
+                        overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerLocalAddr {
+                            leg: InterceptLeg::C,
+                            source,
+                        } => {
+                            assert_eq!(source.raw_os_error(), Some(libc::EBADF), "{verdict}");
+                            format!("ListenerLocalAddr {{ leg: C, errno: {:?} }}", source.raw_os_error())
+                        }
+                        other => panic!("{verdict}: expected exact typed live-task Leg-C local_addr failure, got {other:?}"),
+                    }
+                } else {
+                    "none".to_owned()
+                };
+                let remaining_audit = super::SHARED_NETWORK_AUDIT_PERIOD
+                    .checked_sub(offset)
+                    .expect("the seeded offset is within the audit period");
+                if local_addr_failure {
+                    clock.tick(remaining_audit);
+                    tokio::time::timeout(Duration::from_secs(5), async {
+                        while exec.recovery_progress().is_none() {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "{verdict}: the owner audits ListenerLocalAddr while Leg-C task is live"
+                        )
+                    });
+                }
+                assert!(
+                    intercept.sim().script_accept(
+                        leg_c,
+                        SimAcceptScript::ListenerLost { errno: libc::ECONNABORTED },
+                    ),
+                    "{verdict}: the real leg-C accept task owns the listener-loss stimulus"
+                );
+                tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    match worker.audit_shared_owner().await {
+                        Err(
+                            overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskReturned {
+                                leg: InterceptLeg::C,
+                            },
+                        ) => break,
+                        Err(
+                            overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerLocalAddr {
+                                leg: InterceptLeg::C,
+                                ref source,
+                            },
+                        ) if local_addr_failure
+                            && source.raw_os_error() == Some(libc::EBADF) =>
+                        {
+                            tokio::task::yield_now().await;
+                        }
+                        Ok(()) => tokio::task::yield_now().await,
+                        Err(error) => panic!("{verdict}: the isolated loss is leg C: {error}"),
+                    }
+                }
+                })
+                .await
+                .unwrap_or_else(|_| panic!("{verdict}: the scripted leg-C accept task exits"));
+
+                if !local_addr_failure {
+                    clock.tick(remaining_audit);
+                    tokio::time::timeout(Duration::from_secs(5), async {
+                        while exec.recovery_progress().is_none() {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap_or_else(|_| panic!("{verdict}: the owner observes the leg-C loss"));
+                }
+
+                // One actual retry reaches either the successful replacement
+                // path or the retained native port-theft/EADDRINUSE condition.
+                let retry_outcome = tokio::time::timeout(Duration::from_secs(1), async {
+                    for _ in 0..3 {
+                        clock.tick(super::SHARED_NETWORK_RETRY_PERIOD);
+                        let ready = tokio::time::timeout(Duration::from_millis(20), async {
+                            loop {
+                                let progress = exec.recovery_progress();
+                                let completed = if port_theft {
+                                    progress.is_some_and(|state| state.attempts >= 1)
+                                } else {
+                                    progress.is_none_or(|state| state.attempts >= 1)
+                                };
+                                if completed {
+                                    break;
+                                }
+                                tokio::task::yield_now().await;
+                            }
+                        })
+                        .await
+                        .is_ok();
+                        if ready {
+                            return true;
+                        }
+                    }
+                    false
+                })
+                .await
+                .unwrap_or(false);
+                assert!(retry_outcome, "{verdict}: an actual retry reaches its owner outcome");
+                let gate_reopened = if port_theft {
+                    false
+                } else {
+                    tokio::time::timeout(Duration::from_millis(50), gate.claim_release())
+                        .await
+                        .is_ok_and(|claim| claim.is_some())
+                };
+                let recovery = exec.recovery_progress();
+                let recovery_component = recovery.as_ref().map(|progress| progress.component);
+                let recovery_attempts = recovery.as_ref().map(|progress| progress.attempts);
+                let quiesce_calls = owner
+                    .journal()
+                    .iter()
+                    .filter(|entry| matches!(entry.call, TestOwnerCall::Quiesce(_)))
+                    .count();
+                let active_after = owner.active();
+                let latched_after = owner.latched();
+
+                server.shutdown(Duration::from_millis(10)).await.unwrap_or_else(|error| {
+                    panic!("{verdict}: orderly Sim owner shutdown: {error}")
+                });
+
+                let expected_component = port_theft.then_some(SharedGuestNetworkComponent::LegC);
+                let expected_attempts = port_theft.then_some(1);
+                assert_eq!(
+                    recovery_component, expected_component,
+                    "{verdict}: recovery component after the listener repair; initial_audit_error={initial_audit_error}, attempts={recovery_attempts:?}, quiesce_calls={quiesce_calls}, active_after={active_after:?}, latched_after={latched_after}"
+                );
+                assert_eq!(
+                    recovery_attempts, expected_attempts,
+                    "{verdict}: successful exact-port replacement reopens; EADDRINUSE remains recovering"
+                );
+                assert_eq!(
+                    gate_reopened, !port_theft,
+                    "{verdict}: only the successful exact-port replacement reopens the existing gate"
+                );
+                assert_eq!(
+                    quiesce_calls, 0,
+                    "{verdict}: a pure leg-C listener failure does not quiesce managed TAPs; \
+                     active_before={active_before:?}, active_after={active_after:?}, \
+                     latched_after={latched_after}"
+                );
+                assert_eq!(
+                    active_after, active_before,
+                    "{verdict}: the managed TAP remains raised through the owner audit"
+                );
+                assert!(!latched_after, "{verdict}: the pure listener loss leaves the latch clear");
             }
         }
     }

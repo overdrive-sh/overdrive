@@ -3075,29 +3075,241 @@ pub fn converge_shared_ip_intercept_members_atomically(
     )
 }
 
-/// Observe the intercept-owned guard table `ip overdrive-mtls-guard`
-/// (D-295-R18, provisional: removed by DELIVER step 08-01 if R18 is withdrawn).
+/// Observe the intercept-owned guard table `ip overdrive-mtls-guard` (D-295-R18).
 ///
 /// Returns `Ok(true)` exactly when the table, its `prerouting` chain, and its
 /// single drop rule match the guard identity; `Ok(false)` when the table is
 /// absent. A partial, duplicate, malformed, or foreign-conflicting table is a
 /// typed error.
 #[doc(hidden)]
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-01")]
 pub fn observe_intercept_mark_guard() -> Result<bool, NetlinkError> {
-    todo!("RED scaffold: D-295-R18 observe_intercept_mark_guard — DELIVER step 08-01")
+    intercept_mark_guard::observe()
 }
 
 /// Create whatever is missing of the intercept-owned guard table in one atomic
 /// batch, then require [`observe_intercept_mark_guard`] to return `true`
-/// (D-295-R18, provisional: removed by DELIVER step 08-01 if R18 is withdrawn).
+/// (D-295-R18).
 ///
 /// Never rewrites a present non-matching rule; that case returns the typed
 /// error.
 #[doc(hidden)]
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-01")]
 pub fn converge_intercept_mark_guard() -> Result<(), NetlinkError> {
-    todo!("RED scaffold: D-295-R18 converge_intercept_mark_guard — DELIVER step 08-01")
+    intercept_mark_guard::converge()
+}
+
+/// Private semantic codec for D-295-R18's independent IPv4 intercept-mark
+/// guard. It shares the strict nft dump and expression codec above without
+/// extending the public API.
+mod intercept_mark_guard {
+    use std::collections::BTreeSet;
+
+    use super::{
+        AF_UNSPEC, BaseChainSpec, ChainKind, NF_ACCEPT, NF_INET_PRE_ROUTING, NFNL_MSG_BATCH_BEGIN,
+        NFNL_MSG_BATCH_END, NFNL_SUBSYS_NFTABLES, NFT_MSG_NEWCHAIN, NFT_MSG_NEWRULE,
+        NFT_MSG_NEWTABLE, NLM_F_ACK, NLM_F_APPEND, NLM_F_CREATE, NLM_F_REQUEST, NetlinkError,
+        NfSock, NftFamily, RawChainInfo, RuleInfo, collect_atomic_rule_acks, e_drop, e_mark_equals,
+        e_tcp_protocol, invalid_data, list_chain_info_family, list_other_children_family,
+        list_rules_family, list_set_info_family, list_table_names_family, newchain_payload_family,
+        newrule_payload_family, newtable_payload_family, nfgenmsg, nft_msg_type, nlmsg,
+        normalized_rule_program_identity, read_nft_generation,
+    };
+
+    const TABLE: &str = "overdrive-mtls-guard";
+    const CHAIN: &str = "prerouting";
+    const USERDATA: &[u8] = b"ovd295-ip-guard-0";
+    const INTERCEPT_MARK: u32 = 0x295a;
+
+    #[derive(Clone, Copy, Default)]
+    struct Components {
+        table: bool,
+        chain: bool,
+        rule: bool,
+    }
+
+    fn invalid(reason: &'static str) -> NetlinkError {
+        NetlinkError::nft("intercept-mark-guard", invalid_data(reason))
+    }
+
+    fn expected_chain(chain: &RawChainInfo) -> bool {
+        chain.table == TABLE
+            && chain.name == CHAIN
+            && chain.hook == Some((NF_INET_PRE_ROUTING, 0))
+            && chain.chain_type.as_deref() == Some("filter")
+            && chain.policy == Some(NF_ACCEPT)
+    }
+
+    fn expected_rule_program() -> Result<Vec<u8>, NetlinkError> {
+        let mut expressions = e_mark_equals(INTERCEPT_MARK);
+        expressions.extend(e_tcp_protocol());
+        expressions.extend(e_drop());
+        normalized_rule_program_identity(&expressions)
+            .map_err(|source| NetlinkError::nft("intercept-mark-guard", source))
+    }
+
+    fn expected_rule(rule: &RuleInfo) -> Result<bool, NetlinkError> {
+        Ok(rule.userdata == USERDATA
+            && rule.counter.is_none()
+            && rule.normalized_program == expected_rule_program()?)
+    }
+
+    /// Read the complete table-local shape inside one stable ruleset generation.
+    /// Existing mismatches are errors; missing owned components remain available
+    /// for `converge` to create.
+    fn inspect() -> Result<Components, NetlinkError> {
+        let generation_before = read_nft_generation()?;
+        let table_names = list_table_names_family(NftFamily::Ipv4)?;
+        let matching_tables = table_names.iter().filter(|name| name.as_str() == TABLE).count();
+        if matching_tables > 1 {
+            return Err(invalid("duplicate intercept-mark guard tables"));
+        }
+        if matching_tables == 0 {
+            let generation_after = read_nft_generation()?;
+            if generation_before != generation_after {
+                return Err(invalid(
+                    "intercept-mark guard observation crossed a ruleset generation",
+                ));
+            }
+            return Ok(Components::default());
+        }
+
+        let chains = list_chain_info_family(NftFamily::Ipv4, TABLE)?;
+        let sets = list_set_info_family(NftFamily::Ipv4, TABLE)?;
+        let other_children = list_other_children_family(NftFamily::Ipv4, TABLE)?;
+        if !sets.is_empty() || !other_children.is_empty() {
+            return Err(invalid("intercept-mark guard table contains foreign children"));
+        }
+
+        let chain = match chains.as_slice() {
+            [] => None,
+            [chain] if expected_chain(chain) => Some(chain),
+            [_] => return Err(invalid("intercept-mark guard chain identity conflicts")),
+            _ => return Err(invalid("intercept-mark guard table contains duplicate chains")),
+        };
+        let rules = if chain.is_some() {
+            list_rules_family(NftFamily::Ipv4, TABLE, CHAIN)?
+        } else {
+            Vec::new()
+        };
+        let rule = match rules.as_slice() {
+            [] => false,
+            [rule] if expected_rule(rule)? => true,
+            [_] => return Err(invalid("intercept-mark guard rule identity conflicts")),
+            _ => return Err(invalid("intercept-mark guard chain contains duplicate rules")),
+        };
+
+        let generation_after = read_nft_generation()?;
+        if generation_before != generation_after {
+            return Err(invalid("intercept-mark guard observation crossed a ruleset generation"));
+        }
+        Ok(Components { table: true, chain: chain.is_some(), rule })
+    }
+
+    pub(super) fn observe() -> Result<bool, NetlinkError> {
+        let observed = inspect()?;
+        if !observed.table {
+            return Ok(false);
+        }
+        if observed.chain && observed.rule {
+            Ok(true)
+        } else {
+            Err(invalid("intercept-mark guard table is partial"))
+        }
+    }
+
+    fn create_missing(observed: Components) -> Result<(), NetlinkError> {
+        let mut mutations = Vec::with_capacity(3);
+        if !observed.table {
+            mutations.push((
+                NFT_MSG_NEWTABLE,
+                NLM_F_CREATE,
+                newtable_payload_family(NftFamily::Ipv4, TABLE),
+            ));
+        }
+        if !observed.chain {
+            mutations.push((
+                NFT_MSG_NEWCHAIN,
+                NLM_F_CREATE,
+                newchain_payload_family(
+                    NftFamily::Ipv4,
+                    TABLE,
+                    CHAIN,
+                    BaseChainSpec {
+                        hooknum: NF_INET_PRE_ROUTING,
+                        priority: 0,
+                        kind: ChainKind::Filter,
+                    },
+                ),
+            ));
+        }
+        if !observed.rule {
+            let mut expressions = e_mark_equals(INTERCEPT_MARK);
+            expressions.extend(e_tcp_protocol());
+            expressions.extend(e_drop());
+            mutations.push((
+                NFT_MSG_NEWRULE,
+                NLM_F_CREATE | NLM_F_APPEND,
+                newrule_payload_family(NftFamily::Ipv4, TABLE, CHAIN, &expressions, USERDATA),
+            ));
+        }
+        send_transaction(&mutations)
+    }
+
+    fn send_transaction(mutations: &[(u16, u16, Vec<u8>)]) -> Result<(), NetlinkError> {
+        const OP: &str = "intercept-mark-guard-atomic-transaction";
+        if mutations.is_empty() {
+            return Ok(());
+        }
+        let socket = NfSock::open().map_err(|source| NetlinkError::nft(OP, source))?;
+        let mut batch = Vec::new();
+        nlmsg(
+            &mut batch,
+            NFNL_MSG_BATCH_BEGIN,
+            NLM_F_REQUEST,
+            1,
+            &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+        );
+        for (index, (operation, flags, payload)) in mutations.iter().enumerate() {
+            nlmsg(
+                &mut batch,
+                nft_msg_type(*operation),
+                NLM_F_REQUEST | NLM_F_ACK | *flags,
+                index as u32 + 2,
+                payload,
+            );
+        }
+        let end_sequence = mutations.len() as u32 + 2;
+        nlmsg(
+            &mut batch,
+            NFNL_MSG_BATCH_END,
+            NLM_F_REQUEST,
+            end_sequence,
+            &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+        );
+        socket.send(&batch).map_err(|source| NetlinkError::nft(OP, source))?;
+
+        let mut pending = (2..end_sequence).collect::<BTreeSet<_>>();
+        while !pending.is_empty() {
+            let mut buffer = vec![0u8; 32_768];
+            let received =
+                socket.recv(&mut buffer).map_err(|source| NetlinkError::nft(OP, source))?;
+            collect_atomic_rule_acks(&buffer[..received], &mut pending)
+                .map_err(|source| NetlinkError::nft(OP, source))?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn converge() -> Result<(), NetlinkError> {
+        let observed = inspect()?;
+        if observed.table && observed.chain && observed.rule {
+            return Ok(());
+        }
+        create_missing(observed)?;
+        if observe()? {
+            Ok(())
+        } else {
+            Err(invalid("intercept-mark guard read-back is absent after convergence"))
+        }
+    }
 }
 
 /// Private semantic IPv4 shared-intercept adapter used by the worker's

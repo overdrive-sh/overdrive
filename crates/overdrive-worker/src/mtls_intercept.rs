@@ -235,8 +235,9 @@ pub enum InterceptError {
     /// The worker's verdict over an observation whose `intercept_mark_guard`
     /// is `false`: the guard table `ip overdrive-mtls-guard` is absent.
     /// Source-less. No adapter returns it; only `MtlsInterceptWorker`'s boot
-    /// read-back and runtime audit construct it. Conditional on D-295-R18:
-    /// DELIVER step 08-01 removes it if the native RED withdraws R18.
+    /// read-back and runtime audit construct it. Native RED reproduced the
+    /// IP-program-loss exposure, so R18 and this missing-guard classification
+    /// remain in force.
     // RED scaffold (DR-08 (a)): not constructed before DELIVER step 08-02.
     #[error("shared mTLS intercept-mark guard table ip overdrive-mtls-guard is absent")]
     InterceptMarkGuardAbsent,

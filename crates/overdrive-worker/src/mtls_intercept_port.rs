@@ -432,9 +432,8 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// # Edge cases
     /// Partial, foreign, duplicate, malformed, or generation-unstable state is
     /// a typed error, never a projection.
-    /// Until DELIVER 08-01, the returned `intercept_mark_guard` is `false` to
-    /// mean the guard has not been observed present and exact, not that a read
-    /// found it absent.
+    /// The returned `intercept_mark_guard` reflects the host read-back of the
+    /// exact R18 guard table; `false` means the table was observed absent.
     ///
     /// # Observable invariants
     /// Performs no kernel mutation.
@@ -454,9 +453,8 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// `Ok(None)` without any write when the owned table is absent.
     /// `Ok(Some(state))` only after a read-back whose members equal `expected`,
     /// with the program and the foreign complement unchanged.
-    /// Until DELIVER 08-01, the returned `intercept_mark_guard` is `false` to
-    /// mean the guard has not been observed present and exact, not that a read
-    /// found it absent.
+    /// The returned `intercept_mark_guard` reflects the host read-back of the
+    /// exact R18 guard table; `false` means the table was observed absent.
     ///
     /// # Edge cases
     /// A batch rejection preserves the pre-state. A post-commit read failure
@@ -481,9 +479,8 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// absent, and every other member, the program, and the foreign complement
     /// unchanged. Every process-local element token for the requested keys is
     /// retired, so their guards' `Drop` performs no effect.
-    /// Until DELIVER 08-01, the returned `intercept_mark_guard` is `false` to
-    /// mean the guard has not been observed present and exact, not that a read
-    /// found it absent.
+    /// The returned `intercept_mark_guard` reflects the host read-back of the
+    /// exact R18 guard table; `false` means the table was observed absent.
     ///
     /// # Edge cases
     /// Members already absent before the call are simply missing from the
@@ -517,10 +514,8 @@ pub struct InterceptState {
     /// Whether the policy route is present: the `fwmark 0x1 lookup 100` rule
     /// and table 100's `local 0.0.0.0/0 dev lo` route (review finding F18).
     pub policy_route: bool,
-    /// Whether the D-295-R18 intercept-mark guard table is present and exact.
-    /// Until DELIVER 08-01, every producer sets this to `false` to mean the
-    /// guard has not been observed present and exact; it does not mean a read
-    /// found the guard absent.
+    /// Whether the D-295-R18 intercept-mark guard table was observed present
+    /// and exact.
     pub intercept_mark_guard: bool,
     /// The dynamic members.
     pub members: InterceptMembers,
@@ -1163,6 +1158,9 @@ impl MtlsIntercept for HostMtlsIntercept {
                 observed,
             });
         }
+        overdrive_netlink::nft::converge_intercept_mark_guard().map_err(|source| {
+            InterceptError::NftRuleInstallFailed { op: "intercept-mark-guard-converge", source }
+        })?;
         let guard = self.replace_observed_shared_program(observed, requested)?;
         crate::mtls_intercept::ensure_fwmark_rule()?;
         crate::mtls_intercept::ensure_local_route()?;
@@ -1265,6 +1263,13 @@ impl MtlsIntercept for HostMtlsIntercept {
             source,
         })?;
         let policy_route = crate::mtls_intercept::observe_shared_policy_route()?;
+        let intercept_mark_guard =
+            overdrive_netlink::nft::observe_intercept_mark_guard().map_err(|source| {
+                InterceptError::NftRuleInstallFailed {
+                    op: "intercept-mark-guard-read-back",
+                    source,
+                }
+            })?;
 
         let members = InterceptMembers {
             managed_guest_ips: state.managed_guest_ips().clone(),
@@ -1274,7 +1279,7 @@ impl MtlsIntercept for HostMtlsIntercept {
         let result = InterceptState {
             program: postcondition_from_shared_identity(state.identity()),
             policy_route,
-            intercept_mark_guard: false,
+            intercept_mark_guard,
             members,
         };
 

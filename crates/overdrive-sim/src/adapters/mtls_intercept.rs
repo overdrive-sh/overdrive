@@ -544,7 +544,7 @@ impl SimMtlsIntercept {
     fn state_snapshot(&self) -> Option<InterceptState> {
         let program = self.shared_observation.lock().clone()?;
         let members = self.members.lock().members.clone();
-        Some(InterceptState { program, policy_route: true, intercept_mark_guard: false, members })
+        Some(InterceptState { program, policy_route: true, intercept_mark_guard: true, members })
     }
 
     /// Arm a STANDING fault on `bind_transparent`. Fires on every subsequent

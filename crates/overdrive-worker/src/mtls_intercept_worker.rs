@@ -380,21 +380,25 @@ impl SharedListenerTaskOwner {
 
     fn replace_terminal(
         &self,
-        leg: crate::mtls_intercept::InterceptLeg,
-        task: tokio::task::JoinHandle<SharedListenerTaskResult>,
+        leg: InterceptLeg,
+        task: impl FnOnce() -> tokio::task::JoinHandle<SharedListenerTaskResult>,
     ) -> std::result::Result<(), MtlsSharedOwnerError> {
         let mut slots = self.slots.lock();
         let slot = match leg {
             InterceptLeg::F => &mut slots.leg_f,
             InterceptLeg::C => &mut slots.leg_c,
         };
-        if slot.is_some() {
-            return Err(MtlsSharedOwnerError::TaskObserverClosed);
+        if let Some(occupied) = slot.as_ref() {
+            return Err(if occupied.observer.is_finished() {
+                MtlsSharedOwnerError::TaskReturned { leg }
+            } else {
+                MtlsSharedOwnerError::TaskObserverClosed
+            });
         }
         let Some(event_tx) = self.event_tx.upgrade() else {
             return Err(MtlsSharedOwnerError::TaskObserverClosed);
         };
-        *slot = Some(Self::observe(leg, task, &event_tx));
+        *slot = Some(Self::observe(leg, task(), &event_tx));
         Ok(())
     }
 
@@ -600,7 +604,7 @@ mod shared_listener_task_owner_acceptance {
             MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F }
         ));
         owner
-            .replace_terminal(InterceptLeg::F, tokio::spawn(async { Ok(()) }))
+            .replace_terminal(InterceptLeg::F, || tokio::spawn(async { Ok(()) }))
             .expect("only the removed terminal leg can be replaced");
         assert!(matches!(
             owner.wait_failure().await,
@@ -662,10 +666,9 @@ mod shared_listener_task_owner_acceptance {
             (slots.leg_f.is_none(), slots.leg_c.is_some())
         };
         owner
-            .replace_terminal(
-                InterceptLeg::F,
-                tokio::spawn(std::future::pending::<SharedListenerTaskResult>()),
-            )
+            .replace_terminal(InterceptLeg::F, || {
+                tokio::spawn(std::future::pending::<SharedListenerTaskResult>())
+            })
             .expect("only the consumed terminal slot is replaceable");
         let receiver_consumed = consume_task_owner(owner).await;
 
@@ -683,13 +686,17 @@ mod shared_listener_task_owner_acceptance {
             pending_listener_task(Arc::clone(&drops)),
             pending_listener_task(Arc::clone(&drops)),
         );
-        let replacement = tokio::spawn(async { Ok(()) });
+        let spawned = std::sync::atomic::AtomicBool::new(false);
         assert!(matches!(
-            owner.replace_terminal(InterceptLeg::F, replacement),
+            owner.replace_terminal(InterceptLeg::F, || {
+                spawned.store(true, Ordering::SeqCst);
+                tokio::spawn(async { Ok(()) })
+            }),
             Err(MtlsSharedOwnerError::TaskObserverClosed)
         ));
         assert!(owner.is_live(InterceptLeg::F));
         assert!(owner.is_live(InterceptLeg::C));
+        assert!(!spawned.load(Ordering::SeqCst), "an occupied slot starts no replacement task");
         assert_eq!(drops.load(Ordering::SeqCst), 0);
         assert!(consume_task_owner(owner).await, "shutdown consumes the event receiver");
         assert_eq!(drops.load(Ordering::SeqCst), 2, "both original listeners are joined");
@@ -2211,6 +2218,18 @@ impl MtlsInterceptWorker {
     }
 
     fn audit_shared_owner_snapshot(&self, owner: &SharedOwner) -> Result<(), MtlsSharedOwnerError> {
+        // The retained accept-task observer owns the terminal event that the
+        // supervisor consumes before exact-port replacement. Prefer that
+        // terminal outcome over a simultaneous socket-address read failure;
+        // otherwise the repair path can reach `replace_terminal` while the
+        // completed observer still occupies its slot. A live task still
+        // reports its listener's exact local-address error below.
+        if !owner.tasks.is_live(InterceptLeg::F) {
+            return Err(MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F });
+        }
+        if !owner.tasks.is_live(InterceptLeg::C) {
+            return Err(MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::C });
+        }
         let observed_f = owner
             .leg_f_listener
             .as_ref()
@@ -2234,12 +2253,6 @@ impl MtlsInterceptWorker {
                 expected: owner.leg_c_addr,
                 observed: Some(observed_c),
             });
-        }
-        if !owner.tasks.is_live(InterceptLeg::F) {
-            return Err(MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F });
-        }
-        if !owner.tasks.is_live(InterceptLeg::C) {
-            return Err(MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::C });
         }
         // The host adapter's boot observation is intentionally strict about a
         // zero dynamic-element complement. Once an allocation is live, its
@@ -2270,17 +2283,23 @@ impl MtlsInterceptWorker {
         self: &Arc<Self>,
         owner: &mut SharedOwner,
     ) -> Result<(), MtlsSharedOwnerError> {
-        let observed = self
-            .intercept
-            .observe_shared()
-            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
-        if observed != Some(owner.expected.clone()) {
-            return Err(MtlsSharedOwnerError::Intercept {
-                source: InterceptError::PostconditionMismatch {
-                    expected: owner.expected.clone(),
-                    observed,
-                },
-            });
+        // `observe_shared` is the boot-only zero-dynamic-member observation.
+        // With active allocations, the capability registry owns those exact
+        // members and the listener audit intentionally skips that complement;
+        // do the same during exact-port listener recovery.
+        if !self.capabilities.has_live_records() {
+            let observed = self
+                .intercept
+                .observe_shared()
+                .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
+            if observed != Some(owner.expected.clone()) {
+                return Err(MtlsSharedOwnerError::Intercept {
+                    source: InterceptError::PostconditionMismatch {
+                        expected: owner.expected.clone(),
+                        observed,
+                    },
+                });
+            }
         }
         let Some(dead_leg) = owner.tasks.dead_leg() else {
             return self.audit_shared_owner_snapshot(owner);
@@ -2302,11 +2321,12 @@ impl MtlsInterceptWorker {
             });
         }
         let task_listener = Arc::clone(&listener);
+        let task_stop = owner.stop.clone();
+        let task_worker = Arc::downgrade(self);
+        owner.tasks.replace_terminal(dead_leg, || {
+            shared_listener_task(task_listener, task_stop, task_worker, dead_leg)
+        })?;
         *listener_slot = Some(listener);
-        owner.tasks.replace_terminal(
-            dead_leg,
-            shared_listener_task(task_listener, owner.stop.clone(), Arc::downgrade(self), dead_leg),
-        )?;
         self.audit_shared_owner_snapshot(owner)
     }
 
