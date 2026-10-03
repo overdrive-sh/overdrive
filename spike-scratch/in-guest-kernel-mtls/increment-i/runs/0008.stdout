@@ -1,0 +1,936 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=537171e26e9abd1e8dc399ec pid=558581
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 187,884 bytes  received 1,834 bytes  75,887.20 bytes/sec
+total size is 161,774,094  speedup is 852.71
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== preconditions (artifacts must already be built by build-all.sh --no-sudo) =====
+all prebuilt artifacts present
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo ovd-gbr0 ovd-tp-0002 ovd-tp-0003 ovd-veth-bk ovd-veth-cli 
+
+===== stage stock kernel (root reads /boot/vmlinuz; guest kernel == host kernel) =====
+
+===== artifacts =====
+host uname -r: 7.0.0-29-generic
+Firecracker v1.17.0
+b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682  <metal-home>/igkm-spike-a/igkmd/kernel/vmlinuz-host
+730eb753f4c9119bb01b377448c342d22d9598f06e20b862c784b36a207a259b  <metal-home>/igkm-spike-a/igkmd/out/initramfs-mesh.cpio.gz
+6a917bc36c54b799f93edf1079840491b3fe21769a18aacd4f71ebeceb7b7d29  <metal-home>/igkm-spike-a/igkmd/out/module/igkmd_mtls.ko
+7d70489b12588a53f4171d5997384da00f70766d18b8229464ab94d08ed5ebca  <metal-home>/igkm-spike-a/igkmd/out/bin/igkmd_app
+25f51afe1aaa1af6c1d773b17b128565aae75df141b188a806f932bef2d288e4  <metal-home>/igkm-spike-a/igkmd-host-target/release/peer
+fd9c3e3bd2571af0c5ae487bdf9913a4e6b162f26e065b0353b3251dee3d9e18  <metal-home>/igkm-spike-a/igkmd-host-target/release/relay
+module vermagic: 7.0.0-29-generic SMP preempt mod_unload modversions 
+
+===== service registry + backend health (D4: agent-side; mirrors service_backends) =====
+services:
+  # name       vip            policy  backends(ip:port,...)                       expected_peer
+  svc-a        10.80.0.1:9443 allow   192.168.204.1:6443,192.168.204.1:6444       spiffe://overdrive.test/ns/default/sa/peer-allowed
+  svc-denied   10.80.0.9:9443 deny    -                                           spiffe://overdrive.test/ns/default/sa/peer-denied
+health flags (present = healthy): [192.168.204.1_6443 192.168.204.1_6444 ]
+
+===== create tap igkd03145657 (only host network change) -- backends bind 192.168.204.1, guest eth0 is its peer =====
+igkd03145657     DOWN           192.168.204.1/24 
+
+===== start capture, backends (peer), agent (relay with resolve/LB) =====
+tcpdump=558978 peer=558986 relay=558992 t+0.254s
+u_str LISTEN 0      4096   <metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/vsock.sock_7100 53455312 * 0 users:(("relay",pid=558992,fd=3))                                                                                                   
+
+===== firecracker config =====
+{
+  "boot-source": { "kernel_image_path": "<metal-home>/igkm-spike-a/igkmd/kernel/vmlinuz-host", "initrd_path": "<metal-home>/igkm-spike-a/igkmd/out/initramfs-mesh.cpio.gz",
+    "boot_args": "console=ttyS0 reboot=t panic=1 pci=off i8042.nokbd i8042.noaux random.trust_cpu=on" },
+  "drives": [],
+  "machine-config": { "vcpu_count": 1, "mem_size_mib": 512 },
+  "network-interfaces": [ { "iface_id": "net0", "guest_mac": "52:54:00:1a:05:07", "host_dev_name": "igkd03145657" } ],
+  "vsock": { "vsock_id": "vsock0", "guest_cid": 3, "uds_path": "<metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/vsock.sock" }
+}
+
+===== launch =====
+fc pid=558999 t+0.285s
+RUNNER: guest paused after connect-1 -> mark backend A (192.168.204.1_6443) UNHEALTHY (remove health flag) t+1.465s
+RUNNER: health flags now: [192.168.204.1_6444 ] (only B remains -> next resolve must pick B)
+fc exited on its own exit=1 t+6.649s
+
+===== guest serial =====
+2026-10-03T14:56:58.169871470 [igkmd-mesh:main] Running Firecracker v1.17.0
+2026-10-03T14:56:58.182787440 [igkmd-mesh:main] Artificially kick devices
+2026-10-03T14:56:58.182987721 [igkmd-mesh:fc_vcpu 0] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-10-03T14:56:58.183040561 [igkmd-mesh:main] Successfully started microvm that was configured from one single json
+2026-10-03T14:56:58.438329448 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-10-03T14:56:58.438427966 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0xcfc:0x2 failed: Failed to find address range.
+[    0.000000] Linux version 7.0.0-29-generic (buildd@lcy02-amd64-113) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 (Ubuntu 7.0.0-29.29-generic 7.0.12)
+[    0.000000] Command line: console=ttyS0 reboot=t panic=1 pci=off i8042.nokbd i8042.noaux random.trust_cpu=on pci=off virtio_mmio.device=4K@0xc0001000:5 virtio_mmio.device=4K@0xc0002000:6
+[    0.000000] KERNEL supported cpus:
+[    0.000000]   Intel GenuineIntel
+[    0.000000]   AMD AuthenticAMD
+[    0.000000]   Hygon HygonGenuine
+[    0.000000]   Centaur CentaurHauls
+[    0.000000]   zhaoxin   Shanghai  
+[    0.000000] [Firmware Bug]: TSC doesn't count with P0 frequency!
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x00000000000dffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000e0000-0x00000000000fffff]
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001fffffff]  System RAM
+[    0.000000] BIOS-e820: [gap 0x0000000020000000-0x00000000eebfffff]
+[    0.000000] BIOS-e820: [mem 0x00000000eec00000-0x00000000febfffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] DMI not present or invalid.
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x20000 max_arch_pfn = 0x10000000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000001] kvm-clock: using sched offset of 269858533 cycles
+[    0.000003] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000008] tsc: Detected 2396.388 MHz processor
+[    0.000025] last_pfn = 0x20000 max_arch_pfn = 0x10000000000
+[    0.000069] MTRR map: 0 entries (0 fixed + 0 variable; max 16), built from 8 variable MTRRs
+[    0.000073] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.000150] found SMP MP-table at [mem 0x0009fc00-0x0009fc0f]
+[    0.000168] Using GB pages for direct mapping
+[    0.000314] RAMDISK: [mem 0x1fe2e000-0x1fffffff]
+[    0.000320] ACPI: Early table checksum verification disabled
+[    0.000324] ACPI: RSDP 0x00000000000E0000 000024 (v02 FIRECK)
+[    0.000328] ACPI: XSDT 0x00000000000A0135 00003C (v01 FIRECK FCMVXSDT 00000000 FCAT 20240119)
+[    0.000334] ACPI: FACP 0x000000000009FFA5 000114 (v06 FIRECK FCVMFADT 00000000 FCAT 20240119)
+[    0.000339] ACPI: DSDT 0x000000000009FD30 000275 (v02 FIRECK FCVMDSDT 00000000 FCAT 20240119)
+[    0.000342] ACPI: APIC 0x00000000000A00B9 000040 (v06 FIRECK FCVMMADT 00000000 FCAT 20240119)
+[    0.000344] ACPI: MCFG 0x00000000000A00F9 00003C (v01 FIRECK FCMVMCFG 00000000 FCAT 20240119)
+[    0.000346] ACPI: Reserving FACP table memory at [mem 0x9ffa5-0xa00b8]
+[    0.000347] ACPI: Reserving DSDT table memory at [mem 0x9fd30-0x9ffa4]
+[    0.000348] ACPI: Reserving APIC table memory at [mem 0xa00b9-0xa00f8]
+[    0.000348] ACPI: Reserving MCFG table memory at [mem 0xa00f9-0xa0134]
+[    0.000449] No NUMA configuration found
+[    0.000450] Faking a node at [mem 0x0000000000000000-0x000000001fffffff]
+[    0.000461] NODE_DATA(0) allocated [mem 0x1fe03280-0x1fe2dfff]
+[    0.000908] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.000913] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.000914] TSC deadline timer available
+[    0.000917] CPU topo: Max. logical packages:   1
+[    0.000918] CPU topo: Max. logical nodes:      1
+[    0.000919] CPU topo: Num. nodes per package:  1
+[    0.000921] CPU topo: Max. logical dies:       1
+[    0.000922] CPU topo: Max. dies per package:   1
+[    0.000926] CPU topo: Max. threads per core:   1
+[    0.000926] CPU topo: Num. cores per package:     1
+[    0.000927] CPU topo: Num. threads per package:   1
+[    0.000928] CPU topo: Allowing 1 present CPUs plus 0 hotplug CPUs
+[    0.000943] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.000970] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.000971] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.000973] [gap 0x20000000-0xeebfffff] available for PCI devices
+[    0.000974] Booting paravirtualized kernel on KVM
+[    0.000976] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.002139] Zone ranges:
+[    0.002140]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.002142]   DMA32    [mem 0x0000000001000000-0x000000001fffffff]
+[    0.002143]   Normal   empty
+[    0.002144]   Device   empty
+[    0.002145] Movable zone start for each node
+[    0.002147] Early memory node ranges
+[    0.002148]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.002149]   node   0: [mem 0x0000000000100000-0x000000001fffffff]
+[    0.002151] Initmem setup node 0 [mem 0x0000000000001000-0x000000001fffffff]
+[    0.002171] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.002452] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.011610] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:1 nr_cpu_ids:1 nr_node_ids:1
+[    0.013889] percpu: Embedded 85 pages/cpu s225280 r8192 d114688 u2097152
+[    0.013936] kvm-guest: PV spinlocks disabled, single CPU
+[    0.013938] Kernel command line: console=ttyS0 reboot=t panic=1 pci=off i8042.nokbd i8042.noaux random.trust_cpu=on pci=off virtio_mmio.device=4K@0xc0001000:5 virtio_mmio.device=4K@0xc0002000:6
+[    0.014036] random: crng init done
+[    0.014037] printk: log buffer data + meta data: 262144 + 1114112 = 1376256 bytes
+[    0.014604] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.014886] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.014922] Fallback order for Node 0: 0 
+[    0.014925] Built 1 zonelists, mobility grouping on.  Total pages: 130974
+[    0.014926] Policy zone: DMA32
+[    0.014934] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.016652] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.031268] ftrace: allocating 63941 entries in 252 pages
+[    0.031270] ftrace: allocated 252 pages with 6 groups
+[    0.032678] Dynamic Preempt: lazy
+[    0.032862] rcu: Preemptible hierarchical RCU implementation.
+[    0.032864] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=1.
+[    0.032865] 	Trampoline variant of Tasks RCU enabled.
+[    0.032866] 	Rude variant of Tasks RCU enabled.
+[    0.032866] 	Tracing variant of Tasks RCU enabled.
+[    0.032868] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.032868] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.032882] RCU Tasks: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.032884] RCU Tasks Rude: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.038713] NR_IRQS: 524544, nr_irqs: 256, preallocated irqs: 0
+[    0.038855] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.039065] Console: colour dummy device 80x25
+[    0.039134] printk: legacy console [ttyS0] enabled
+[    0.165998] ACPI: Core revision 20251212
+[    0.166908] APIC: Switch to symmetric I/O mode setup
+[    0.168145] x2apic enabled
+[    0.169050] APIC: Switched APIC routing to: physical x2apic
+[    0.170284] clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x228ae3847f6, max_idle_ns: 440795295175 ns
+[    0.172402] Calibrating delay loop (skipped) preset value.. 4792.77 BogoMIPS (lpj=2396388)
+[    0.173396] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.173396] Last level iTLB entries: 4KB 512, 2MB 512, 4MB 256
+[    0.173396] Last level dTLB entries: 4KB 3072, 2MB 3072, 4MB 1536, 1GB 0
+[    0.173396] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.173396] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.173396] Transient Scheduler Attacks: Vulnerable: No microcode
+[    0.173396] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.173396] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.173396] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.173396] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.173396] active return thunk: srso_alias_return_thunk
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x800: 'Control-flow User registers'
+[    0.173396] x86/fpu: Supporting XSAVE feature 0x1000: 'Control-flow Kernel registers (KVM only)'
+[    0.173396] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.173396] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.173396] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.173396] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.173396] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.173396] x86/fpu: xstate_offset[11]: 2440, xstate_sizes[11]:   16
+[    0.173396] x86/fpu: xstate_offset[12]: 2456, xstate_sizes[12]:   24
+[    0.173396] x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format.
+[    0.173396] Freeing SMP alternatives memory: 56K
+[    0.173396] pid_max: default: 32768 minimum: 301
+[    0.173396] landlock: Up and running.
+[    0.173396] Yama: becoming mindful.
+[    0.173396] AppArmor: AppArmor initialized
+[    0.173396] AppArmor: AppArmor secmark mediation reserved: ready to be enabled
+[    0.173396] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.173396] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.173396] VFS: Finished mounting rootfs on nullfs
+[    0.173396] smpboot: CPU0: AMD EPYC (family: 0x19, model: 0xa0, stepping: 0x2)
+[    0.174161] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.174415] ... version:                   2
+[    0.175261] ... bit width:                 48
+[    0.175402] ... generic counters:          6
+[    0.176254] ... generic bitmap:            000000000000003f
+[    0.176402] ... fixed-purpose counters:    0
+[    0.177256] ... fixed-purpose bitmap:      0000000000000000
+[    0.177402] ... value mask:                0000ffffffffffff
+[    0.178402] ... max period:                00007fffffffffff
+[    0.179402] ... global_ctrl mask:          000000000000003f
+[    0.180596] signal: max sigframe size: 3376
+[    0.181487] rcu: Hierarchical SRCU implementation.
+[    0.182408] rcu: 	Max phase no-delay instances is 400.
+[    0.191776] smp: Bringing up secondary CPUs ...
+[    0.192424] smp: Brought up 1 node, 1 CPU
+[    0.193231] smpboot: Total of 1 processors activated (4792.77 BogoMIPS)
+[    0.193615] Memory: 159292K/523896K available (23799K kernel code, 4952K rwdata, 16764K rodata, 5292K init, 5856K bss, 359152K reserved, 0K cma-reserved)
+[    0.194626] devtmpfs: initialized
+[    0.195509] x86/mm: Memory block size: 128MB
+[    0.197371] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.197427] posixtimers hash table entries: 512 (order: 1, 8192 bytes, linear)
+[    0.198446] futex hash table entries: 256 (16384 bytes on 1 NUMA nodes, total 16 KiB, linear).
+2026-10-03T14:56:58.750672697 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750735292 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750767330 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750798787 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750830425 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750862673 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750894792 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750926109 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750957426 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.750988703 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.751020110 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.751051427 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.751082805 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.751113861 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.751145078 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.751176486 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.751207983 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T14:56:58.751238990 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+[    0.200402] PM: RTC time: 00:00:00, date: 2000-00-00
+[    0.204300] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.204594] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.205555] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.206415] audit: initializing netlink subsys (disabled)
+[    0.207705] thermal_sys: Registered thermal governor 'fair_share'
+[    0.207707] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.208404] thermal_sys: Registered thermal governor 'step_wise'
+[    0.209408] audit: type=2000 audit(1791039418.514:1): state=initialized audit_enabled=0 res=1
+[    0.211405] thermal_sys: Registered thermal governor 'user_space'
+[    0.211407] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.212450] cpuidle: using governor ladder
+[    0.214232] cpuidle: using governor menu
+[    0.214548] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.215578] PCI: Fatal: No config space access function found
+[    0.216693] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.220539] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.221403] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.226402] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.227402] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.252072] ACPI: Added _OSI(Module Device)
+[    0.252404] ACPI: Added _OSI(Processor Device)
+[    0.253294] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.257676] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.258542] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.259549] ACPI: Interpreter enabled
+[    0.260296] ACPI: PM: (supports S0)
+[    0.263481] ACPI: Using IOAPIC for interrupt routing
+[    0.264474] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.267401] PCI: Using E820 reservations for host bridge windows
+[    0.271912] iommu: Default domain type: Translated
+[    0.274401] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.275792] SCSI subsystem initialized
+[    0.278452] ACPI: bus type USB registered
+[    0.279288] usbcore: registered new interface driver usbfs
+[    0.279416] usbcore: registered new interface driver hub
+[    0.282438] usbcore: registered new device driver usb
+[    0.283439] pps_core: LinuxPPS API ver. 1 registered
+[    0.286401] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.287409] PTP clock support registered
+[    0.290583] EDAC MC: Ver: 3.0.0
+[    0.291903] NetLabel: Initializing
+[    0.292403] NetLabel:  domain hash size = 128
+[    0.293263] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.295454] NetLabel:  unlabeled traffic allowed by default
+[    0.298441] mctp: management component transport protocol core
+[    0.299403] NET: Registered PF_MCTP protocol family
+[    0.301626] PCI: Using ACPI for IRQ routing
+[    0.302403] PCI: System does not support PCI
+[    0.303327] vgaarb: loaded
+[    0.304124] clocksource: Switched to clocksource kvm-clock
+[    0.305027] VFS: Disk quotas dquot_6.6.0
+[    0.305863] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.309221] AppArmor: AppArmor Filesystem Enabled
+[    0.310222] pnp: PnP ACPI init
+[    0.311052] pnp: PnP ACPI: found 2 devices
+[    0.314829] NET: Registered PF_INET protocol family
+[    0.315927] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.342914] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.344595] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.346154] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.347758] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.349198] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.350563] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.352041] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.353363] UDP-Lite hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.354847] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.355997] NET: Registered PF_XDP protocol family
+[    0.356975] PCI: CLS 0 bytes, default 64
+[    0.357889] virtio-mmio: Registering device virtio-mmio.0 at 0xc0001000-0xc0001fff, IRQ 5.
+[    0.359603] Trying to unpack rootfs image as initramfs...
+[    0.365595] virtio-mmio: Registering device virtio-mmio.1 at 0xc0002000-0xc0002fff, IRQ 6.
+[    0.367333] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x228ae3847f6, max_idle_ns: 440795295175 ns
+[    0.371560] clocksource: Switched to clocksource tsc
+[    0.372608] platform rtc_cmos: registered platform RTC device (no PNP device found)
+2026-10-03T14:56:58.948451205 [igkmd-mesh:fc_vcpu 0] 2 messages were suppressed due to rate limiting
+2026-10-03T14:56:58.948507179 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x87:0x1 failed: Failed to find address range.
+[    0.379425] Initialise system trusted keyrings
+[    0.380350] Key type blacklist registered
+[    0.383617] workingset: timestamp_bits=36 max_order=17 bucket_order=0
+[    0.387878] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.389224] fuse: init (API version 7.45)
+[    0.392685] integrity: Platform Keyring initialized
+[    0.393686] integrity: Machine keyring initialized
+[    0.411565] Freeing initrd memory: 1864K
+[    0.417137] Key type asymmetric registered
+[    0.417981] Asymmetric key parser 'x509' registered
+[    0.419033] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 242)
+[    0.420579] io scheduler mq-deadline registered
+[    0.421656] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.423798] virtio-mmio virtio-mmio.0: error -EBUSY: can't request region for resource [mem 0xc0001000-0xc0001fff]
+[    0.425854] virtio-mmio virtio-mmio.0: probe with driver virtio-mmio failed with error -16
+[    0.427512] virtio-mmio virtio-mmio.1: error -EBUSY: can't request region for resource [mem 0xc0002000-0xc0002fff]
+[    0.429560] virtio-mmio virtio-mmio.1: probe with driver virtio-mmio failed with error -16
+[    0.431338] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    0.455879] 00:00: ttyS0 at I/O 0x3f8 (irq = 28, base_baud = 115200) is a U6_16550A
+2026-10-03T14:56:59.027630699 [igkmd-mesh:fc_vcpu 0] 2 messages were suppressed due to rate limiting
+2026-10-03T14:56:59.027672982 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x2f9:0x1 failed: Failed to find address range.
+[    0.461233] Linux agpgart interface v0.103
+[    0.464281] loop: module loaded
+[    0.465204] ACPI: bus type drm_connector registered
+[    0.466395] tun: Universal TUN/TAP device driver, 1.6
+2026-10-03T14:56:59.038123922 [igkmd-mesh:fc_vcpu 0] [Net:net0] notifying queues
+[    0.468293] PPP generic driver version 2.4.2
+[    0.469360] i8042: PNP: PS/2 Controller [PNP0303:PS2] at 0x60,0x64 irq 29
+[    0.471024] mousedev: PS/2 mouse device common for all mice
+[    0.472413] rtc_cmos rtc_cmos: only 24-hr supported
+[    0.473430] i2c_dev: i2c /dev entries driver
+[    0.474337] device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+[    0.476779] device-mapper: uevent: version 1.0.3
+[    0.477803] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[    0.479565] amd_pstate: The CPPC feature is supported but currently disabled by the BIOS.
+[    0.479565] Please enable it if your BIOS has the CPPC option.
+[    0.482321] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    0.483886] drop_monitor: Initializing network drop monitor service
+[    0.485271] NET: Registered PF_INET6 protocol family
+[    0.486609] Segment Routing with IPv6
+[    0.487363] In-situ OAM (IOAM) with IPv6
+[    0.488210] NET: Registered PF_PACKET protocol family
+[    0.489276] Key type dns_resolver registered
+2026-10-03T14:56:59.060355904 [igkmd-mesh:fc_vcpu 0] Invalid MMIO read @ 0xfed803c0:0x4: Failed to find address range.
+2026-10-03T14:56:59.060376505 [igkmd-mesh:fc_vcpu 0] Invalid MMIO read @ 0xfed803c0:0x4: Failed to find address range.
+[    0.490507] IPI shorthand broadcast: enabled
+[    0.494971] sched_clock: Marking stable (361001643, 133534033)->(624088063, -129552387)
+[    0.496808] registered taskstats version 1
+[    0.498041] Loading compiled-in X.509 certificates
+[    0.499654] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    0.502065] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    0.504635] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    0.507022] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    0.509660] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    0.511631] blacklist: Loading compiled-in revocation X.509 certificates
+[    0.513001] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    0.514967] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    0.517052] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    0.519213] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    0.521305] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    0.523433] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    0.525604] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    0.527748] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.540240] Demotion targets for Node 0: null
+[    0.541257] Key type .fscrypt registered
+[    0.542070] Key type fscrypt-provisioning registered
+[    0.543196] Key type big_key registered
+[    0.544768] Key type encrypted registered
+[    0.545593] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.546748] ima: No TPM chip found, activating TPM-bypass!
+[    0.547870] Loading compiled-in module X.509 certificates
+[    0.549421] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    0.551389] ima: Allocated hash algorithm: sha256
+[    0.552362] ima: No architecture policies found
+[    0.553335] evm: Initialising EVM extended attributes:
+[    0.554369] evm: security.selinux
+[    0.555055] evm: security.SMACK64
+[    0.555742] evm: security.SMACK64EXEC
+[    0.556471] evm: security.SMACK64TRANSMUTE
+[    0.557311] evm: security.SMACK64MMAP
+[    0.558065] evm: security.apparmor
+[    0.558769] evm: security.ima
+[    0.559365] evm: security.capability
+[    0.560104] evm: HMAC attrs: 0x1
+[    0.561173] PM:   Magic number: 0:110:269243
+[    0.562298] RAS: Correctable Errors collector initialized.
+[    0.563798] clk: Disabling unused clocks
+[    0.564604] PM: genpd: Disabling unused power domains
+[    0.567372] Freeing unused decrypted memory: 2028K
+[    0.568547] Freeing unused kernel image (initmem) memory: 5292K
+[    0.569299] Write protecting the kernel read-only data: 43008k
+[    0.570458] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    0.571615] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    0.635095] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.635940] Run /init as init process
+IGKMD-INIT: booted 7.0.0-29-generic; links:
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1000\    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop qlen 1000\    link/ether 52:54:00:1a:05:07 brd ff:ff:ff:ff:ff:ff
+IGKMD-INIT: eth0 2: eth0    inet 192.168.204.2/24 scope global eth0\       valid_lft forever preferred_lft forever
+IGKMD-INIT: insmod tls OK
+[    0.653547] NET: Registered PF_VSOCK protocol family
+IGKMD-INIT: insmod vsock OK
+IGKMD-INIT: insmod vmw_vsock_virtio_transport_common OK
+2026-10-03T14:56:59.229879755 [igkmd-mesh:fc_vcpu 0] [Vsock:vsock] notifying queues
+IGKMD-INIT: insmod vmw_vsock_virtio_transport OK
+IGKMD-INIT: /dev/vsock=crw-------    1 0        0          10, 262 Oct  3 14:56 /dev/vsock
+[    0.664941] igkmd_mtls: loading out-of-tree module taints kernel.
+[    0.665735] igkmd_mtls: module verification failed: signature and/or required key missing - tainting kernel
+[    0.667154] IGKMD: init on stock kernel; mesh="10.80.0.1:9443,10.80.0.9:9443" agent cid=2 port=7100
+[    0.677203] IGKMD: hooked tcp_prot connect/sendmsg/recvmsg
+IGKMD-INIT: insmod igkmd_mtls OK
+IGKMD-INIT: ===== CASE passthrough (non-mesh 192.168.204.1:5001, plaintext positive control) =====
+IGKMD-APP: START mode=passthrough vip=192.168.204.1:5001 tag=pt
+IGKMD-APP: connect VIP 192.168.204.1:5001 returned 0 (module resolved+rewrote dst and installed transparent mTLS if mesh)
+IGKMD-APP: write(39) rc=39: IGKM-D-REQ-PT-pt guest->peer plaintext
+IGKMD-APP: pt read(48) PLAINTEXT: IGKM-D-RESP-PT-pt from-PT peer->guest plaintext
+IGKMD-APP: DONE mode=passthrough
+IGKMD-INIT: ===== CASE lbfresh (VIP 10.80.0.1:9443 -> svc-a; connect-1 lands on first-healthy; host toggles health; connect-2 re-resolves) =====
+IGKMD-APP: START mode=lbfresh vip=10.80.0.1:9443 tag=svca
+[    0.689827] IGKMD: [resolve] vip 10.80.0.1:9443 -> asking agent over vsock cid=2 port=7100
+[    0.691082] IGKMD: [resolve] agent chose backend 192.168.204.1:6443 expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; rewriting connect dst
+IGKMD-APP: connect VIP 10.80.0.1:9443 returned 0 (module resolved+rewrote dst and installed transparent mTLS if mesh)
+[    0.694497] IGKMD: [c1] HOLD on first I/O: mesh 192.168.204.1:6443, relaying TLS handshake over vsock to cid=2 port=7100
+[    0.697591] ------------[ cut here ]------------
+[    0.698205] memcpy: detected field-spanning write (size 36) of single field "dst" at include/linux/sockptr.h:49 (size 0)
+[    0.699522] WARNING: include/linux/sockptr.h:49 at do_tls_setsockopt_conf+0x743/0x9c0 [tls], CPU#0: igkmd_app/85
+[    0.700793] Modules linked in: igkmd_mtls(OE) vmw_vsock_virtio_transport vmw_vsock_virtio_transport_common vsock tls
+[    0.702076] CPU: 0 UID: 0 PID: 85 Comm: igkmd_app Tainted: G           OE       7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    0.703411] Tainted: [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+[    0.704088] RIP: 0010:do_tls_setsockopt_conf+0x74f/0x9c0 [tls]
+[    0.704830] Code: 44 24 04 4c 89 54 24 08 44 88 5c 24 10 4c 89 4c 24 18 48 89 44 24 20 48 8d 3d ed 1c e7 ff 31 c9 48 c7 c2 00 58 48 c0 4c 89 ee <67> 48 0f b9 3a 44 8b 44 24 04 4c 8b 54 24 08 44 0f b6 5c 24 10 4c
+[    0.707064] RSP: 0018:ff5acdcdc01cf760 EFLAGS: 00010246
+[    0.707729] RAX: ff1b1f1b42b994cc RBX: ff5acdcdc01cf8dc RCX: 0000000000000000
+[    0.708603] RDX: ffffffffc0485800 RSI: 0000000000000024 RDI: ffffffffc0473030
+[    0.709475] RBP: ff5acdcdc01cf7e8 R08: 0000000000000001 R09: ff1b1f1b42b994c8
+[    0.710361] R10: ff1b1f1b411a0980 R11: ff5acdcdc01cf700 R12: ff1b1f1b42b99400
+[    0.711249] R13: 0000000000000024 R14: 0000000000000001 R15: ff5acdcdc01cf8d8
+[    0.712140] FS:  0000000000ca7400(0000) GS:ff1b1f1bb2fff000(0000) knlGS:0000000000000000
+[    0.713135] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    0.713866] CR2: 00000000004ba1c0 CR3: 0000000002fae005 CR4: 0000000000f71ef0
+[    0.714755] PKRU: 55555554
+[    0.715107] Call Trace:
+[    0.715428]  <TASK>
+[    0.715742]  ? evict+0xe0/0x290
+[    0.716152]  do_tls_setsockopt+0x1dd/0x270 [tls]
+[    0.716749]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.717343]  tls_setsockopt+0x5a/0x80 [tls]
+[    0.717890]  do_handshake.cold+0x3a6/0x64d [igkmd_mtls]
+[    0.718549]  maybe_handshake+0x1e1/0x450 [igkmd_mtls]
+[    0.719186]  hooked_sendmsg+0x96/0x190 [igkmd_mtls]
+[    0.719811]  inet_sendmsg+0x7f/0x90
+[    0.720257]  sock_write_iter+0x179/0x1a0
+[    0.720774]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.721368]  vfs_write+0x3c6/0x490
+[    0.721830]  ksys_write+0xc6/0xf0
+[    0.722256]  __x64_sys_write+0x19/0x30
+[    0.722752]  x64_sys_call+0x22f/0x2390
+[    0.723227]  do_syscall_64+0x105/0x5a0
+[    0.723727]  ? sched_clock_noinstr+0x9/0x10
+[    0.724257]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.724877]  ? sched_clock+0x10/0x30
+[    0.725331]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.725946]  ? sched_clock_cpu+0xf/0x260
+[    0.726440]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.727057]  ? pick_next_task+0x67/0xc20
+[    0.727562]  ? sched_clock_noinstr+0x9/0x10
+[    0.728097]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.728716]  ? psi_task_switch+0xb7/0x390
+[    0.729219]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.729834]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.730424]  ? raw_spin_rq_unlock+0x14/0x50
+[    0.730972]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.731578]  ? finish_task_switch.isra.0+0x95/0x2d0
+[    0.732222]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.732844]  ? __schedule+0x2c3/0x650
+[    0.733309]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.733927]  ? schedule+0x3d/0x90
+[    0.734350]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.734965]  ? exit_to_user_mode_loop+0x68/0x540
+[    0.735550]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.736163]  ? arch_exit_to_user_mode_prepare.isra.0+0xc3/0xe0
+[    0.736905]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.737497]  ? do_syscall_64+0x140/0x5a0
+[    0.738080]  ? __sys_setsockopt+0x7b/0xd0
+[    0.738598]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.739200]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.739815]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    0.740521]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.741141]  ? do_syscall_64+0x140/0x5a0
+[    0.741655]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.742248]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[    0.742989]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.743594]  ? irqentry_exit+0x97/0x6f0
+[    0.744093]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.744714]  ? exc_page_fault+0x94/0x1e0
+[    0.745205]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.745821]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    0.746441] RIP: 0033:0x44ce56
+[    0.746860] Code: 47 ba 04 00 00 00 48 c7 c0 f0 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[    0.749101] RSP: 002b:00007ffe94a82300 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[    0.750045] RAX: ffffffffffffffda RBX: 00007ffe94a82370 RCX: 000000000044ce56
+[    0.750932] RDX: 000000000000002c RSI: 00007ffe94a82370 RDI: 0000000000000003
+[    0.751824] RBP: 00007ffe94a82310 R08: 0000000000000000 R09: 0000000000000000
+[    0.752716] R10: 0000000000000000 R11: 0000000000000202 R12: 00000000000024e3
+[    0.753594] R13: 00007ffe94a82fb4 R14: 0000000000000002 R15: 00000000004af160
+[    0.754477]  </TASK>
+[    0.754795] ---[ end trace 0000000000000000 ]---
+[    0.755799] IGKMD: [c1] HANDSHAKE DONE peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; kTLS installed on the workload socket (TO_PEER=3 NEED_PEER=3); kernel carries TLS, relay out of path
+[    0.757944] IGKMD: [c1] RESOLVE-MATCH expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed handshake_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed match=1 (the backend reached is the one resolution chose)
+IGKMD-APP: write(44) rc=44: IGKM-D-REQ-svca-c1 guest->peer lb-connect-1
+IGKMD-APP: lb-c1 read(52) PLAINTEXT: IGKM-D-RESP-svca-c1 from-A peer->guest lb-connect-1
+IGKMD-APP: PAUSE-FOR-HEALTH-TOGGLE (sleeping 3s; host marks first-choice backend A unhealthy now)
+[    3.764498] IGKMD: [resolve] vip 10.80.0.1:9443 -> asking agent over vsock cid=2 port=7100
+[    3.767017] IGKMD: [resolve] agent chose backend 192.168.204.1:6444 expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; rewriting connect dst
+IGKMD-APP: connect VIP 10.80.0.1:9443 returned 0 (module resolved+rewrote dst and installed transparent mTLS if mesh)
+[    3.774142] IGKMD: [c2] HOLD on first I/O: mesh 192.168.204.1:6444, relaying TLS handshake over vsock to cid=2 port=7100
+[    3.779445] IGKMD: [c2] HANDSHAKE DONE peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; kTLS installed on the workload socket (TO_PEER=3 NEED_PEER=3); kernel carries TLS, relay out of path
+[    3.784153] IGKMD: [c2] RESOLVE-MATCH expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed handshake_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed match=1 (the backend reached is the one resolution chose)
+IGKMD-APP: write(64) rc=64: IGKM-D-REQ-svca-c2 guest->peer lb-connect-2-after-health-toggle
+IGKMD-APP: lb-c2 read(72) PLAINTEXT: IGKM-D-RESP-svca-c2 from-B peer->guest lb-connect-2-after-health-toggle
+IGKMD-APP: lbfresh settle (sleeping 2s so the capture flushes)
+IGKMD-APP: DONE mode=lbfresh
+IGKMD-INIT: ===== CASE deny (VIP 10.80.0.9:9443 -> svc-denied; resolve DENY -> connect() EACCES, no TCP) =====
+IGKMD-APP: START mode=deny vip=10.80.0.9:9443 tag=dn
+[    5.831077] IGKMD: [resolve] vip 10.80.0.9:9443 -> asking agent over vsock cid=2 port=7100
+[    5.833527] IGKMD: [resolve] vip 10.80.0.9:9443 DENY from agent: policy deny: service svc-denied not permitted for spiffe://overdrive.test/ns/default/sa/guest-client -> connect() returns -EACCES, no TCP, no app bytes
+IGKMD-APP: connect VIP 10.80.0.9:9443 FAILED errno=13 (Permission denied)
+IGKMD-APP: DENY-CASE OK: connect() refused (expect EACCES=13); no TCP SYN, no application bytes on the wire
+IGKMD-INIT: in-guest kTLS proof -- /proc/net/tls_stat (nonzero TxSw/RxSw = kernel kTLS active):
+TlsCurrTxSw                     	0
+TlsCurrRxSw                     	0
+TlsCurrTxDevice                 	0
+TlsCurrRxDevice                 	0
+TlsTxSw                         	2
+TlsRxSw                         	2
+TlsTxDevice                     	0
+TlsRxDevice                     	0
+TlsDecryptError                 	0
+TlsRxDeviceResync               	0
+TlsDecryptRetry                 	0
+TlsRxNoPadViolation             	0
+TlsRxRekeyOk                    	0
+TlsRxRekeyError                 	0
+TlsTxRekeyOk                    	0
+TlsTxRekeyError                 	0
+TlsRxRekeyReceived              	0
+IGKMD-INIT: ss -K (tls ULP on the workload sockets):
+  (ss has no -K / no tls sockets listed)
+IGKMD-INIT: VERDICT mesh-complete
+[    5.873876] reboot: Restarting system
+[    5.874657] reboot: machine restart
+2026-10-03T14:57:04.446601274 [igkmd-mesh:fc_vcpu 0] Unexpected exit reason on vcpu run: Shutdown
+2026-10-03T14:57:04.446686933 [igkmd-mesh:main] Vmm is stopping.
+2026-10-03T14:57:04.446716468 [igkmd-mesh:main] Killing vCPU threads
+2026-10-03T14:57:04.500191624 [igkmd-mesh:main] RunWithoutApiError error: MicroVMStopped without an error: GenericError
+2026-10-03T14:57:04.500279396 [igkmd-mesh:main] Firecracker exiting with error. exit_code=1
+
+===== relay log (agent: resolve requests, backend choices, handshakes, custody) =====
+RELAY listening on unix <metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/vsock.sock_7100 pid=558992 client identity=spiffe://overdrive.test/ns/default/sa/guest-client server identity=spiffe://overdrive.test/ns/default/sa/guest-server (keys: client PKCS#8 138 B, guest-server PKCS#8 138 B, P-256 scalars 32 B, held in this process only; one thread per vsock connection) t+0.242026s
+RELAY service registry (D4, health-dir <metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/health):
+RELAY   service svc-a vip 10.80.0.1:9443 policy=allow backends=[192.168.204.1:6443,192.168.204.1:6444] expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed
+RELAY   service svc-denied vip 10.80.0.9:9443 policy=deny backends=[] expected_peer=spiffe://overdrive.test/ns/default/sa/peer-denied
+RELAY[c1] vsock connection accepted t+1.364583s
+RELAY[c1] vsock rx RESOLVE payload=7 vip=10.80.0.1:9443 (service-name resolution on the SAME vsock channel — D4) t+1.365762s
+RELAY[c1] resolve service=svc-a backends(by Ord)[192.168.204.1:6443=healthy 192.168.204.1:6444=healthy] -> chose 192.168.204.1:6443 (first-healthy, MtlsResolve-style) expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed t+1.365807s
+RELAY[c1] vsock tx RESOLVED backend=192.168.204.1:6443 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.365822s
+RELAY[c2] vsock connection accepted t+1.369284s
+RELAY[c2] vsock rx OPEN payload=7 dst=192.168.204.1:6443 role=TLS client, local identity=spiffe://overdrive.test/ns/default/sa/guest-client t+1.370707s
+RELAY[c2] vsock tx TO_PEER payload=194 wire=199 records[0x16/189] t+1.370964s
+RELAY[c2] vsock tx NEED_PEER payload=0 wire=5  t+1.370974s
+RELAY[c2] vsock rx FROM_PEER payload=127 records[0x16/122] t+1.371550s
+RELAY[c2] vsock tx TO_PEER payload=6 wire=11 records[0x14/1] t+1.371685s
+RELAY[c2] vsock tx NEED_PEER payload=0 wire=5  t+1.371693s
+RELAY[c2] vsock rx FROM_PEER payload=6 records[0x14/1] t+1.371825s
+RELAY[c2] vsock tx NEED_PEER payload=0 wire=5  t+1.371835s
+RELAY[c2] vsock rx FROM_PEER payload=696 records[0x17/691] t+1.371934s
+RELAY[c2] vsock tx TO_PEER payload=610 wire=615 records[0x17/605] t+1.372305s
+RELAY[c2] handshake complete: policy ALLOW local spiffe://overdrive.test/ns/default/sa/guest-client <-> peer spiffe://overdrive.test/ns/default/sa/peer-allowed; suite=TLS13_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0 buffered_plaintext=false; traffic secrets from rustls KeyLog tx=CLIENT_TRAFFIC_SECRET_0 rx=SERVER_TRAFFIC_SECRET_0 (32 B each), host check HKDF(secret)==rustls key/iv tx=true rx=true t+1.372321s
+RELAY[c2] vsock tx SECRETS payload=194 wire=199 (v2 suite=0x1301 tx: seq 0 secret 32B key 16B iv 12B; rx: seq 0 secret 32B key 16B iv 12B; peer id 50B) t+1.372333s
+RELAY[c2] guest closed the vsock connection (agent out of the data path) t+1.372428s
+RELAY[c2] tally guest->host FROM_PEER: frames=3 wire_bytes=844
+RELAY[c2] tally guest->host OPEN: frames=1 wire_bytes=12
+RELAY[c2] tally host->guest NEED_PEER: frames=3 wire_bytes=15
+RELAY[c2] tally host->guest SECRETS: frames=1 wire_bytes=199
+RELAY[c2] tally host->guest TO_PEER: frames=3 wire_bytes=825
+RELAY[c2] custody: host->guest total 1039 bytes; client SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; guest-server SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; application traffic secrets sent (changed vs Spike B: expected 1 each when ALLOW) = [1,1]
+RELAY[c3] vsock connection accepted t+4.439208s
+RELAY[c3] vsock rx RESOLVE payload=7 vip=10.80.0.1:9443 (service-name resolution on the SAME vsock channel — D4) t+4.441583s
+RELAY[c3] resolve service=svc-a backends(by Ord)[192.168.204.1:6443=unhealthy 192.168.204.1:6444=healthy] -> chose 192.168.204.1:6444 (first-healthy, MtlsResolve-style) expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed t+4.441642s
+RELAY[c3] vsock tx RESOLVED backend=192.168.204.1:6444 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+4.441658s
+RELAY[c4] vsock connection accepted t+4.447396s
+RELAY[c4] vsock rx OPEN payload=7 dst=192.168.204.1:6444 role=TLS client, local identity=spiffe://overdrive.test/ns/default/sa/guest-client t+4.452039s
+RELAY[c4] vsock tx TO_PEER payload=194 wire=199 records[0x16/189] t+4.452223s
+RELAY[c4] vsock tx NEED_PEER payload=0 wire=5  t+4.452232s
+RELAY[c4] vsock rx FROM_PEER payload=127 records[0x16/122] t+4.453050s
+RELAY[c4] vsock tx TO_PEER payload=6 wire=11 records[0x14/1] t+4.453168s
+RELAY[c4] vsock tx NEED_PEER payload=0 wire=5  t+4.453175s
+RELAY[c4] vsock rx FROM_PEER payload=6 records[0x14/1] t+4.453356s
+RELAY[c4] vsock tx NEED_PEER payload=0 wire=5  t+4.453363s
+RELAY[c4] vsock rx FROM_PEER payload=695 records[0x17/690] t+4.453650s
+RELAY[c4] vsock tx TO_PEER payload=610 wire=615 records[0x17/605] t+4.453983s
+RELAY[c4] handshake complete: policy ALLOW local spiffe://overdrive.test/ns/default/sa/guest-client <-> peer spiffe://overdrive.test/ns/default/sa/peer-allowed; suite=TLS13_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0 buffered_plaintext=false; traffic secrets from rustls KeyLog tx=CLIENT_TRAFFIC_SECRET_0 rx=SERVER_TRAFFIC_SECRET_0 (32 B each), host check HKDF(secret)==rustls key/iv tx=true rx=true t+4.453998s
+RELAY[c4] vsock tx SECRETS payload=194 wire=199 (v2 suite=0x1301 tx: seq 0 secret 32B key 16B iv 12B; rx: seq 0 secret 32B key 16B iv 12B; peer id 50B) t+4.454008s
+RELAY[c4] guest closed the vsock connection (agent out of the data path) t+4.454168s
+RELAY[c4] tally guest->host FROM_PEER: frames=3 wire_bytes=843
+RELAY[c4] tally guest->host OPEN: frames=1 wire_bytes=12
+RELAY[c4] tally host->guest NEED_PEER: frames=3 wire_bytes=15
+RELAY[c4] tally host->guest SECRETS: frames=1 wire_bytes=199
+RELAY[c4] tally host->guest TO_PEER: frames=3 wire_bytes=825
+RELAY[c4] custody: host->guest total 1039 bytes; client SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; guest-server SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; application traffic secrets sent (changed vs Spike B: expected 1 each when ALLOW) = [1,1]
+RELAY[c5] vsock connection accepted t+6.505801s
+RELAY[c5] vsock rx RESOLVE payload=7 vip=10.80.0.9:9443 (service-name resolution on the SAME vsock channel — D4) t+6.508145s
+RELAY[c5] resolve service=svc-denied vip=10.80.0.9:9443 policy=DENY for local spiffe://overdrive.test/ns/default/sa/guest-client -> DENY (no backend; guest connect() fails, no TCP) t+6.508167s
+
+===== peer log (backends A/B: which one served each request) =====
+PEER listening tls 192.168.204.1:6443 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed backend-label=A send_tls13_tickets=0 (production-faithful: no NewSessionTicket) t+0.237406s
+PEER listening tls 192.168.204.1:6444 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed backend-label=B send_tls13_tickets=0 (production-faithful: no NewSessionTicket) t+0.237518s
+PEER listening plain 192.168.204.1:5001 (non-mesh pass-through) t+0.237572s
+PEER ready t+0.237611s
+PEER[PT:5001#1] accepted tcp from 192.168.204.2:47918 t+1.357210s
+PEER[PT:5001#1] rx plaintext line 1 (39 bytes): IGKM-D-REQ-PT-pt guest->peer plaintext\n t+1.358728s
+PEER[PT:5001#1] tx plaintext line 1 (48 bytes): IGKM-D-RESP-PT-pt from-PT peer->guest plaintext\n t+1.358777s
+PEER[PT:5001#1] EOF t+1.360730s
+PEER[A:6443#1] accepted tcp from 192.168.204.2:60326 t+1.367824s
+PEER[A:6443#1] handshake OK version=TLSv1_3 suite=TLS13_AES_128_GCM_SHA256 verified client SPIFFE ID=spiffe://overdrive.test/ns/default/sa/guest-client backend-label=A send_tls13_tickets=0 (production-faithful) t+1.431074s
+PEER[A:6443#1] rx plaintext line 1 (44 bytes): IGKM-D-REQ-svca-c1 guest->peer lb-connect-1\n t+1.435314s
+PEER[A:6443#1] tx plaintext line 1 (52 bytes): IGKM-D-RESP-svca-c1 from-A peer->guest lb-connect-1\n t+1.435372s
+PEER[A:6443#1] read ended: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof; application plaintext bytes received=44 t+1.437520s
+PEER[B:6444#1] accepted tcp from 192.168.204.2:38652 t+4.445807s
+PEER[B:6444#1] handshake OK version=TLSv1_3 suite=TLS13_AES_128_GCM_SHA256 verified client SPIFFE ID=spiffe://overdrive.test/ns/default/sa/guest-client backend-label=B send_tls13_tickets=0 (production-faithful) t+4.494035s
+PEER[B:6444#1] rx plaintext line 1 (64 bytes): IGKM-D-REQ-svca-c2 guest->peer lb-connect-2-after-health-toggle\n t+4.494058s
+PEER[B:6444#1] tx plaintext line 1 (72 bytes): IGKM-D-RESP-svca-c2 from-B peer->guest lb-connect-2-after-health-toggle\n t+4.494091s
+PEER[B:6444#1] read ended: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof; application plaintext bytes received=64 t+4.497080s
+
+===== tap capture scan (mesh plaintext REQUEST/RESPONSE must be 0x; plaintext OK on :5001) =====
+-rw-r--r-- 1 tcpdump tcpdump 8954 Oct  3 14:57 <metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/tap.pcap
+a2ebe016e8c012c4d7f81c966118aef5f13e2ac2b63ae66237d488b822b5dbfb  <metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/tap.pcap
+SCAN conn client guest:47918 -> server peer:5001 (PLAIN) first packet t+1.356896s
+SCAN   guest->peer: 39 bytes flags[FIN,SYN] marker(IGKM-D-)=1
+SCAN     contains plaintext b'IGKM-D-REQ-PT-pt guest->peer plaintext\n'
+SCAN   peer->guest: 48 bytes flags[FIN,SYN] marker(IGKM-D-)=1
+SCAN     contains plaintext b'IGKM-D-RESP-PT-pt from-PT peer->guest plaintext\n'
+SCAN conn client guest:60326 -> server peer:6443 (TLS) first packet t+1.367664s
+SCAN   guest->peer: 876 bytes flags[FIN,RST,SYN] marker(IGKM-D-)=0 records=4 (0x17 count=2) unframed_bytes=0
+SCAN     records: 0x16/189 0x14/1 0x17/605 0x17/61
+SCAN       seg#1 t+1.371117s: 0x16/189
+SCAN       seg#2 t+1.371786s: 0x14/1
+SCAN       seg#3 t+1.430673s: 0x17/605
+SCAN       seg#4 t+1.435248s: 0x17/61
+SCAN   peer->guest: 927 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=5 (0x17 count=3) unframed_bytes=0
+SCAN     records: 0x16/122 0x14/1 0x17/691 0x17/69 0x17/19
+SCAN       seg#1 t+1.371416s: 0x16/122 0x14/1 0x17/691 COALESCED
+SCAN       seg#2 t+1.435358s: 0x17/69
+SCAN       seg#3 t+1.437563s: 0x17/19
+SCAN conn client guest:38652 -> server peer:6444 (TLS) first packet t+4.445466s
+SCAN   guest->peer: 896 bytes flags[FIN,RST,SYN] marker(IGKM-D-)=0 records=4 (0x17 count=2) unframed_bytes=0
+SCAN     records: 0x16/189 0x14/1 0x17/605 0x17/81
+SCAN       seg#1 t+4.452453s: 0x16/189
+SCAN       seg#2 t+4.453315s: 0x14/1
+SCAN       seg#3 t+4.493701s: 0x17/605 0x17/81 COALESCED
+SCAN   peer->guest: 946 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=5 (0x17 count=3) unframed_bytes=0
+SCAN     records: 0x16/122 0x14/1 0x17/690 0x17/89 0x17/19
+SCAN       seg#1 t+4.452749s: 0x16/122 0x14/1 0x17/690 COALESCED
+SCAN       seg#2 t+4.494081s: 0x17/89
+SCAN       seg#3 t+4.497097s: 0x17/19
+SCAN totals:
+SCAN   tls streams: 3645 bytes, marker(IGKM-D-) occurrences=0
+SCAN     tls: b'IGKM-D-REQ-PT-pt guest->peer plaintext\n' occurrences=0
+SCAN     tls: b'IGKM-D-RESP-PT-pt from-PT peer->guest plaintext\n' occurrences=0
+SCAN     tls: b'IGKM-D-REQ-svca-c1 guest->peer lb-connect-1\n' occurrences=0
+SCAN     tls: b'IGKM-D-RESP-svca-c1 from-A peer->guest lb-connect-1\n' occurrences=0
+SCAN     tls: b'IGKM-D-REQ-svca-c2 guest->peer lb-connect-2-after-health-toggle\n' occurrences=0
+SCAN     tls: b'IGKM-D-RESP-svca-c2 from-B peer->guest lb-connect-2-after-health-toggle\n' occurrences=0
+SCAN   plain streams: 87 bytes, marker(IGKM-D-) occurrences=2
+SCAN     plain: b'IGKM-D-REQ-PT-pt guest->peer plaintext\n' occurrences=1
+SCAN     plain: b'IGKM-D-RESP-PT-pt from-PT peer->guest plaintext\n' occurrences=1
+
+===== VIP never dialed on the wire (the module rewrote dst BEFORE connect; expect 0 packets to 10.80.0.x) =====
+packets to any VIP 10.80.0.x: 0 (expected 0)
+packets to backend :6443 (A): 10
+packets to backend :6444 (B): 9
+
+===== plaintext marker scan on the WIRE (my IGKM-D- strings): only the :5001 passthrough may appear =====
+  wire occurrences of 'IGKM-D-REQ-PT' : 1
+  wire occurrences of 'IGKM-D-RESP-PT' : 1
+  wire occurrences of 'IGKM-D-REQ-svca-c1' : 0
+  wire occurrences of 'IGKM-D-REQ-svca-c2' : 0
+  wire occurrences of 'IGKM-D-RESP-svca-c1' : 0
+  wire occurrences of 'IGKM-D-RESP-svca-c2' : 0
+  wire occurrences of 'from-A' : 0
+  wire occurrences of 'from-B' : 0
+(expected: PT strings >=1 cleartext on non-mesh :5001; every mesh string = 0, inside kTLS records)
+
+===== custody (SVID key must never cross vsock; a resolve carries no key material at all) =====
+RELAY[c1] vsock tx RESOLVED backend=192.168.204.1:6443 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.365822s
+RELAY[c2] custody: host->guest total 1039 bytes; client SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; guest-server SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; application traffic secrets sent (changed vs Spike B: expected 1 each when ALLOW) = [1,1]
+RELAY[c3] vsock tx RESOLVED backend=192.168.204.1:6444 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+4.441658s
+RELAY[c4] custody: host->guest total 1039 bytes; client SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; guest-server SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; application traffic secrets sent (changed vs Spike B: expected 1 each when ALLOW) = [1,1]
+
+===== verdict markers =====
+IGKMD-APP: connect VIP 192.168.204.1:5001 returned 0 (module resolved+rewrote dst and installed transparent mTLS if mesh)
+IGKMD-APP: connect VIP 10.80.0.1:9443 returned 0 (module resolved+rewrote dst and installed transparent mTLS if mesh)
+[    0.755799] IGKMD: [c1] HANDSHAKE DONE peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; kTLS installed on the workload socket (TO_PEER=3 NEED_PEER=3); kernel carries TLS, relay out of path
+[    0.757944] IGKMD: [c1] RESOLVE-MATCH expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed handshake_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed match=1 (the backend reached is the one resolution chose)
+IGKMD-APP: lb-c1 read(52) PLAINTEXT: IGKM-D-RESP-svca-c1 from-A peer->guest lb-connect-1
+IGKMD-APP: PAUSE-FOR-HEALTH-TOGGLE (sleeping 3s; host marks first-choice backend A unhealthy now)
+IGKMD-APP: connect VIP 10.80.0.1:9443 returned 0 (module resolved+rewrote dst and installed transparent mTLS if mesh)
+[    3.779445] IGKMD: [c2] HANDSHAKE DONE peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; kTLS installed on the workload socket (TO_PEER=3 NEED_PEER=3); kernel carries TLS, relay out of path
+[    3.784153] IGKMD: [c2] RESOLVE-MATCH expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed handshake_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed match=1 (the backend reached is the one resolution chose)
+IGKMD-APP: lb-c2 read(72) PLAINTEXT: IGKM-D-RESP-svca-c2 from-B peer->guest lb-connect-2-after-health-toggle
+IGKMD-INIT: ===== CASE deny (VIP 10.80.0.9:9443 -> svc-denied; resolve DENY -> connect() EACCES, no TCP) =====
+[    5.833527] IGKMD: [resolve] vip 10.80.0.9:9443 DENY from agent: policy deny: service svc-denied not permitted for spiffe://overdrive.test/ns/default/sa/guest-client -> connect() returns -EACCES, no TCP, no app bytes
+IGKMD-APP: connect VIP 10.80.0.9:9443 FAILED errno=13 (Permission denied)
+IGKMD-APP: DENY-CASE OK: connect() refused (expect EACCES=13); no TCP SYN, no application bytes on the wire
+IGKMD-INIT: VERDICT mesh-complete
+<metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/relay.log:RELAY[c1] resolve service=svc-a backends(by Ord)[192.168.204.1:6443=healthy 192.168.204.1:6444=healthy] -> chose 192.168.204.1:6443 (first-healthy, MtlsResolve-style) expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed t+1.365807s
+<metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/relay.log:RELAY[c1] vsock tx RESOLVED backend=192.168.204.1:6443 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.365822s
+<metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/relay.log:RELAY[c3] resolve service=svc-a backends(by Ord)[192.168.204.1:6443=unhealthy 192.168.204.1:6444=healthy] -> chose 192.168.204.1:6444 (first-healthy, MtlsResolve-style) expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed t+4.441642s
+<metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/relay.log:RELAY[c3] vsock tx RESOLVED backend=192.168.204.1:6444 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+4.441658s
+<metal-home>/igkm-spike-a/runs-igkmd/20261003T145657Z-558933/relay.log:RELAY[c5] resolve service=svc-denied vip=10.80.0.9:9443 policy=DENY for local spiffe://overdrive.test/ns/default/sa/guest-client -> DENY (no backend; guest connect() fails, no TCP) t+6.508167s
+
+===== tap capture (base64, for the evidence tree -- capture.sh extracts runs/NNNN.tap.pcap) =====
+----- BEGIN tap.pcap base64 -----
+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
+lDycttI=
+----- END tap.pcap base64 -----
+
+===== cleanup =====
+del tap igkd03145657
+
+===== post-run host state =====
+tap igkd03145657 present: no
+192.168.204.x on host: 0
+firecracker procs: []
+peer/relay procs: []
+tcpdump procs: []
+run dir present: no
