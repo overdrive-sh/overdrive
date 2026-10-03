@@ -1379,7 +1379,6 @@ fn journal_has(journal: &Journal, alloc: &AllocationId, step: Step) -> bool {
 /// `activate`, no EXEC release, and no running hook; the reopen lets it
 /// activate exactly once, release the command, and keep its Running row.
 #[tokio::test]
-#[ignore = "pending DELIVER step 06-04 (S-ND295-52)"]
 async fn tap_activation_waits_on_a_recovering_exec_gate_and_runs_once_after_reopen() {
     let (fixture, journal, _trace_guard) =
         journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
@@ -1715,7 +1714,6 @@ async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_
 /// teardown, and the lease released last, then a dominating Failed row
 /// carrying the typed refusal the owner port returned.
 #[tokio::test]
-#[ignore = "pending DELIVER step 06-04 (S-ND295-52)"]
 async fn tap_activation_failure_retires_the_lease_and_releases_it_last() {
     let (fixture, journal, _trace_guard, alloc) =
         drive_refused_activation("gti-activation-refused-lease").await;
@@ -1777,7 +1775,6 @@ async fn assert_projection_carries_the_refusal(
 /// outcomes table: a Condemned allocation and a missing allocation record)),
 /// and the same failure projection follows, carrying that typed cause.
 #[tokio::test]
-#[ignore = "pending DELIVER step 06-04 (S-ND295-52)"]
 async fn activation_of_a_condemned_allocation_takes_the_failure_projection() {
     let sim_owner = Arc::new(SimSharedGuestNetworkOwner::default());
     let (fixture, journal, _trace_guard) = journaled_fixture(Arc::clone(&sim_owner), false).await;

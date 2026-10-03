@@ -1113,6 +1113,7 @@ pub async fn dispatch_with_network_provisioner(
         net_slot_allocator,
         network_provisioner,
         None,
+        None,
         host,
     )
     .await
@@ -1138,6 +1139,7 @@ async fn dispatch_with_network_provisioner_and_guest(
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_network: GuestNetworkProvisionerAndPool<'_>,
+    guest_network_exec: Option<&overdrive_core::guest_network::GuestNetworkExecGate>,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
@@ -1164,6 +1166,7 @@ async fn dispatch_with_network_provisioner_and_guest(
             net_slot_allocator,
             network_provisioner,
             guest_network,
+            guest_network_exec,
             host,
         ))
         .await;
@@ -1346,6 +1349,7 @@ async fn dispatch_with_network_owner(
         &state.dns_slots,
         &ProductionNetworkGuard,
         Some((state.shared_guest_network.as_ref(), state.guest_pool.as_ref())),
+        Some(state.guest_network_exec.as_ref()),
         state.vm_host_state.as_ref(),
     )
     .await
@@ -1432,6 +1436,7 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
         &state.dns_slots,
         &HostNetworkProvisioner,
         Some((provisioner, state.guest_pool.as_ref())),
+        Some(state.guest_network_exec.as_ref()),
         state.vm_host_state.as_ref(),
     )
     .await;
@@ -1671,15 +1676,29 @@ async fn teardown_guest_network(
 async fn activate_guest_network(
     plan: &crate::guest_network::GuestNetworkPlan,
     guest_provisioner: &dyn GuestNetworkProvisioner,
-) -> Result<(), ShimError> {
-    match guest_provisioner.activate(plan).await.map_err(ShimError::from)? {
-        crate::guest_network::TapActivation::Raised => Ok(()),
-        // D-295-R5: wait on the EXEC gate and activate again.
-        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-04")]
-        crate::guest_network::TapActivation::QuiescenceLatched => {
-            todo!(
-                "RED scaffold: D-295-R5 activation wait on a latched quiescence — DELIVER step 06-04"
-            )
+    guest_network_exec: Option<&overdrive_core::guest_network::GuestNetworkExecGate>,
+) -> Result<bool, ShimError> {
+    let Some(guest_network_exec) = guest_network_exec else {
+        return Err(ShimError::GuestNetwork(crate::guest_network::GuestNetworkError::Io {
+            operation: crate::guest_network::GuestNetworkOperation::TapSetUp,
+            source: std::io::Error::other("guest network EXEC gate is not wired"),
+        }));
+    };
+    loop {
+        let Some(claim) = guest_network_exec.claim_release().await else {
+            tracing::info!(
+                name: "guest_network.activation_withheld",
+                alloc = %plan.alloc(),
+                reason = "fail_stop",
+                "guest network activation and EXEC are withheld at fail-stop"
+            );
+            return Ok(false);
+        };
+        let activation = guest_provisioner.activate(plan).await;
+        drop(claim);
+        match activation.map_err(ShimError::from)? {
+            crate::guest_network::TapActivation::Raised => return Ok(true),
+            crate::guest_network::TapActivation::QuiescenceLatched => {}
         }
     }
 }
@@ -1867,6 +1886,7 @@ async fn dispatch_single(
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_network: GuestNetworkProvisionerAndPool<'_>,
+    guest_network_exec: Option<&overdrive_core::guest_network::GuestNetworkExecGate>,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
     match action {
@@ -2630,23 +2650,28 @@ async fn dispatch_single(
                 }
                 if let (Some(plan), Some((guest_provisioner, guest_pool))) =
                     (guest_plan.as_ref(), guest_network)
-                    && let Err(activation_error) =
-                        activate_guest_network(plan, guest_provisioner).await
                 {
-                    return fail_closed_on_guest_network_activation(
-                        driver.as_ref(),
-                        mtls_lifecycle,
-                        net_slot_allocator,
-                        network_provisioner,
-                        (guest_provisioner, guest_pool),
-                        obs,
-                        bus,
-                        tick,
-                        &row,
-                        handle_opt.as_ref(),
-                        &activation_error,
-                    )
-                    .await;
+                    match activate_guest_network(plan, guest_provisioner, guest_network_exec).await
+                    {
+                        Ok(true) => {}
+                        Ok(false) => return Ok(()),
+                        Err(activation_error) => {
+                            return fail_closed_on_guest_network_activation(
+                                driver.as_ref(),
+                                mtls_lifecycle,
+                                net_slot_allocator,
+                                network_provisioner,
+                                (guest_provisioner, guest_pool),
+                                obs,
+                                bus,
+                                tick,
+                                &row,
+                                handle_opt.as_ref(),
+                                &activation_error,
+                            )
+                            .await;
+                        }
+                    }
                 }
                 if guest_command_release_permitted(true, true, stable_exact_rule_baseline)
                     && let Some(handle) = &handle_opt
@@ -3139,35 +3164,41 @@ async fn dispatch_single(
                     );
                     if let (Some(plan), Some((guest_provisioner, guest_pool))) =
                         (plan.as_ref(), guest_network)
-                        && let Err(activation_error) =
-                            activate_guest_network(plan, guest_provisioner).await
                     {
-                        let successor_outcome = fail_closed_on_guest_network_activation(
-                            driver.as_ref(),
-                            mtls_lifecycle,
-                            net_slot_allocator,
-                            network_provisioner,
-                            (guest_provisioner, guest_pool),
-                            obs,
-                            bus,
-                            tick,
-                            &row,
-                            Some(handle),
-                            &activation_error,
-                        )
-                        .await;
-                        return finish_restart(
-                            successor_outcome,
-                            &prior_drivers,
-                            &predecessor_handle,
-                            prior_workload_addr,
-                            alloc_drivers,
-                            mtls_lifecycle,
-                            net_slot_allocator,
-                            network_provisioner,
-                            guest_network,
-                        )
-                        .await;
+                        match activate_guest_network(plan, guest_provisioner, guest_network_exec)
+                            .await
+                        {
+                            Ok(true) => {}
+                            Ok(false) => return Ok(()),
+                            Err(activation_error) => {
+                                let successor_outcome = fail_closed_on_guest_network_activation(
+                                    driver.as_ref(),
+                                    mtls_lifecycle,
+                                    net_slot_allocator,
+                                    network_provisioner,
+                                    (guest_provisioner, guest_pool),
+                                    obs,
+                                    bus,
+                                    tick,
+                                    &row,
+                                    Some(handle),
+                                    &activation_error,
+                                )
+                                .await;
+                                return finish_restart(
+                                    successor_outcome,
+                                    &prior_drivers,
+                                    &predecessor_handle,
+                                    prior_workload_addr,
+                                    alloc_drivers,
+                                    mtls_lifecycle,
+                                    net_slot_allocator,
+                                    network_provisioner,
+                                    guest_network,
+                                )
+                                .await;
+                            }
+                        }
                     }
                     driver.release_for_exit_emission(handle).await;
                     driver.on_alloc_running(&spec);

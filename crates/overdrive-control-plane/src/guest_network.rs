@@ -162,6 +162,18 @@ pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner + Send + Sync {
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError>;
     /// Latch quiescence, then set every `Active` TAP down and read it back.
+    ///
+    /// `Ok(TapQuiescence)` means the owner determined every `Active` TAP's
+    /// outcome; each unconfirmed TAP is present in `unconfirmed`. `Err` means
+    /// the owner could not determine per-TAP outcomes at all. The Sim adapter's
+    /// scripted `Fail` is `Err(GuestNetworkError::Io { operation: TapSetDown,
+    /// .. })`.
+    ///
+    /// Every adapter call is bounded by the caller's quiescence bound: this
+    /// future does not synchronously block the task awaiting it and may be
+    /// dropped at any await. A repeat call while latched sets down and reads
+    /// back any TAP still `Active` after a partial restore; with no `Active`
+    /// TAPs it performs no I/O and returns an empty result.
     async fn quiesce_managed_taps(&self) -> Result<TapQuiescence>;
     /// Raise every quiesced activation-complete TAP and read it back, then
     /// clear the quiescence latch.
@@ -2408,12 +2420,12 @@ enum HostGuestNetworkAllocationPhase {
     ProvisionedDown,
     Active,
     QuiescedActive,
+    Condemned,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HostGuestNetworkAllocationState {
     plan: GuestNetworkPlan,
-    tap: String,
     ifindex: u32,
     program_id: u32,
     egress_program_id: u32,
@@ -2455,7 +2467,6 @@ pub(super) struct HostSharedGuestNetworkOwner {
     scratch_io: Arc<dyn SharedGuestNetworkScratchIo>,
     allocation_io: Arc<dyn GuestNetworkAllocationIo>,
     tcx: Arc<parking_lot::Mutex<Option<HostGuestTcxState>>>,
-    allocations: parking_lot::Mutex<BTreeMap<AllocationId, HostGuestNetworkAllocationState>>,
     allocation_lifecycle: tokio::sync::Mutex<HostGuestNetworkLifecycle>,
     // Failed partial provisions stay private and lease-correlated until the
     // existing teardown boundary proves the same empty complement; this is
@@ -2483,7 +2494,6 @@ impl HostSharedGuestNetworkOwner {
             scratch_io: Arc::new(RealSharedGuestNetworkScratchIo::new()),
             allocation_io,
             tcx,
-            allocations: parking_lot::Mutex::new(BTreeMap::new()),
             allocation_lifecycle: tokio::sync::Mutex::new(HostGuestNetworkLifecycle::default()),
             rollback_pending: parking_lot::Mutex::new(BTreeMap::new()),
         }
@@ -2502,7 +2512,6 @@ impl HostSharedGuestNetworkOwner {
             scratch_io: Arc::new(RealSharedGuestNetworkScratchIo::new()),
             allocation_io,
             tcx: Arc::new(parking_lot::Mutex::new(None)),
-            allocations: parking_lot::Mutex::new(BTreeMap::new()),
             allocation_lifecycle: tokio::sync::Mutex::new(HostGuestNetworkLifecycle::default()),
             rollback_pending: parking_lot::Mutex::new(BTreeMap::new()),
         }
@@ -2522,6 +2531,21 @@ impl HostSharedGuestNetworkOwner {
 
     fn netlink_error(operation: GuestNetworkOperation, source: NetlinkError) -> GuestNetworkError {
         GuestNetworkError::Netlink { operation, source }
+    }
+
+    fn missing_activation_record(plan: &GuestNetworkPlan) -> GuestNetworkError {
+        GuestNetworkError::PostconditionMismatch {
+            operation: GuestNetworkOperation::TapObserve,
+            expected: GuestNetworkFact::Tap {
+                name: plan.assignment().tap.clone(),
+                ifindex: None,
+                link_kind: GuestLinkKind::Tap,
+                persistent: true,
+                up: false,
+                owner_uid: Some(0),
+            },
+            observed: None,
+        }
     }
 
     fn tcx_error(operation: GuestNetworkOperation, source: GuestTcxError) -> GuestNetworkError {
@@ -2600,6 +2624,7 @@ impl HostSharedGuestNetworkOwner {
         let mut reserved = lifecycle
             .allocations
             .values()
+            .filter(|state| !matches!(state.phase, HostGuestNetworkAllocationPhase::Condemned))
             .map(|state| state.plan.assignment().mac)
             .chain(additional.map(|plan| plan.assignment().mac))
             .collect::<BTreeSet<_>>();
@@ -2658,16 +2683,15 @@ impl HostSharedGuestNetworkOwner {
     }
 
     fn expected_guard_members(
-        &self,
+        lifecycle: &HostGuestNetworkLifecycle,
         extra: Option<&GuestNetworkPlan>,
         exclude: Option<&AllocationId>,
     ) -> BTreeSet<String> {
-        let mut members = self
+        let mut members = lifecycle
             .allocations
-            .lock()
             .iter()
             .filter(|(alloc, _)| exclude.is_none_or(|excluded| excluded != *alloc))
-            .map(|(_, state)| state.tap.clone())
+            .map(|(_, state)| state.plan.assignment().tap.clone())
             .collect::<BTreeSet<_>>();
         if let Some(plan) = extra {
             members.insert(plan.assignment().tap.clone());
@@ -2883,8 +2907,12 @@ impl HostSharedGuestNetworkOwner {
             })
     }
 
-    fn rollback_guard_complement(&self, plan: &GuestNetworkPlan) -> Result<()> {
-        let expected_members = self.expected_guard_members(None, Some(plan.alloc()));
+    fn rollback_guard_complement(
+        &self,
+        lifecycle: &HostGuestNetworkLifecycle,
+        plan: &GuestNetworkPlan,
+    ) -> Result<()> {
+        let expected_members = Self::expected_guard_members(lifecycle, None, Some(plan.alloc()));
         self.allocation_io
             .observe_guard(&expected_members)
             .map_err(|error| Self::guard_error(GuestNetworkOperation::CleanupComplement, error))
@@ -2925,6 +2953,7 @@ impl HostSharedGuestNetworkOwner {
 
     async fn rollback_provision(
         &self,
+        lifecycle: &HostGuestNetworkLifecycle,
         plan: &GuestNetworkPlan,
         ifindex: Option<u32>,
         rollback_links: GuestNetworkRollbackLinks,
@@ -3002,7 +3031,7 @@ impl HostSharedGuestNetworkOwner {
                 }
             }
         }
-        attempt!(self.rollback_guard_complement(plan));
+        attempt!(self.rollback_guard_complement(lifecycle, plan));
         (first, tap_removed)
     }
 
@@ -3515,7 +3544,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             self.allocation_io.insert_guard_member(plan).map_err(|error| {
                 Self::guard_error(GuestNetworkOperation::GuardMemberInsert, error)
             })?;
-            let expected_members = self.expected_guard_members(Some(plan), None);
+            let expected_members = Self::expected_guard_members(&lifecycle, Some(plan), None);
             let guard = self.allocation_io.observe_guard(&expected_members).map_err(|error| {
                 Self::guard_error(GuestNetworkOperation::GuardMemberInsert, error)
             })?;
@@ -3727,7 +3756,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
         .await;
         if let Err(error) = primary {
             let (cleanup, tap_removed) =
-                self.rollback_provision(plan, ifindex, rollback_links, false).await;
+                self.rollback_provision(&lifecycle, plan, ifindex, rollback_links, false).await;
             if let Some(cleanup_error) = cleanup {
                 self.rollback_pending.lock().insert(
                     plan.alloc().clone(),
@@ -3778,22 +3807,10 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 observed: None,
             });
         };
-        self.allocations.lock().insert(
-            plan.alloc().clone(),
-            HostGuestNetworkAllocationState {
-                plan: plan.clone(),
-                tap: plan.assignment().tap.clone(),
-                ifindex,
-                program_id,
-                egress_program_id,
-                phase: HostGuestNetworkAllocationPhase::ProvisionedDown,
-            },
-        );
         lifecycle.allocations.insert(
             plan.alloc().clone(),
             HostGuestNetworkAllocationState {
                 plan: plan.clone(),
-                tap: plan.assignment().tap.clone(),
                 ifindex,
                 program_id,
                 egress_program_id,
@@ -3806,43 +3823,17 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
     async fn activate(&self, plan: &GuestNetworkPlan) -> Result<TapActivation> {
         let mut lifecycle = self.allocation_lifecycle.lock().await;
         if lifecycle.quiescing {
-            return Err(GuestNetworkError::PostconditionMismatch {
-                operation: GuestNetworkOperation::TapSetUp,
-                expected: GuestNetworkFact::Tap {
-                    name: plan.assignment().tap.clone(),
-                    ifindex: None,
-                    link_kind: GuestLinkKind::Tap,
-                    persistent: true,
-                    up: true,
-                    owner_uid: Some(0),
-                },
-                observed: Some(GuestNetworkFact::Tap {
-                    name: plan.assignment().tap.clone(),
-                    ifindex: None,
-                    link_kind: GuestLinkKind::Tap,
-                    persistent: true,
-                    up: false,
-                    owner_uid: Some(0),
-                }),
-            });
+            return Ok(TapActivation::QuiescenceLatched);
         }
-        let state = lifecycle.allocations.get(plan.alloc()).cloned().ok_or_else(|| {
-            GuestNetworkError::PostconditionMismatch {
-                operation: GuestNetworkOperation::TapSetUp,
-                expected: GuestNetworkFact::Tap {
-                    name: plan.assignment().tap.clone(),
-                    ifindex: None,
-                    link_kind: GuestLinkKind::Tap,
-                    persistent: true,
-                    up: true,
-                    owner_uid: Some(0),
-                },
-                observed: None,
-            }
-        })?;
-        if matches!(state.phase, HostGuestNetworkAllocationPhase::Active) {
-            return Ok(TapActivation::Raised);
+        let Some(state) = lifecycle.allocations.get(plan.alloc()).cloned() else {
+            return Err(Self::missing_activation_record(plan));
+        };
+        if state.plan != *plan || matches!(state.phase, HostGuestNetworkAllocationPhase::Condemned)
+        {
+            return Err(Self::missing_activation_record(plan));
         }
+        let already_active = matches!(state.phase, HostGuestNetworkAllocationPhase::Active);
+        let expected_up = already_active;
 
         let bridge_ifindex = self.observe_bridge(plan).await?;
         let tap = self
@@ -3850,24 +3841,32 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             .observe_tap(plan)
             .await
             .map_err(|source| Self::netlink_error(GuestNetworkOperation::TapObserve, source))?;
-        let (expected_tap, observed_tap) = Self::tap_fact(plan, &tap, false);
-        if expected_tap != observed_tap.clone().unwrap_or_else(|| expected_tap.clone()) {
+        let (mut expected_tap, observed_tap) = Self::tap_fact(plan, &tap, expected_up);
+        if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected_tap {
+            *ifindex = Some(state.ifindex);
+        }
+        if observed_tap.is_none()
+            || expected_tap != observed_tap.clone().unwrap_or_else(|| expected_tap.clone())
+        {
             return Err(GuestNetworkError::PostconditionMismatch {
                 operation: GuestNetworkOperation::TapObserve,
                 expected: expected_tap,
                 observed: observed_tap,
             });
         }
-        let tap_ifindex = match tap {
+        let (tap_ifindex, master_ifindex, mac) = match &tap {
             GuestNetworkAllocationTapObservation::Persistent {
-                ifindex, master_ifindex, ..
-            } => {
-                Self::ensure_master(ifindex, bridge_ifindex, master_ifindex)?;
-                ifindex
-            }
+                ifindex,
+                master_ifindex,
+                mac,
+                ..
+            } => (*ifindex, *master_ifindex, *mac),
             GuestNetworkAllocationTapObservation::Incompatible { .. }
             | GuestNetworkAllocationTapObservation::Absent { .. } => {
-                let (expected, observed) = Self::tap_fact(plan, &tap, false);
+                let (mut expected, observed) = Self::tap_fact(plan, &tap, expected_up);
+                if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
+                    *ifindex = Some(state.ifindex);
+                }
                 return Err(GuestNetworkError::PostconditionMismatch {
                     operation: GuestNetworkOperation::TapObserve,
                     expected,
@@ -3875,7 +3874,43 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 });
             }
         };
-        let expected_members = self.expected_guard_members(None, None);
+        Self::ensure_master(tap_ifindex, bridge_ifindex, master_ifindex)?;
+        let reserved = Self::reserved_host_macs(&lifecycle, Some(plan));
+        let (expected_host_mac, observed_host_mac) =
+            Self::tap_host_mac_facts(tap_ifindex, mac, &reserved);
+        if let Some(observed) = observed_host_mac {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapObserve,
+                expected: expected_host_mac,
+                observed: Some(observed),
+            });
+        }
+        match self
+            .allocation_io
+            .observe_tap_debug_msg_mask(plan)
+            .await
+            .map_err(|source| Self::netlink_error(GuestNetworkOperation::TapObserve, source))?
+        {
+            Some(0) => {}
+            Some(mask) => {
+                return Err(GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapObserve,
+                    expected: GuestNetworkFact::TapDebugMsgMask { ifindex: tap_ifindex, mask: 0 },
+                    observed: Some(GuestNetworkFact::TapDebugMsgMask {
+                        ifindex: tap_ifindex,
+                        mask,
+                    }),
+                });
+            }
+            None => {
+                return Err(GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapObserve,
+                    expected: GuestNetworkFact::TapDebugMsgMask { ifindex: tap_ifindex, mask: 0 },
+                    observed: None,
+                });
+            }
+        }
+        let expected_members = Self::expected_guard_members(&lifecycle, None, None);
         let guard = self
             .allocation_io
             .observe_guard(&expected_members)
@@ -3945,14 +3980,48 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             });
         }
 
-        if let Err(source) = self.allocation_io.set_tap_up(plan).await {
-            self.allocations.lock().entry(plan.alloc().clone()).and_modify(|state| {
-                state.phase = HostGuestNetworkAllocationPhase::ProvisionedDown;
+        let egress_attachment = self
+            .allocation_io
+            .query_egress_attachment(plan)
+            .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxEgressQuery, source))?;
+        if egress_attachment.program_ids != vec![state.egress_program_id] {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TcxEgressQuery,
+                expected: GuestNetworkFact::TcxAttachment {
+                    ifindex: tap_ifindex,
+                    program_id: Some(state.egress_program_id),
+                    attach_point: Some(TcxAttachPoint::Egress),
+                },
+                observed: Some(GuestNetworkFact::TcxAttachment {
+                    ifindex: tap_ifindex,
+                    program_id: egress_attachment.program_ids.first().copied(),
+                    attach_point: Some(TcxAttachPoint::Egress),
+                }),
             });
-            lifecycle
-                .allocations
-                .entry(plan.alloc().clone())
-                .and_modify(|state| state.phase = HostGuestNetworkAllocationPhase::ProvisionedDown);
+        }
+        if !self
+            .allocation_io
+            .egress_link_pin_present(plan)
+            .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxEgressLinkPin, source))?
+        {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TcxEgressLinkPin,
+                expected: GuestNetworkFact::BpfLinkPin {
+                    path: PathBuf::new(),
+                    link_id: Some(state.egress_program_id),
+                },
+                observed: Some(GuestNetworkFact::BpfLinkPin {
+                    path: PathBuf::new(),
+                    link_id: None,
+                }),
+            });
+        }
+
+        if already_active {
+            return Ok(TapActivation::Raised);
+        }
+
+        if let Err(source) = self.allocation_io.set_tap_up(plan).await {
             return Err(Self::netlink_error(GuestNetworkOperation::TapSetUp, source));
         }
         let result = async {
@@ -3961,8 +4030,13 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 self.allocation_io.observe_tap(plan).await.map_err(|source| {
                     Self::netlink_error(GuestNetworkOperation::TapObserve, source)
                 })?;
-            let (expected, observed) = Self::tap_fact(plan, &final_tap, true);
-            if expected != observed.clone().unwrap_or_else(|| expected.clone()) {
+            let (mut expected, observed) = Self::tap_fact(plan, &final_tap, true);
+            if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
+                *ifindex = Some(state.ifindex);
+            }
+            if observed.is_none()
+                || expected != observed.clone().unwrap_or_else(|| expected.clone())
+            {
                 return Err(GuestNetworkError::PostconditionMismatch {
                     operation: GuestNetworkOperation::TapObserve,
                     expected,
@@ -3981,25 +4055,36 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
         }
         .await;
         if let Err(error) = result {
-            let down =
+            let cleanup = async {
                 self.allocation_io.set_tap_down(plan).await.map_err(|source| {
                     Self::netlink_error(GuestNetworkOperation::TapSetDown, source)
-                });
-            self.allocations.lock().entry(plan.alloc().clone()).and_modify(|state| {
+                })?;
+                let down = self.allocation_io.observe_tap(plan).await.map_err(|source| {
+                    Self::netlink_error(GuestNetworkOperation::TapSetDown, source)
+                })?;
+                let (mut expected, observed) = Self::tap_fact(plan, &down, false);
+                if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
+                    *ifindex = Some(state.ifindex);
+                }
+                if observed.is_none()
+                    || expected != observed.clone().unwrap_or_else(|| expected.clone())
+                {
+                    return Err(GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TapSetDown,
+                        expected,
+                        observed,
+                    });
+                }
+                Ok(())
+            }
+            .await;
+            if cleanup.is_ok()
+                && let Some(state) = lifecycle.allocations.get_mut(plan.alloc())
+            {
                 state.phase = HostGuestNetworkAllocationPhase::ProvisionedDown;
-            });
-            lifecycle
-                .allocations
-                .entry(plan.alloc().clone())
-                .and_modify(|state| state.phase = HostGuestNetworkAllocationPhase::ProvisionedDown);
-            return match down {
-                Ok(()) => Err(error),
-                Err(cleanup) => Err(cleanup),
-            };
+            }
+            return Err(cleanup.err().unwrap_or(error));
         }
-        self.allocations.lock().entry(plan.alloc().clone()).and_modify(|state| {
-            state.phase = HostGuestNetworkAllocationPhase::Active;
-        });
         lifecycle
             .allocations
             .entry(plan.alloc().clone())
@@ -4013,6 +4098,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
         if let Some(pending) = pending_rollback {
             let (error, tap_removed) = self
                 .rollback_provision(
+                    &lifecycle,
                     &pending.plan,
                     pending.ifindex,
                     pending.links,
@@ -4029,12 +4115,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             self.rollback_pending.lock().remove(plan.alloc());
             return Ok(());
         }
-        let Some(state) = lifecycle
-            .allocations
-            .get(plan.alloc())
-            .cloned()
-            .or_else(|| self.allocations.lock().get(plan.alloc()).cloned())
-        else {
+        let Some(state) = lifecycle.allocations.get(plan.alloc()).cloned() else {
             return Ok(());
         };
         let mut first = None;
@@ -4250,7 +4331,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                     }
                 })
         );
-        let expected_members = self.expected_guard_members(None, Some(plan.alloc()));
+        let expected_members = Self::expected_guard_members(&lifecycle, None, Some(plan.alloc()));
         attempt!(
             self.allocation_io
                 .observe_guard(&expected_members)
@@ -4260,7 +4341,6 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
         if let Some(error) = first {
             return Err(error);
         }
-        self.allocations.lock().remove(plan.alloc());
         lifecycle.allocations.remove(plan.alloc());
         Ok(())
     }
@@ -4471,7 +4551,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     async fn converge_shared(&self) -> Result<()> {
         const BRIDGE: &str = "ovd-gbr0";
         const GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
-        let mut lifecycle = self.allocation_lifecycle.lock().await;
+        let _lifecycle = self.allocation_lifecycle.lock().await;
         overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
             client.ensure_bridge(BRIDGE, overdrive_core::dataplane::GUEST_BRIDGE_MAC).await?;
@@ -4631,49 +4711,6 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             .pin_counter_map(&counter_pin)
             .map_err(|source| Self::tcx_error(GuestNetworkOperation::CounterMapPin, source))?;
         *self.tcx.lock() = Some(HostGuestTcxState { program, inventory: identity });
-        if lifecycle.quiescing {
-            let quiesced = lifecycle
-                .allocations
-                .iter()
-                .filter(|(_, state)| {
-                    matches!(state.phase, HostGuestNetworkAllocationPhase::QuiescedActive)
-                })
-                .map(|(alloc, state)| (alloc.clone(), state.clone()))
-                .collect::<Vec<_>>();
-            for (alloc, state) in quiesced {
-                let plan = state.plan.clone();
-                self.allocation_io.set_tap_up(&plan).await.map_err(|source| {
-                    Self::netlink_error(GuestNetworkOperation::TapSetUp, source)
-                })?;
-                let observed = self.allocation_io.observe_tap(&plan).await.map_err(|source| {
-                    Self::netlink_error(GuestNetworkOperation::TapObserve, source)
-                })?;
-                let (expected, actual) = Self::tap_fact(&plan, &observed, true);
-                if expected != actual.clone().unwrap_or_else(|| expected.clone()) {
-                    return Err(GuestNetworkError::PostconditionMismatch {
-                        operation: GuestNetworkOperation::TapObserve,
-                        expected,
-                        observed: actual,
-                    });
-                }
-                if let GuestNetworkAllocationTapObservation::Persistent {
-                    ifindex,
-                    master_ifindex,
-                    ..
-                } = observed
-                {
-                    let bridge_ifindex = self.observe_bridge(&plan).await?;
-                    Self::ensure_master(ifindex, bridge_ifindex, master_ifindex)?;
-                }
-                if let Some(state) = lifecycle.allocations.get_mut(&alloc) {
-                    state.phase = HostGuestNetworkAllocationPhase::Active;
-                }
-                self.allocations.lock().entry(alloc).and_modify(|state| {
-                    state.phase = HostGuestNetworkAllocationPhase::Active;
-                });
-            }
-            lifecycle.quiescing = false;
-        }
         Ok(())
     }
     async fn audit_shared(
@@ -4681,7 +4718,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         const BRIDGE: &str = "ovd-gbr0";
         const GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
-        let lifecycle = self.allocation_lifecycle.lock().await;
+        let mut lifecycle = self.allocation_lifecycle.lock().await;
         let (bridge, gateway_present) =
             self.allocation_io.observe_shared_bridge().await.map_err(|source| {
                 SharedGuestNetworkAuditError {
@@ -4905,6 +4942,9 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         let reserved_macs = Self::reserved_host_macs(&lifecycle, None);
         let mut audit = SharedGuestNetworkAudit::default();
         for (alloc, state) in &lifecycle.allocations {
+            if matches!(state.phase, HostGuestNetworkAllocationPhase::Condemned) {
+                continue;
+            }
             let plan = &state.plan;
             let expected_up = matches!(state.phase, HostGuestNetworkAllocationPhase::Active);
             let observed = match self.allocation_io.observe_tap(plan).await {
@@ -5143,7 +5183,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 continue;
             }
             let has_guard_member = guard_inventory.members.iter().any(|member| {
-                matches!(&member.identity, BridgeGuardMemberIdentity::Ifname(name) if name == &state.tap)
+                matches!(&member.identity, BridgeGuardMemberIdentity::Ifname(name) if name == &plan.assignment().tap)
             });
             if !has_guard_member {
                 audit.damaged.insert(
@@ -5151,12 +5191,12 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                     GuestNetworkError::PostconditionMismatch {
                         operation: GuestNetworkOperation::GuardMemberInsert,
                         expected: GuestNetworkFact::BridgeGuard {
-                            tap: state.tap.clone(),
+                            tap: plan.assignment().tap.clone(),
                             member: true,
                             rules: expected_guard_rules.clone(),
                         },
                         observed: Some(GuestNetworkFact::BridgeGuard {
-                            tap: state.tap.clone(),
+                            tap: plan.assignment().tap.clone(),
                             member: false,
                             rules: observed_guard_rules.clone(),
                         }),
@@ -5164,49 +5204,114 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 );
             }
         }
+        for alloc in audit.damaged.keys() {
+            if let Some(state) = lifecycle.allocations.get_mut(alloc) {
+                state.phase = HostGuestNetworkAllocationPhase::Condemned;
+            }
+        }
         Ok(audit)
     }
+    /// The host classifies every TAP set-down and read-back failure—including
+    /// `NetlinkError::Connect`—as that TAP's `unconfirmed` entry, continues the
+    /// pass, and returns `Ok` rather than `Err`. It awaits the allocation-I/O
+    /// port directly and never synchronously blocks the task awaiting this
+    /// future.
     async fn quiesce_managed_taps(&self) -> Result<TapQuiescence> {
         let mut lifecycle = self.allocation_lifecycle.lock().await;
-        if lifecycle.quiescing {
-            return Ok(TapQuiescence::default());
-        }
         lifecycle.quiescing = true;
         let active = lifecycle
             .allocations
             .iter()
             .filter(|(_, state)| matches!(state.phase, HostGuestNetworkAllocationPhase::Active))
-            .map(|(alloc, state)| (alloc.clone(), state.tap.clone()))
+            .map(|(alloc, state)| (alloc.clone(), state.clone()))
             .collect::<Vec<_>>();
-        for (alloc, tap) in active {
-            let down = overdrive_netlink::block_on_host_netlink(|| async {
-                let client = overdrive_netlink::Client::new()?;
-                client.set_link_down(&tap).await?;
-                client.observe_link(&tap).await
+        let mut quiescence = TapQuiescence::default();
+        for (alloc, state) in active {
+            let outcome = match self.allocation_io.set_tap_down(&state.plan).await {
+                Err(source) => Err(Self::netlink_error(GuestNetworkOperation::TapSetDown, source)),
+                Ok(()) => match self.allocation_io.observe_tap(&state.plan).await {
+                    Err(source) => {
+                        Err(Self::netlink_error(GuestNetworkOperation::TapSetDown, source))
+                    }
+                    Ok(observed) => {
+                        let (mut expected, actual) = Self::tap_fact(&state.plan, &observed, false);
+                        if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
+                            *ifindex = Some(state.ifindex);
+                        }
+                        if actual.is_none()
+                            || expected != actual.clone().unwrap_or_else(|| expected.clone())
+                        {
+                            Err(GuestNetworkError::PostconditionMismatch {
+                                operation: GuestNetworkOperation::TapSetDown,
+                                expected,
+                                observed: actual,
+                            })
+                        } else {
+                            Ok(())
+                        }
+                    }
+                },
+            };
+            if let Some(current) = lifecycle.allocations.get_mut(&alloc) {
+                match outcome {
+                    Ok(()) => current.phase = HostGuestNetworkAllocationPhase::QuiescedActive,
+                    Err(error) => {
+                        current.phase = HostGuestNetworkAllocationPhase::Condemned;
+                        quiescence.unconfirmed.insert(alloc, error);
+                    }
+                }
+            }
+        }
+        Ok(quiescence)
+    }
+
+    async fn restore_quiesced_taps(&self) -> Result<()> {
+        let mut lifecycle = self.allocation_lifecycle.lock().await;
+        if !lifecycle.quiescing {
+            return Ok(());
+        }
+        let quiesced = lifecycle
+            .allocations
+            .iter()
+            .filter(|(_, state)| {
+                matches!(state.phase, HostGuestNetworkAllocationPhase::QuiescedActive)
             })
-            .map_err(|source| GuestNetworkError::Netlink {
-                operation: GuestNetworkOperation::TapSetDown,
-                source,
-            })?;
-            if down != Some(false) {
+            .map(|(alloc, state)| (alloc.clone(), state.clone()))
+            .collect::<Vec<_>>();
+        for (alloc, state) in quiesced {
+            self.allocation_io
+                .set_tap_up(&state.plan)
+                .await
+                .map_err(|source| Self::netlink_error(GuestNetworkOperation::TapSetUp, source))?;
+            let bridge_ifindex = self.observe_bridge(&state.plan).await?;
+            let observed =
+                self.allocation_io.observe_tap(&state.plan).await.map_err(|source| {
+                    Self::netlink_error(GuestNetworkOperation::TapObserve, source)
+                })?;
+            let (mut expected, actual) = Self::tap_fact(&state.plan, &observed, true);
+            if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
+                *ifindex = Some(state.ifindex);
+            }
+            if actual.is_none() || expected != actual.clone().unwrap_or_else(|| expected.clone()) {
                 return Err(GuestNetworkError::PostconditionMismatch {
-                    operation: GuestNetworkOperation::TapSetDown,
-                    expected: GuestNetworkFact::LinkUp { ifindex: 0, up: false },
-                    observed: Some(GuestNetworkFact::LinkUp { ifindex: 0, up: true }),
+                    operation: GuestNetworkOperation::TapObserve,
+                    expected,
+                    observed: actual,
                 });
             }
-            if let Some(state) = lifecycle.allocations.get_mut(&alloc) {
-                state.phase = HostGuestNetworkAllocationPhase::QuiescedActive;
+            let GuestNetworkAllocationTapObservation::Persistent {
+                ifindex, master_ifindex, ..
+            } = observed
+            else {
+                return Err(Self::missing_activation_record(&state.plan));
+            };
+            Self::ensure_master(ifindex, bridge_ifindex, master_ifindex)?;
+            if let Some(current) = lifecycle.allocations.get_mut(&alloc) {
+                current.phase = HostGuestNetworkAllocationPhase::Active;
             }
-            self.allocations.lock().entry(alloc).and_modify(|state| {
-                state.phase = HostGuestNetworkAllocationPhase::QuiescedActive;
-            });
         }
-        Ok(TapQuiescence::default())
-    }
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-04")]
-    async fn restore_quiesced_taps(&self) -> Result<()> {
-        todo!("RED scaffold: D-295-R14 restore_quiesced_taps — DELIVER step 06-04")
+        lifecycle.quiescing = false;
+        Ok(())
     }
 }
 
@@ -9514,7 +9619,6 @@ mod allocation_owner_acceptance {
     /// confirm down is excluded from later audits the same way. The healthy
     /// allocation stays in every universe.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-50)"]
     async fn a_condemned_allocation_leaves_every_later_audit_and_restore_universe() {
         let kernel = FakeAttachmentKernel::healthy();
         let owner = owner_over(&kernel);
@@ -9795,7 +9899,6 @@ mod allocation_owner_acceptance {
     /// failure, unless that set-down itself fails, whose `TapSetDown` error
     /// then takes precedence.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
     async fn activation_reads_every_protection_fact_before_reporting_success() {
         let kernel = FakeAttachmentKernel::healthy();
         let owner = owner_over(&kernel);
@@ -9943,7 +10046,6 @@ mod allocation_owner_acceptance {
     /// refused with the source-less missing-record mismatch and nothing is
     /// written.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
     async fn activation_under_a_latch_or_condemnation_changes_nothing() {
         let kernel = FakeAttachmentKernel::healthy();
         let owner = owner_over(&kernel);
@@ -10044,7 +10146,6 @@ mod allocation_owner_acceptance {
     /// `Netlink { operation: TapSetDown, source: Connect }` and condemned, and
     /// the latch is set.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
     async fn quiescence_reports_every_unconfirmed_tap_and_condemns_it() {
         let kernel = FakeAttachmentKernel::healthy();
         let owner = owner_over(&kernel);
@@ -10248,7 +10349,6 @@ mod allocation_owner_acceptance {
     /// and the pass still confirms the TAP after them. Restore raises only
     /// the confirmed TAPs; the unconfirmed ones stay refused.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
     async fn a_netlink_session_failure_is_one_taps_unconfirmed_entry_and_the_pass_continues() {
         // The read-back of one TAP cannot obtain a session.
         let kernel = FakeAttachmentKernel::healthy();
@@ -10399,7 +10499,6 @@ mod allocation_owner_acceptance {
     /// latch. The re-quiesced allocation is `QuiescedActive` again: the next
     /// restore raises both, in `AllocationId` order, and clears the latch.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
     async fn a_repeat_quiescence_while_latched_sets_down_what_a_partial_restore_raised() {
         let kernel = FakeAttachmentKernel::healthy();
         let owner = owner_over(&kernel);
@@ -10498,7 +10597,6 @@ mod allocation_owner_acceptance {
     /// thread, so the bound can never fire, and the wall-clock watchdog turns
     /// the stall into a failure instead of a hung suite.
     #[test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
     fn a_quiescence_whose_set_down_never_completes_is_a_bound_miss_not_a_blocked_caller() {
         /// The quiescence bound the caller races; any positive value.
         const BOUND: std::time::Duration = std::time::Duration::from_secs(1);
@@ -10612,7 +10710,6 @@ mod allocation_owner_acceptance {
     /// the pass, keeps the latch and the remainder quiesced; a retry raises
     /// only the remainder.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
     async fn restore_raises_only_quiesced_active_taps_in_order_and_clears_the_latch_last() {
         struct RestoreFixture {
             kernel: Arc<FakeAttachmentKernel>,
@@ -10950,7 +11047,6 @@ mod allocation_owner_acceptance {
     /// The contrast (E22 (i2)): a TAP moved to an unreserved address
     /// activates.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-72)"]
     async fn a_reserved_or_missing_host_side_address_refuses_activation_before_any_change() {
         for broken in InvariantBreak::ALL {
             let fixture = AuditFixture::new("nd295-s72-activate").await;
@@ -11092,7 +11188,6 @@ mod allocation_owner_acceptance {
     /// allocation's guest MAC is not damage. The later audit still reads the
     /// holder's TAP and names nothing.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 06-04 (S-ND295-72)"]
     async fn a_tap_holding_a_condemned_guests_address_is_not_audit_damage() {
         let kernel = FakeAttachmentKernel::healthy();
         let owner = owner_over(&kernel);
@@ -11836,61 +11931,148 @@ mod shared_owner_link_address_kernel {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    fn e23_kernel_tap_state(tap: &str) -> (u32, bool) {
+        let root = std::path::Path::new("/sys/class/net").join(tap);
+        let ifindex = std::fs::read_to_string(root.join("ifindex"))
+            .expect("the managed TAP exists in the kernel")
+            .trim()
+            .parse::<u32>()
+            .expect("the kernel exposes the TAP's ifindex");
+        let flags = std::fs::read_to_string(root.join("flags"))
+            .expect("read the TAP's administrative flags directly from the kernel");
+        let flags = u32::from_str_radix(flags.trim().trim_start_matches("0x"), 16)
+            .expect("the kernel exposes hexadecimal link flags");
+        (ifindex, flags & libc::IFF_UP as u32 != 0)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn e23_refused_threads(cgroup: &std::path::Path) -> u64 {
+        std::fs::read_to_string(cgroup.join("pids.events"))
+            .expect("read the real pids-controller refusal counter")
+            .lines()
+            .find_map(|line| line.strip_prefix("max "))
+            .expect("pids.events exposes the max refusal counter")
+            .parse()
+            .expect("the kernel exposes a numeric refusal counter")
+    }
+
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
     /// E23 — A refused OS thread is a typed failure, never a panic.
     /// CONTRACT_SHAPE: unbounded-preservation.
     ///
     /// User decision 2 of 2026-09-30: the host owner's `quiesce_managed_taps`
-    /// under a `pids.max` cap returns a typed result and never aborts — the one
-    /// `Active` TAP whose set-down could not get a netlink session is that TAP's
-    /// `unconfirmed` entry carrying `NetlinkError::Connect` (DR-08 (b)-A), and
-    /// the host still returns `Ok`, never `Err`. The per-TAP Connect→unconfirmed
-    /// mapping over many TAPs is proven in the fake-kernel lane (S-ND295-51);
-    /// this body proves the REAL quiescence composes a refused thread without
-    /// aborting — which requires at least one managed `Active` TAP, so the pass
-    /// has a per-TAP set-down to run. `converge_shared` alone registers no
-    /// allocation, so the TAP is provisioned and activated before the cap;
-    /// otherwise the pass quiesces an empty set and the refused-thread stimulus
-    /// never fires.
+    /// under a `pids.max` cap returns `Ok` and never aborts. The accepted E23
+    /// evidence lane (feature-delta.md:6174) permits exactly two outcomes for
+    /// the one managed `Active` TAP: a realization needing no new thread
+    /// confirms it down, or a refused required thread leaves that allocation
+    /// `unconfirmed` with `NetlinkError::Connect` (DR-08 (b)-A). Direct kernel
+    /// read-back proves the first branch is not an empty or unverified pass;
+    /// the refusal errno and pids-controller events discriminate the second.
+    /// A control pass without the cap confirms the same TAP down. The per-TAP
+    /// Connect→unconfirmed mapping over many TAPs remains S-ND295-51's oracle.
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "pending DELIVER step 06-04 (E23)"]
     async fn quiesce_managed_taps_never_aborts_when_a_thread_is_refused() {
         require_root("quiesce_managed_taps_never_aborts_when_a_thread_is_refused");
         let _sweep = NodeSharedStateSweep::fresh();
         let owner = HostSharedGuestNetworkOwner::new();
         owner.converge_shared().await.expect("the production owner converges a clean node");
-        // One managed `Active` TAP, so the quiescence pass has a real per-TAP
-        // set-down to run and the refused-thread stimulus bites.
+        // One real managed Active TAP prevents a vacuous empty pass.
         let plan = kernel_plan("nd295-e23-quiesce", TAP_ADDRESS, TAP);
         owner.provision(&plan).await.expect("the production owner provisions the managed TAP down");
         assert_eq!(
             owner.activate(&plan).await.expect("the production owner raises the managed TAP"),
             TapActivation::Raised,
         );
+        let (ifindex, up) = e23_kernel_tap_state(TAP);
+        assert!(up, "the managed TAP is administratively up before the control pass");
+        let control = owner.quiesce_managed_taps().await.expect("the uncapped control returns Ok");
+        assert!(control.unconfirmed.is_empty(), "the uncapped control confirms the managed TAP");
+        assert_eq!(e23_kernel_tap_state(TAP), (ifindex, false), "the same TAP reads back down");
+        owner
+            .restore_quiesced_taps()
+            .await
+            .expect("restore the managed TAP before imposing the cap");
+        assert_eq!(
+            e23_kernel_tap_state(TAP),
+            (ifindex, true),
+            "the capped pass starts with an Active TAP"
+        );
+
         let _refused = overdrive_testing::pids_max::refuse_thread_creation()
             .expect("the Lima substrate delegates the pids controller to the cgroup root");
-        let quiescence = owner.quiesce_managed_taps().await;
-        // Reaching here proves the owner's quiescence did not abort/panic under
-        // thread refusal (user decision 2 of 2026-09-30). Per DR-08 (b)-A the
-        // host returns no `Err`: the one `Active` TAP whose set-down could not
-        // get a netlink worker thread is that allocation's `unconfirmed` entry
-        // carrying `NetlinkError::Connect`, and the pass still returns `Ok`.
-        let quiescence = quiescence.expect("the host returns per-TAP outcomes, never Err");
-        for (alloc, error) in &quiescence.unconfirmed {
-            assert!(
-                matches!(
-                    error,
-                    GuestNetworkError::Netlink { source: NetlinkError::Connect { .. }, .. }
-                ),
-                "{alloc}'s unconfirmed entry is a Connect session failure, got {error:?}",
-            );
-        }
-        assert!(
-            quiescence.unconfirmed.contains_key(plan.alloc()),
-            "the managed TAP whose set-down thread was refused is unconfirmed, got {:?}",
+        let cgroup = std::fs::read_to_string("/proc/self/cgroup")
+            .expect("read this process's real cgroup membership");
+        let cgroup = cgroup
+            .lines()
+            .find_map(|line| line.strip_prefix("0::"))
+            .expect("the process is in a cgroup-v2 leaf");
+        let cgroup = std::path::Path::new("/sys/fs/cgroup").join(cgroup.trim_start_matches('/'));
+        let read_count = |name| {
+            std::fs::read_to_string(cgroup.join(name))
+                .expect("read the kernel's task-count cap")
+                .trim()
+                .parse::<u64>()
+                .expect("the scratch leaf has a numeric task-count cap")
+        };
+        let capped_tasks = read_count("pids.max");
+        assert_eq!(
+            read_count("pids.current"),
+            capped_tasks,
+            "the actual task-count limit is reached"
+        );
+        let refused_before = e23_refused_threads(&cgroup);
+        let quiescence = owner
+            .quiesce_managed_taps()
+            .await
+            .expect("the host returns per-TAP outcomes, never Err");
+        let kernel_state = e23_kernel_tap_state(TAP);
+        let refused_after = e23_refused_threads(&cgroup);
+        eprintln!(
+            "[E23] pids.max={capped_tasks}; pids.current={}; refused={refused_before}->{refused_after}; \
+             TAP={TAP}; before=({ifindex}, up); after={kernel_state:?}; unconfirmed={:?}",
+            read_count("pids.current"),
             quiescence.unconfirmed,
         );
+        assert_eq!(kernel_state.0, ifindex, "quiescence accounts for the original managed TAP");
+        if quiescence.unconfirmed.is_empty() {
+            assert_eq!(
+                kernel_state,
+                (ifindex, false),
+                "full quiescence requires the real TAP down"
+            );
+            assert_eq!(
+                refused_after, refused_before,
+                "the confirmed-down branch needed no refused OS thread",
+            );
+        } else {
+            assert_eq!(
+                quiescence.unconfirmed.keys().collect::<Vec<_>>(),
+                vec![plan.alloc()],
+                "the complete unconfirmed partition names exactly the one managed allocation",
+            );
+            let error = &quiescence.unconfirmed[plan.alloc()];
+            let GuestNetworkError::Netlink {
+                operation: GuestNetworkOperation::TapSetDown,
+                source: NetlinkError::Connect { source },
+            } = error
+            else {
+                panic!(
+                    "the refused thread is this TAP's TapSetDown/Connect failure, got {error:?}"
+                );
+            };
+            assert_eq!(
+                source.raw_os_error(),
+                Some(libc::EAGAIN),
+                "preserve the real spawn-refusal errno"
+            );
+            assert_eq!(source.kind(), std::io::ErrorKind::WouldBlock);
+            assert!(
+                refused_after > refused_before,
+                "the kernel actually refused a required thread"
+            );
+        }
     }
 
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
