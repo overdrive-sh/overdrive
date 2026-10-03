@@ -571,6 +571,7 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
 async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
     let tmp = TempDir::new().expect("tempdir");
     let h = build_harness(&tmp).await;
+    h.state.mtls_worker.start_shared_owner().await.expect("the fixture's shared mTLS owner starts");
     let start = Instant::now();
     // Drive to Running so the prior row exists before the crash.
     let _prior = drive_to_first_running(&h, start).await;
@@ -621,6 +622,7 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
          (regression guard for build_lifecycle_event from==to bug)"
     );
     assert_eq!(ev.to, AllocStateWire::Failed);
+    h.state.mtls_worker.shutdown_owner().await.expect("the fixture's shared mTLS owner shuts down");
 }
 
 // -----------------------------------------------------------------------
