@@ -1,0 +1,55 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=c5e8ea992a7a1db6e835e6a8 pid=209748
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 152,929 bytes  received 3,833 bytes  44,789.14 bytes/sec
+total size is 156,788,896  speedup is 1,000.17
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build] sources  (07:11:23)
+unikraft HEAD=eb8fa2368618cea11c9bde196f79e6e6b9caeed5 tree=48639ed4fe5ce6133789c54a043d1ae86fed4f61 dirty=0
+lib-lwip HEAD=ec55ae17618feeb57c8c10109bcf5c42723e8e95 tree=16e828f2b3af7b73787307189f624538cffd8974 dirty=0
+fork-lwip branch head at build time (lib-lwip default LWIP_UNIKRAFT21X downloads this branch zip):
+bef26c44236a078d4352e76392ef16f019bea501	refs/heads/UNIKRAFT-2_1_x
+gcc      /usr/bin/gcc  gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+make     /usr/bin/make  GNU Make 4.4.1
+ld       /usr/bin/ld  GNU ld (GNU Binutils for Ubuntu) 2.46
+flex     <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/flex  flex 2.6.4
+bison    <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/bison  bison (GNU Bison) 3.8.2
+m4       <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/m4  m4 (GNU M4) 1.4.19
+python3  /usr/bin/python3  Python 3.14.4
+
+##### [build] app sources -> <metal-home>/igkm-spike-a/unikraft/app-igkmc  (07:11:23)
+e744c68a388293182533697b8d04c604a621ec182a34e1be0151e850cde2bde0  <metal-home>/igkm-spike-a/unikraft/app-igkmc/main.c
+dd9103dedca15e3816b502350a474b7ce25660c467dc150aa451569d1ec0a65a  <metal-home>/igkm-spike-a/unikraft/app-igkmc/defconfig
+87805b662de71f791f40a03d62765ebac4321c7467edf5d8a20de70dd8a7a4b3  <metal-home>/igkm-spike-a/unikraft/app-igkmc/Makefile.uk
+fb62c3c6716ee2f4cd4dbec36336b8b2742d661f13b7c701d0823bcadeef91ae  <metal-home>/igkm-spike-a/unikraft/app-igkmc/Config.uk
+
+##### [build] configure: make defconfig UK_DEFCONFIG=<metal-home>/igkm-spike-a/unikraft/app-igkmc/defconfig  (07:11:23)
+defconfig FAILED
+make: Entering directory '<metal-home>/igkm-spike-a/unikraft/unikraft'
+  LN      Makefile
+  MKDIR   lxdialog
+  MAKE    kconfig
+/usr/bin/gcc -ldl -I. -I<metal-home>/igkm-spike-a/unikraft/build-igkmc/kconfig -DCONFIG_=\"\"   -c fixdep.c -o <metal-home>/igkm-spike-a/unikraft/build-igkmc/kconfig/fixdep.o
+/usr/bin/gcc -ldl -I. -I<metal-home>/igkm-spike-a/unikraft/build-igkmc/kconfig -DCONFIG_=\"\"   <metal-home>/igkm-spike-a/unikraft/build-igkmc/kconfig/fixdep.o -o <metal-home>/igkm-spike-a/unikraft/build-igkmc/kconfig/fixdep
+/bin/sh: 1: lex: not found
+make[3]: *** [Makefile.rules:70: <metal-home>/igkm-spike-a/unikraft/build-igkmc/kconfig/lexer.lex.c] Error 127
+make[2]: *** [<metal-home>/igkm-spike-a/unikraft/build-igkmc/Makefile:890: <metal-home>/igkm-spike-a/unikraft/build-igkmc/kconfig/conf] Error 2
+make[1]: *** [Makefile:1175: sub-make] Error 2
+make: *** [Makefile:41: _all] Error 2
+make: Leaving directory '<metal-home>/igkm-spike-a/unikraft/unikraft'

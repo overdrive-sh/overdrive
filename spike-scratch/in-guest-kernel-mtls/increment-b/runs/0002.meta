@@ -1,0 +1,10 @@
+run_id=0002
+label=fetch-fc-v1.17.0
+started_utc=2026-09-28T06:42:23Z
+ended_utc=2026-09-28T06:42:40Z
+exit_code=0
+local_commit=4143f29cff6f21049f0efb238120b76ef0b96031
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-b/fetch-firecracker.sh v1.17.0
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=71d931efe9361595a72f44584d92937b93c2619ef92e3a8eb962aa2856ae1dc8
+stderr_sha256=b635d31e4bbdee90fa148eb3c7a80cc7fba4ecd484820791c595049197f8b44c

@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-i/build-all.sh`
+xtask: running metal run (one bootstrap lease session)

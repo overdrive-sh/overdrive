@@ -1,0 +1,20 @@
+# Spike B3 stretch only (GH #303, increment-f): appended to igkmf.defconfig for
+# the Go HTTP client. The checklist image does not have these.
+# futex(2) and set_tid_address(2) (Go runtime locks and thread parking; glibc
+# pthreads under runtime/cgo).
+CONFIG_LIBPOSIX_FUTEX=y
+# eventfd2(2): the Go netpoller's wake-up fd.
+CONFIG_LIBPOSIX_EVENTFD=y
+# pipe2(2): fallback wake-up / general use.
+CONFIG_LIBPOSIX_PIPE=y
+# Run 0021: glibc's pthread_create (used by Go's runtime/cgo to start its OS
+# threads) calls clone(0x3d0f00), which includes CLONE_FS. posix-process only
+# accepts a clone flag some library registered a handler for
+# (lib/posix-process/events.c:34-60); the CLONE_FS handler is posix-vfs's
+# (lib/posix-vfs/vfs.c:329, under LIBPOSIX_VFS_MULTICTX, default y with
+# multithreading) or vfscore's. Without a VFS: "Unsupported clone flags
+# requested: 0x3d0f00" and pthread_create fails with ENOTSUP. posix-vfs has a
+# built-in empty root, so no filesystem is mounted.
+CONFIG_LIBPOSIX_VFS=y
+# With a VFS present, elfloader would generate /etc files; not wanted.
+# CONFIG_APPELFLOADER_AUTOGEN is not set

@@ -1,0 +1,78 @@
+From f94289186290f22583af101efab076a41f04d03d Mon Sep 17 00:00:00 2001
+From: Overdrive spike <spike@invalid>
+Date: Mon, 28 Sep 2026 22:27:38 +0200
+Subject: [PATCH] posix-socket: add connect post-hook for in-guest mTLS spike
+ (GH #303)
+
+---
+ lib/posix-socket/exportsyms.uk       |  1 +
+ lib/posix-socket/include/uk/socket.h | 14 ++++++++++++++
+ lib/posix-socket/socket.c            | 11 +++++++++++
+ 3 files changed, 26 insertions(+)
+
+diff --git a/lib/posix-socket/exportsyms.uk b/lib/posix-socket/exportsyms.uk
+index ec00311..5c824e3 100644
+--- a/lib/posix-socket/exportsyms.uk
++++ b/lib/posix-socket/exportsyms.uk
+@@ -25,3 +25,4 @@ uk_socketpair_create
+ uk_socket_accept
+ uk_sys_socket
+ uk_sys_socketpair
++uk_socket_connect_hook
+diff --git a/lib/posix-socket/include/uk/socket.h b/lib/posix-socket/include/uk/socket.h
+index 8ff21f3..d34fe46 100644
+--- a/lib/posix-socket/include/uk/socket.h
++++ b/lib/posix-socket/include/uk/socket.h
+@@ -62,6 +62,20 @@ struct posix_socket_node {
+ 
+ #include <uk/socket_driver.h>
+ 
++struct uk_file;
++
++/**
++ * Connect post-hook (Overdrive GH #303 spike). Called by connect() after the
++ * address-family driver's connect has finished: ret is 0 for a completed
++ * (blocking) connect or -EINPROGRESS for a non-blocking one. The returned
++ * value replaces ret. The default weak definition returns ret unchanged; a
++ * library may provide a strong definition to act on the connected socket
++ * (e.g. hold it and swap its driver) before connect() returns to the caller.
++ */
++int uk_socket_connect_hook(const struct uk_file *sock,
++			   const struct sockaddr *addr, socklen_t addr_len,
++			   int blocking, int ret);
++
+ struct uk_file *uk_socket_create(int family, int type, int protocol);
+ 
+ int uk_socketpair_create(int family, int type, int protocol,
+diff --git a/lib/posix-socket/socket.c b/lib/posix-socket/socket.c
+index da4bd39..5a82c77 100644
+--- a/lib/posix-socket/socket.c
++++ b/lib/posix-socket/socket.c
+@@ -655,6 +655,14 @@ out:
+ 	return ret;
+ }
+ 
++__weak int uk_socket_connect_hook(const struct uk_file *sock __unused,
++				  const struct sockaddr *addr __unused,
++				  socklen_t addr_len __unused,
++				  int blocking __unused, int ret)
++{
++	return ret;
++}
++
+ UK_TRACEPOINT(trace_posix_socket_connect, "%d %p %d",
+ 	      int, const struct sockaddr *, socklen_t);
+ UK_TRACEPOINT(trace_posix_socket_connect_ret, "%d", int);
+@@ -692,6 +700,9 @@ UK_SYSCALL_R_DEFINE(int, connect, int, sock, const struct sockaddr *, addr,
+ 					&ret, &_opsz);
+ 		uk_file_runlock(of->file);
+ 	}
++	if (ret == 0 || ret == -EINPROGRESS)
++		ret = uk_socket_connect_hook(of->file, addr, addr_len,
++					     _SHOULD_BLOCK(mode), ret);
+ 	uk_ofile_release(of);
+ 
+ out:
+-- 
+2.52.0
+

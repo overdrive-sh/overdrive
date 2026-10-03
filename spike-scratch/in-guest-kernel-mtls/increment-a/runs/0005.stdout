@@ -1,0 +1,95 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=5007b59822430ef348d7dffa pid=172529
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 145,740 bytes  received 1,967 bytes  98,471.33 bytes/sec
+total size is 156,134,184  speedup is 1,057.05
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-patched] separate local clone <metal-home>/igkm-spike-a/nanos-pvhfix at aad473aad2f73a9893d5c32be333f2796725ab82  (06:14:07)
+aad473aad2f73a9893d5c32be333f2796725ab82
+vendored acpica   e01cc6b3d12b5f73f44d46fa15a7f569c793b328
+vendored lwip     e27f9b7af7e5b025a5b8803899f12b1d35f7d968
+vendored mbedtls  729a04f67c64363ded0ed8fc3a408fdf5c40797c
+
+##### [build-patched] kernel-pvhfix (patch 0001 only)  (06:14:08)
+ src/x86_64/init.s | 1 +
+ 1 file changed, 1 insertion(+)
+
+##### [build-patched] kernel-pvhfix-sockdebug (patch 0001 + diagnostic 0002)  (06:14:19)
+diff --git a/src/virtio/virtio_socket.c b/src/virtio/virtio_socket.c
+index 72e13706..b469206d 100644
+--- a/src/virtio/virtio_socket.c
++++ b/src/virtio/virtio_socket.c
+@@ -41,7 +41,7 @@ struct virtio_vsock_hdr {
+     u32 fwd_cnt;
+ } __attribute__((packed));
+ 
+-//#define VIRTIO_SOCK_DEBUG
++#define VIRTIO_SOCK_DEBUG
+ #ifdef VIRTIO_SOCK_DEBUG
+ #define virtio_sock_debug(x, ...) do {tprintf(sym(virtio_sock), 0, ss(x "\n"), ##__VA_ARGS__);} while(0)
+ #else
+diff --git a/src/x86_64/init.s b/src/x86_64/init.s
+index a76dee5d..6d57b597 100644
+--- a/src/x86_64/init.s
++++ b/src/x86_64/init.s
+@@ -107,6 +107,7 @@ extern pvh_start
+ 
+ bits 32
+ pvh_start32:
++        mov esp, 0xa000
+         PREPARE_LONG_MODE eax
+         ; set up minimal mapping to be able to run in 64-bit mode, carving page
+         ; tables from the top of the first 1MB of memory (which will not be
+
+##### [build-patched] artifact identity  (06:14:20)
+c99b7da38017ee74d5e1999ae1f76654420ffca859972a25a1637aa87ef9f521  <metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img
+792bf6e7fa5b190d435d229a7c07608b783f3388cf68897aab9b7f86870f259d  <metal-home>/igkm-spike-a/out/kernel-pvhfix.img
+4746fa6181934d840b8c42b522d589971a964d79ccf7dc0bb68992f6fee9c7b0  <metal-home>/igkm-spike-a/out/kernel-pvhfix-sockdebug.img
+--- <metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img
+  Xen                  0x00000004	Unknown note type: (0x00000012)
+   description data: dc 00 20 00 
+32-bit disassembly at the PVH entry 0x2000dc (patched: expect mov esp,0xa000 first):
+00000000002000dc <pvh_start32>:
+  2000dc:	b8 20 00 00 00       	mov    $0x20,%eax
+  2000e1:	0f 22 e0             	mov    %eax,%cr4
+  2000e4:	b9 80 00 00 c0       	mov    $0xc0000080,%ecx
+  2000e9:	0f 32                	rdmsr
+  2000eb:	0d 00 09 00 00       	or     $0x900,%eax
+--- <metal-home>/igkm-spike-a/out/kernel-pvhfix.img
+  Xen                  0x00000004	Unknown note type: (0x00000012)
+   description data: dc 00 20 00 
+32-bit disassembly at the PVH entry 0x2000dc (patched: expect mov esp,0xa000 first):
+00000000002000dc <pvh_start32>:
+  2000dc:	bc 00 a0 00 00       	mov    $0xa000,%esp
+  2000e1:	b8 20 00 00 00       	mov    $0x20,%eax
+  2000e6:	0f 22 e0             	mov    %eax,%cr4
+  2000e9:	b9 80 00 00 c0       	mov    $0xc0000080,%ecx
+  2000ee:	0f 32                	rdmsr
+--- <metal-home>/igkm-spike-a/out/kernel-pvhfix-sockdebug.img
+  Xen                  0x00000004	Unknown note type: (0x00000012)
+   description data: dc 00 20 00 
+32-bit disassembly at the PVH entry 0x2000dc (patched: expect mov esp,0xa000 first):
+00000000002000dc <pvh_start32>:
+  2000dc:	bc 00 a0 00 00       	mov    $0xa000,%esp
+  2000e1:	b8 20 00 00 00       	mov    $0x20,%eax
+  2000e6:	0f 22 e0             	mov    %eax,%cr4
+  2000e9:	b9 80 00 00 c0       	mov    $0xc0000080,%ecx
+  2000ee:	0f 32                	rdmsr
+
+##### [build-patched] done  (06:14:20)

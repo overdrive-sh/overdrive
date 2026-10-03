@@ -1,0 +1,84 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=7da82a091af9064b7771f0a2 pid=292197
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 154,297 bytes  received 3,382 bytes  63,071.60 bytes/sec
+total size is 159,210,919  speedup is 1,009.72
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-binary] toolchain (stock Ubuntu packages, unmodified)  (10:50:22)
+gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+GNU ld (GNU Binutils for Ubuntu) 2.46
+ldd (Ubuntu GLIBC 2.43-2ubuntu2.4) 2.43
+binutils 2.46-3ubuntu2
+gcc-15 15.2.0-16ubuntu1
+libc6 2.43-2ubuntu2.4
+libc6-dev 2.43-2ubuntu2.4
+9ac383602e9356a56161357881b78ac9803a4fdb6202b47e6a1c8f90afc46b82  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/app-linux/igkmf_app.c
+--- the source includes only standard Linux/POSIX/glibc headers:
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include <gnu/libc-version.h>
+#include <sys/auxv.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/utsname.h>
+#include <netinet/in.h>
+
+##### [build-binary] compile: gcc -static-pie (the form app-elfloader loads: ET_DYN, no PT_INTERP)  (10:50:22)
+gcc -O2 -g0 -Wall -Wextra -fPIE -static-pie -o <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/app-linux/igkmf_app.c
+exit=0
+
+##### [build-binary] identity of the produced ELF  (10:50:23)
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app: ELF 64-bit LSB pie executable, x86-64, version 1 (GNU/Linux), static-pie linked, BuildID[sha1]=26c851e4aeacd249f7423092e71484c3c46c20e0, for GNU/Linux 3.2.0, not stripped
+043e34e746ef86eb2a97c3334920edc1022ef34e54186213eb33571f6357b179  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app
+-rwxrwxr-x 1 ubuntu ubuntu 890080 Sep 29 10:50 <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app
+  Class:                             ELF64
+  OS/ABI:                            UNIX - GNU
+  Type:                              DYN (Position-Independent Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Entry point address:               0x8840
+--- program headers (no INTERP expected; DYNAMIC present for self-relocation)
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x006d10 0x006d10 R   0x1000
+  LOAD           0x007000 0x0000000000007000 0x0000000000007000 0x08a20d 0x08a20d R E 0x1000
+  LOAD           0x092000 0x0000000000092000 0x0000000000092000 0x02a6f0 0x02a6f0 R   0x1000
+  LOAD           0x0bcec8 0x00000000000bdec8 0x00000000000bdec8 0x005ac0 0x014f60 RW  0x1000
+  DYNAMIC        0x0c0ce8 0x00000000000c1ce8 0x00000000000c1ce8 0x0001b0 0x0001b0 RW  0x8
+  TLS            0x0bcec8 0x00000000000bdec8 0x00000000000bdec8 0x000038 0x000050 R   0x8
+  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0x10
+  GNU_RELRO      0x0bcec8 0x00000000000bdec8 0x00000000000bdec8 0x004138 0x004138 R   0x1
+--- dynamic section NEEDED entries (none expected):
+  (none)
+--- strings containing 'unikraft' / 'ukplat' (0 expected):
+0
+--- glibc version string embedded:
+GNU C Library (Ubuntu GLIBC 2.43-2ubuntu2.4) stable release version 2.43.
+
+##### [build-binary] native smoke test on the host Linux: ./igkmf-app id  (10:50:23)
+IGKM-F: BOOT-MARKER app started t=3964830.184199
+IGKM-F: uname(2): sysname="Linux" release="7.0.0-29-generic" version="#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026" machine="x86_64"
+IGKM-F: libc: glibc 2.43 (stable), statically linked into this ELF; pid=292586 ppid=292534
+IGKM-F: auxv: AT_ENTRY=0x7dde00ded840 AT_PHDR=0x7dde00de5040 AT_BASE=0 AT_PAGESZ=4096 AT_SYSINFO_EHDR=0x7dde00de3000 AT_RANDOM=set AT_EXECFN="<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app"
+IGKM-F: wall clock CLOCK_REALTIME=1790679023.350744 s since 1970-01-01
+IGKM-F: argv[0]="<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app"
+IGKM-F: argv[1]="id"
+exit=0

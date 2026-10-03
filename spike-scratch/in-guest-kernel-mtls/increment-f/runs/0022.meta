@@ -1,0 +1,10 @@
+run_id=0022
+label=build-guest-go-strace-vfs
+started_utc=2026-09-29T11:09:25Z
+ended_utc=2026-09-29T11:09:48Z
+exit_code=0
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-f/build-guest.sh go-strace
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=cd3382d3b6199940fc7b550fe263c84fed5cff0e03824990dbfe76873834ee6d
+stderr_sha256=60de953842fef292cd9a54965c23212f343b9df499ff4acb4ff302fa5d62834a

@@ -1,0 +1,11 @@
+run_id=0004
+label=mesh-run
+started_utc=2026-10-03T14:46:38Z
+ended_utc=2026-10-03T14:47:24Z
+exit_code=0
+local_commit=c6a25ae14a48799de905164ca3487b90da4a4532
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-i/run-mesh-fc.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=c85622134ea0395050246fcfd20d6ccb196c849c7e8f5676e99e0fc141c8fb40
+stderr_sha256=58b712a0f333de8392b953b616b2cdf4e796fc6282a629b8af0f70be0434c1f6
+tap_pcap_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855

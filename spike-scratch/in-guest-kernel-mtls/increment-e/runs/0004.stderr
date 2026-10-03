@@ -1,0 +1,4 @@
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running `target/debug/xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-e/build-guest.sh`
+xtask: running metal run (one bootstrap lease session)

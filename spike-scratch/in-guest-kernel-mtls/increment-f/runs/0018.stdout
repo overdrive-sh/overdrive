@@ -1,0 +1,35 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=27ecdafb70a7edb6eba9c57b pid=330104
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 4,704,267 bytes  received 3,531 bytes  724,276.62 bytes/sec
+total size is 168,416,444  speedup is 35.77
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-go] latest stable Go for linux-amd64 from https://go.dev/dl/?mode=json  (11:06:17)
+version=go1.27.1 file=go1.27.1.linux-amd64.tar.gz sha256(go.dev)=63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+go1.27.1.linux-amd64.tar.gz: OK
+go version go1.27.1 linux/amd64
+linux
+amd64
+gcc
+
+##### [build-go] build: CGO_ENABLED=0, -buildmode=pie, external link with -static-pie (host gcc/glibc crt, no libc code needed by Go)  (11:06:19)
+51667153405531962dc1902a0850fa3babbd8b01d30430e9314c90faec329172  main.go
+c13cce5835cb6fb67437b1de6ad45bf389ab6dc92c8bb0e1df0fa12e354ae724  go.mod
+-linkmode=external requires external (cgo) linking, but cgo is not enabled
+go build exit=1

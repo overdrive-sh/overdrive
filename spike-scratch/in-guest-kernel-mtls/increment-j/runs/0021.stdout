@@ -1,0 +1,1168 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=bb4e62b1c79bcc49535aaebe pid=576493
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 185,510 bytes  received 2,527 bytes  19,793.37 bytes/sec
+total size is 162,251,872  speedup is 862.87
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== preconditions (build-all.sh --no-sudo must have produced these) =====
+all prebuilt artifacts present; PHASE=nbconnect
+
+===== pre-run host state =====
+
+===== stage stock kernel (guest kernel == host kernel) =====
+
+===== artifacts =====
+host uname -r: 7.0.0-29-generic
+Firecracker v1.17.0
+b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682  <metal-home>/igkm-spike-a/igkmd/kernel/vmlinuz-host
+8b2dc450011d8bd164db2194ef2a01bb42849ca0df2af527de84cf733738d98c  <metal-home>/igkm-spike-a/igkmd/out/initramfs-mesh.cpio.gz
+643f999797ee7c23a09c6a9ff33b7680477478fe298dd8e7af4542a578c320ab  <metal-home>/igkm-spike-a/igkmd/out/module/igkmd_mtls.ko
+ede84b7304b2ae3459d0cafd37e6b19d3164364dd19bda9ecb2ca499dad9a9d0  <metal-home>/igkm-spike-a/igkmd/out/bin/igkmd_app
+4544461b2b61e45c08d44b8e269ec64a2da1f08108b90bdc1b890b4b862a2d63  <metal-home>/igkm-spike-a/igkmd-host-target/release/peer
+fd9c3e3bd2571af0c5ae487bdf9913a4e6b162f26e065b0353b3251dee3d9e18  <metal-home>/igkm-spike-a/igkmd-host-target/release/relay
+df9bee8591b9b8eff8c322239aacd25e4438e82d267a4c6b3c54f8882920a127  <metal-home>/igkm-spike-a/igkmd-host-target/release/inclient
+module vermagic: 7.0.0-29-generic SMP preempt mod_unload modversions 
+
+===== service registry + backend health =====
+services:
+  # name       vip            policy  backends(ip:port,...)                   expected_peer
+  svc-a        10.80.0.1:9443 allow   192.168.204.1:6443,192.168.204.1:6444   spiffe://overdrive.test/ns/default/sa/peer-allowed
+  svc-hs-deny  10.80.0.2:9443 allow   192.168.204.1:6445                      spiffe://overdrive.test/ns/default/sa/peer-denied
+  svc-denied   10.80.0.9:9443 deny    -                                       spiffe://overdrive.test/ns/default/sa/peer-denied
+
+===== create tap igkd03161901 =====
+igkd03161901     DOWN           192.168.204.1/24 
+
+===== start capture, backends (peer), agent (relay) =====
+tcpdump=576882 peer=576894 relay=576901 t+0.252s
+
+===== firecracker config (igkm_phase=nbconnect) =====
+
+===== launch =====
+fc pid=576905 t+0.268s
+fc exited on its own exit=1 t+2.806s
+
+===== guest serial =====
+2026-10-03T16:19:01.554278029 [igkmd-mesh:main] Running Firecracker v1.17.0
+2026-10-03T16:19:01.566836542 [igkmd-mesh:main] Artificially kick devices
+2026-10-03T16:19:01.566938646 [igkmd-mesh:fc_vcpu 1] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-10-03T16:19:01.567041360 [igkmd-mesh:fc_vcpu 0] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-10-03T16:19:01.567066508 [igkmd-mesh:main] Successfully started microvm that was configured from one single json
+2026-10-03T16:19:01.822666648 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-10-03T16:19:01.822722082 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0xcfc:0x2 failed: Failed to find address range.
+[    0.000000] Linux version 7.0.0-29-generic (buildd@lcy02-amd64-113) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 (Ubuntu 7.0.0-29.29-generic 7.0.12)
+[    0.000000] Command line: console=ttyS0 reboot=t panic=1 pci=off i8042.nokbd i8042.noaux random.trust_cpu=on igkm_phase=nbconnect pci=off virtio_mmio.device=4K@0xc0001000:5 virtio_mmio.device=4K@0xc0002000:6
+[    0.000000] KERNEL supported cpus:
+[    0.000000]   Intel GenuineIntel
+[    0.000000]   AMD AuthenticAMD
+[    0.000000]   Hygon HygonGenuine
+[    0.000000]   Centaur CentaurHauls
+[    0.000000]   zhaoxin   Shanghai  
+[    0.000000] [Firmware Bug]: TSC doesn't count with P0 frequency!
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x00000000000dffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000e0000-0x00000000000fffff]
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001fffffff]  System RAM
+[    0.000000] BIOS-e820: [gap 0x0000000020000000-0x00000000eebfffff]
+[    0.000000] BIOS-e820: [mem 0x00000000eec00000-0x00000000febfffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] DMI not present or invalid.
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x20000 max_arch_pfn = 0x10000000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000000] kvm-clock: using sched offset of 269641136 cycles
+[    0.000003] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000007] tsc: Detected 2396.388 MHz processor
+[    0.000025] last_pfn = 0x20000 max_arch_pfn = 0x10000000000
+[    0.000069] MTRR map: 0 entries (0 fixed + 0 variable; max 16), built from 8 variable MTRRs
+[    0.000072] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.000151] found SMP MP-table at [mem 0x0009fc00-0x0009fc0f]
+[    0.000168] Using GB pages for direct mapping
+[    0.000282] RAMDISK: [mem 0x1fe28000-0x1fffffff]
+[    0.000289] ACPI: Early table checksum verification disabled
+[    0.000293] ACPI: RSDP 0x00000000000E0000 000024 (v02 FIRECK)
+[    0.000297] ACPI: XSDT 0x00000000000A0151 00003C (v01 FIRECK FCMVXSDT 00000000 FCAT 20240119)
+[    0.000303] ACPI: FACP 0x000000000009FFB9 000114 (v06 FIRECK FCVMFADT 00000000 FCAT 20240119)
+[    0.000307] ACPI: DSDT 0x000000000009FD44 000275 (v02 FIRECK FCVMDSDT 00000000 FCAT 20240119)
+[    0.000310] ACPI: APIC 0x00000000000A00CD 000048 (v06 FIRECK FCVMMADT 00000000 FCAT 20240119)
+[    0.000312] ACPI: MCFG 0x00000000000A0115 00003C (v01 FIRECK FCMVMCFG 00000000 FCAT 20240119)
+[    0.000314] ACPI: Reserving FACP table memory at [mem 0x9ffb9-0xa00cc]
+[    0.000315] ACPI: Reserving DSDT table memory at [mem 0x9fd44-0x9ffb8]
+[    0.000316] ACPI: Reserving APIC table memory at [mem 0xa00cd-0xa0114]
+[    0.000317] ACPI: Reserving MCFG table memory at [mem 0xa0115-0xa0150]
+[    0.000416] No NUMA configuration found
+[    0.000417] Faking a node at [mem 0x0000000000000000-0x000000001fffffff]
+[    0.000429] NODE_DATA(0) allocated [mem 0x1fdfd280-0x1fe27fff]
+[    0.000884] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.000889] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.000891] TSC deadline timer available
+[    0.000893] CPU topo: Max. logical packages:   1
+[    0.000894] CPU topo: Max. logical nodes:      1
+[    0.000895] CPU topo: Num. nodes per package:  1
+[    0.000897] CPU topo: Max. logical dies:       1
+[    0.000897] CPU topo: Max. dies per package:   1
+[    0.000902] CPU topo: Max. threads per core:   1
+[    0.000902] CPU topo: Num. cores per package:     2
+[    0.000903] CPU topo: Num. threads per package:   2
+[    0.000903] CPU topo: Allowing 2 present CPUs plus 0 hotplug CPUs
+[    0.000920] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.000940] kvm-guest: KVM setup pv remote TLB flush
+[    0.000944] kvm-guest: setup PV sched yield
+[    0.000956] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.000958] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.000959] [gap 0x20000000-0xeebfffff] available for PCI devices
+[    0.000961] Booting paravirtualized kernel on KVM
+[    0.000962] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.002121] Zone ranges:
+[    0.002122]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.002124]   DMA32    [mem 0x0000000001000000-0x000000001fffffff]
+[    0.002125]   Normal   empty
+[    0.002126]   Device   empty
+[    0.002127] Movable zone start for each node
+[    0.002129] Early memory node ranges
+[    0.002130]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.002131]   node   0: [mem 0x0000000000100000-0x000000001fffffff]
+[    0.002133] Initmem setup node 0 [mem 0x0000000000001000-0x000000001fffffff]
+[    0.002152] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.002427] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.011621] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:2 nr_cpu_ids:2 nr_node_ids:1
+[    0.013907] percpu: Embedded 85 pages/cpu s225280 r8192 d114688 u1048576
+[    0.013960] kvm-guest: PV spinlocks enabled
+[    0.013962] PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.013965] Kernel command line: console=ttyS0 reboot=t panic=1 pci=off i8042.nokbd i8042.noaux random.trust_cpu=on igkm_phase=nbconnect pci=off virtio_mmio.device=4K@0xc0001000:5 virtio_mmio.device=4K@0xc0002000:6
+[    0.014068] Unknown kernel command line parameters "igkm_phase=nbconnect", will be passed to user space.
+[    0.014081] random: crng init done
+[    0.014082] printk: log buffer data + meta data: 262144 + 1114112 = 1376256 bytes
+[    0.014648] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.015183] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.015236] Fallback order for Node 0: 0 
+[    0.015239] Built 1 zonelists, mobility grouping on.  Total pages: 130974
+[    0.015241] Policy zone: DMA32
+[    0.015249] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.017051] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+[    0.031808] ftrace: allocating 63941 entries in 252 pages
+[    0.031810] ftrace: allocated 252 pages with 6 groups
+[    0.032998] Dynamic Preempt: lazy
+[    0.033156] rcu: Preemptible hierarchical RCU implementation.
+[    0.033157] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=2.
+[    0.033159] 	Trampoline variant of Tasks RCU enabled.
+[    0.033159] 	Rude variant of Tasks RCU enabled.
+[    0.033160] 	Tracing variant of Tasks RCU enabled.
+[    0.033161] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.033162] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
+[    0.033186] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.033188] RCU Tasks Rude: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.038994] NR_IRQS: 524544, nr_irqs: 424, preallocated irqs: 0
+[    0.039144] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.039336] Console: colour dummy device 80x25
+[    0.039410] printk: legacy console [ttyS0] enabled
+[    0.171735] ACPI: Core revision 20251212
+[    0.172636] APIC: Switch to symmetric I/O mode setup
+[    0.173879] x2apic enabled
+[    0.174787] APIC: Switched APIC routing to: physical x2apic
+[    0.175897] kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+[    0.177339] kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+[    0.179138] kvm-guest: setup PV IPIs
+[    0.179973] clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x228ae3847f6, max_idle_ns: 440795295175 ns
+[    0.182088] Calibrating delay loop (skipped) preset value.. 4792.77 BogoMIPS (lpj=2396388)
+[    0.183082] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.183082] Last level iTLB entries: 4KB 512, 2MB 512, 4MB 256
+[    0.183082] Last level dTLB entries: 4KB 3072, 2MB 3072, 4MB 1536, 1GB 0
+[    0.183082] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.183082] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.183082] Transient Scheduler Attacks: Vulnerable: No microcode
+[    0.183082] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.183082] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.183082] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.183082] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.183082] active return thunk: srso_alias_return_thunk
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x800: 'Control-flow User registers'
+[    0.183082] x86/fpu: Supporting XSAVE feature 0x1000: 'Control-flow Kernel registers (KVM only)'
+[    0.183082] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.183082] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.183082] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.183082] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.183082] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.183082] x86/fpu: xstate_offset[11]: 2440, xstate_sizes[11]:   16
+[    0.183082] x86/fpu: xstate_offset[12]: 2456, xstate_sizes[12]:   24
+[    0.183082] x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format.
+[    0.183082] Freeing SMP alternatives memory: 56K
+[    0.183082] pid_max: default: 32768 minimum: 301
+[    0.183082] landlock: Up and running.
+[    0.183082] Yama: becoming mindful.
+[    0.183082] AppArmor: AppArmor initialized
+[    0.183082] AppArmor: AppArmor secmark mediation reserved: ready to be enabled
+[    0.183082] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.183082] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.183082] VFS: Finished mounting rootfs on nullfs
+[    0.183082] smpboot: CPU0: AMD EPYC (family: 0x19, model: 0xa0, stepping: 0x2)
+[    0.183865] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.184092] ... version:                   2
+[    0.184945] ... bit width:                 48
+[    0.185087] ... generic counters:          6
+[    0.185944] ... generic bitmap:            000000000000003f
+[    0.186096] ... fixed-purpose counters:    0
+[    0.186950] ... fixed-purpose bitmap:      0000000000000000
+[    0.187087] ... value mask:                0000ffffffffffff
+[    0.188087] ... max period:                00007fffffffffff
+[    0.189088] ... global_ctrl mask:          000000000000003f
+[    0.190275] signal: max sigframe size: 3376
+[    0.191197] rcu: Hierarchical SRCU implementation.
+[    0.192093] rcu: 	Max phase no-delay instances is 400.
+[    0.193317] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+[    0.202340] smp: Bringing up secondary CPUs ...
+[    0.203595] smpboot: x86: Booting SMP configuration:
+2026-10-03T16:19:02.127509647 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.127530889 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.127811681 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.127828186 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x71:0x1 failed: Failed to find address range.
+[    0.204092] .... node  #0, CPUs:      #1
+[    0.205199] smp: Brought up 1 node, 2 CPUs
+[    0.206089] smpboot: Total of 2 processors activated (9585.55 BogoMIPS)
+[    0.207434] Memory: 158420K/523896K available (23799K kernel code, 4952K rwdata, 16764K rodata, 5292K init, 5856K bss, 359528K reserved, 0K cma-reserved)
+[    0.208445] devtmpfs: initialized
+[    0.209315] x86/mm: Memory block size: 128MB
+[    0.211489] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.212121] posixtimers hash table entries: 1024 (order: 2, 16384 bytes, linear)
+[    0.213130] futex hash table entries: 512 (32768 bytes on 1 NUMA nodes, total 32 KiB, linear).
+2026-10-03T16:19:02.144780132 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144800673 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144814363 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144828114 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144841734 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144855285 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144868905 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144882205 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144895656 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144909046 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144929136 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144949076 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144969006 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.144989186 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+[    0.214755] PM: RTC time: 00:00:00, date: 2000-00-00
+[    0.217993] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.218326] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.219242] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.220101] audit: initializing netlink subsys (disabled)
+[    0.221190] audit: type=2000 audit(1791044341.902:1): state=initialized audit_enabled=0 res=1
+[    0.221302] thermal_sys: Registered thermal governor 'fair_share'
+[    0.221975] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.224097] thermal_sys: Registered thermal governor 'step_wise'
+[    0.226094] thermal_sys: Registered thermal governor 'user_space'
+[    0.229094] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.231123] cpuidle: using governor ladder
+[    0.236109] cpuidle: using governor menu
+[    0.237595] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.240514] PCI: Fatal: No config space access function found
+[    0.244296] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.251345] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.258093] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.261096] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.266831] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.276232] ACPI: Added _OSI(Module Device)
+[    0.277078] ACPI: Added _OSI(Processor Device)
+[    0.277978] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.278341] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.282099] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.283193] ACPI: Interpreter enabled
+[    0.283950] ACPI: PM: (supports S0)
+[    0.284090] ACPI: Using IOAPIC for interrupt routing
+[    0.285165] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.286088] PCI: Using E820 reservations for host bridge windows
+[    0.289102] iommu: Default domain type: Translated
+[    0.290063] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.291327] SCSI subsystem initialized
+[    0.293174] ACPI: bus type USB registered
+[    0.294015] usbcore: registered new interface driver usbfs
+[    0.294103] usbcore: registered new interface driver hub
+[    0.295100] usbcore: registered new device driver usb
+[    0.296152] pps_core: LinuxPPS API ver. 1 registered
+[    0.297088] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.298094] PTP clock support registered
+[    0.299171] EDAC MC: Ver: 3.0.0
+[    0.300623] NetLabel: Initializing
+[    0.301091] NetLabel:  domain hash size = 128
+[    0.301954] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.302171] NetLabel:  unlabeled traffic allowed by default
+[    0.303146] mctp: management component transport protocol core
+[    0.304100] NET: Registered PF_MCTP protocol family
+[    0.305103] PCI: Using ACPI for IRQ routing
+[    0.305945] PCI: System does not support PCI
+[    0.306145] vgaarb: loaded
+[    0.307361] clocksource: Switched to clocksource kvm-clock
+[    0.308737] VFS: Disk quotas dquot_6.6.0
+[    0.309574] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.311551] AppArmor: AppArmor Filesystem Enabled
+[    0.312544] pnp: PnP ACPI init
+[    0.313396] pnp: PnP ACPI: found 2 devices
+[    0.317536] NET: Registered PF_INET protocol family
+[    0.318638] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.344907] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.346601] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.348149] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.349750] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.351191] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.352532] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.353999] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.355326] UDP-Lite hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.356811] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.357957] NET: Registered PF_XDP protocol family
+[    0.358920] PCI: CLS 0 bytes, default 64
+[    0.359867] Trying to unpack rootfs image as initramfs...
+[    0.359877] virtio-mmio: Registering device virtio-mmio.0 at 0xc0001000-0xc0001fff, IRQ 5.
+[    0.362645] virtio-mmio: Registering device virtio-mmio.1 at 0xc0002000-0xc0002fff, IRQ 6.
+[    0.364327] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x228ae3847f6, max_idle_ns: 440795295175 ns
+[    0.366410] clocksource: Switched to clocksource tsc
+[    0.367470] platform rtc_cmos: registered platform RTC device (no PNP device found)
+[    0.369671] Initialise system trusted keyrings
+[    0.370616] Key type blacklist registered
+[    0.371515] workingset: timestamp_bits=36 max_order=17 bucket_order=0
+[    0.373326] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.376012] fuse: init (API version 7.45)
+[    0.377049] integrity: Platform Keyring initialized
+[    0.378040] integrity: Machine keyring initialized
+[    0.389045] Freeing initrd memory: 1888K
+[    0.391793] Key type asymmetric registered
+[    0.392635] Asymmetric key parser 'x509' registered
+[    0.393655] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 242)
+[    0.395206] io scheduler mq-deadline registered
+[    0.396295] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.398434] virtio-mmio virtio-mmio.0: error -EBUSY: can't request region for resource [mem 0xc0001000-0xc0001fff]
+[    0.400483] virtio-mmio virtio-mmio.0: probe with driver virtio-mmio failed with error -16
+[    0.402133] virtio-mmio virtio-mmio.1: error -EBUSY: can't request region for resource [mem 0xc0002000-0xc0002fff]
+[    0.404173] virtio-mmio virtio-mmio.1: probe with driver virtio-mmio failed with error -16
+[    0.405947] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    0.430396] 00:00: ttyS0 at I/O 0x3f8 (irq = 28, base_baud = 115200) is a U6_16550A
+2026-10-03T16:19:02.378311304 [igkmd-mesh:fc_vcpu 0] 3 messages were suppressed due to rate limiting
+2026-10-03T16:19:02.378323112 [igkmd-mesh:fc_vcpu 0] vcpu: IO read @ 0x2f9:0x1 failed: Failed to find address range.
+2026-10-03T16:19:02.378335541 [igkmd-mesh:fc_vcpu 0] 6 messages were suppressed due to rate limiting
+2026-10-03T16:19:02.378341640 [igkmd-mesh:fc_vcpu 0] vcpu: IO write @ 0x2f9:0x1 failed: Failed to find address range.
+[    0.435444] Linux agpgart interface v0.103
+[    0.439061] loop: module loaded
+[    0.440032] ACPI: bus type drm_connector registered
+[    0.441225] tun: Universal TUN/TAP device driver, 1.6
+2026-10-03T16:19:02.389267996 [igkmd-mesh:fc_vcpu 0] [Net:net0] notifying queues
+[    0.443199] PPP generic driver version 2.4.2
+[    0.444319] i8042: PNP: PS/2 Controller [PNP0303:PS2] at 0x60,0x64 irq 29
+[    0.446023] mousedev: PS/2 mouse device common for all mice
+[    0.447406] rtc_cmos rtc_cmos: only 24-hr supported
+[    0.448418] i2c_dev: i2c /dev entries driver
+[    0.449324] device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+[    0.451737] device-mapper: uevent: version 1.0.3
+[    0.452755] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[    0.454522] amd_pstate: The CPPC feature is supported but currently disabled by the BIOS.
+[    0.454522] Please enable it if your BIOS has the CPPC option.
+[    0.457254] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    0.458786] drop_monitor: Initializing network drop monitor service
+[    0.460244] NET: Registered PF_INET6 protocol family
+[    0.462042] Segment Routing with IPv6
+[    0.462796] In-situ OAM (IOAM) with IPv6
+[    0.463629] NET: Registered PF_PACKET protocol family
+[    0.464762] Key type dns_resolver registered
+2026-10-03T16:19:02.412387224 [igkmd-mesh:fc_vcpu 1] Invalid MMIO read @ 0xfed803c0:0x4: Failed to find address range.
+2026-10-03T16:19:02.412408857 [igkmd-mesh:fc_vcpu 1] Invalid MMIO read @ 0xfed803c0:0x4: Failed to find address range.
+[    0.466323] IPI shorthand broadcast: enabled
+[    0.471166] sched_clock: Marking stable (328005718, 142930331)->(592438088, -121502039)
+[    0.473250] registered taskstats version 1
+[    0.474584] Loading compiled-in X.509 certificates
+[    0.476285] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    0.478709] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    0.481257] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    0.483629] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    0.486238] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    0.488211] blacklist: Loading compiled-in revocation X.509 certificates
+[    0.489572] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    0.491574] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    0.493648] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    0.495788] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    0.497862] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    0.499987] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    0.502110] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    0.504231] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.517194] Demotion targets for Node 0: null
+[    0.518367] Key type .fscrypt registered
+[    0.520006] Key type fscrypt-provisioning registered
+[    0.522258] Key type big_key registered
+[    0.525492] Key type encrypted registered
+[    0.526311] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.527455] ima: No TPM chip found, activating TPM-bypass!
+[    0.528566] Loading compiled-in module X.509 certificates
+[    0.530122] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    0.532087] ima: Allocated hash algorithm: sha256
+[    0.533060] ima: No architecture policies found
+[    0.534037] evm: Initialising EVM extended attributes:
+[    0.535071] evm: security.selinux
+[    0.535742] evm: security.SMACK64
+[    0.536416] evm: security.SMACK64EXEC
+[    0.537166] evm: security.SMACK64TRANSMUTE
+[    0.538000] evm: security.SMACK64MMAP
+[    0.538737] evm: security.apparmor
+[    0.539435] evm: security.ima
+[    0.540045] evm: security.capability
+[    0.540766] evm: HMAC attrs: 0x1
+[    0.541810] PM:   Magic number: 0:110:269243
+[    0.543550] RAS: Correctable Errors collector initialized.
+[    0.546644] clk: Disabling unused clocks
+[    0.548264] PM: genpd: Disabling unused power domains
+[    0.553829] Freeing unused decrypted memory: 2028K
+[    0.556363] Freeing unused kernel image (initmem) memory: 5292K
+[    0.557914] Write protecting the kernel read-only data: 43008k
+[    0.560356] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    0.562674] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    0.638988] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.639834] Run /init as init process
+IGKME-INIT: booted 7.0.0-29-generic phase=nbconnect; eth0 2: eth0    inet 192.168.204.2/24 scope global eth0\       valid_lft forever preferred_lft forever
+IGKME-INIT: insmod tls OK
+[    0.662918] NET: Registered PF_VSOCK protocol family
+IGKME-INIT: insmod vsock OK
+IGKME-INIT: insmod vmw_vsock_virtio_transport_common OK
+2026-10-03T16:19:02.616730394 [igkmd-mesh:fc_vcpu 1] [Vsock:vsock] notifying queues
+IGKME-INIT: insmod vmw_vsock_virtio_transport OK
+[    0.674681] igkmd_mtls: loading out-of-tree module taints kernel.
+[    0.675513] igkmd_mtls: module verification failed: signature and/or required key missing - tainting kernel
+[    0.677050] IGKME: init on stock kernel; mesh="10.80.0.1:9443,10.80.0.2:9443,10.80.0.9:9443" mesh_listen="8443,8444" agent cid=2 port=7100
+[    0.691022] IGKME: hooked tcp_prot connect/accept/sendmsg/recvmsg; private proto_ops.poll ready (orig_poll=tcp_poll)
+IGKME-INIT: insmod igkmd_mtls OK
+IGKME-INIT: ===== PART 2 non-blocking connect (ok): VIP 10.80.0.1:9443 -> svc-a =====
+IGKME-APP: nbclient START vip=10.80.0.1:9443 sub=ok (O_NONBLOCK) t+0.000s
+[    0.697372] IGKME: [resolve] vip 10.80.0.1:9443 -> asking agent over vsock cid=2 port=7100
+[    0.698617] IGKME: [resolve] agent chose backend 192.168.204.1:6443 expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; rewriting connect dst
+[    0.701382] IGKME: [connect] NON-BLOCKING mesh connect 192.168.204.1:6443 -> EINPROGRESS; readiness withheld, handshake driven by kthread
+IGKME-APP: nbclient connect() rc=-1 errno=115 (Operation now in progress) t+0.009s
+IGKME-APP: nbclient pre-ready write() rc=-1 errno=11 (Resource temporarily unavailable) [EAGAIN=11 expected: not writable before kTLS] t+0.010s
+[    0.709076] IGKME: [c1] HOLD on first I/O: CLIENT mesh 192.168.204.1:6443, relaying CLIENT TLS handshake over vsock cid=2 port=7100
+[    0.711991] ------------[ cut here ]------------
+[    0.712578] memcpy: detected field-spanning write (size 36) of single field "dst" at include/linux/sockptr.h:49 (size 0)
+[    0.713897] WARNING: include/linux/sockptr.h:49 at do_tls_setsockopt_conf+0x743/0x9c0 [tls], CPU#1: igkme-hs/92
+[    0.715131] Modules linked in: igkmd_mtls(OE) vmw_vsock_virtio_transport vmw_vsock_virtio_transport_common vsock tls
+[    0.716415] CPU: 1 UID: 0 PID: 92 Comm: igkme-hs Tainted: G           OE       7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    0.717756] Tainted: [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+[    0.718419] RIP: 0010:do_tls_setsockopt_conf+0x74f/0x9c0 [tls]
+[    0.719166] Code: 44 24 04 4c 89 54 24 08 44 88 5c 24 10 4c 89 4c 24 18 48 89 44 24 20 48 8d 3d ed 4c fd ff 31 c9 48 c7 c2 00 88 3e c0 4c 89 ee <67> 48 0f b9 3a 44 8b 44 24 04 4c 8b 54 24 08 44 0f b6 5c 24 10 4c
+[    0.721416] RSP: 0018:ff53f349c023ba68 EFLAGS: 00010246
+[    0.722081] RAX: ff304a4901b224cc RBX: ff53f349c023bbe6 RCX: 0000000000000000
+[    0.722969] RDX: ffffffffc03e8800 RSI: 0000000000000024 RDI: ffffffffc03d6030
+[    0.723846] RBP: ff53f349c023baf0 R08: 0000000000000001 R09: ff304a4901b224c8
+[    0.724736] R10: ff304a49031bc280 R11: ff53f349c023ba00 R12: ff304a4901b22400
+[    0.725629] R13: 0000000000000024 R14: 0000000000000001 R15: 0000000000000001
+[    0.726520] FS:  0000000000000000(0000) GS:ff304a4966cff000(0000) knlGS:0000000000000000
+[    0.727514] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    0.728232] CR2: 000071f739a5a000 CR3: 000000000306f006 CR4: 0000000000f71ef0
+[    0.729127] PKRU: 55555554
+[    0.729489] Call Trace:
+[    0.729811]  <TASK>
+[    0.730109]  ? evict+0xe0/0x290
+[    0.730527]  do_tls_setsockopt+0x1dd/0x270 [tls]
+[    0.731114]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.731724]  tls_setsockopt+0x5a/0x80 [tls]
+[    0.732262]  do_handshake.cold+0x3b1/0x6e3 [igkmd_mtls]
+[    0.732921]  ? __pfx_igkm_drive+0x10/0x10 [igkmd_mtls]
+[    0.733584]  igkm_drive+0x1fe/0x2e0 [igkmd_mtls]
+[    0.734169]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.734769]  ? dequeue_entity+0xef/0x710
+[    0.735288]  kthread+0xf7/0x130
+[    0.735704]  ? __pfx_kthread+0x10/0x10
+[    0.736191]  ret_from_fork+0x195/0x2a0
+[    0.736676]  ? __pfx_kthread+0x10/0x10
+[    0.737168]  ? __pfx_kthread+0x10/0x10
+[    0.737651]  ret_from_fork_asm+0x1a/0x30
+[    0.738162]  </TASK>
+[    0.738464] ---[ end trace 0000000000000000 ]---
+[    0.739821] IGKME: [c1] HANDSHAKE DONE role=client peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; kTLS installed on the workload socket (TO_PEER=3 NEED_PEER=3); kernel carries TLS, relay out of path
+[    0.742272] IGKME: [c1] RESOLVE-MATCH expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed handshake_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed match=1
+[    0.744172] IGKME: [kthread] role=client background handshake DONE; kTLS installed, waking poll (readiness now reported)
+IGKME-APP: nbclient epoll wake#1 revents=0x4 t+0.050s
+IGKME-APP: nbclient EPOLLOUT (writable) FIRST seen at wake#1 t+0.051s -- this is AFTER the module's kTLS install line above
+IGKME-APP: nbclient post-ready write() rc=38 errno=11: IGKM-E-REQN nbclient->peer first line
+t+0.053sIGKME-APP: nbclient read(38) PLAINTEXT: IGKM-E-REQN nbclient->peer first line
+IGKME-APP: DONE mode=nbclient sub=ok t+0.058s
+IGKME-INIT: ===== PART 2 non-blocking connect (handshake-deny -> SO_ERROR): VIP 10.80.0.2:9443 -> svc-hs-deny =====
+IGKME-APP: nbclient START vip=10.80.0.2:9443 sub=hsdeny (O_NONBLOCK) t+0.000s
+[    0.758994] IGKME: [resolve] vip 10.80.0.2:9443 -> asking agent over vsock cid=2 port=7100
+[    0.761255] IGKME: [resolve] agent chose backend 192.168.204.1:6445 expected_peer=spiffe://overdrive.test/ns/default/sa/peer-denied; rewriting connect dst
+[    0.764806] IGKME: [connect] NON-BLOCKING mesh connect 192.168.204.1:6445 -> EINPROGRESS; readiness withheld, handshake driven by kthread
+IGKME-APP: nbclient connect() rc=-1 errno=115 (Operation now in progress) t+0.009s
+[    0.767466] BUG: TASK stack guard page was hit at ff53f349c026bff8 (stack is ff53f349c026c000..ff53f349c0270000)
+[    0.767471] Oops: stack guard page: 0000 [#1] SMP NOPTI
+[    0.767477] CPU: 1 UID: 0 PID: 99 Comm: igkmd_app Tainted: G        W  OE       7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    0.767481] Tainted: [W]=WARN, [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+[    0.767483] RIP: 0010:__raw_spin_lock_irqsave+0xa/0x80
+[    0.767488] Code: ff 0f 1f 40 00 66 66 2e 0f 1f 84 00 00 00 00 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 55 48 89 e5 41 54 53 48 89 fb <9c> 58 0f 1f 40 00 49 89 c4 fa 0f 1f 44 00 00 65 ff 05 90 74 f1 02
+[    0.767490] RSP: 0018:ff53f349c026c000 EFLAGS: 00010286
+[    0.767493] RAX: 0000000000000000 RBX: ffffffffc060f0e8 RCX: 0000000000000000
+[    0.767494] RDX: 0000000000000000 RSI: ff53f349c026c0a8 RDI: ffffffffc060f0e8
+[    0.767496] RBP: ff53f349c026c010 R08: 0000000000000000 R09: 0000000000000000
+[    0.767497] R10: 0000000000000000 R11: 0000000000000000 R12: ff304a49031bc280
+[    0.767498] R13: 0000000000000026 R14: 0000000000000001 R15: 0000000000000000
+[    0.767501] FS:  0000000001ff0400(0000) GS:ff304a4966cff000(0000) knlGS:0000000000000000
+[    0.767503] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    0.767505] CR2: ff53f349c026bff8 CR3: 0000000002f84002 CR4: 0000000000f71ef0
+[    0.767508] PKRU: 55555554
+[    0.767509] Call Trace:
+[    0.767510]  <TASK>
+[    0.767513]  _raw_spin_lock_irqsave+0xe/0x20
+[    0.767522]  tbl_get+0x22/0x140 [igkmd_mtls]
+[    0.767528]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.767531]  ? _raw_spin_unlock_irqrestore+0x11/0x60
+[    0.767533]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.767536]  io_gate+0x46/0x480 [igkmd_mtls]
+[    0.767539]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.767541]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.767544]  ? io_gate+0x46/0x480 [igkmd_mtls]
+[    0.767546]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.767556]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.767558]  ? _raw_spin_unlock_irqrestore+0x11/0x60
+[    0.767560]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.767562]  ? tbl_state+0x70/0x100 [igkmd_mtls]
+[    0.767564]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.767567]  hooked_sendmsg+0x57/0xb0 [igkmd_mtls]
+[    0.767571]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767573]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767576]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767579]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767582]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767585]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767588]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767590]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767593]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767596]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767599]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767602]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767605]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767607]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767610]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767613]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767616]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767619]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767621]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767624]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767627]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767630]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767633]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767636]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767638]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767641]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767644]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767647]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767650]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767653]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767655]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767658]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767661]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767664]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767667]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767670]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767672]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767675]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767678]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767681]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767684]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767687]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767689]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767692]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767695]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767698]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767701]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767704]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767706]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767709]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767712]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767715]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767718]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767721]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767724]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767727]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767730]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767733]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767735]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767738]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767741]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767744]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767747]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767750]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767752]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767755]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767758]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767761]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767764]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767767]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767769]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767772]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767775]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767778]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767781]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767784]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767786]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767789]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767792]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767795]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767798]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767801]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767803]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767806]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767809]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767812]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767815]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767818]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767820]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767823]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767826]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767829]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767832]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767835]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767838]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767840]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767843]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767846]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767849]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767852]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767855]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767857]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767860]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767863]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767866]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767869]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767872]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767874]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767877]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767880]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767883]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767886]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767889]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767891]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767894]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767897]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767900]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767903]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767906]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767908]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767911]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767914]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767917]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767920]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767923]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767925]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767928]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767936]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767939]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767942]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767945]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767948]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767950]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767953]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767956]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767959]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767962]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767965]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767967]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767970]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767973]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767976]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767979]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767982]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767984]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767987]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767990]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767993]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767996]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.767999]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768002]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768004]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768007]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768010]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768013]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768016]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768019]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768021]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768024]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768027]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768030]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768033]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768036]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768038]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768041]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768044]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768047]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768050]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768053]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768056]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768058]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768061]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768064]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768067]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768070]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768073]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768076]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768078]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768081]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768084]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768087]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768090]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768093]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768095]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768098]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768101]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768104]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768107]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768110]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768112]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768115]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768118]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768121]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768124]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768127]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768129]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768132]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768135]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768138]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768141]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768143]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768146]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768149]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768152]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768155]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768158]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768160]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768163]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768166]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768169]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768172]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768175]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768177]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768180]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768183]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768186]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768189]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768192]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768195]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768198]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768201]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768203]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768206]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768209]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768212]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768215]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768218]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768220]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768223]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768226]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768229]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768232]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768235]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768237]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768240]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768243]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768246]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768249]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768252]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768254]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768257]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768260]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768263]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768266]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768269]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768271]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768274]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768277]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768280]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768283]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768286]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768288]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768291]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768294]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768297]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768300]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768303]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768306]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768308]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768311]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768314]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768317]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768320]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768323]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768325]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768328]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768331]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768334]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768337]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768340]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768342]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768345]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768348]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768351]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768354]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768357]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768359]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768362]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768365]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768368]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768371]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768374]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768376]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768379]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768382]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768385]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768388]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768391]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768393]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768396]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768399]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768402]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768405]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768408]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768410]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768413]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768416]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768419]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768422]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768432]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768435]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768438]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768440]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768443]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768446]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768449]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768452]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768455]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768457]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768460]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768463]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768466]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768469]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768471]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768474]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768477]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768480]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768483]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768486]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768488]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768491]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768494]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768497]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768501]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768505]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768508]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768511]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768513]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768516]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768519]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768522]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768525]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768528]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768530]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768533]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768536]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768539]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768542]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768545]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768547]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768550]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768553]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768556]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768559]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768561]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768564]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768567]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768570]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768573]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768576]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768578]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768581]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768584]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768587]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768590]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768592]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768595]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768598]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768601]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768604]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768607]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768609]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768612]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768615]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768618]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768621]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768623]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768626]  hooked_sendmsg+0x76/0xb0 [igkmd_mtls]
+[    0.768629]  inet_sendmsg+0x7f/0x90
+[    0.768634]  sock_write_iter+0x179/0x1a0
+[    0.768638]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.768644]  vfs_write+0x3c6/0x490
+[    0.768651]  ksys_write+0xc6/0xf0
+[    0.768655]  __x64_sys_write+0x19/0x30
+[    0.768657]  x64_sys_call+0x22f/0x2390
+[    0.768660]  do_syscall_64+0x105/0x5a0
+[    0.768664]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.768667]  ? count_memcg_events+0x103/0x250
+[    0.768671]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.768673]  ? handle_mm_fault+0x1be/0x2e0
+[    0.768678]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.768680]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[    0.768684]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.768687]  ? irqentry_exit+0x97/0x6f0
+[    0.768690]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.768692]  ? exc_page_fault+0x94/0x1e0
+[    0.768696]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    0.768698] RIP: 0033:0x450016
+[    0.768701] Code: 47 ba 04 00 00 00 48 c7 c0 f0 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[    0.768702] RSP: 002b:00007ffc7c5fb9f0 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[    0.768705] RAX: ffffffffffffffda RBX: 00000000ffffffff RCX: 0000000000450016
+[    0.768706] RDX: 0000000000000026 RSI: 00007ffc7c5fbab0 RDI: 0000000000000003
+[    0.768707] RBP: 00007ffc7c5fba00 R08: 0000000000000000 R09: 0000000000000000
+[    0.768708] R10: 0000000000000000 R11: 0000000000000202 R12: 00000000004b8ac0
+[    0.768709] R13: 00007ffc7c5fbab0 R14: 00007ffc7c5fba80 R15: 0000000001ff03f0
+[    0.768715]  </TASK>
+[    0.768716] Modules linked in: igkmd_mtls(OE) vmw_vsock_virtio_transport vmw_vsock_virtio_transport_common vsock tls
+[    0.768723] ---[ end trace 0000000000000000 ]---
+[    0.768724] RIP: 0010:__raw_spin_lock_irqsave+0xa/0x80
+[    0.768727] Code: ff 0f 1f 40 00 66 66 2e 0f 1f 84 00 00 00 00 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 55 48 89 e5 41 54 53 48 89 fb <9c> 58 0f 1f 40 00 49 89 c4 fa 0f 1f 44 00 00 65 ff 05 90 74 f1 02
+[    0.768728] RSP: 0018:ff53f349c026c000 EFLAGS: 00010286
+[    0.768730] RAX: 0000000000000000 RBX: ffffffffc060f0e8 RCX: 0000000000000000
+[    0.768731] RDX: 0000000000000000 RSI: ff53f349c026c0a8 RDI: ffffffffc060f0e8
+[    0.768732] RBP: ff53f349c026c010 R08: 0000000000000000 R09: 0000000000000000
+[    0.768733] R10: 0000000000000000 R11: 0000000000000000 R12: ff304a49031bc280
+[    0.768735] R13: 0000000000000026 R14: 0000000000000001 R15: 0000000000000000
+[    0.768737] FS:  0000000001ff0400(0000) GS:ff304a4966cff000(0000) knlGS:0000000000000000
+[    0.768739] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    0.768740] CR2: ff53f349c026bff8 CR3: 0000000002f84002 CR4: 0000000000f71ef0
+[    0.768743] PKRU: 55555554
+[    0.768745] Kernel panic - not syncing: Fatal exception in interrupt
+[    0.768868] Kernel Offset: 0x34200000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+2026-10-03T16:19:02.991696440 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:02.993722119 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:03.194785742 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:03.196825382 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:03.397889096 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:03.399929808 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:03.600992000 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:03.603031850 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:03.804094662 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:03.806134132 [igkmd-mesh:fc_vcpu 1] Failed to trigger i8042 kbd interrupt (disabled by guest OS)
+2026-10-03T16:19:04.007198227 [igkmd-mesh:fc_vcpu 1] Unexpected exit reason on vcpu run: Shutdown
+2026-10-03T16:19:04.007265999 [igkmd-mesh:main] Vmm is stopping.
+2026-10-03T16:19:04.007289464 [igkmd-mesh:main] Killing vCPU threads
+2026-10-03T16:19:04.055366758 [igkmd-mesh:main] RunWithoutApiError error: MicroVMStopped without an error: GenericError
+2026-10-03T16:19:04.055438236 [igkmd-mesh:main] Firecracker exiting with error. exit_code=1
+
+===== relay log (agent: OPEN/ACCEPT/RESOLVE, handshakes, custody) =====
+RELAY listening on unix <metal-home>/igkm-spike-a/runs-igkmd/20261003T161901Z-576853/vsock.sock_7100 pid=576901 client identity=spiffe://overdrive.test/ns/default/sa/guest-client server identity=spiffe://overdrive.test/ns/default/sa/guest-server (keys: client PKCS#8 138 B, guest-server PKCS#8 138 B, P-256 scalars 32 B, held in this process only; one thread per vsock connection) t+0.239432s
+RELAY service registry (D4, health-dir <metal-home>/igkm-spike-a/runs-igkmd/20261003T161901Z-576853/health):
+RELAY   service svc-a vip 10.80.0.1:9443 policy=allow backends=[192.168.204.1:6443,192.168.204.1:6444] expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed
+RELAY   service svc-hs-deny vip 10.80.0.2:9443 policy=allow backends=[192.168.204.1:6445] expected_peer=spiffe://overdrive.test/ns/default/sa/peer-denied
+RELAY   service svc-denied vip 10.80.0.9:9443 policy=deny backends=[] expected_peer=spiffe://overdrive.test/ns/default/sa/peer-denied
+RELAY[c1] vsock connection accepted t+1.347395s
+RELAY[c1] vsock rx RESOLVE payload=7 vip=10.80.0.1:9443 (service-name resolution on the SAME vsock channel — D4) t+1.348576s
+RELAY[c1] resolve service=svc-a backends(by Ord)[192.168.204.1:6443=healthy 192.168.204.1:6444=healthy] -> chose 192.168.204.1:6443 (first-healthy, MtlsResolve-style) expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed t+1.348606s
+RELAY[c1] vsock tx RESOLVED backend=192.168.204.1:6443 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.348614s
+RELAY[c2] vsock connection accepted t+1.358647s
+RELAY[c2] vsock rx OPEN payload=7 dst=192.168.204.1:6443 role=TLS client, local identity=spiffe://overdrive.test/ns/default/sa/guest-client t+1.360680s
+RELAY[c2] vsock tx TO_PEER payload=194 wire=199 records[0x16/189] t+1.360851s
+RELAY[c2] vsock tx NEED_PEER payload=0 wire=5  t+1.360857s
+RELAY[c2] vsock rx FROM_PEER payload=127 records[0x16/122] t+1.361329s
+RELAY[c2] vsock tx TO_PEER payload=6 wire=11 records[0x14/1] t+1.361404s
+RELAY[c2] vsock tx NEED_PEER payload=0 wire=5  t+1.361408s
+RELAY[c2] vsock rx FROM_PEER payload=6 records[0x14/1] t+1.361580s
+RELAY[c2] vsock tx NEED_PEER payload=0 wire=5  t+1.361586s
+RELAY[c2] vsock rx FROM_PEER payload=695 records[0x17/690] t+1.361722s
+RELAY[c2] vsock tx TO_PEER payload=610 wire=615 records[0x17/605] t+1.361945s
+RELAY[c2] handshake complete: policy ALLOW local spiffe://overdrive.test/ns/default/sa/guest-client <-> peer spiffe://overdrive.test/ns/default/sa/peer-allowed; suite=TLS13_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0 buffered_plaintext=false; traffic secrets from rustls KeyLog tx=CLIENT_TRAFFIC_SECRET_0 rx=SERVER_TRAFFIC_SECRET_0 (32 B each), host check HKDF(secret)==rustls key/iv tx=true rx=true t+1.361954s
+RELAY[c2] vsock tx SECRETS payload=194 wire=199 (v2 suite=0x1301 tx: seq 0 secret 32B key 16B iv 12B; rx: seq 0 secret 32B key 16B iv 12B; peer id 50B) t+1.361961s
+RELAY[c2] guest closed the vsock connection (agent out of the data path) t+1.362125s
+RELAY[c2] tally guest->host FROM_PEER: frames=3 wire_bytes=843
+RELAY[c2] tally guest->host OPEN: frames=1 wire_bytes=12
+RELAY[c2] tally host->guest NEED_PEER: frames=3 wire_bytes=15
+RELAY[c2] tally host->guest SECRETS: frames=1 wire_bytes=199
+RELAY[c2] tally host->guest TO_PEER: frames=3 wire_bytes=825
+RELAY[c2] custody: host->guest total 1039 bytes; client SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; guest-server SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; application traffic secrets sent (changed vs Spike B: expected 1 each when ALLOW) = [1,1]
+RELAY[c3] vsock connection accepted t+1.408986s
+RELAY[c3] vsock rx RESOLVE payload=7 vip=10.80.0.2:9443 (service-name resolution on the SAME vsock channel — D4) t+1.411226s
+RELAY[c3] resolve service=svc-hs-deny backends(by Ord)[192.168.204.1:6445=healthy] -> chose 192.168.204.1:6445 (first-healthy, MtlsResolve-style) expected_peer=spiffe://overdrive.test/ns/default/sa/peer-denied t+1.411245s
+RELAY[c3] vsock tx RESOLVED backend=192.168.204.1:6445 peer=spiffe://overdrive.test/ns/default/sa/peer-denied (payload=58 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.411253s
+
+===== peer log (backends) =====
+PEER listening tls 192.168.204.1:6443 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed backend-label=A send_tls13_tickets=0 (production-faithful: no NewSessionTicket) t+0.234682s
+PEER listening tls 192.168.204.1:6444 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed backend-label=B send_tls13_tickets=0 (production-faithful: no NewSessionTicket) t+0.234783s
+PEER listening tls 192.168.204.1:6445 identity=spiffe://overdrive.test/ns/default/sa/peer-denied backend-label=DENIED send_tls13_tickets=0 (production-faithful: no NewSessionTicket) t+0.234853s
+PEER listening plain 192.168.204.1:5001 (non-mesh pass-through) t+0.234919s
+PEER ready t+0.234948s
+PEER[A:6443#1] accepted tcp from 192.168.204.2:60566 t+1.354746s
+PEER[A:6443#1] handshake OK version=TLSv1_3 suite=TLS13_AES_128_GCM_SHA256 verified client SPIFFE ID=spiffe://overdrive.test/ns/default/sa/guest-client backend-label=A send_tls13_tickets=0 (production-faithful) t+1.402007s
+PEER[A:6443#1] rx plaintext line 1 (38 bytes): IGKM-E-REQN nbclient->peer first line\n t+1.402028s
+PEER[A:6443#1] tx plaintext line 1 (38 bytes): IGKM-E-REQN nbclient->peer first line\n t+1.402055s
+PEER[A:6443#1] read ended: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof; application plaintext bytes received=38 t+1.404045s
+PEER[DENIED:6445#1] accepted tcp from 192.168.204.2:41138 t+1.416538s
+
+===== inclient log (inbound host callers) =====
+(no inbound dials this phase)
+
+===== tap capture scan =====
+-rw-r--r-- 1 tcpdump tcpdump 4288 Oct  3 16:19 <metal-home>/igkm-spike-a/runs-igkmd/20261003T161901Z-576853/tap.pcap
+2613c71ba0561af2f470e8c114592401432ca33c3a62a7820df92a08ed46b802  <metal-home>/igkm-spike-a/runs-igkmd/20261003T161901Z-576853/tap.pcap
+SCAN conn client guest:60566 -> server peer:6443 (TLS) first packet t+1.351499s
+SCAN   guest->peer: 870 bytes flags[FIN,RST,SYN] marker(IGKM-D-)=0 marker(IGKM-E-)=0 records=4 (0x17 count=2) unframed_bytes=0
+SCAN     records: 0x16/189 0x14/1 0x17/605 0x17/55
+SCAN       seg#1 t+1.361003s: 0x16/189
+SCAN       seg#2 t+1.361538s: 0x14/1
+SCAN       seg#3 t+1.401772s: 0x17/605 0x17/55 COALESCED
+SCAN   peer->guest: 912 bytes flags[FIN,SYN] marker(IGKM-D-)=0 marker(IGKM-E-)=0 records=5 (0x17 count=3) unframed_bytes=0
+SCAN     records: 0x16/122 0x14/1 0x17/690 0x17/55 0x17/19
+SCAN       seg#1 t+1.361205s: 0x16/122 0x14/1 0x17/690 COALESCED
+SCAN       seg#2 t+1.402047s: 0x17/55
+SCAN       seg#3 t+1.404056s: 0x17/19
+SCAN conn client guest:41138 -> server peer:6445 (TLS) first packet t+1.414887s
+SCAN   guest->peer: 0 bytes flags[SYN] marker(IGKM-D-)=0 marker(IGKM-E-)=0 records=0 (0x17 count=0) unframed_bytes=0
+SCAN     records: (none)
+SCAN   peer->guest: 0 bytes flags[SYN] marker(IGKM-D-)=0 marker(IGKM-E-)=0 records=0 (0x17 count=0) unframed_bytes=0
+SCAN     records: (none)
+SCAN totals:
+SCAN   tls streams: 1782 bytes, marker(IGKM-D-) occurrences=0, marker(IGKM-E-) occurrences=0
+SCAN     tls: b'IGKM-D-REQ-PT-pt guest->peer plaintext\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQI inbound peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-FLOOD' occurrences=0
+SCAN   plain streams: 0 bytes, marker(IGKM-D-) occurrences=0, marker(IGKM-E-) occurrences=0
+
+===== plaintext marker scan on the WIRE (mesh app markers must be 0x; :5001 PT may appear) =====
+  wire occurrences of 'IGKM-E-REQI' : 0
+  wire occurrences of 'IGKM-E-RESP' : 0
+  wire occurrences of 'IGKM-E-REQN' : 0
+  wire occurrences of 'IGKM-E-FLOOD' : 0
+  wire occurrences of 'IGKM-D-REQ-PT' : 0
+  wire occurrences of 'from-guest-server' : 0
+  wire occurrences of 'from-A' : 0
+  wire occurrences of 'from-B' : 0
+  wire occurrences of 'PLAINTEXT-IN-GUEST' : 0
+
+===== custody (SVID key must never cross vsock) =====
+RELAY[c1] vsock tx RESOLVED backend=192.168.204.1:6443 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.348614s
+RELAY[c2] custody: host->guest total 1039 bytes; client SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; guest-server SVID key occurrences PKCS#8 DER=0 PEM=0 private scalar=0; application traffic secrets sent (changed vs Spike B: expected 1 each when ALLOW) = [1,1]
+RELAY[c3] vsock tx RESOLVED backend=192.168.204.1:6445 peer=spiffe://overdrive.test/ns/default/sa/peer-denied (payload=58 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.411253s
+
+===== verdict markers =====
+[    0.701382] IGKME: [connect] NON-BLOCKING mesh connect 192.168.204.1:6443 -> EINPROGRESS; readiness withheld, handshake driven by kthread
+[    0.739821] IGKME: [c1] HANDSHAKE DONE role=client peer=spiffe://overdrive.test/ns/default/sa/peer-allowed; kTLS installed on the workload socket (TO_PEER=3 NEED_PEER=3); kernel carries TLS, relay out of path
+[    0.742272] IGKME: [c1] RESOLVE-MATCH expected_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed handshake_peer=spiffe://overdrive.test/ns/default/sa/peer-allowed match=1
+[    0.744172] IGKME: [kthread] role=client background handshake DONE; kTLS installed, waking poll (readiness now reported)
+IGKME-APP: nbclient EPOLLOUT (writable) FIRST seen at wake#1 t+0.051s -- this is AFTER the module's kTLS install line above
+IGKME-INIT: ===== PART 2 non-blocking connect (handshake-deny -> SO_ERROR): VIP 10.80.0.2:9443 -> svc-hs-deny =====
+[    0.764806] IGKME: [connect] NON-BLOCKING mesh connect 192.168.204.1:6445 -> EINPROGRESS; readiness withheld, handshake driven by kthread
+RELAY[c1] vsock rx RESOLVE payload=7 vip=10.80.0.1:9443 (service-name resolution on the SAME vsock channel — D4) t+1.348576s
+RELAY[c1] vsock tx RESOLVED backend=192.168.204.1:6443 peer=spiffe://overdrive.test/ns/default/sa/peer-allowed (payload=59 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.348614s
+RELAY[c2] vsock rx OPEN payload=7 dst=192.168.204.1:6443 role=TLS client, local identity=spiffe://overdrive.test/ns/default/sa/guest-client t+1.360680s
+RELAY[c2] handshake complete: policy ALLOW local spiffe://overdrive.test/ns/default/sa/guest-client <-> peer spiffe://overdrive.test/ns/default/sa/peer-allowed; suite=TLS13_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0 buffered_plaintext=false; traffic secrets from rustls KeyLog tx=CLIENT_TRAFFIC_SECRET_0 rx=SERVER_TRAFFIC_SECRET_0 (32 B each), host check HKDF(secret)==rustls key/iv tx=true rx=true t+1.361954s
+RELAY[c3] vsock rx RESOLVE payload=7 vip=10.80.0.2:9443 (service-name resolution on the SAME vsock channel — D4) t+1.411226s
+RELAY[c3] vsock tx RESOLVED backend=192.168.204.1:6445 peer=spiffe://overdrive.test/ns/default/sa/peer-denied (payload=58 B = addr 7 B + peer-id string; custody: NO key material in a resolve) t+1.411253s
+
+===== tap capture (base64 for the evidence tree) =====
+----- BEGIN tap.pcap base64 -----
+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
+AAAAAAAAAAAB/6tkpw==
+----- END tap.pcap base64 -----
+
+===== cleanup =====
+del tap igkd03161901
+
+===== post-run host state =====
+tap igkd03161901 present: no
+192.168.204.x on host: 0
+firecracker procs: []
+peer/relay/inclient procs: []
+tcpdump procs: []

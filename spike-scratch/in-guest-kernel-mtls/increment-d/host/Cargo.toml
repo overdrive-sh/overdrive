@@ -1,0 +1,17 @@
+# Spike B host programs (GH #303 in-guest-kernel-mtls, increment-d).
+# Throwaway probe code. Its own workspace: NOT a member of the repo workspace.
+[package]
+name = "igkmd-host"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "logging"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem", "crypto"] }
+x509-parser = "=0.18.1"
+
+[profile.release]
+debug = false

@@ -1,0 +1,125 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=8f5c3681eaae0e03f64d881d pid=163847
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 150,719 bytes  received 1,876 bytes  61,038.00 bytes/sec
+total size is 156,058,019  speedup is 1,022.69
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build] nasm 2.16.03  (06:06:37)
+1412a1c760bbd05db026b6c0d1657affd6631cd0a63cddb6f73cc6d4aa616148  nasm-2.16.03.tar.xz
+1412a1c760bbd05db026b6c0d1657affd6631cd0a63cddb6f73cc6d4aa616148  <metal-home>/igkm-spike-a/src/nasm-2.16.03.tar.xz
+NASM version 2.16.03 compiled on Sep 28 2026
+
+##### [build] nanos source at aad473aad2f73a9893d5c32be333f2796725ab82  (06:06:50)
+nanos HEAD=aad473aad2f73a9893d5c32be333f2796725ab82
+nanos commit date=2026-09-19T09:38:22+02:00 subject=test/runtime: add test cases to exercise FALLOC_FL_PUNCH_HOLE on a memfd
+nanos worktree dirty files: 0
+
+##### [build] nanos make kernel (boot.img + kernel.img)  (06:06:54)
+
+##### [build] nanos make mkfs  (06:07:07)
+vendored acpica   e01cc6b3d12b5f73f44d46fa15a7f569c793b328
+vendored lwip     e27f9b7af7e5b025a5b8803899f12b1d35f7d968
+vendored mbedtls  729a04f67c64363ded0ed8fc3a408fdf5c40797c
+
+##### [build] artifact identity  (06:07:17)
+-rwxrwxr-x 1 ubuntu ubuntu 1820848 Sep 28 06:07 <metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img
+-rw-rw-r-- 1 ubuntu ubuntu   49152 Sep 28 06:06 <metal-home>/igkm-spike-a/nanos/output/platform/pc/boot/boot.img
+-rwxrwxr-x 1 ubuntu ubuntu 1910136 Sep 28 06:07 <metal-home>/igkm-spike-a/nanos/output/tools/bin/mkfs
+c99b7da38017ee74d5e1999ae1f76654420ffca859972a25a1637aa87ef9f521  <metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img
+9a6c4e6b817be8b057b734b5481cb02e2b1acb8dbbb13dbfa4950f81dc72a4bc  <metal-home>/igkm-spike-a/nanos/output/platform/pc/boot/boot.img
+<metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, not stripped
+<metal-home>/igkm-spike-a/nanos/output/platform/pc/boot/boot.img:  DOS/MBR boot sector
+--- readelf -h (kernel.img)
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00 
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x201d87
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          1819888 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         4
+  Size of section headers:           64 (bytes)
+  Number of section headers:         15
+  Section header string table index: 14
+--- readelf -n (kernel.img notes; PVH = Xen note type 0x12)
+
+Displaying notes found in: .note
+  Owner                Data size 	Description
+  Xen                  0x00000004	Unknown note type: (0x00000012)
+   description data: dc 00 20 00 
+--- bzImage setup-header magic at 0x202 (expect NOT 'HdrS' for PVH route)
+  \0  \0  \0  \0
+
+##### [build] guest program (static)  (06:07:17)
+<metal-home>/igkm-spike-a/out/vsock_probe: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=4fd2cb9913553255360a7d1d01fbf31dd9c8a53c, for GNU/Linux 3.2.0, not stripped
+d541c4a7e452e23a2021e31a08a44503df8ff7c0b5a590c6757a653dec39992a  <metal-home>/igkm-spike-a/out/vsock_probe
+
+##### [build] nanos disk image  (06:07:17)
+(
+    children:(
+        vsock_probe:(contents:(host:<metal-home>/igkm-spike-a/out/vsock_probe))
+    )
+    program:/vsock_probe
+    arguments:[vsock_probe]
+    environment:(PWD:/)
+    # prints NET: static IP config / default-interface lines
+    log_level:info
+    ipaddr:192.168.203.2
+    netmask:255.255.255.0
+    gateway:192.168.203.1
+)
+UUID: ab3ca717-45bc-acb3-03e9-85fff8c0960f
+metadata
+(children:(kernel:()))
+UUID: 3f21433c-4d7f-ec19-fc11-9fa0739a6e7f
+metadata
+(arguments:[vsock_probe]
+ children:(vsock_probe:())
+ environment:(PWD:/)
+ gateway:192.168.203.1
+ ipaddr:192.168.203.2
+ log_level:info
+ netmask:255.255.255.0
+ program:/vsock_probe)
+-rw-r--r-- 1 ubuntu ubuntu 15781888 Sep 28 06:07 <metal-home>/igkm-spike-a/out/nanos-vsock.img
+27157a22bd2ceb9d0167248b3b04bb68add394368c2840e2f8ffce75a542beec  <metal-home>/igkm-spike-a/out/nanos-vsock.img
+--- MBR partition table
+Disk <metal-home>/igkm-spike-a/out/nanos-vsock.img: 15.05 MiB, 15781888 bytes, 30824 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: dos
+Disk identifier: 0x000c0000
+
+Device                                         Boot Start   End Sectors Size Id Type
+<metal-home>/igkm-spike-a/out/nanos-vsock.img1 *      104 24679   24576  12M 83 Linux
+<metal-home>/igkm-spike-a/out/nanos-vsock.img2 *    24680 30823    6144   3M 83 Linux
+
+##### [build] done  (06:07:17)
+KERNEL=<metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img
+IMAGE=<metal-home>/igkm-spike-a/out/nanos-vsock.img

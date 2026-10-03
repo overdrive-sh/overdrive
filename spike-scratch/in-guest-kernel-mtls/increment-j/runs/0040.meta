@@ -1,0 +1,11 @@
+run_id=0040
+label=regression-boot
+started_utc=2026-10-03T16:31:45Z
+ended_utc=2026-10-03T16:33:07Z
+exit_code=0
+local_commit=f3b2ae745aae2251496f1395c5c5ca35adca13f1
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- spike-scratch/in-guest-kernel-mtls/increment-j/run-fc.sh regression
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=509664975ff9235910225bba10dfe95881dae177d7423cde9d5b4ee484a080aa
+stderr_sha256=a128504573b2e71520f782b6e614ab59e67d141539211c1423bb74b23985d45b
+tap_pcap_sha256=4eb47418becf7379395f5db1f775927e9503fcf7e7f34c5146f5664af5e0e90f

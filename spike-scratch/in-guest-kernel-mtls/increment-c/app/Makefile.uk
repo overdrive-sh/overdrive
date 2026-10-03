@@ -1,0 +1,4 @@
+# Spike A3 native Unikraft app (GH #303): one C source, no app-level options.
+$(eval $(call addlib,appigkmc))
+
+APPIGKMC_SRCS-y += $(APPIGKMC_BASE)/main.c

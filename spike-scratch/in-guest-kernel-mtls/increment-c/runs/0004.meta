@@ -1,0 +1,10 @@
+run_id=0004
+label=build-retry-lexyacc
+started_utc=2026-09-28T07:11:50Z
+ended_utc=2026-09-28T07:12:13Z
+exit_code=1
+local_commit=f1dd126258733fdbbdd16e1b8b67f4b6b0000567
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-c/build.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=30366374d4df3b04a73f813c74a30fbdf4d5b1dc8f4ec0ee9e3afc34905531b5
+stderr_sha256=7b96430c1967a003c4e2e6619fa5010eba53a07c9b536408b5e322ccdd9838f1

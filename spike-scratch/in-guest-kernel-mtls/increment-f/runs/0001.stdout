@@ -1,0 +1,135 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=d82d0f9d1db4f2e5c46cbc01 pid=288430
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 222,736 bytes  received 2,714 bytes  90,180.00 bytes/sec
+total size is 159,113,327  speedup is 705.76
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+=== substrate probes ===
+uname -m: x86_64
+uname -r: 7.0.0-29-generic
+systemd-detect-virt: none (exit 1)
+cpu vmx/svm flag count: 16
+cpu aes flag count: 16
+crw-rw---- 1 root kvm 10, 232 Sep 29 10:43 /dev/kvm
+KVM_GET_API_VERSION=12 KVM_CREATE_VM=ok
+model name	: AMD EPYC 8024P 8-Core Processor
+16
+
+=== Firecracker v1.17.0 (Spike A2 binary, must be unchanged) ===
+99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5  <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64
+Firecracker v1.17.0
+
+=== Unikraft / lib-lwip / Mbed TLS trees (Spikes A3, B, B2) ===
+unikraft         HEAD=eb8fa2368618cea11c9bde196f79e6e6b9caeed5 dirty=0
+lib-lwip         HEAD=ec55ae17618feeb57c8c10109bcf5c42723e8e95 dirty=0
+--- unikraft worktrees
+<metal-home>/igkm-spike-a/unikraft/unikraft       eb8fa236 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/unikraft-igkmd eb8fa236 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/unikraft-igkme eb8fa236 (detached HEAD)
+--- lib-lwip worktrees
+<metal-home>/igkm-spike-a/unikraft/lib-lwip       ec55ae1 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/lib-lwip-igkme ec55ae1 (detached HEAD)
+--- Spike B worktree unikraft-igkmd (must be 0001+0002 only)
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+--- Spike B2 worktrees unikraft-igkme (0001+0002) and lib-lwip-igkme (0003)
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+ include/uk/lwip_readiness.h | 19 +++++++++++++++++++
+ sockets.c                   | 25 +++++++++++++++++++++++--
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+<metal-home>/igkm-spike-a/unikraft/app-igkmc
+<metal-home>/igkm-spike-a/unikraft/app-igkmd
+<metal-home>/igkm-spike-a/unikraft/app-igkme
+<metal-home>/igkm-spike-a/unikraft/build-igkmc
+<metal-home>/igkm-spike-a/unikraft/build-igkmd
+<metal-home>/igkm-spike-a/unikraft/build-igkme
+<metal-home>/igkm-spike-a/unikraft/igkmc-defconfig.log
+<metal-home>/igkm-spike-a/unikraft/igkmc-make.log
+<metal-home>/igkm-spike-a/unikraft/igkmd-defconfig.log
+<metal-home>/igkm-spike-a/unikraft/igkmd-make.log
+<metal-home>/igkm-spike-a/unikraft/igkme-defconfig.log
+<metal-home>/igkm-spike-a/unikraft/igkme-make.log
+<metal-home>/igkm-spike-a/unikraft/lib-lwip
+<metal-home>/igkm-spike-a/unikraft/lib-lwip-igkme
+<metal-home>/igkm-spike-a/unikraft/lib-mtlsguard
+<metal-home>/igkm-spike-a/unikraft/lib-mtlsguard-igkme
+<metal-home>/igkm-spike-a/unikraft/mbedtls
+<metal-home>/igkm-spike-a/unikraft/out
+<metal-home>/igkm-spike-a/unikraft/out-igkmd
+<metal-home>/igkm-spike-a/unikraft/out-igkme
+<metal-home>/igkm-spike-a/unikraft/tools
+<metal-home>/igkm-spike-a/unikraft/unikraft
+<metal-home>/igkm-spike-a/unikraft/unikraft-igkmd
+<metal-home>/igkm-spike-a/unikraft/unikraft-igkme
+a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7.tar.bz2
+bison
+flex
+flex++
+m4
+yacc
+--- app-elfloader / lib-libelf clones (created by increment-f build-guest.sh if absent)
+app-elfloader  absent
+lib-libelf     absent
+1.4G	<metal-home>/igkm-spike-a
+/dev/md1        847G  137G  667G  18% /
+
+=== host C toolchain + glibc for the UNMODIFIED Linux test binary ===
+gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+GNU ld (GNU Binutils for Ubuntu) 2.46
+ldd (Ubuntu GLIBC 2.43-2ubuntu2.4) 2.43
+glibc 2.43
+binutils 2.46-3ubuntu2
+gcc 4:15.2.0-5ubuntu1
+libc6 2.43-2ubuntu2.4
+libc6-dev 2.43-2ubuntu2.4
+rcrt1.o  /usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/rcrt1.o
+crt1.o   /usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crt1.o
+libc.a   /usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc.a
+/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc.a: current ar archive
+
+=== fetch tools / optional stretch toolchains (presence only) ===
+git      /usr/bin/git
+wget     /usr/bin/wget
+curl     /usr/bin/curl
+tar      /usr/bin/tar
+xz       /usr/bin/xz
+bzip2    /usr/bin/bzip2
+file     /usr/bin/file
+readelf  /usr/bin/readelf
+objdump  /usr/bin/objdump
+strings  /usr/bin/strings
+go       MISSING
+busybox  /usr/bin/busybox
+python3  /usr/bin/python3
+cpio     /usr/bin/cpio
+/usr/bin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+
+=== tap name / subnet / port availability (increment-f: 192.168.204.0/24, taps igkf<ddHHMMSS>) ===
+igkf* links: []
+192.168.204.x on host: 0
+no listener on 5001/6443-6451/7100
+firecracker processes: []
+
+=== verdict ===
+SUBSTRATE OK

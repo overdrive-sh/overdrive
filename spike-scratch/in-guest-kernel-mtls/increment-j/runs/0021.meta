@@ -1,0 +1,11 @@
+run_id=0021
+label=nbconnect-boot
+started_utc=2026-10-03T16:17:50Z
+ended_utc=2026-10-03T16:19:06Z
+exit_code=0
+local_commit=f3b2ae745aae2251496f1395c5c5ca35adca13f1
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- spike-scratch/in-guest-kernel-mtls/increment-j/run-fc.sh nbconnect
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=c562b7e69a1c10d494ae29a95245ef049e6b50fda419017abb87e8d751077a88
+stderr_sha256=e4a6e3dadd7605eeeab88513124bff114d074188258967b70bf9ed6c3592232c
+tap_pcap_sha256=2613c71ba0561af2f470e8c114592401432ca33c3a62a7820df92a08ed46b802

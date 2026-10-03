@@ -1,0 +1,10 @@
+run_id=0027
+label=sync-remove-stray-macho
+started_utc=2026-09-29T11:15:00Z
+ended_utc=2026-09-29T11:15:14Z
+exit_code=0
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash -c ls -la spike-scratch/in-guest-kernel-mtls/increment-f/app-go/; pgrep -a firecracker || echo "no firecracker"; ip -o link show | grep -c igk || true
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=464842d5781efc0b5a4256ebc67c2090b1ed49ead205127e818b91759d5a47e4
+stderr_sha256=e8b6ddfe9317536aac50b5e5480e7d1e78740179309e0176462b311426e9ca35

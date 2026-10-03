@@ -260,6 +260,14 @@ must be re-supplied by the control plane is a **#26-coupled, Tier-3-spike
 question** — do not assume it without confirming the kernel/kTLS survival
 semantics on a real kernel.
 
+## kTLS NIC offload does not apply — Linux offloads only TLS 1.2, the mesh uses TLS 1.3
+
+Linux kTLS NIC offload supports **TLS 1.2 only**
+(`net/tls/tls_device.c` returns `-EOPNOTSUPP` for any other version),
+and the kernel silently falls back to software kTLS. The mesh uses
+**TLS 1.3**, so every kTLS session in Overdrive is software kTLS. Do not
+cite NIC offload as an advantage of host-side over guest-side kTLS.
+
 ## East-west mTLS tests — the egress DIALER speaks PLAINTEXT; the captured leg's encryption flips by direction
 
 The workload-identity model above has a load-bearing **testing** corollary

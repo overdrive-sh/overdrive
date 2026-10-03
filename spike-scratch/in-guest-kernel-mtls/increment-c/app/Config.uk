@@ -1,0 +1,2 @@
+# Spike A3 native Unikraft app (GH #303). No app-level Kconfig options; the
+# configuration lives in ./defconfig (Kconfig fragment for `make defconfig`).

@@ -1,0 +1,518 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=0a893f984f5f826585482647 pid=183200
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 145,633 bytes  received 2,825 bytes  59,383.20 bytes/sec
+total size is 156,523,879  speedup is 1,054.33
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo 
+firecracker processes: []
+
+===== versions / artifacts =====
+7.0.0-29-generic
+Firecracker v1.17.0
+
+2026-09-28T06:43:01.936091450 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0
+aad473aad2f73a9893d5c32be333f2796725ab82
+99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5  <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64
+c99b7da38017ee74d5e1999ae1f76654420ffca859972a25a1637aa87ef9f521  <metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img
+27157a22bd2ceb9d0167248b3b04bb68add394368c2840e2f8ffce75a542beec  <metal-home>/igkm-spike-a/out/nanos-vsock.img
+--- kernel ELF entry and notes (PVH = Xen note type 0x12)
+  Entry point address:               0x201d87
+  Xen                  0x00000004	Unknown note type: (0x00000012)
+   description data: dc 00 20 00 
+
+===== create tap igkmb0 (the only host network change) =====
+igkmb0           DOWN           192.168.203.1/24 
+
+===== firecracker config =====
+{
+  "boot-source": {
+    "kernel_image_path": "<metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "<metal-home>/igkm-spike-a/runs-fc/20260928T064301Z-183560/disk.img",
+      "is_root_device": false,
+      "is_read_only": false
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": 1,
+    "mem_size_mib": 512
+  },
+  "network-interfaces": [
+    {
+      "iface_id": "net0",
+      "guest_mac": "52:54:00:1a:03:02",
+      "host_dev_name": "igkmb0"
+    }
+  ],
+  "vsock": {
+    "vsock_id": "vsock0",
+    "guest_cid": 3,
+    "uds_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064301Z-183560/vsock.sock"
+  },
+  "logger": {
+    "log_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064301Z-183560/fc.log",
+    "level": "Debug",
+    "show_level": true,
+    "show_log_origin": true
+  },
+  "metrics": {
+    "metrics_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064301Z-183560/fc.metrics"
+  }
+}
+
+===== launch =====
+Firecracker command: <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64 --no-api --config-file <metal-home>/igkm-spike-a/runs-fc/20260928T064301Z-183560/vm.json --id igkm-b 
+firecracker pid=183610 listener pid=183606 T0=1790577782.049762157 firecracker-start=t+0.061853s
+firecracker exited on its own: exit=1 at t+0.136s (<=0.05s poll)
+listener exit=1
+
+===== host listener log =====
+HOST: vsock-leg listening on unix <metal-home>/igkm-spike-a/runs-fc/20260928T064301Z-183560/vsock.sock_5000 t+0.016267s
+HOST: net-leg listening on tcp 192.168.203.1:5001 (IP_FREEBIND) t+0.016328s
+HOST: vsock-leg NO CONNECTION before deadline t+60.114323s
+HOST: net-leg NO CONNECTION before deadline t+60.114395s
+HOST: VERDICT vsock=FAIL t+60.114554s
+HOST: VERDICT net=FAIL t+60.114567s
+
+===== guest serial console (Nanos, = firecracker stdout) =====
+2026-09-28T06:43:02.115094899 [igkm-b:main] Running Firecracker v1.17.0
+
+===== firecracker stderr =====
+Error: RunWithoutApiError(Shutdown(GenericError))
+
+===== firecracker log (Debug) =====
+2026-09-28T06:43:02.116229206 [igkm-b:main:DEBUG:src/vmm/src/builder.rs:379] event_start: build microvm for boot
+2026-09-28T06:43:02.119815153 [igkm-b:main:DEBUG:src/vmm/src/arch/x86_64/mod.rs:524] Kernel loaded using PVH boot protocol
+2026-09-28T06:43:02.119841893 [igkm-b:main:DEBUG:src/vmm/src/device_manager/mmio.rs:85] acpi: Building AML for VirtIO device _SB_.V000. memory range: 0xc0001000:4096 gsi: 5
+2026-09-28T06:43:02.119909475 [igkm-b:main:DEBUG:src/vmm/src/device_manager/mmio.rs:85] acpi: Building AML for VirtIO device _SB_.V001. memory range: 0xc0002000:4096 gsi: 6
+2026-09-28T06:43:02.119988995 [igkm-b:main:DEBUG:src/vmm/src/device_manager/mmio.rs:85] acpi: Building AML for VirtIO device _SB_.V002. memory range: 0xc0003000:4096 gsi: 7
+2026-09-28T06:43:02.120010968 [igkm-b:main:DEBUG:src/vmm/src/devices/acpi/vmgenid.rs:58] vmgenid: building VMGenID device. Address: 0x000dfff0. IRQ: 8
+2026-09-28T06:43:02.120058059 [igkm-b:main:DEBUG:src/vmm/src/devices/acpi/vmgenid.rs:113] vmgenid: writing new generation ID to guest: 0x4878dc3107df9cad7544a01dc763d2ef
+2026-09-28T06:43:02.120237048 [igkm-b:main:DEBUG:src/vmm/src/arch/x86_64/mptable.rs:130] mptable: Allocated 304 bytes for MPTable 1 vCPUs at address 0x0009fc00
+2026-09-28T06:43:02.120408536 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (700 bytes) at address: 0x0009fd30
+2026-09-28T06:43:02.120427885 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (276 bytes) at address: 0x0009ffec
+2026-09-28T06:43:02.120448937 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (64 bytes) at address: 0x000a0100
+2026-09-28T06:43:02.120475637 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (60 bytes) at address: 0x000a0140
+2026-09-28T06:43:02.120505061 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (60 bytes) at address: 0x000a017c
+2026-09-28T06:43:02.120533965 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:174] acpi: Wrote RSDP (36 bytes) at address: 0x000e0000
+2026-09-28T06:43:02.120705633 [igkm-b:main:DEBUG:src/vmm/src/builder.rs:381] event_end: build microvm for boot
+2026-09-28T06:43:02.120711963 [igkm-b:main:DEBUG:src/vmm/src/builder.rs:383] event_start: boot microvm
+2026-09-28T06:43:02.120717131 [igkm-b:main:INFO:src/vmm/src/device_manager/mod.rs:387] Artificially kick devices
+2026-09-28T06:43:02.120902760 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:323] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-28T06:43:02.120928499 [igkm-b:main:DEBUG:src/vmm/src/builder.rs:385] event_end: boot microvm
+2026-09-28T06:43:02.120934678 [igkm-b:main:INFO:src/firecracker/src/main.rs:610] Successfully started microvm that was configured from one single json
+2026-09-28T06:43:02.121098495 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:457] Invalid MMIO read @ 0xfffffffc:0x4: Failed to find address range.
+2026-09-28T06:43:02.121174689 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:447] Invalid MMIO read @ 0xfffffffc:0x4: Failed to find address range.
+2026-09-28T06:43:02.121233478 [igkm-b:fc_vcpu 0:ERROR:src/vmm/src/arch/x86_64/vcpu.rs:782] Unexpected exit reason on vcpu run: Shutdown
+2026-09-28T06:43:02.121335091 [igkm-b:main:INFO:src/vmm/src/lib.rs:693] Vmm is stopping.
+2026-09-28T06:43:02.121341420 [igkm-b:main:INFO:src/vmm/src/lib.rs:768] Killing vCPU threads
+2026-09-28T06:43:02.147085658 [igkm-b:main:ERROR:src/firecracker/src/main.rs:110] RunWithoutApiError error: MicroVMStopped without an error: GenericError
+2026-09-28T06:43:02.147128392 [igkm-b:main:ERROR:src/firecracker/src/main.rs:113] Firecracker exiting with error. exit_code=1
+
+===== firecracker metrics (last line, pretty) =====
+{
+    "utc_timestamp_ms": 1790577782121,
+    "api_server": {
+        "process_startup_time_us": 0,
+        "process_startup_time_cpu_us": 0
+    },
+    "balloon": {
+        "activate_fails": 0,
+        "inflate_count": 0,
+        "stats_updates_count": 0,
+        "stats_update_fails": 0,
+        "deflate_count": 0,
+        "event_fails": 0,
+        "free_page_report_count": 0,
+        "free_page_report_freed": 0,
+        "free_page_report_fails": 0,
+        "free_page_hint_count": 0,
+        "free_page_hint_freed": 0,
+        "free_page_hint_fails": 0
+    },
+    "block_rootfs": {
+        "activate_fails": 0,
+        "cfg_fails": 0,
+        "no_avail_buffer": 0,
+        "event_fails": 0,
+        "execute_fails": 0,
+        "invalid_reqs_count": 0,
+        "flush_count": 0,
+        "queue_event_count": 0,
+        "rate_limiter_event_count": 0,
+        "update_count": 0,
+        "update_fails": 0,
+        "read_bytes": 0,
+        "write_bytes": 0,
+        "read_count": 0,
+        "write_count": 0,
+        "read_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "write_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "rate_limiter_throttled_events": 0,
+        "io_engine_throttled_events": 0,
+        "remaining_reqs_count": 0
+    },
+    "block": {
+        "activate_fails": 0,
+        "cfg_fails": 0,
+        "no_avail_buffer": 0,
+        "event_fails": 0,
+        "execute_fails": 0,
+        "invalid_reqs_count": 0,
+        "flush_count": 0,
+        "queue_event_count": 0,
+        "rate_limiter_event_count": 0,
+        "update_count": 0,
+        "update_fails": 0,
+        "read_bytes": 0,
+        "write_bytes": 0,
+        "read_count": 0,
+        "write_count": 0,
+        "read_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "write_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "rate_limiter_throttled_events": 0,
+        "io_engine_throttled_events": 0,
+        "remaining_reqs_count": 0
+    },
+    "deprecated_api": {
+        "deprecated_http_api_calls": 0
+    },
+    "get_api_requests": {
+        "instance_info_count": 0,
+        "machine_cfg_count": 0,
+        "mmds_count": 0,
+        "vmm_version_count": 0,
+        "hotplug_memory_count": 0
+    },
+    "i8042": {
+        "error_count": 0,
+        "missed_read_count": 0,
+        "missed_write_count": 0,
+        "read_count": 0,
+        "reset_count": 0,
+        "write_count": 0
+    },
+    "uart": {
+        "error_count": 0,
+        "flush_count": 0,
+        "missed_read_count": 0,
+        "missed_write_count": 0,
+        "read_count": 0,
+        "write_count": 0,
+        "rate_limiter_dropped_bytes": 0
+    },
+    "latencies_us": {
+        "full_create_snapshot": 0,
+        "diff_create_snapshot": 0,
+        "load_snapshot": 0,
+        "pause_vm": 0,
+        "resume_vm": 0,
+        "vmm_full_create_snapshot": 0,
+        "vmm_diff_create_snapshot": 0,
+        "vmm_load_snapshot": 0,
+        "vmm_pause_vm": 0,
+        "vmm_resume_vm": 0
+    },
+    "logger": {
+        "missed_metrics_count": 0,
+        "metrics_fails": 0,
+        "missed_log_count": 0,
+        "rate_limited_log_count": 0
+    },
+    "mmds": {
+        "rx_accepted": 0,
+        "rx_accepted_err": 0,
+        "rx_accepted_unusual": 0,
+        "rx_bad_eth": 0,
+        "rx_invalid_token": 0,
+        "rx_no_token": 0,
+        "rx_count": 0,
+        "tx_bytes": 0,
+        "tx_count": 0,
+        "tx_errors": 0,
+        "tx_frames": 0,
+        "connections_created": 0,
+        "connections_destroyed": 0
+    },
+    "net_net0": {
+        "activate_fails": 0,
+        "cfg_fails": 0,
+        "no_rx_avail_buffer": 0,
+        "no_tx_avail_buffer": 0,
+        "event_fails": 0,
+        "rx_queue_event_count": 0,
+        "rx_event_rate_limiter_count": 0,
+        "rx_rate_limiter_throttled": 0,
+        "rx_tap_event_count": 0,
+        "rx_bytes_count": 0,
+        "rx_packets_count": 0,
+        "rx_fails": 0,
+        "rx_count": 0,
+        "tap_read_fails": 0,
+        "tap_write_fails": 0,
+        "tap_write_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "tx_bytes_count": 0,
+        "tx_malformed_frames": 0,
+        "tx_fails": 0,
+        "tx_count": 0,
+        "tx_packets_count": 0,
+        "tx_queue_event_count": 0,
+        "tx_rate_limiter_event_count": 0,
+        "tx_rate_limiter_throttled": 0,
+        "tx_spoofed_mac_count": 0,
+        "tx_remaining_reqs_count": 0
+    },
+    "net": {
+        "activate_fails": 0,
+        "cfg_fails": 0,
+        "no_rx_avail_buffer": 0,
+        "no_tx_avail_buffer": 0,
+        "event_fails": 0,
+        "rx_queue_event_count": 0,
+        "rx_event_rate_limiter_count": 0,
+        "rx_rate_limiter_throttled": 0,
+        "rx_tap_event_count": 0,
+        "rx_bytes_count": 0,
+        "rx_packets_count": 0,
+        "rx_fails": 0,
+        "rx_count": 0,
+        "tap_read_fails": 0,
+        "tap_write_fails": 0,
+        "tap_write_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "tx_bytes_count": 0,
+        "tx_malformed_frames": 0,
+        "tx_fails": 0,
+        "tx_count": 0,
+        "tx_packets_count": 0,
+        "tx_queue_event_count": 0,
+        "tx_rate_limiter_event_count": 0,
+        "tx_rate_limiter_throttled": 0,
+        "tx_spoofed_mac_count": 0,
+        "tx_remaining_reqs_count": 0
+    },
+    "patch_api_requests": {
+        "drive_count": 0,
+        "drive_fails": 0,
+        "network_count": 0,
+        "network_fails": 0,
+        "machine_cfg_count": 0,
+        "machine_cfg_fails": 0,
+        "mmds_count": 0,
+        "mmds_fails": 0,
+        "hotplug_memory_count": 0,
+        "hotplug_memory_fails": 0,
+        "pmem_count": 0,
+        "pmem_fails": 0
+    },
+    "put_api_requests": {
+        "actions_count": 0,
+        "actions_fails": 0,
+        "boot_source_count": 0,
+        "boot_source_fails": 0,
+        "drive_count": 0,
+        "drive_fails": 0,
+        "logger_count": 0,
+        "logger_fails": 0,
+        "machine_cfg_count": 0,
+        "machine_cfg_fails": 0,
+        "cpu_cfg_count": 0,
+        "cpu_cfg_fails": 0,
+        "metrics_count": 0,
+        "metrics_fails": 0,
+        "network_count": 0,
+        "network_fails": 0,
+        "mmds_count": 0,
+        "mmds_fails": 0,
+        "vsock_count": 0,
+        "vsock_fails": 0,
+        "pmem_count": 0,
+        "pmem_fails": 0,
+        "serial_count": 0,
+        "serial_fails": 0,
+        "hotplug_memory_count": 0,
+        "hotplug_memory_fails": 0
+    },
+    "seccomp": {
+        "num_faults": 0
+    },
+    "vcpu": {
+        "exit_io_in": 0,
+        "exit_io_out": 0,
+        "exit_mmio_read": 0,
+        "exit_mmio_write": 0,
+        "failures": 0,
+        "kvmclock_ctrl_fails": 0,
+        "exit_io_in_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "exit_io_out_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "exit_mmio_read_agg": {
+            "min_us": 17,
+            "max_us": 17,
+            "sum_us": 0
+        },
+        "exit_mmio_write_agg": {
+            "min_us": 19,
+            "max_us": 19,
+            "sum_us": 0
+        }
+    },
+    "vmm": {
+        "panic_count": 0
+    },
+    "signals": {
+        "sigbus": 0,
+        "sigsegv": 0,
+        "sigxfsz": 0,
+        "sigxcpu": 0,
+        "sigpipe": 0,
+        "sighup": 0,
+        "sigill": 0
+    },
+    "vsock": {
+        "activate_fails": 0,
+        "cfg_fails": 0,
+        "rx_queue_event_fails": 0,
+        "tx_queue_event_fails": 0,
+        "ev_queue_event_fails": 0,
+        "muxer_event_fails": 0,
+        "conn_event_fails": 0,
+        "rx_queue_event_count": 0,
+        "tx_queue_event_count": 0,
+        "rx_bytes_count": 0,
+        "tx_bytes_count": 0,
+        "rx_packets_count": 0,
+        "tx_packets_count": 0,
+        "conns_added": 0,
+        "conns_killed": 0,
+        "conns_removed": 0,
+        "killq_resync": 0,
+        "tx_flush_fails": 0,
+        "tx_write_fails": 0,
+        "rx_read_fails": 0
+    },
+    "entropy": {
+        "activate_fails": 0,
+        "entropy_event_fails": 0,
+        "entropy_event_count": 0,
+        "entropy_bytes": 0,
+        "host_rng_fails": 0,
+        "entropy_rate_limiter_throttled": 0,
+        "rate_limiter_event_count": 0
+    },
+    "pmem": {
+        "activate_fails": 0,
+        "cfg_fails": 0,
+        "event_fails": 0,
+        "queue_event_count": 0,
+        "rate_limiter_throttled_events": 0,
+        "rate_limiter_event_count": 0
+    },
+    "interrupts": {
+        "triggers": 0,
+        "config_updates": 0
+    },
+    "memory_hotplug": {
+        "activate_fails": 0,
+        "queue_event_fails": 0,
+        "queue_event_count": 0,
+        "plug_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "plug_count": 0,
+        "plug_bytes": 0,
+        "plug_fails": 0,
+        "unplug_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "unplug_count": 0,
+        "unplug_bytes": 0,
+        "unplug_fails": 0,
+        "unplug_discard_fails": 0,
+        "unplug_all_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "unplug_all_count": 0,
+        "unplug_all_fails": 0,
+        "state_agg": {
+            "min_us": 0,
+            "max_us": 0,
+            "sum_us": 0
+        },
+        "state_count": 0,
+        "state_fails": 0
+    }
+}
+
+===== run verdict =====
+HOST: VERDICT vsock=FAIL t+60.114554s
+HOST: VERDICT net=FAIL t+60.114567s
+
+===== cleanup =====
+deleting tap igkmb0
+
+===== post-run host state (must match pre-run) =====
+links added:   
+links removed: 
+firecracker processes before: [] after: []
+tap igkmb0 present: no
+192.168.203.x on host: 0
+run dir present: no
+leftover listener/firecracker pids: 

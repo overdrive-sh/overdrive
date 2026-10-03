@@ -1,0 +1,10 @@
+run_id=0008
+label=host-state-check-final
+started_utc=2026-09-29T10:24:38Z
+ended_utc=2026-09-29T10:24:55Z
+exit_code=0
+local_commit=07c3089733cd1d18813c3e48650dba886a019ed6
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-e/host-state-check.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=8a4b34b11cebc57e960a9f54ed07766a48149c67058038bdd23c9bffb176d598
+stderr_sha256=c4280103619de1f2501bcf16250c099340b44526dc9b88e5675926e4b2448168

@@ -1,0 +1,43 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=bde19f92b3a8a493d61e4b4f pid=448701
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 205,646 bytes  received 1,824 bytes  59,277.14 bytes/sec
+total size is 161,316,852  speedup is 777.54
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+host uname -r:                7.0.0-29-generic
+--- HOST kernel untouched (our module must NOT be on the host) ---
+igkmh modules on host:        []
+  (expected empty: the .ko was insmod'd ONLY inside the disposable guest)
+host tainted?:                0 (nonzero only if something loaded an OOT module ON THE HOST; our guest taint does not count here)
+--- no leaked probe objects on the host ---
+firecracker procs:            []
+peer/relay/inclient procs:    []
+tcpdump procs:                []
+igkh* taps on host:   []
+192.168.204.x/205.x on host:  0
+test listeners 5001/6443-6451/7100: []
+igkmh run dirs left:          [none]
+vsock unix sockets under scratch: 0
+--- retained (intended) throwaway artifacts in the unsynced scratch tree ---
+26M	<metal-home>/igkm-spike-a/igkmh
+-rwxrwxr-x 1 ubuntu ubuntu  830592 Oct  1 15:48 <metal-home>/igkm-spike-a/igkmh/out/bin/igkmh_app
+-rw-rw-r-- 1 ubuntu ubuntu 1901320 Oct  1 15:48 <metal-home>/igkm-spike-a/igkmh/out/initramfs-mesh.cpio.gz
+-rw-rw-r-- 1 ubuntu ubuntu  760232 Oct  1 15:48 <metal-home>/igkm-spike-a/igkmh/out/module/igkmh_mtls.ko
+--- host /boot kernel is the stock image we copied (sha) ---
+b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682  <metal-home>/igkm-spike-a/igkmh/kernel/vmlinuz-host
+VERDICT: host clean = YES

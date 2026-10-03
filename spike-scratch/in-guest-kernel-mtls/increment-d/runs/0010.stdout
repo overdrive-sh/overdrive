@@ -1,0 +1,155 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=beded4d3d4775736cf429235 pid=258889
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 199,844 bytes  received 5,576 bytes  82,168.00 bytes/sec
+total size is 157,461,104  speedup is 766.53
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-host] toolchain  (20:43:37)
+root-owned entries in the shared ~/.cargo/registry (first 3): <metal-home>/.cargo/registry <metal-home>/.cargo/registry/CACHEDIR.TAG <metal-home>/.cargo/registry/index 
+CARGO_HOME=<metal-home>/igkm-spike-a/cargo-home RUSTUP_HOME=<metal-home>/.rustup
+rustc 1.95.0 (59807616e 2026-04-14)
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+1915eee6efe16069087a1bd862786903c59c779a1b6412d448d2d9913f32c85f  Cargo.toml
+a3ea684d5a7e065325761fb7d4c669a1a3805b1b6fa17050078e6e082f1fa9d4  Cargo.lock
+5aa29e466dc93e2f6f4cea03e0f9c15b9a56006dc2d9171c3e480582f12aa2a2  src/lib.rs
+1213e48bc930d016d18593a09e2fcada14e38106c29f056ad4241139142de762  src/bin/gencerts.rs
+fdc35056059e8d7188fbf08fd644cc44eee9e59ab417beadabbab49e79ed112a  src/bin/inclient.rs
+fbb554fb840dafae79d0af2a077c3cb35a80533c14abe20ad82e87a156ac2ec1  src/bin/peer.rs
+344197cd98e6118a249052bdd8cb79e4a62a7840b1f3aa2be16e4054a62f61ef  src/bin/relay.rs
+
+##### [build-host] pinned crate versions (Cargo.lock)  (20:43:37)
+  rcgen 0.14.10
+  ring 0.17.14
+  rustls 0.23.45
+  rustls-pki-types 1.15.1
+  rustls-webpki 0.103.15
+  time 0.3.55
+  x509-parser 0.18.1
+
+##### [build-host] cargo build --release --locked  (20:43:37)
+   Compiling igkmd-host v0.0.0 (<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/host)
+    Finished `release` profile [optimized] target(s) in 1.41s
+8e7cb1b1aaa15dc48efedd8e73b62587d57036fb63cfd7c825abae34ddb38de0  <metal-home>/igkm-spike-a/igkmd-host-target/release/gencerts
+ada2900efdb07d91fedd1037ee246caa5c48a693cc2ea6c6d3fd8c08576e5dca  <metal-home>/igkm-spike-a/igkmd-host-target/release/peer
+f47405dc236431553d828d2c2765614d9c2b25383eb1e76ea0509e03d05a81cc  <metal-home>/igkm-spike-a/igkmd-host-target/release/relay
+0055e30aacbaf5ed641af6e44dc4340e56fe7b479b5552aee329d2e70e79e1eb  <metal-home>/igkm-spike-a/igkmd-host-target/release/inclient
+
+##### [build-host] test PKI -> <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs  (20:43:38)
+GENCERTS: client.pem spiffe=spiffe://overdrive.test/ns/default/sa/guest-client server=false validity=2026-09-27..2026-10-28 der_len=459
+GENCERTS: peer-allowed.pem spiffe=spiffe://overdrive.test/ns/default/sa/peer-allowed server=true validity=2026-09-27..2026-10-28 der_len=465
+GENCERTS: peer-denied.pem spiffe=spiffe://overdrive.test/ns/default/sa/peer-denied server=true validity=2026-09-27..2026-10-28 der_len=465
+GENCERTS: guest-server.pem spiffe=spiffe://overdrive.test/ns/default/sa/guest-server server=true validity=2026-09-27..2026-10-28 der_len=466
+GENCERTS: peer-client.pem spiffe=spiffe://overdrive.test/ns/default/sa/peer-client server=false validity=2026-09-27..2026-10-28 der_len=458
+GENCERTS: peer-client-denied.pem spiffe=spiffe://overdrive.test/ns/default/sa/peer-client-denied server=false validity=2026-09-27..2026-10-28 der_len=471
+GENCERTS: ca.pem CN=igkm-d spike test CA
+total 56
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:43 ca.key
+-rw-rw-r-- 1 ubuntu ubuntu 631 Sep 28 20:43 ca.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:43 client.key
+-rw-rw-r-- 1 ubuntu ubuntu 676 Sep 28 20:43 client.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:43 guest-server.key
+-rw-rw-r-- 1 ubuntu ubuntu 688 Sep 28 20:43 guest-server.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:43 peer-allowed.key
+-rw-rw-r-- 1 ubuntu ubuntu 684 Sep 28 20:43 peer-allowed.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:43 peer-client-denied.key
+-rw-rw-r-- 1 ubuntu ubuntu 692 Sep 28 20:43 peer-client-denied.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:43 peer-client.key
+-rw-rw-r-- 1 ubuntu ubuntu 676 Sep 28 20:43 peer-client.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:43 peer-denied.key
+-rw-rw-r-- 1 ubuntu ubuntu 684 Sep 28 20:43 peer-denied.pem
+--- ca.pem
+No extensions in certificate
+subject=CN=igkm-d spike test CA
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+sha256 Fingerprint=A8:1E:45:C0:CD:63:75:17:B9:21:E7:E5:F5:C6:B8:99:DA:29:74:CA:1B:B6:E1:C6:BF:35:B7:04:CE:BF:9C:C3
+--- client.pem
+subject=CN=igkm-d guest-client
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/guest-client
+X509v3 Extended Key Usage: 
+    TLS Web Client Authentication
+sha256 Fingerprint=3C:19:93:47:67:06:A6:F8:17:E2:3F:26:DD:FE:4A:C2:04:78:79:A8:D3:CE:26:AE:F9:2B:35:9C:67:D4:67:A9
+--- peer-allowed.pem
+subject=CN=igkm-d peer-allowed
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/peer-allowed, IP Address:192.168.203.1
+X509v3 Extended Key Usage: 
+    TLS Web Server Authentication
+sha256 Fingerprint=C2:50:6D:04:02:9B:71:A1:C3:9D:7C:48:7F:FC:CC:3C:A1:04:75:DE:F0:17:22:9E:67:76:7D:A7:FB:51:2C:08
+--- peer-denied.pem
+subject=CN=igkm-d peer-denied
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/peer-denied, IP Address:192.168.203.1
+X509v3 Extended Key Usage: 
+    TLS Web Server Authentication
+sha256 Fingerprint=4D:AD:FD:90:C0:AE:24:E8:03:86:74:97:06:83:07:C7:D2:EE:F1:9F:63:C7:1F:27:FD:4B:D9:BD:25:B2:5B:83
+--- guest-server.pem
+subject=CN=igkm-d guest-server
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/guest-server, IP Address:192.168.203.2
+X509v3 Extended Key Usage: 
+    TLS Web Server Authentication
+sha256 Fingerprint=1A:09:69:D8:FA:97:F8:C8:F6:E1:A5:E8:5D:5A:9E:89:73:FD:A9:23:1A:75:E9:7E:C8:C3:EC:E7:F4:51:F0:2E
+--- peer-client.pem
+subject=CN=igkm-d peer-client
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/peer-client
+X509v3 Extended Key Usage: 
+    TLS Web Client Authentication
+sha256 Fingerprint=B6:EE:CE:4B:67:63:DA:4B:C6:92:88:7D:07:34:3B:59:CE:9E:F8:E3:2D:30:CA:3C:87:D1:13:CD:99:23:02:4F
+--- peer-client-denied.pem
+subject=CN=igkm-d peer-client-denied
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/peer-client-denied
+X509v3 Extended Key Usage: 
+    TLS Web Client Authentication
+sha256 Fingerprint=14:D0:10:B0:C4:E7:B9:3F:28:AF:D0:7E:D5:4F:36:EA:B0:41:A7:12:E8:98:B4:68:E4:65:3C:8F:75:9E:69:33
+--- chain check
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/client.pem: OK
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/peer-allowed.pem: OK
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/peer-denied.pem: OK
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/guest-server.pem: OK
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/peer-client.pem: OK
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/peer-client-denied.pem: OK
+--- client key (held by the relay only): type and sha256 of the PKCS#8 DER
+Private-Key: (256 bit)
+1ec380214a76600e92580963f3f4246148a1d36d1f763dfd978e1911ae1943e9  -
+--- guest-server key (held by the relay only): type and sha256 of the PKCS#8 DER
+Private-Key: (256 bit)
+8b387b25f9b992ed4debd4a0f6ad4b0a601a612396574d50f97345a80216ef1b  -

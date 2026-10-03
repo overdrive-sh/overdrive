@@ -1,0 +1,801 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=8911ce1d93c492552cfdbe6f pid=257796
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 163,023 bytes  received 4,550 bytes  37,238.44 bytes/sec
+total size is 157,354,032  speedup is 939.02
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo 
+firecracker processes: []
+
+===== versions / artifacts =====
+7.0.0-29-generic
+Firecracker v1.17.0
+eb8fa2368618cea11c9bde196f79e6e6b9caeed5
+ lib/posix-socket/exportsyms.uk       |  1 +
+ lib/posix-socket/include/uk/socket.h | 14 ++++++++++++++
+ lib/posix-socket/socket.c            | 11 +++++++++++
+ 3 files changed, 26 insertions(+)
+ec55ae17618feeb57c8c10109bcf5c42723e8e95
+99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5  <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64
+a43bee60d1e9aa054a9aa246846db03ffa38857b8a49e15fe7bb176258fe5be5  <metal-home>/igkm-spike-a/unikraft/out-igkmd/igkmd_fc-x86_64
+880c5580349aa71ecf3a4060c6c766f072c7a5ec49f214056aee856d22b58e2f  <metal-home>/igkm-spike-a/igkmd-host-target/release/peer
+ff4c12374b1759c3c322d0cbce4fdb4ff7de4804d7f76ba8b163dacc756deb06  <metal-home>/igkm-spike-a/igkmd-host-target/release/relay
+e3b35083cba6adf3def8328105dfbe3cd289714f34df61814ae852600969dfae  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/patches/0001-posix-socket-connect-post-hook.patch
+preset=mesh boot_args="igkmd netdev.ip=192.168.203.2/24:192.168.203.1 mtlsguard.mesh=192.168.203.1:6443-6446 mtlsguard.agent_port=7100 -- run"
+
+===== create tap igkmd0 (the only host network change) =====
+igkmd0           DOWN           192.168.203.1/24 
+
+===== start capture, peer, relay =====
+tcpdump: listening on igkmd0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+tcpdump pid=258192 peer pid=258201 relay pid=258209 t+0.206014s
+LISTEN 0      128    192.168.203.1:5001 0.0.0.0:* users:(("peer",pid=258201,fd=9))                          
+LISTEN 0      128    192.168.203.1:6445 0.0.0.0:* users:(("peer",pid=258201,fd=5))                          
+LISTEN 0      128    192.168.203.1:6444 0.0.0.0:* users:(("peer",pid=258201,fd=4))                          
+LISTEN 0      128    192.168.203.1:6446 0.0.0.0:* users:(("peer",pid=258201,fd=8))                          
+LISTEN 0      128    192.168.203.1:6443 0.0.0.0:* users:(("peer",pid=258201,fd=3))                          
+u_str LISTEN 0      4096   <metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/vsock.sock_7100 52189794 * 0 users:(("relay",pid=258209,fd=3))                                                                                                    
+
+===== firecracker config =====
+{
+  "boot-source": {
+    "kernel_image_path": "<metal-home>/igkm-spike-a/unikraft/out-igkmd/igkmd_fc-x86_64",
+    "boot_args": "igkmd netdev.ip=192.168.203.2/24:192.168.203.1 mtlsguard.mesh=192.168.203.1:6443-6446 mtlsguard.agent_port=7100 -- run"
+  },
+  "drives": [],
+  "machine-config": { "vcpu_count": 1, "mem_size_mib": 512 },
+  "network-interfaces": [
+    { "iface_id": "net0", "guest_mac": "52:54:00:1a:03:04", "host_dev_name": "igkmd0" }
+  ],
+  "vsock": { "vsock_id": "vsock0", "guest_cid": 3, "uds_path": "<metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/vsock.sock" },
+  "logger": { "log_path": "<metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/fc.log", "level": "Info", "show_level": true, "show_log_origin": true },
+  "metrics": { "metrics_path": "<metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/fc.metrics" }
+}
+
+===== launch =====
+firecracker pid=258220 t+0.331318s
+RUNNER: client-first exchange 1 answered and relay connection c4 finished -> SIGKILL relay pid 258209 t+0.742045s
+RUNNER: relay killed t+0.755822s; kill -0: gone
+RUNNER: relay processes now: []
+RUNNER: unix listeners on the agent path now: []
+RUNNER: stale socket file left by the killed relay: srwxr-xr-x 1 root root 0 Sep 28 20:34 <metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/vsock.sock_7100
+firecracker exited on its own: exit=0 t+8.838416s
+tcpdump pid 258192 still running -> SIGINT
+peer pid 258201 still running -> SIGTERM
+
+===== relay log =====
+RELAY listening on unix <metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/vsock.sock_7100 pid=258209 local identity=spiffe://overdrive.test/ns/default/sa/guest-client (client key: PKCS#8 138 B, P-256 scalar 32 B, held in this process only) t+0.193631s
+RELAY[c1] vsock connection accepted t+0.555045s
+RELAY[c1] vsock rx OPEN payload=7 dst=192.168.203.1:6444 local identity=spiffe://overdrive.test/ns/default/sa/guest-client t+0.556434s
+RELAY[c1] vsock tx TO_PEER payload=194 wire=199 records[0x16/189] t+0.556710s
+RELAY[c1] vsock tx NEED_PEER payload=0 wire=5  t+0.556724s
+RELAY[c1] vsock rx FROM_PEER payload=827 records[0x16/122 0x14/1 0x17/689] t+0.561419s
+RELAY[c1] handshake NOT completed: policy deny: local spiffe://overdrive.test/ns/default/sa/guest-client -> peer spiffe://overdrive.test/ns/default/sa/peer-denied (handshake aborted: invalid peer certificate: ApplicationVerificationFailure) t+0.561688s
+RELAY[c1] vsock tx DENY payload=205 wire=210  t+0.561703s
+RELAY[c1] guest closed the vsock connection (agent out of the data path) t+0.569854s
+RELAY[c1] tally guest->host FROM_PEER: frames=1 wire_bytes=832
+RELAY[c1] tally guest->host OPEN: frames=1 wire_bytes=12
+RELAY[c1] tally host->guest DENY: frames=1 wire_bytes=210
+RELAY[c1] tally host->guest NEED_PEER: frames=1 wire_bytes=5
+RELAY[c1] tally host->guest TO_PEER: frames=1 wire_bytes=199
+RELAY[c1] custody: host->guest total 414 bytes; occurrences of client key PKCS#8 DER=0 PEM=0 private scalar=0
+RELAY[c2] vsock connection accepted t+0.579383s
+RELAY[c2] vsock rx OPEN payload=7 dst=192.168.203.1:6446 local identity=spiffe://overdrive.test/ns/default/sa/guest-client t+0.580738s
+RELAY[c2] vsock tx TO_PEER payload=194 wire=199 records[0x16/189] t+0.580929s
+RELAY[c2] vsock tx NEED_PEER payload=0 wire=5  t+0.580940s
+RELAY[c2] vsock rx FROM_PEER payload=828 records[0x16/122 0x14/1 0x17/690] t+0.585733s
+RELAY[c2] vsock tx TO_PEER payload=615 wire=620 records[0x14/1 0x17/604] t+0.586104s
+RELAY[c2] handshake complete: policy ALLOW local spiffe://overdrive.test/ns/default/sa/guest-client -> peer spiffe://overdrive.test/ns/default/sa/peer-allowed; suite=TLS13_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0 buffered_plaintext=false t+0.586116s
+RELAY[c2] vsock tx SECRETS payload=128 wire=133 (suite=0x1301 tx: seq 0 key 16B iv 12B; rx: seq 0 key 16B iv 12B; peer id 50B) t+0.586129s
+RELAY[c2] guest closed the vsock connection (agent out of the data path) t+0.595768s
+RELAY[c2] tally guest->host FROM_PEER: frames=1 wire_bytes=833
+RELAY[c2] tally guest->host OPEN: frames=1 wire_bytes=12
+RELAY[c2] tally host->guest NEED_PEER: frames=1 wire_bytes=5
+RELAY[c2] tally host->guest SECRETS: frames=1 wire_bytes=133
+RELAY[c2] tally host->guest TO_PEER: frames=2 wire_bytes=819
+RELAY[c2] custody: host->guest total 957 bytes; occurrences of client key PKCS#8 DER=0 PEM=0 private scalar=0
+RELAY[c3] vsock connection accepted t+0.612248s
+RELAY[c3] vsock rx OPEN payload=7 dst=192.168.203.1:6445 local identity=spiffe://overdrive.test/ns/default/sa/guest-client t+0.613584s
+RELAY[c3] vsock tx TO_PEER payload=194 wire=199 records[0x16/189] t+0.613751s
+RELAY[c3] vsock tx NEED_PEER payload=0 wire=5  t+0.613762s
+RELAY[c3] vsock rx FROM_PEER payload=827 records[0x16/122 0x14/1 0x17/689] t+0.618594s
+RELAY[c3] vsock tx TO_PEER payload=616 wire=621 records[0x14/1 0x17/605] t+0.618945s
+RELAY[c3] handshake complete: policy ALLOW local spiffe://overdrive.test/ns/default/sa/guest-client -> peer spiffe://overdrive.test/ns/default/sa/peer-allowed; suite=TLS13_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0 buffered_plaintext=false t+0.618956s
+RELAY[c3] vsock tx SECRETS payload=128 wire=133 (suite=0x1301 tx: seq 0 key 16B iv 12B; rx: seq 0 key 16B iv 12B; peer id 50B) t+0.618968s
+RELAY[c3] guest closed the vsock connection (agent out of the data path) t+0.628642s
+RELAY[c3] tally guest->host FROM_PEER: frames=1 wire_bytes=832
+RELAY[c3] tally guest->host OPEN: frames=1 wire_bytes=12
+RELAY[c3] tally host->guest NEED_PEER: frames=1 wire_bytes=5
+RELAY[c3] tally host->guest SECRETS: frames=1 wire_bytes=133
+RELAY[c3] tally host->guest TO_PEER: frames=2 wire_bytes=820
+RELAY[c3] custody: host->guest total 958 bytes; occurrences of client key PKCS#8 DER=0 PEM=0 private scalar=0
+RELAY[c4] vsock connection accepted t+0.647954s
+RELAY[c4] vsock rx OPEN payload=7 dst=192.168.203.1:6443 local identity=spiffe://overdrive.test/ns/default/sa/guest-client t+0.649284s
+RELAY[c4] vsock tx TO_PEER payload=194 wire=199 records[0x16/189] t+0.649442s
+RELAY[c4] vsock tx NEED_PEER payload=0 wire=5  t+0.649453s
+RELAY[c4] vsock rx FROM_PEER payload=828 records[0x16/122 0x14/1 0x17/690] t+0.654282s
+RELAY[c4] vsock tx TO_PEER payload=616 wire=621 records[0x14/1 0x17/605] t+0.654641s
+RELAY[c4] handshake complete: policy ALLOW local spiffe://overdrive.test/ns/default/sa/guest-client -> peer spiffe://overdrive.test/ns/default/sa/peer-allowed; suite=TLS13_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0 buffered_plaintext=false t+0.654655s
+RELAY[c4] vsock tx SECRETS payload=128 wire=133 (suite=0x1301 tx: seq 0 key 16B iv 12B; rx: seq 0 key 16B iv 12B; peer id 50B) t+0.654667s
+RELAY[c4] guest closed the vsock connection (agent out of the data path) t+0.664296s
+RELAY[c4] tally guest->host FROM_PEER: frames=1 wire_bytes=833
+RELAY[c4] tally guest->host OPEN: frames=1 wire_bytes=12
+RELAY[c4] tally host->guest NEED_PEER: frames=1 wire_bytes=5
+RELAY[c4] tally host->guest SECRETS: frames=1 wire_bytes=133
+RELAY[c4] tally host->guest TO_PEER: frames=2 wire_bytes=820
+RELAY[c4] custody: host->guest total 958 bytes; occurrences of client key PKCS#8 DER=0 PEM=0 private scalar=0
+
+===== peer log =====
+PEER listening tls 192.168.203.1:6443 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=client-first-echo tickets=0 t+0.188963s
+PEER listening tls 192.168.203.1:6444 identity=spiffe://overdrive.test/ns/default/sa/peer-denied mode=client-first-echo tickets=0 t+0.189124s
+PEER listening tls 192.168.203.1:6445 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=server-first tickets=0 t+0.189231s
+PEER listening tls 192.168.203.1:6446 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=client-first-echo tickets=1 t+0.189338s
+PEER listening plain 192.168.203.1:5001 (non-mesh pass-through) t+0.189373s
+PEER ready t+0.189405s
+PEER[5001#1] accepted tcp from 192.168.203.2:51824 t+0.500182s
+PEER[5001#1] rx plaintext line 1 (42 bytes): IGKM-D-PLAIN-REQ pass-through guest->host\n t+0.548250s
+PEER[5001#1] tx plaintext line 1 (43 bytes): IGKM-D-PLAIN-RESP pass-through host->guest\n t+0.548315s
+PEER[5001#1] EOF t+0.550986s
+PEER[6444#1] accepted tcp from 192.168.203.2:51825 t+0.552681s
+PEER[6444#1] handshake FAILED: unexpected end of file; application plaintext bytes received=0 t+0.569926s
+PEER[6446#1] accepted tcp from 192.168.203.2:51826 t+0.577106s
+PEER[6446#1] handshake OK version=TLSv1_3 suite=TLS13_AES_128_GCM_SHA256 verified client SPIFFE ID=spiffe://overdrive.test/ns/default/sa/guest-client t+0.588406s
+PEER[6446#1] rx plaintext line 1 (28 bytes): IGKM-D-REQN nst guest->peer\n t+0.603203s
+PEER[6446#1] tx plaintext line 1 (29 bytes): IGKM-D-RESPN nst peer->guest\n t+0.603256s
+PEER[6446#1] read ended: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof; application plaintext bytes received=28 t+0.608159s
+PEER[6445#1] accepted tcp from 192.168.203.2:51827 t+0.609907s
+PEER[6445#1] handshake OK version=TLSv1_3 suite=TLS13_AES_128_GCM_SHA256 verified client SPIFFE ID=spiffe://overdrive.test/ns/default/sa/guest-client t+0.621198s
+PEER[6445#1] sent greeting first (41 bytes): IGKM-D-GREETING server-first peer->guest\n t+0.621244s
+PEER[6445#1] rx plaintext line 1 (37 bytes): IGKM-D-REQS server-first guest->peer\n t+0.635950s
+PEER[6445#1] tx plaintext line 1 (38 bytes): IGKM-D-RESPS server-first peer->guest\n t+0.635998s
+PEER[6445#1] clean close (close_notify received); application plaintext bytes received=37 t+0.642229s
+PEER[6443#1] accepted tcp from 192.168.203.2:51828 t+0.645695s
+PEER[6443#1] handshake OK version=TLSv1_3 suite=TLS13_AES_128_GCM_SHA256 verified client SPIFFE ID=spiffe://overdrive.test/ns/default/sa/guest-client t+0.656905s
+PEER[6443#1] rx plaintext line 1 (37 bytes): IGKM-D-REQ1 client-first guest->peer\n t+0.697776s
+PEER[6443#1] tx plaintext line 1 (38 bytes): IGKM-D-RESP1 client-first peer->guest\n t+0.697837s
+PEER[6443#1] rx plaintext line 2 (41 bytes): IGKM-D-REQ2 after-relay-kill guest->peer\n t+8.704957s
+PEER[6443#1] tx plaintext line 2 (42 bytes): IGKM-D-RESP2 after-relay-kill peer->guest\n t+8.705042s
+PEER[6443#1] clean close (close_notify received); application plaintext bytes received=78 t+8.718021s
+PEER[6443#2] accepted tcp from 192.168.203.2:51829 t+8.727209s
+PEER[6443#2] handshake FAILED: unexpected end of file; application plaintext bytes received=0 t+8.736173s
+
+===== guest serial console (Unikraft) =====
+2026-09-28T20:34:29.619244830 [igkm-d:main] Running Firecracker v1.17.0
+[    0.000000] Info: [libukrandom] <swrand.c @  111> Initializing the random number generator...
+[    0.000000] Info: [libukrandom] <random.c @  108> CSPRNG seed source: CPU
+[    0.000000] Info: [libkvmplat] <setup.c @  179> Switch from bootstrap stack to stack @0x11000
+[    0.000000] Info: [libukboot] <boot.c @  279> Unikraft constructor table at 0x193000 - 0x193040
+[    0.000000] Info: [libukboot] <boot.c @  288> Initialize memory allocator...
+[    0.000000] Info: [libukallocbbuddy] <bbuddy.c @  659> Initialize binary buddy allocator 11000
+[    0.000000] Info: [libukboot] <boot.c @  347> Initialize the IRQ subsystem...
+[    0.000000] Info: [libukboot] <boot.c @  354> Initialize platform time...
+[    0.000000] Info: [libkvmplat] <tscclock.c @  258> Calibrating TSC clock against i8254 timer
+[    0.100001] Info: [libkvmplat] <tscclock.c @  279> Clock source: TSC, frequency estimate is 2396491920 Hz
+[    0.101842] Info: [libukboot] <boot.c @  358> Initialize scheduling...
+[    0.103094] Info: [libukschedcoop] <schedcoop.c @  289> Initializing cooperative scheduler
+[    0.104814] Info: [libukboot] <boot.c @  391> Init Table @ 0x193040 - 0x1930c0
+[    0.106235] Info: [libukbus] <bus.c @  133> Initialize bus handlers...
+[    0.107463] Info: [libukbus] <bus.c @  135> Probe buses...
+[    0.108509] Info: [libvirtio_mmio] <virtio_mmio_cmdl.c @   93> virtio-mmio device 4K@0xc0001000:5
+[    0.110283] Info: [libvirtio_bus] <virtio_bus.c @  128> Virtio device 0x73020 initialized
+[    0.111846] Info: [libuknetdev] <netdev.c @  198> Registered netdev0: 0x232030 (virtio-net)
+[    0.113436] Info: [libvirtio_mmio] <virtio_mmio.c @  548> finish probing a virtio mmio dev
+[    0.114994] Info: [libvirtio_mmio] <virtio_mmio_cmdl.c @   93> virtio-mmio device 4K@0xc0002000:6
+[    0.116755] Info: [libvirtio_bus] <virtio_bus.c @  128> Virtio device 0x52020 initialized
+[    0.122204] Info: [libukvsockdev] <vsockdev.c @  176> vsockdev: Configured event queue
+[    0.123751] Info: [libukvsockdev] <vsockdev.c @  152> vsockdev: Configured receive queue
+[    0.125338] Info: [libvirtio_vsock] <virtio_vsock.c @ 2073> Started virtio-vsock device
+[    0.126846] Info: [libvirtio_mmio] <virtio_mmio.c @  548> finish probing a virtio mmio dev
+[    0.128491] Info: [liblwip] <init.c @  174> Initializing lwip
+[    0.129730] Info: [liblwip] <init.c @  225> Attach network device 0 to lwIP...
+  1: Set IPv4 address 192.168.203.2 mask 255.255.255.0 gw 192.168.203.1
+[    0.132524] Warn: [libvirtio_mmio] <virtio_mmio.c @  173> Unaligned io read: 6 bytes
+[    0.134070] Info: [libuknetdev] <netdev.c @  407> netdev0: Configured interface
+[    0.137771] Info: [libuknetdev] <netdev.c @  554> netdev0: Configured receive queue 0
+[    0.139377] Info: [libuknetdev] <netdev.c @  587> netdev0: Configured transmit queue 0
+[    0.140951] Info: [libvirtio_net] <virtio_net.c @ 1403> virtio-net: 0 started
+[    0.142318] Info: [libuknetdev] <netdev.c @  606> netdev0: Started interface
+en1: Added
+[    0.143843] Info: [liblwip] <init.c @  345> en1: Hardware address: 52:54:00:1a:03:04
+[    0.145317] Info: [liblwip] <init.c @  352> en1: Check checksums:
+[    0.146468] Info: [liblwip] <init.c @  371> en1: Generate checksums: IP UDP TCP ICMP ICMP6
+[    0.148035] Info: [liblwip] <init.c @  442> en1: Set as default interface
+en1: Interface is up
+Powered by
+o.   .o       _ _               __ _
+Oo   Oo  ___ (_) | __ __  __ _ ' _) :_
+oO   oO ' _ `| | |/ /  _)' _` | |_|  _)
+oOo oOO| | | | |   (| | | (_) |  _) :_
+ OoOoO ._, ._:_:_,\_._,  .__,_:_, \___)
+          Ijiraq 0.21.0~eb8fa236-custom
+[    0.153893] Info: [libukboot] <boot.c @  470> Pre-init table at 0x193168 - 0x193168
+[    0.155343] Info: [libukboot] <boot.c @  481> Constructor table at 0x193168 - 0x193168
+[    0.156848] Info: [libukboot] <boot.c @  504> Calling main(2, ['igkmd', 'run'])
+IGKM-D: BOOT-MARKER app started t=0.158236
+IGKM-D: guest wall clock ukplat_wall_clock()=946598400.056401 s since 1970-01-01
+IGKM-D: argv[0]="igkmd"
+IGKM-D: argv[1]="run"
+IGKM-D: A pass-through connect(192.168.203.1:5001) t=0.161177
+MTLSGUARD: Mbed TLS 3.6.7 AES-GCM known-answer self test:
+  GCM note: using AESNI.
+  AES-GCM-128 #0 (enc): passed
+  AES-GCM-128 #0 (dec): passed
+  AES-GCM-128 #0 split (enc): passed
+  AES-GCM-128 #0 split (dec): passed
+  AES-GCM-128 #1 (enc): passed
+  AES-GCM-128 #1 (dec): passed
+  AES-GCM-128 #1 split (enc): passed
+  AES-GCM-128 #1 split (dec): passed
+  AES-GCM-128 #2 (enc): passed
+  AES-GCM-128 #2 (dec): passed
+  AES-GCM-128 #2 split (enc): passed
+  AES-GCM-128 #2 split (dec): passed
+  AES-GCM-128 #3 (enc): passed
+  AES-GCM-128 #3 (dec): passed
+  AES-GCM-128 #3 split (enc): passed
+  AES-GCM-128 #3 split (dec): passed
+  AES-GCM-128 #4 (enc): passed
+  AES-GCM-128 #4 (dec): passed
+  AES-GCM-128 #4 split (enc): passed
+  AES-GCM-128 #4 split (dec): passed
+  AES-GCM-128 #5 (enc): passed
+  AES-GCM-128 #5 (dec): passed
+  AES-GCM-128 #5 split (enc): passed
+  AES-GCM-128 #5 split (dec): passed
+  AES-GCM-192 #0 (enc): passed
+  AES-GCM-192 #0 (dec): passed
+  AES-GCM-192 #0 split (enc): passed
+  AES-GCM-192 #0 split (dec): passed
+  AES-GCM-192 #1 (enc): passed
+  AES-GCM-192 #1 (dec): passed
+  AES-GCM-192 #1 split (enc): passed
+  AES-GCM-192 #1 split (dec): passed
+  AES-GCM-192 #2 (enc): passed
+  AES-GCM-192 #2 (dec): passed
+  AES-GCM-192 #2 split (enc): passed
+  AES-GCM-192 #2 split (dec): passed
+  AES-GCM-192 #3 (enc): passed
+  AES-GCM-192 #3 (dec): passed
+  AES-GCM-192 #3 split (enc): passed
+  AES-GCM-192 #3 split (dec): passed
+  AES-GCM-192 #4 (enc): passed
+  AES-GCM-192 #4 (dec): passed
+  AES-GCM-192 #4 split (enc): passed
+  AES-GCM-192 #4 split (dec): passed
+  AES-GCM-192 #5 (enc): passed
+  AES-GCM-192 #5 (dec): passed
+  AES-GCM-192 #5 split (enc): passed
+  AES-GCM-192 #5 split (dec): passed
+  AES-GCM-256 #0 (enc): passed
+  AES-GCM-256 #0 (dec): passed
+  AES-GCM-256 #0 split (enc): passed
+  AES-GCM-256 #0 split (dec): passed
+  AES-GCM-256 #1 (enc): passed
+  AES-GCM-256 #1 (dec): passed
+  AES-GCM-256 #1 split (enc): passed
+  AES-GCM-256 #1 split (dec): passed
+  AES-GCM-256 #2 (enc): passed
+  AES-GCM-256 #2 (dec): passed
+  AES-GCM-256 #2 split (enc): passed
+  AES-GCM-256 #2 split (dec): passed
+  AES-GCM-256 #3 (enc): passed
+  AES-GCM-256 #3 (dec): passed
+  AES-GCM-256 #3 split (enc): passed
+  AES-GCM-256 #3 split (dec): passed
+  AES-GCM-256 #4 (enc): passed
+  AES-GCM-256 #4 (dec): passed
+  AES-GCM-256 #4 split (enc): passed
+  AES-GCM-256 #4 split (dec): passed
+  AES-GCM-256 #5 (enc): passed
+  AES-GCM-256 #5 (dec): passed
+  AES-GCM-256 #5 split (enc): passed
+  AES-GCM-256 #5 split (dec): passed
+
+MTLSGUARD: gcm self test result=0, AES-NI in use=yes, mesh="192.168.203.1:6443-6446", agent vsock port=7100
+MTLSGUARD: connect 192.168.203.1:5001: not a mesh destination -> pass-through, driver untouched t=0.207517
+IGKM-D: A pass-through connect() returned 0 errno=0 (-) after 47063 us t=0.209290
+IGKM-D: A pass-through wrote 42 bytes: IGKM-D-PLAIN-REQ pass-through guest->host
+IGKM-D: A pass-through read 43 bytes: IGKM-D-PLAIN-RESP pass-through host->guest
+IGKM-D: VERDICT A pass-through=PASS
+IGKM-D: B deny connect(192.168.203.1:6444) t=0.214068
+MTLSGUARD: [c1] connect 192.168.203.1:6444: mesh destination; TCP is up -> HOLD connect() until the host handshake completes t=0.215171
+MTLSGUARD: [c1] vsock connected to host relay (cid 2 port 7100) t=0.217678
+MTLSGUARD: [c1] vsock tx OPEN payload=7 wire=12 t=0.218934
+MTLSGUARD: [c1] vsock rx TO_PEER payload=194 wire=199 t=0.219982
+MTLSGUARD: [c1] tcp tx 194 handshake bytes to peer
+MTLSGUARD: [c1] vsock rx NEED_PEER payload=0 wire=5 t=0.221958
+MTLSGUARD: [c1] tcp rx 827 handshake bytes from peer
+MTLSGUARD: [c1] vsock tx FROM_PEER payload=827 wire=832 t=0.223922
+MTLSGUARD: [c1] vsock rx DENY payload=205 wire=210 t=0.225113
+MTLSGUARD: [c1] host DENY: policy deny: local spiffe://overdrive.test/ns/default/sa/guest-client -> peer spiffe://overdrive.test/ns/default/sa/peer-denied (handshake aborted: invalid peer certificate: ApplicationVerificationFailure)
+MTLSGUARD: [c1] vsock summary: rx TO_PEER x1 (194 B), NEED_PEER x1; tx FROM_PEER 827 B; closing vsock (agent leaves the data path) t=0.229996
+MTLSGUARD: [c1] connect 192.168.203.1:6444: FAIL closed, connect() returns -13, TCP shut down, no application data sent (held 17207 us) t=0.232378
+IGKM-D: B deny connect() returned -1 errno=13 (Permission denied) after 19901 us t=0.234865
+IGKM-D: VERDICT B deny=PASS
+IGKM-D: C nst-control connect(192.168.203.1:6446) t=0.236879
+[    0.237911] Info: [libvirtio_vsock] <virtio_vsock.c @ 1021> Got packet to port 0 without socket
+MTLSGUARD: [c2] connect 192.168.203.1:6446: mesh destination; TCP is up -> HOLD connect() until the host handshake completes t=0.239582
+MTLSGUARD: [c2] vsock connected to host relay (cid 2 port 7100) t=0.241979
+MTLSGUARD: [c2] vsock tx OPEN payload=7 wire=12 t=0.243242
+MTLSGUARD: [c2] vsock rx TO_PEER payload=194 wire=199 t=0.244283
+MTLSGUARD: [c2] tcp tx 194 handshake bytes to peer
+MTLSGUARD: [c2] vsock rx NEED_PEER payload=0 wire=5 t=0.246270
+MTLSGUARD: [c2] tcp rx 828 handshake bytes from peer
+MTLSGUARD: [c2] vsock tx FROM_PEER payload=828 wire=833 t=0.248236
+MTLSGUARD: [c2] vsock rx TO_PEER payload=615 wire=620 t=0.249439
+MTLSGUARD: [c2] tcp tx 615 handshake bytes to peer
+MTLSGUARD: [c2] vsock rx SECRETS payload=128 wire=133 t=0.251411
+MTLSGUARD: [c2] record layer installed: TLS_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0, peer identity (from host) spiffe://overdrive.test/ns/default/sa/peer-allowed; socket driver lwip -> mtlsguard t=0.252573
+MTLSGUARD: [c2] vsock summary: rx TO_PEER x2 (809 B), NEED_PEER x1; tx FROM_PEER 828 B; closing vsock (agent leaves the data path) t=0.255916
+MTLSGUARD: [c2] connect 192.168.203.1:6446: RELEASE connect() = 0 after 18704 us hold t=0.258286
+IGKM-D: C nst-control connect() returned 0 errno=0 (-) after 22027 us t=0.259924
+MTLSGUARD: [c2] tx record seq=0 appdata plaintext=28 wire=50 (outer 0x17, inner 0x17) t=0.261282
+IGKM-D: C nst-control wrote 28 bytes: IGKM-D-REQN nst guest->peer
+[    0.264007] Info: [libvirtio_vsock] <virtio_vsock.c @ 1021> Got packet to port 1 without socket
+MTLSGUARD: [c2] rx record seq=0 wire=103 inner=0x16 plaintext=81 t=0.265673
+MTLSGUARD: [c2] rx post-handshake handshake message type 4 (NewSessionTicket) -> unsupported, fail closed
+IGKM-D: C nst-control read returned -1 errno=71 (Protocol error)
+MTLSGUARD: [c2] close: tx records=1 rx records=1
+IGKM-D: VERDICT C nst-control=PASS
+IGKM-D: D server-first connect(192.168.203.1:6445) t=0.271234
+MTLSGUARD: [c3] connect 192.168.203.1:6445: mesh destination; TCP is up -> HOLD connect() until the host handshake completes t=0.272398
+MTLSGUARD: [c3] vsock connected to host relay (cid 2 port 7100) t=0.274827
+MTLSGUARD: [c3] vsock tx OPEN payload=7 wire=12 t=0.276092
+MTLSGUARD: [c3] vsock rx TO_PEER payload=194 wire=199 t=0.277135
+MTLSGUARD: [c3] tcp tx 194 handshake bytes to peer
+MTLSGUARD: [c3] vsock rx NEED_PEER payload=0 wire=5 t=0.279127
+MTLSGUARD: [c3] tcp rx 827 handshake bytes from peer
+MTLSGUARD: [c3] vsock tx FROM_PEER payload=827 wire=832 t=0.281095
+MTLSGUARD: [c3] vsock rx TO_PEER payload=616 wire=621 t=0.282288
+MTLSGUARD: [c3] tcp tx 616 handshake bytes to peer
+MTLSGUARD: [c3] vsock rx SECRETS payload=128 wire=133 t=0.284259
+MTLSGUARD: [c3] record layer installed: TLS_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0, peer identity (from host) spiffe://overdrive.test/ns/default/sa/peer-allowed; socket driver lwip -> mtlsguard t=0.285416
+MTLSGUARD: [c3] vsock summary: rx TO_PEER x2 (810 B), NEED_PEER x1; tx FROM_PEER 827 B; closing vsock (agent leaves the data path) t=0.288763
+MTLSGUARD: [c3] connect 192.168.203.1:6445: RELEASE connect() = 0 after 18755 us hold t=0.291153
+IGKM-D: D server-first connect() returned 0 errno=0 (-) after 20525 us t=0.292795
+[    0.294191] Info: [libvirtio_vsock] <virtio_vsock.c @ 1021> Got packet to port 2 without socket
+MTLSGUARD: [c3] rx record seq=0 wire=63 inner=0x17 plaintext=41 t=0.295839
+IGKM-D: D server-first read 41 bytes: IGKM-D-GREETING server-first peer->guest
+MTLSGUARD: [c3] tx record seq=0 appdata plaintext=37 wire=59 (outer 0x17, inner 0x17) t=0.298435
+IGKM-D: D server-first wrote 37 bytes: IGKM-D-REQS server-first guest->peer
+MTLSGUARD: [c3] rx record seq=1 wire=60 inner=0x17 plaintext=38 t=0.301350
+IGKM-D: D server-first read 38 bytes: IGKM-D-RESPS server-first peer->guest
+MTLSGUARD: [c3] close: tx records=1 rx records=2
+MTLSGUARD: [c3] tx record seq=1 close_notify plaintext=2 wire=24 (outer 0x17, inner 0x15) t=0.304699
+IGKM-D: VERDICT D server-first=PASS
+IGKM-D: E client-first connect(192.168.203.1:6443) t=0.307022
+MTLSGUARD: [c4] connect 192.168.203.1:6443: mesh destination; TCP is up -> HOLD connect() until the host handshake completes t=0.308187
+MTLSGUARD: [c4] vsock connected to host relay (cid 2 port 7100) t=0.310532
+MTLSGUARD: [c4] vsock tx OPEN payload=7 wire=12 t=0.311788
+MTLSGUARD: [c4] vsock rx TO_PEER payload=194 wire=199 t=0.312824
+MTLSGUARD: [c4] tcp tx 194 handshake bytes to peer
+MTLSGUARD: [c4] vsock rx NEED_PEER payload=0 wire=5 t=0.314800
+MTLSGUARD: [c4] tcp rx 828 handshake bytes from peer
+MTLSGUARD: [c4] vsock tx FROM_PEER payload=828 wire=833 t=0.316782
+MTLSGUARD: [c4] vsock rx TO_PEER payload=616 wire=621 t=0.317975
+MTLSGUARD: [c4] tcp tx 616 handshake bytes to peer
+MTLSGUARD: [c4] vsock rx SECRETS payload=128 wire=133 t=0.319925
+MTLSGUARD: [c4] record layer installed: TLS_AES_128_GCM_SHA256 tx_seq=0 rx_seq=0, peer identity (from host) spiffe://overdrive.test/ns/default/sa/peer-allowed; socket driver lwip -> mtlsguard t=0.321089
+MTLSGUARD: [c4] vsock summary: rx TO_PEER x2 (810 B), NEED_PEER x1; tx FROM_PEER 828 B; closing vsock (agent leaves the data path) t=0.324441
+MTLSGUARD: [c4] connect 192.168.203.1:6443: RELEASE connect() = 0 after 18609 us hold t=0.326796
+IGKM-D: E client-first connect() returned 0 errno=0 (-) after 20388 us t=0.328448
+MTLSGUARD: [c4] tx record seq=0 appdata plaintext=37 wire=59 (outer 0x17, inner 0x17) t=0.329817
+IGKM-D: E client-first wrote 37 bytes: IGKM-D-REQ1 client-first guest->peer
+[    0.332717] Info: [libvirtio_vsock] <virtio_vsock.c @ 1021> Got packet to port 3 without socket
+MTLSGUARD: [c4] rx record seq=0 wire=60 inner=0x17 plaintext=38 t=0.360434
+IGKM-D: E client-first read 38 bytes: IGKM-D-RESP1 client-first peer->guest
+IGKM-D: E exchange 1 done; sleeping 8 s on the open connection (host kills the relay now) t=0.362970
+IGKM-D: E woke; exchange 2 on the SAME connection t=8.364815
+MTLSGUARD: [c4] tx record seq=1 appdata plaintext=41 wire=63 (outer 0x17, inner 0x17) t=8.366954
+IGKM-D: E client-first wrote 41 bytes: IGKM-D-REQ2 after-relay-kill guest->peer
+MTLSGUARD: [c4] rx record seq=1 wire=64 inner=0x17 plaintext=42 t=8.372971
+IGKM-D: E client-first read 42 bytes: IGKM-D-RESP2 after-relay-kill peer->guest
+MTLSGUARD: [c4] close: tx records=2 rx records=2
+MTLSGUARD: [c4] tx record seq=2 close_notify plaintext=2 wire=24 (outer 0x17, inner 0x15) t=8.380021
+IGKM-D: VERDICT E client-first=PASS
+IGKM-D: VERDICT E after-relay-kill=PASS
+IGKM-D: F agent-down connect(192.168.203.1:6443) t=8.386735
+MTLSGUARD: [c5] connect 192.168.203.1:6443: mesh destination; TCP is up -> HOLD connect() until the host handshake completes t=8.389300
+MTLSGUARD: [c5] host relay unreachable on vsock cid 2 port 7100 (-111) -> fail closed t=8.394584
+MTLSGUARD: [c5] connect 192.168.203.1:6443: FAIL closed, connect() returns -103, TCP shut down, no application data sent (held 8972 us) t=8.398271
+IGKM-D: F agent-down connect() returned -1 errno=103 (Software caused connection abort) after 14790 us t=8.403764
+IGKM-D: VERDICT F agent-down=PASS
+IGKM-D: G non-blocking connect(192.168.203.1:6443) t=8.409261
+MTLSGUARD: connect 192.168.203.1:6443: NON-BLOCKING mesh connect -> refused with EOPNOTSUPP (readiness hold not implemented in this spike) t=8.411592
+IGKM-D: G non-blocking connect() returned -1 errno=95 (Operation not supported) after 5636 us t=8.417202
+IGKM-D: VERDICT G non-blocking=PASS
+IGKM-D: app returning t=8.422171
+[    8.423060] Info: [libukboot] <boot.c @  514> main returned 0
+[    8.424787] Info: [libukboot] <shutdown_req.c @   50> Shutdown requested (0)
+[    8.426921] Info: [libvirtio_vsock] <virtio_vsock.c @ 1021> Got packet to port 4 without socket
+[    8.429548] Info: [libukboot] <boot.c @  430> Shutting down system (0)
+[   
+===== firecracker stderr =====
+
+===== firecracker log =====
+2026-09-28T20:34:29.622294771 [igkm-d:main:INFO:src/vmm/src/device_manager/mod.rs:387] Artificially kick devices
+2026-09-28T20:34:29.622398497 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:323] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-28T20:34:29.622413039 [igkm-d:main:INFO:src/firecracker/src/main.rs:610] Successfully started microvm that was configured from one single json
+2026-09-28T20:34:29.634735976 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634754834 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634769316 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634783537 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634797719 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634811770 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634825951 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634839972 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634854094 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634868095 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634882256 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634896297 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634910368 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.634924379 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T20:34:29.761846879 [igkm-d:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Vsock:vsock] notifying queues
+2026-09-28T20:34:29.768982619 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/devices/virtio/device.rs:159] Received acknowledge request for unknown feature: 0x202089a3
+2026-09-28T20:34:29.777463884 [igkm-d:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Net:net0] notifying queues
+2026-09-28T20:34:38.068479008 [igkm-d:main:INFO:src/vmm/src/lib.rs:693] Vmm is stopping.
+2026-09-28T20:34:38.068517887 [igkm-d:main:INFO:src/vmm/src/lib.rs:768] Killing vCPU threads
+2026-09-28T20:34:38.068538067 [igkm-d:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:409] Requested a vCPU run with immediate_exit enabled. The operation was skipped
+2026-09-28T20:34:38.092281142 [igkm-d:main:INFO:src/firecracker/src/main.rs:116] Firecracker exiting successfully. exit_code=0
+
+===== firecracker metrics (non-zero vsock/net/i8042 counters) =====
+   line2 i8042.missed_write_count = 1
+   line2 i8042.read_count = 2
+   line2 i8042.reset_count = 1
+   line2 i8042.write_count = 4
+   line2 net.no_tx_avail_buffer = 1
+   line2 net.rx_queue_event_count = 31
+   line2 net.rx_tap_event_count = 37
+   line2 net.rx_bytes_count = 6970
+   line2 net.rx_packets_count = 44
+   line2 net.rx_count = 44
+   line2 net.tap_write_agg.sum_us = 1181
+   line2 net.tx_bytes_count = 6066
+   line2 net.tx_count = 47
+   line2 net.tx_packets_count = 47
+   line2 net.tx_queue_event_count = 38
+   line2 net.tx_remaining_reqs_count = 16
+   line2 vsock.tx_queue_event_count = 19
+   line2 vsock.rx_bytes_count = 3287
+   line2 vsock.tx_bytes_count = 3378
+   line2 vsock.rx_packets_count = 28
+   line2 vsock.tx_packets_count = 20
+   line2 vsock.conns_added = 4
+   line2 vsock.conns_removed = 4
+
+===== tcpdump =====
+tcpdump: listening on igkmd0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+91 packets captured
+91 packets received by filter
+0 packets dropped by kernel
+-rw-r--r-- 1 root root 13424 Sep 28 20:34 <metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/tap.pcap
+a3781d548057dc160f301dbeb1c31856c3f363b036f3c3b649dde111e78e5593  <metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/tap.pcap
+
+===== tap capture scan =====
+SCAN conn guest:51824 -> peer:5001 (PLAIN)
+SCAN   guest->peer: 42 bytes flags[FIN,SYN] marker(IGKM-D-)=1
+SCAN     contains plaintext b'IGKM-D-PLAIN-REQ pass-through guest->host\n'
+SCAN   peer->guest: 43 bytes flags[FIN,SYN] marker(IGKM-D-)=1
+SCAN     contains plaintext b'IGKM-D-PLAIN-RESP pass-through host->guest\n'
+SCAN conn guest:51825 -> peer:6444 (TLS)
+SCAN   guest->peer: 194 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=1 (0x17 count=0) unframed_bytes=0
+SCAN     records: 0x16/189
+SCAN   peer->guest: 827 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=3 (0x17 count=1) unframed_bytes=0
+SCAN     records: 0x16/122 0x14/1 0x17/689
+SCAN conn guest:51826 -> peer:6446 (TLS)
+SCAN   guest->peer: 859 bytes flags[FIN,RST,SYN] marker(IGKM-D-)=0 records=4 (0x17 count=2) unframed_bytes=0
+SCAN     records: 0x16/189 0x14/1 0x17/604 0x17/45
+SCAN   peer->guest: 1006 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=6 (0x17 count=4) unframed_bytes=0
+SCAN     records: 0x16/122 0x14/1 0x17/690 0x17/98 0x17/46 0x17/19
+SCAN conn guest:51827 -> peer:6445 (TLS)
+SCAN   guest->peer: 893 bytes flags[FIN,RST,SYN] marker(IGKM-D-)=0 records=5 (0x17 count=3) unframed_bytes=0
+SCAN     records: 0x16/189 0x14/1 0x17/605 0x17/54 0x17/19
+SCAN   peer->guest: 974 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=6 (0x17 count=4) unframed_bytes=0
+SCAN     records: 0x16/122 0x14/1 0x17/689 0x17/58 0x17/55 0x17/19
+SCAN conn guest:51828 -> peer:6443 (TLS)
+SCAN   guest->peer: 956 bytes flags[FIN,RST,SYN] marker(IGKM-D-)=0 records=6 (0x17 count=4) unframed_bytes=0
+SCAN     records: 0x16/189 0x14/1 0x17/605 0x17/54 0x17/58 0x17/19
+SCAN   peer->guest: 976 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=6 (0x17 count=4) unframed_bytes=0
+SCAN     records: 0x16/122 0x14/1 0x17/690 0x17/55 0x17/59 0x17/19
+SCAN conn guest:51829 -> peer:6443 (TLS)
+SCAN   guest->peer: 0 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=0 (0x17 count=0) unframed_bytes=0
+SCAN     records: (none)
+SCAN   peer->guest: 0 bytes flags[FIN,SYN] marker(IGKM-D-)=0 records=0 (0x17 count=0) unframed_bytes=0
+SCAN     records: (none)
+SCAN conn guest:51830 -> peer:6443 (TLS)
+SCAN   guest->peer: 0 bytes flags[SYN] marker(IGKM-D-)=0 records=0 (0x17 count=0) unframed_bytes=0
+SCAN     records: (none)
+SCAN   peer->guest: 0 bytes flags[SYN] marker(IGKM-D-)=0 records=0 (0x17 count=0) unframed_bytes=0
+SCAN     records: (none)
+SCAN totals:
+SCAN   tls streams: 6685 bytes, marker(IGKM-D-) occurrences=0
+SCAN     tls: b'IGKM-D-REQ1 client-first guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-D-RESP1 client-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-D-REQ2 after-relay-kill guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-D-RESP2 after-relay-kill peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-D-GREETING server-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-D-REQS server-first guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-D-RESPS server-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-D-REQN nst guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-D-RESPN nst peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-D-PLAIN-REQ pass-through guest->host\n' occurrences=0
+SCAN     tls: b'IGKM-D-PLAIN-RESP pass-through host->guest\n' occurrences=0
+SCAN   plain streams: 85 bytes, marker(IGKM-D-) occurrences=2
+SCAN     plain: b'IGKM-D-PLAIN-REQ pass-through guest->host\n' occurrences=1
+SCAN     plain: b'IGKM-D-PLAIN-RESP pass-through host->guest\n' occurrences=1
+
+===== tap capture (base64, for the evidence tree) =====
+----- BEGIN tap.pcap base64 -----
+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
+----- END tap.pcap base64 -----
+
+===== run verdict =====
+RELAY[c1] custody: host->guest total 414 bytes; occurrences of client key PKCS#8 DER=0 PEM=0 private scalar=0
+RELAY[c2] custody: host->guest total 957 bytes; occurrences of client key PKCS#8 DER=0 PEM=0 private scalar=0
+RELAY[c3] custody: host->guest total 958 bytes; occurrences of client key PKCS#8 DER=0 PEM=0 private scalar=0
+RELAY[c4] custody: host->guest total 958 bytes; occurrences of client key PKCS#8 DER=0 PEM=0 private scalar=0
+
+===== cleanup =====
+deleting tap igkmd0
+
+===== post-run host state (must match pre-run) =====
+links added:   
+links removed: 
+firecracker processes before: [] after: []
+tap igkmd0 present: no
+192.168.203.x on host: 0
+listeners on 5001/6443-6446: []
+igkmd processes left: []
+run dir present: no

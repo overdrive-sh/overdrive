@@ -1,0 +1,1 @@
+# Spike B2 guest app (GH #303, increment-e). No app-level Kconfig options; see ./defconfig.

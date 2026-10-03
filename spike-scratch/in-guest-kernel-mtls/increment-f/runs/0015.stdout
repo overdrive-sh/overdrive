@@ -1,0 +1,65 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=cd6cc9ba787b919201de7f82 pid=321760
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 322,742 bytes  received 3,547 bytes  130,515.60 bytes/sec
+total size is 160,265,857  speedup is 491.18
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-busybox] fetch https://busybox.net/downloads/busybox-1.37.0.tar.bz2 (+ .sha256)  (11:02:30)
+3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4  busybox-1.37.0.tar.bz2
+busybox-1.37.0.tar.bz2: OK
+-rw-rw-r-- 1 ubuntu ubuntu 2565764 Sep 29 11:02 busybox-1.37.0.tar.bz2
+
+##### [build-busybox] unpack + configure (allnoconfig + the busybox and wget applets only)  (11:02:33)
+CONFIG_BUSYBOX=y
+# CONFIG_STATIC is not set
+# CONFIG_PIE is not set
+CONFIG_EXTRA_CFLAGS="-fPIE -std=gnu17"
+CONFIG_EXTRA_LDFLAGS="-static-pie"
+CONFIG_WGET=y
+# CONFIG_FEATURE_WGET_LONG_OPTIONS is not set
+# CONFIG_FEATURE_WGET_STATUSBAR is not set
+# CONFIG_FEATURE_WGET_FTP is not set
+# CONFIG_FEATURE_WGET_AUTHENTICATION is not set
+# CONFIG_FEATURE_WGET_TIMEOUT is not set
+# CONFIG_FEATURE_WGET_HTTPS is not set
+# CONFIG_FEATURE_WGET_OPENSSL is not set
+250908dc51937c60a4e041ff5cc3101528c6360a8a3ebb453ca8f1e129a2ad60  .config
+
+##### [build-busybox] build (host gcc 15.2.0, glibc 2.43)  (11:02:40)
+  SPLIT   include/autoconf.h -> include/config/*
+  GEN     include/bbconfigopts.h
+  GEN     include/common_bufsiz.h
+  GEN     include/embedded_scripts.h
+  HOSTCC  applets/usage
+  HOSTCC  applets/applet_tables
+applets/usage.c: In function ‘main’:
+applets/usage.c:52:17: warning: ignoring return value of ‘write’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+   52 |                 write(STDOUT_FILENO, usage_array[i].usage, strlen(usage_array[i].usage) + 1);
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  GEN     include/usage_compressed.h
+  GEN     include/applet_tables.h include/NUM_APPLETS.h
+  GEN     include/applet_tables.h include/NUM_APPLETS.h
+  CC      applets/applets.o
+  HOSTCC  applets/usage_pod
+  LD      applets/built-in.o
+/usr/bin/x86_64-linux-gnu-ld.bfd: -r and -pie may not be used together
+collect2: error: ld returned 1 exit status
+make[1]: *** [scripts/Makefile.build:264: applets/built-in.o] Error 1
+make[1]: *** Waiting for unfinished jobs....
+make: *** [Makefile:372: applets_dir] Error 2

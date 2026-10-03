@@ -1,0 +1,214 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=4bcfd30b373ce991fd7e51e3 pid=242369
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 150,095 bytes  received 4,382 bytes  61,790.80 bytes/sec
+total size is 157,239,526  speedup is 1,017.88
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-host] toolchain  (20:20:44)
+root-owned entries in the shared ~/.cargo/registry (first 3): <metal-home>/.cargo/registry <metal-home>/.cargo/registry/CACHEDIR.TAG <metal-home>/.cargo/registry/index 
+CARGO_HOME=<metal-home>/igkm-spike-a/cargo-home RUSTUP_HOME=<metal-home>/.rustup
+rustc 1.95.0 (59807616e 2026-04-14)
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+1915eee6efe16069087a1bd862786903c59c779a1b6412d448d2d9913f32c85f  Cargo.toml
+a3ea684d5a7e065325761fb7d4c669a1a3805b1b6fa17050078e6e082f1fa9d4  Cargo.lock
+1519f6fc83aa52af6d0014804144d206bc0edeab31e2d4a1386c9ad73ac094d1  src/lib.rs
+d16029d7443f8bd3707cd70aa03e72de0c71b39e97eeca04d236944248b08f2d  src/bin/gencerts.rs
+fbb554fb840dafae79d0af2a077c3cb35a80533c14abe20ad82e87a156ac2ec1  src/bin/peer.rs
+1741bf1c53ef821d2d89cb4c336ad9bf8776fe822bfce1a6ead1e45b16769fd0  src/bin/relay.rs
+
+##### [build-host] pinned crate versions (Cargo.lock)  (20:20:44)
+  rcgen 0.14.10
+  ring 0.17.14
+  rustls 0.23.45
+  rustls-pki-types 1.15.1
+  rustls-webpki 0.103.15
+  time 0.3.55
+  x509-parser 0.18.1
+
+##### [build-host] cargo build --release --locked  (20:20:44)
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded autocfg v1.5.1
+  Downloaded asn1-rs-impl v0.2.0
+  Downloaded cfg-if v1.0.5
+  Downloaded asn1-rs-derive v0.6.0
+  Downloaded data-encoding v2.11.1
+  Downloaded lazy_static v1.5.0
+  Downloaded rusticata-macros v4.1.0
+  Downloaded time-core v0.1.9
+  Downloaded bit-vec v0.9.1
+  Downloaded powerfmt v0.2.0
+  Downloaded num-conv v0.2.2
+  Downloaded untrusted v0.9.0
+  Downloaded subtle v2.6.1
+  Downloaded zeroize v1.9.0
+  Downloaded thiserror v2.0.21
+  Downloaded thiserror-impl v2.0.21
+  Downloaded yasna v0.6.0
+  Downloaded unicode-ident v1.0.26
+  Downloaded serde_core v1.0.229
+  Downloaded rcgen v0.14.10
+  Downloaded minimal-lexical v0.2.1
+  Downloaded x509-parser v0.18.1
+  Downloaded num-bigint v0.4.8
+  Downloaded nom v7.1.3
+  Downloaded memchr v2.8.3
+  Downloaded serde_derive v1.0.229
+  Downloaded serde v1.0.229
+  Downloaded rustls-webpki v0.103.15
+  Downloaded der-parser v10.0.0
+  Downloaded cc v1.5.1
+  Downloaded asn1-rs v0.7.2
+  Downloaded time v0.3.55
+  Downloaded syn v3.0.6
+  Downloaded syn v2.0.119
+  Downloaded proc-macro2 v1.0.107
+  Downloaded rustls v0.23.45
+  Downloaded num-traits v0.2.19
+  Downloaded log v0.4.34
+  Downloaded time-macros v0.2.32
+  Downloaded pem v4.0.0
+  Downloaded getrandom v0.2.17
+  Downloaded find-msvc-tools v0.1.14
+  Downloaded deranged v0.5.8
+  Downloaded rustls-pki-types v1.15.1
+  Downloaded once_cell v1.21.4
+  Downloaded base64 v0.23.1
+  Downloaded synstructure v0.13.2
+  Downloaded quote v1.0.47
+  Downloaded shlex v2.0.1
+  Downloaded oid-registry v0.8.1
+  Downloaded num-integer v0.1.47
+  Downloaded displaydoc v0.2.7
+  Downloaded libc v0.2.189
+  Downloaded ring v0.17.14
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling autocfg v1.5.1
+   Compiling find-msvc-tools v0.1.14
+   Compiling shlex v2.0.1
+   Compiling num-conv v0.2.2
+   Compiling time-core v0.1.9
+   Compiling libc v0.2.189
+   Compiling powerfmt v0.2.0
+   Compiling deranged v0.5.8
+   Compiling thiserror v2.0.21
+   Compiling memchr v2.8.3
+   Compiling minimal-lexical v0.2.1
+   Compiling cfg-if v1.0.5
+   Compiling untrusted v0.9.0
+   Compiling zeroize v1.9.0
+   Compiling cc v1.5.1
+   Compiling oid-registry v0.8.1
+   Compiling time-macros v0.2.32
+   Compiling base64 v0.23.1
+   Compiling rustls v0.23.45
+   Compiling subtle v2.6.1
+   Compiling lazy_static v1.5.0
+   Compiling log v0.4.34
+   Compiling rustls-pki-types v1.15.1
+   Compiling data-encoding v2.11.1
+   Compiling once_cell v1.21.4
+   Compiling num-traits v0.2.19
+   Compiling pem v4.0.0
+   Compiling nom v7.1.3
+   Compiling syn v2.0.119
+   Compiling syn v3.0.6
+   Compiling time v0.3.55
+   Compiling num-integer v0.1.47
+   Compiling getrandom v0.2.17
+   Compiling ring v0.17.14
+   Compiling num-bigint v0.4.8
+   Compiling rusticata-macros v4.1.0
+   Compiling thiserror-impl v2.0.21
+   Compiling displaydoc v0.2.7
+   Compiling yasna v0.6.0
+   Compiling synstructure v0.13.2
+   Compiling asn1-rs-impl v0.2.0
+   Compiling asn1-rs-derive v0.6.0
+   Compiling asn1-rs v0.7.2
+   Compiling der-parser v10.0.0
+   Compiling x509-parser v0.18.1
+   Compiling rustls-webpki v0.103.15
+   Compiling rcgen v0.14.10
+   Compiling igkmd-host v0.0.0 (<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/host)
+    Finished `release` profile [optimized] target(s) in 15.35s
+c07268fd9dd7986afcaa8639d4c6054dafc6c7f14c3a2351297294330ba28bfe  <metal-home>/igkm-spike-a/igkmd-host-target/release/gencerts
+880c5580349aa71ecf3a4060c6c766f072c7a5ec49f214056aee856d22b58e2f  <metal-home>/igkm-spike-a/igkmd-host-target/release/peer
+ff4c12374b1759c3c322d0cbce4fdb4ff7de4804d7f76ba8b163dacc756deb06  <metal-home>/igkm-spike-a/igkmd-host-target/release/relay
+
+##### [build-host] test PKI -> <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs  (20:20:59)
+GENCERTS: client.pem spiffe=spiffe://overdrive.test/ns/default/sa/guest-client server=false validity=2026-09-27..2026-10-28 der_len=460
+GENCERTS: peer-allowed.pem spiffe=spiffe://overdrive.test/ns/default/sa/peer-allowed server=true validity=2026-09-27..2026-10-28 der_len=466
+GENCERTS: peer-denied.pem spiffe=spiffe://overdrive.test/ns/default/sa/peer-denied server=true validity=2026-09-27..2026-10-28 der_len=465
+GENCERTS: ca.pem CN=igkm-d spike test CA
+total 32
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:20 ca.key
+-rw-rw-r-- 1 ubuntu ubuntu 627 Sep 28 20:20 ca.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:20 client.key
+-rw-rw-r-- 1 ubuntu ubuntu 680 Sep 28 20:20 client.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:20 peer-allowed.key
+-rw-rw-r-- 1 ubuntu ubuntu 688 Sep 28 20:20 peer-allowed.pem
+-rw------- 1 ubuntu ubuntu 241 Sep 28 20:20 peer-denied.key
+-rw-rw-r-- 1 ubuntu ubuntu 684 Sep 28 20:20 peer-denied.pem
+--- ca.pem
+No extensions in certificate
+subject=CN=igkm-d spike test CA
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+sha256 Fingerprint=FA:F5:0C:36:D3:AA:07:7F:20:20:D2:00:74:45:D9:38:94:D4:54:48:5D:A8:0C:15:77:18:AA:F5:3F:64:50:E0
+--- client.pem
+subject=CN=igkm-d guest-client
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/guest-client
+X509v3 Extended Key Usage: 
+    TLS Web Client Authentication
+sha256 Fingerprint=87:33:0C:50:25:57:38:CB:5A:55:FB:51:32:6F:5E:CA:74:85:B0:47:BA:65:86:70:A5:2E:A0:55:C9:FE:EC:A1
+--- peer-allowed.pem
+subject=CN=igkm-d peer-allowed
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/peer-allowed, IP Address:192.168.203.1
+X509v3 Extended Key Usage: 
+    TLS Web Server Authentication
+sha256 Fingerprint=80:AD:E1:0B:F1:B7:CC:FC:73:3B:D9:72:4D:8D:D3:C1:D1:DE:2A:1D:58:2D:8B:A5:88:4A:A1:ED:50:A7:3E:9D
+--- peer-denied.pem
+subject=CN=igkm-d peer-denied
+issuer=CN=igkm-d spike test CA
+notBefore=Sep 27 00:00:00 2026 GMT
+notAfter=Oct 28 00:00:00 2026 GMT
+X509v3 Subject Alternative Name: 
+    URI:spiffe://overdrive.test/ns/default/sa/peer-denied, IP Address:192.168.203.1
+X509v3 Extended Key Usage: 
+    TLS Web Server Authentication
+sha256 Fingerprint=F1:C8:DD:01:EF:0A:72:4D:F2:82:34:34:FA:8E:ED:A8:CC:88:C0:34:EA:26:4B:75:DB:B3:6C:AD:8E:2E:6C:20
+--- chain check
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/client.pem: OK
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/peer-allowed.pem: OK
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-d/out/certs/peer-denied.pem: OK
+--- client key (held by the relay only): type and sha256 of the PKCS#8 DER
+Private-Key: (256 bit)
+28b12d34e9196e32c260c33edf461c78095c7187e375c376df095f146312de72  -

@@ -1,0 +1,10 @@
+run_id=0009
+label=boot-mesh-fc1.17.0
+started_utc=2026-09-28T20:34:10Z
+ended_utc=2026-09-28T20:34:39Z
+exit_code=0
+local_commit=2c3a8ec68f970de507c9aa4508fca88f0be09d3f
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/unikraft/out-igkmd/igkmd_fc-x86_64 OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-d/run-boot-fc.sh mesh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=6e9720fa8886690d5a36c8834606f878fc0125a9d03ac059e975370b67e8b9c7
+stderr_sha256=143d3494dd283fb4edcfe428422dd9ceac65b520a069c13b70df5a71ccfab915

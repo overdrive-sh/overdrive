@@ -1,0 +1,5 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-e/build-guest.sh`
+xtask: running metal run (one bootstrap lease session)
+Preparing worktree (detached HEAD eb8fa236)
+Preparing worktree (detached HEAD ec55ae1)

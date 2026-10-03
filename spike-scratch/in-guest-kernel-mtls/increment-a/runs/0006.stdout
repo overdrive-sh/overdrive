@@ -1,0 +1,648 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f579ea1eeabd60901b976203 pid=176770
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 146,483 bytes  received 1,975 bytes  59,383.20 bytes/sec
+total size is 156,141,696  speedup is 1,051.76
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo 
+cloud-hypervisor processes: []
+
+===== versions / artifacts =====
+7.0.0-29-generic
+cloud-hypervisor v53.0
+aad473aad2f73a9893d5c32be333f2796725ab82
+792bf6e7fa5b190d435d229a7c07608b783f3388cf68897aab9b7f86870f259d  <metal-home>/igkm-spike-a/out/kernel-pvhfix.img
+27157a22bd2ceb9d0167248b3b04bb68add394368c2840e2f8ffce75a542beec  <metal-home>/igkm-spike-a/out/nanos-vsock.img
+
+===== launch =====
+CH command: cloud-hypervisor --kernel <metal-home>/igkm-spike-a/out/kernel-pvhfix.img --disk path=<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/disk.img --cpus boot=1 --memory size=512M --net tap=igkma0\,ip=192.168.203.1\,mask=255.255.255.0\,mac=52:54:00:1a:03:02 --vsock cid=3\,socket=<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/vsock.sock --serial file=<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/serial.log --console off --event-monitor path=<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/events.json --log-file <metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/ch.log -vv 
+cloud-hypervisor pid=177153 listener pid=177150 T0=1790576088.368795417
+tap while VM running: igkma0           UNKNOWN        192.168.203.1/24 fe80::c040:3eff:fe2b:a0ed/64 
+cloud-hypervisor still running after 60s (guest did not power off) -> cleanup will stop it
+listener exit=0
+
+===== host listener log =====
+HOST: vsock-leg listening on unix <metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/vsock.sock_5000 t+0.020454s
+HOST: net-leg listening on tcp 192.168.203.1:5001 (IP_FREEBIND) t+0.020520s
+HOST: vsock-leg accepted connection peer='' t+0.170292s
+HOST: vsock-leg received 33 bytes: b'IGKM-A-VSOCK-REQUEST guest->host\n' t+0.172449s
+HOST: vsock-leg replied 34 bytes: b'IGKM-A-VSOCK-RESPONSE host->guest\n' t+0.172467s
+HOST: net-leg accepted connection peer=('192.168.203.2', 52477) t+0.190760s
+HOST: net-leg received 31 bytes: b'IGKM-A-NET-REQUEST guest->host\n' t+0.192895s
+HOST: net-leg replied 32 bytes: b'IGKM-A-NET-RESPONSE host->guest\n' t+0.192920s
+HOST: VERDICT vsock=PASS t+0.192995s
+HOST: VERDICT net=PASS t+0.193000s
+
+===== guest serial console (Nanos) =====
+[0.044241] NET: static IP config for interface en1:
+	address	192.168.203.2
+	netmask	192.168.203.2
+	gateway	192.168.203.2
+[0.046826] en1: assigned 192.168.203.2
+[0.047650] NET: starting DHCPv6 for interface en1
+[0.048702] gitversion: aad473aad2f73a9893d5c32be333f2796725ab82
+IGKM-A: BOOT-MARKER guest program started t=0.051299
+IGKM-A: vsock socket(AF_VSOCK=40, SOCK_STREAM) t=0.052575
+IGKM-A: vsock connected local cid=4294967295 port=1024 -> cid=2 port=5000 t=0.054294
+IGKM-A: vsock wrote 33 bytes t=0.056095
+IGKM-A: vsock read 34 bytes: IGKM-A-VSOCK-RESPONSE host->guest
+IGKM-A: VERDICT vsock=PASS
+IGKM-A: net connected local 192.168.203.2:52477 -> 192.168.203.1:5001 t=0.074552
+IGKM-A: net wrote 31 bytes t=0.076726
+IGKM-A: net read 32 bytes: IGKM-A-NET-RESPONSE host->guest
+IGKM-A: VERDICT net=PASS
+IGKM-A: program exiting t=0.079378
+
+===== cloud-hypervisor event monitor =====
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 162535
+  },
+  "source": "vmm",
+  "event": "starting",
+  "properties": null
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 2889319
+  },
+  "source": "vm",
+  "event": "booting",
+  "properties": null
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 21794393
+  },
+  "source": "vm",
+  "event": "booted",
+  "properties": null
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 30460826
+  },
+  "source": "virtio-device",
+  "event": "activated",
+  "properties": {
+    "id": "_disk0"
+  }
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 37075572
+  },
+  "source": "virtio-device",
+  "event": "activated",
+  "properties": {
+    "id": "__rng"
+  }
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 42609981
+  },
+  "source": "virtio-device",
+  "event": "activated",
+  "properties": {
+    "id": "_vsock2"
+  }
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 47087320
+  },
+  "source": "virtio-device",
+  "event": "activated",
+  "properties": {
+    "id": "_net1"
+  }
+}
+
+
+===== cloud-hypervisor stdout/stderr =====
+
+===== cloud-hypervisor log (-vv) =====
+cloud-hypervisor:   0.000053s: <main> INFO:cloud-hypervisor/src/main.rs:631 -- v53.0 starting
+cloud-hypervisor:   0.000325s: <main> INFO:event_monitor/src/lib.rs:113 -- Event: source = vmm event = starting 
+cloud-hypervisor:   0.002129s: <vmm> INFO:vmm/src/api/mod.rs:1278 -- API request event: VmCreate VmConfig { cpus: CpusConfig { boot_vcpus: 1, max_vcpus: 1, topology: None, kvm_hyperv: false, max_phys_bits: 46, affinity: None, features: CpuFeatures { amx: false }, nested: true, core_scheduling: Vm, profile: Host }, memory: MemoryConfig { size: 536870912, mergeable: false, hotplug_method: Acpi, hotplug_size: None, hotplugged_size: None, shared: false, hugepages: false, hugepage_size: None, prefault: false, reserve: false, zones: None, thp: true }, payload: Some(PayloadConfig { firmware: None, kernel: Some("<metal-home>/igkm-spike-a/out/kernel-pvhfix.img"), cmdline: None, initramfs: None }), rate_limit_groups: None, disks: Some([DiskConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, path: Some("<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/disk.img"), readonly: false, direct: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, disable_io_uring: false, disable_aio: false, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Unknown, lock_granularity: ByteRange }]), net: Some([NetConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, tap: Some("igkma0"), ip: Some(192.168.203.1), mask: Some(255.255.255.0), mac: MacAddr { bytes: [82, 84, 0, 26, 3, 2] }, host_mac: None, mtu: None, num_queues: 2, queue_size: 256, vhost_user: false, vhost_socket: None, vhost_mode: Client, fds: None, rate_limiter_config: None, offload_tso: true, offload_ufo: true, offload_csum: true }]), rng: RngConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, src: "/dev/urandom" }, balloon: None, generic_vhost_user: None, fs: None, pmem: None, serial: SerialConfig { common: CommonConsoleConfig { file: Some("<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/serial.log"), mode: File, socket: None } }, console: ConsoleConfig { common: CommonConsoleConfig { file: None, mode: Off, socket: None }, pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None } }, debug_console: DebugConsoleConfig { file: None, mode: Off, iobase: Some(233) }, devices: None, user_devices: None, vdpa: None, vsock: Some(VsockConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, cid: 3, socket: "<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/vsock.sock" }), pvpanic: false, iommu: false, numa: None, watchdog: false, rtc: None, pci_segments: None, platform: None, tpm: None, preserved_fds: None, landlock_enable: false, landlock_rules: None }
+cloud-hypervisor:   0.003021s: <vmm> INFO:vmm/src/api/mod.rs:1169 -- API request event: VmBoot
+cloud-hypervisor:   0.003045s: <vmm> INFO:vmm/src/lib.rs:2230 -- Booting VM
+cloud-hypervisor:   0.003067s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = booting 
+cloud-hypervisor:   0.003379s: <vmm> INFO:vmm/src/memory_manager.rs:681 -- create ram region for zone mem0, region_start: 0x0, region_size: 0x20000000
+cloud-hypervisor:   0.003440s: <vmm> INFO:vmm/src/memory_manager.rs:2154 -- RAM region mapping at 0x7594e3200000 (size = 0x20000000)
+cloud-hypervisor:   0.003470s: <vmm> DEBUG:vmm/src/memory_manager.rs:2167 -- Successfully marked pages as THP eligible
+cloud-hypervisor:   0.003503s: <vmm> INFO:vmm/src/vm.rs:606 -- Booting VM from config: Mutex { data: VmConfig { cpus: CpusConfig { boot_vcpus: 1, max_vcpus: 1, topology: None, kvm_hyperv: false, max_phys_bits: 46, affinity: None, features: CpuFeatures { amx: false }, nested: true, core_scheduling: Vm, profile: Host }, memory: MemoryConfig { size: 536870912, mergeable: false, hotplug_method: Acpi, hotplug_size: None, hotplugged_size: None, shared: false, hugepages: false, hugepage_size: None, prefault: false, reserve: false, zones: None, thp: true }, payload: Some(PayloadConfig { firmware: None, kernel: Some("<metal-home>/igkm-spike-a/out/kernel-pvhfix.img"), cmdline: None, initramfs: None }), rate_limit_groups: None, disks: Some([DiskConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, path: Some("<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/disk.img"), readonly: false, direct: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, disable_io_uring: false, disable_aio: false, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Unknown, lock_granularity: ByteRange }]), net: Some([NetConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, tap: Some("igkma0"), ip: Some(192.168.203.1), mask: Some(255.255.255.0), mac: MacAddr { bytes: [82, 84, 0, 26, 3, 2] }, host_mac: None, mtu: None, num_queues: 2, queue_size: 256, vhost_user: false, vhost_socket: None, vhost_mode: Client, fds: None, rate_limiter_config: None, offload_tso: true, offload_ufo: true, offload_csum: true }]), rng: RngConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, src: "/dev/urandom" }, balloon: None, generic_vhost_user: None, fs: None, pmem: None, serial: SerialConfig { common: CommonConsoleConfig { file: Some("<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/serial.log"), mode: File, socket: None } }, console: ConsoleConfig { common: CommonConsoleConfig { file: None, mode: Off, socket: None }, pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None } }, debug_console: DebugConsoleConfig { file: None, mode: Off, iobase: Some(233) }, devices: None, user_devices: None, vdpa: None, vsock: Some(VsockConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, cid: 3, socket: "<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/vsock.sock" }), pvpanic: false, iommu: false, numa: None, watchdog: false, rtc: None, pci_segments: None, platform: None, tpm: None, preserved_fds: None, landlock_enable: false, landlock_rules: None }, poisoned: false, .. }
+cloud-hypervisor:   0.004336s: <vmm> INFO:arch/src/x86_64/mod.rs:629 -- Generating guest CPUID with physical address size: 46
+cloud-hypervisor:   0.004462s: <vmm> INFO:vmm/src/pci_segment.rs:107 -- Adding PCI segment: id=0, PCI MMIO config address: 0xe8000000, mem32 area [0xc0000000-0xe7ffffff], mem64 area [0x100000000-0x3fffffeeffff]
+cloud-hypervisor:   0.004505s: <vmm> INFO:vmm/src/memory_manager.rs:2433 -- Creating userspace mapping: 0 -> 7594e3200000 20000000, slot 0
+cloud-hypervisor:   0.004577s: <vmm> INFO:vmm/src/memory_manager.rs:2491 -- Created userspace mapping: 0 -> 7594e3200000 20000000
+cloud-hypervisor:   0.004661s: <vmm> INFO:vmm/src/cpu.rs:1100 -- Request to create new vCPUs: desired = 1, max = 1, allocated = 0, present = 0
+cloud-hypervisor:   0.004698s: <vmm> DEBUG:vmm/src/cpu.rs:973 -- Creating vCPU: cpu_id = 0
+cloud-hypervisor:   0.004688s: <payload_loader> INFO:vmm/src/vm.rs:1636 -- Loading kernel
+cloud-hypervisor:   0.005081s: <vmm> INFO:vmm/src/device_manager.rs:2700 -- Creating virtio-block device: DiskConfig { pci_common: PciDeviceCommonConfig { id: Some("_disk0"), iommu: false, pci_segment: 0, pci_device_id: None }, path: Some("<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/disk.img"), readonly: false, direct: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, disable_io_uring: false, disable_aio: false, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Unknown, lock_granularity: ByteRange }
+cloud-hypervisor:   0.005128s: <payload_loader> INFO:vmm/src/vm.rs:1659 -- PVH kernel loaded: entry_addr = 0x2000dc
+cloud-hypervisor:   0.005353s: <vmm> INFO:block/src/factory.rs:153 -- Opening RAW disk file with io_uring backend
+cloud-hypervisor:   0.005377s: <vmm> WARN:vmm/src/device_manager.rs:2756 -- DEPRECATION: auto-detection of disk image type is deprecated and will be removed in a future release. Please specify image type explicitly.
+cloud-hypervisor:   0.005399s: <vmm> WARN:vmm/src/device_manager.rs:2761 -- No image_type specified - detected as raw. Configuration updated to persist type across reboots and migrations.
+cloud-hypervisor:   0.005424s: <vmm> WARN:vmm/src/device_manager.rs:2769 -- Autodetected raw image type. Disabling sector 0 writes.
+cloud-hypervisor:   0.005491s: <vmm> INFO:block/src/lib.rs:428 -- Probed file sparse support: punch_hole=true, zero_range=true => true
+cloud-hypervisor:   0.005521s: <vmm> INFO:virtio-devices/src/block.rs:871 -- Disk topology: DiskTopology { logical_block_size: 512, physical_block_size: 512, minimum_io_size: 512, optimal_io_size: 0 }
+cloud-hypervisor:   0.005576s: <vmm> INFO:vmm/src/device_manager.rs:2929 -- Creating virtio-net device: NetConfig { pci_common: PciDeviceCommonConfig { id: Some("_net1"), iommu: false, pci_segment: 0, pci_device_id: None }, tap: Some("igkma0"), ip: Some(192.168.203.1), mask: Some(255.255.255.0), mac: MacAddr { bytes: [82, 84, 0, 26, 3, 2] }, host_mac: None, mtu: None, num_queues: 2, queue_size: 256, vhost_user: false, vhost_socket: None, vhost_mode: Client, fds: None, rate_limiter_config: None, offload_tso: true, offload_ufo: true, offload_csum: true }
+cloud-hypervisor:   0.006273s: <vmm> INFO:vmm/src/device_manager.rs:3091 -- Creating virtio-rng device: RngConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, src: "/dev/urandom" }
+cloud-hypervisor:   0.006362s: <vmm> INFO:vmm/src/device_manager.rs:3519 -- Creating virtio-vsock device: VsockConfig { pci_common: PciDeviceCommonConfig { id: Some("_vsock2"), iommu: false, pci_segment: 0, pci_device_id: None }, cid: 3, socket: "<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/vsock.sock" }
+cloud-hypervisor:   0.006700s: <vmm> DEBUG:virtio-devices/src/block.rs:1021 -- Attempting to acquire Write lock for disk image: id=_disk0,path=<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/disk.img,granularity=ByteRange(0, 15781888)
+cloud-hypervisor:   0.006769s: <vmm> INFO:virtio-devices/src/block.rs:1042 -- Acquired Write lock for disk image id=_disk0,path=<metal-home>/igkm-spike-a/runs/20260928T061448Z-177121/disk.img
+cloud-hypervisor:   0.007089s: <vmm> INFO:vmm/src/acpi.rs:1166 -- Generated ACPI tables: took 286µs size = 5169
+cloud-hypervisor:   0.007125s: <vmm> INFO:vmm/src/vm.rs:2739 -- Created ACPI tables: rsdp_addr = 0xa0000
+cloud-hypervisor:   0.007167s: <vmm> INFO:vmm/src/cpu.rs:556 -- Configuring vCPU: cpu_id = 0
+cloud-hypervisor:   0.007211s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000000 index = 0x00000000 eax = 0x00000010 ebx = 0x68747541 ecx = 0x444d4163 edx = 0x69746e65 flags = 0x00000000
+cloud-hypervisor:   0.007287s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000001 index = 0x00000000 eax = 0x00aa0f02 ebx = 0x00010800 ecx = 0xf7fa3203 edx = 0x178bfbff flags = 0x00000000
+cloud-hypervisor:   0.007359s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000002 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.007461s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000003 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.007563s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000004 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.007664s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000005 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.007774s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000006 index = 0x00000000 eax = 0x00000004 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.007881s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000007 index = 0x00000000 eax = 0x00000001 ebx = 0xf1bf07ab ecx = 0x00415fce edx = 0xbc000010 flags = 0x00000001
+cloud-hypervisor:   0.007961s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000007 index = 0x00000001 eax = 0x00000020 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.008061s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000008 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.008162s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000009 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.008263s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000a index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.008364s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000b index = 0x00000000 eax = 0x00000000 ebx = 0x00000001 ecx = 0x00000100 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.008463s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000c index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.008565s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x00000000 eax = 0x000002e7 ebx = 0x00000988 ecx = 0x00000988 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.008658s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x00000001 eax = 0x0000000f ebx = 0x000009b0 ecx = 0x00001800 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.008780s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x00000002 eax = 0x00000100 ebx = 0x00000240 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.008876s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x00000005 eax = 0x00000040 ebx = 0x00000340 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.008972s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x00000006 eax = 0x00000200 ebx = 0x00000380 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.009066s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x00000007 eax = 0x00000400 ebx = 0x00000580 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.009160s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x00000009 eax = 0x00000008 ebx = 0x00000980 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.009257s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x0000000b eax = 0x00000010 ebx = 0x00000000 ecx = 0x00000001 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.009354s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000d index = 0x0000000c eax = 0x00000018 ebx = 0x00000000 ecx = 0x00000001 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.009452s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000e index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.009550s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000f index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.009649s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x00000010 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.009746s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000000 index = 0x00000000 eax = 0x80000022 ebx = 0x68747541 ecx = 0x444d4163 edx = 0x69746e65 flags = 0x00000000
+cloud-hypervisor:   0.009818s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000001 index = 0x00000000 eax = 0x00aa0f02 ebx = 0x80000000 ecx = 0x00c003f7 edx = 0x2fd3fbff flags = 0x00000000
+cloud-hypervisor:   0.009879s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000005 index = 0x00000000 eax = 0xff48ff40 ebx = 0xff48ff40 ecx = 0x20080140 edx = 0x20080140 flags = 0x00000000
+cloud-hypervisor:   0.009935s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000006 index = 0x00000000 eax = 0x5c002200 ebx = 0x6c004200 ecx = 0x04006140 edx = 0x01009140 flags = 0x00000000
+cloud-hypervisor:   0.009993s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000007 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000100 flags = 0x00000000
+cloud-hypervisor:   0.010080s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000008 index = 0x00000000 eax = 0x002e392e ebx = 0x531ad205 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010155s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000009 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010245s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000000a index = 0x00000000 eax = 0x00000001 ebx = 0x00000008 ecx = 0x00000000 edx = 0x1201947b flags = 0x00000000
+cloud-hypervisor:   0.010326s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000000b index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010416s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000000c index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010506s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000000d index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010596s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000000e index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010686s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000000f index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010783s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000010 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010875s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000011 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.010966s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000012 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011058s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000013 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011149s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000014 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011241s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000015 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011333s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000016 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011424s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000017 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011520s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000018 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011611s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000019 index = 0x00000000 eax = 0xf048f040 ebx = 0xf0400000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011685s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001a index = 0x00000000 eax = 0x00000006 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011783s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001b index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011874s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001c index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.011965s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001d index = 0x00000000 eax = 0x00004121 ebx = 0x01c0003f ecx = 0x0000003f edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.012043s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001d index = 0x00000001 eax = 0x00004122 ebx = 0x01c0003f ecx = 0x0000003f edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.012121s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001d index = 0x00000002 eax = 0x00004143 ebx = 0x01c0003f ecx = 0x000007ff edx = 0x00000002 flags = 0x00000001
+cloud-hypervisor:   0.012197s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001d index = 0x00000003 eax = 0x0001c163 ebx = 0x03c0003f ecx = 0x00003fff edx = 0x00000001 flags = 0x00000001
+cloud-hypervisor:   0.012271s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001d index = 0x00000004 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.012361s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001e index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.012451s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x8000001f index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.012541s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000020 index = 0x00000000 eax = 0x00000000 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.012631s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000021 index = 0x00000000 eax = 0x18000347 ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.012713s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000022 index = 0x00000000 eax = 0x00000001 ebx = 0x00000006 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.012811s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x40000000 index = 0x00000000 eax = 0x40000010 ebx = 0x4b4d564b ecx = 0x564b4d56 edx = 0x0000004d flags = 0x00000000
+cloud-hypervisor:   0.012875s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x40000001 index = 0x00000000 eax = 0x0100fefb ebx = 0x00000000 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.012958s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000002 index = 0x00000000 eax = 0x20444d41 ebx = 0x43595045 ecx = 0x32303820 edx = 0x38205034 flags = 0x00000000
+cloud-hypervisor:   0.013013s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000003 index = 0x00000000 eax = 0x726f432d ebx = 0x72502065 ecx = 0x7365636f edx = 0x20726f73 flags = 0x00000000
+cloud-hypervisor:   0.013069s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x80000004 index = 0x00000000 eax = 0x20202020 ebx = 0x20202020 ecx = 0x20202020 edx = 0x00202020 flags = 0x00000000
+cloud-hypervisor:   0.013131s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000000b index = 0x00000001 eax = 0x00000000 ebx = 0x00000001 ecx = 0x00000200 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.013229s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000001f index = 0x00000000 eax = 0x00000000 ebx = 0x00000001 ecx = 0x00000100 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.013324s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000001f index = 0x00000001 eax = 0x00000000 ebx = 0x00000001 ecx = 0x00000200 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.013419s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x0000001f index = 0x00000002 eax = 0x00000000 ebx = 0x00000001 ecx = 0x00000500 edx = 0x00000000 flags = 0x00000001
+cloud-hypervisor:   0.013514s: <vmm> DEBUG:arch/src/x86_64/mod.rs:1001 -- function = 0x40000010 index = 0x00000000 eax = 0x002490e5 ebx = 0x000f4240 ecx = 0x00000000 edx = 0x00000000 flags = 0x00000000
+cloud-hypervisor:   0.013692s: <vmm> INFO:vmm/src/vm.rs:1826 -- Configuring system
+cloud-hypervisor:   0.013727s: <vmm> INFO:arch/src/x86_64/mod.rs:1174 -- first usable physical memory range, start: 0x00100000, end: 0x20000000
+cloud-hypervisor:   0.013769s: <vmm> INFO:arch/src/x86_64/mod.rs:1246 -- create_memmap_entry, start: 0x00100000, end: 0x20000000
+cloud-hypervisor:   0.013798s: <vmm> INFO:vmm/src/cpu.rs:1513 -- Starting vCPUs: desired = 1, allocated = 1, present = 0, paused = false
+cloud-hypervisor:   0.013903s: <vmm> DEBUG:vmm/src/cpu.rs:1231 -- Starting vCPU: cpu_id = 0
+cloud-hypervisor:   0.021784s: <vcpu0> INFO:vmm/src/cpu.rs:1314 -- vCPU 0: core scheduling cookie = 0x9612b9d0
+cloud-hypervisor:   0.021966s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = booted 
+cloud-hypervisor:   0.026277s: <vcpu0> DEBUG:devices/src/ioapic.rs:175 -- IOAPIC_W @ offset 0x0
+cloud-hypervisor:   0.026327s: <vcpu0> DEBUG:devices/src/ioapic.rs:155 -- IOAPIC_R @ offset 0x10
+cloud-hypervisor:   0.026354s: <vcpu0> DEBUG:devices/src/ioapic.rs:299 -- IOAPIC_R reg 0x1
+cloud-hypervisor:   0.026390s: <vcpu0> DEBUG:devices/src/ioapic.rs:175 -- IOAPIC_W @ offset 0x0
+cloud-hypervisor:   0.026428s: <vcpu0> DEBUG:devices/src/ioapic.rs:155 -- IOAPIC_R @ offset 0x10
+cloud-hypervisor:   0.026455s: <vcpu0> DEBUG:devices/src/ioapic.rs:299 -- IOAPIC_R reg 0x2a
+cloud-hypervisor:   0.026491s: <vcpu0> DEBUG:devices/src/ioapic.rs:175 -- IOAPIC_W @ offset 0x0
+cloud-hypervisor:   0.026529s: <vcpu0> DEBUG:devices/src/ioapic.rs:175 -- IOAPIC_W @ offset 0x10
+cloud-hypervisor:   0.026556s: <vcpu0> DEBUG:devices/src/ioapic.rs:253 -- IOAPIC_W reg 0x2b, val 0x0
+cloud-hypervisor:   0.026594s: <vcpu0> DEBUG:devices/src/ioapic.rs:175 -- IOAPIC_W @ offset 0x0
+cloud-hypervisor:   0.026632s: <vcpu0> DEBUG:devices/src/ioapic.rs:175 -- IOAPIC_W @ offset 0x10
+cloud-hypervisor:   0.026659s: <vcpu0> DEBUG:devices/src/ioapic.rs:253 -- IOAPIC_W reg 0x2a, val 0x26
+cloud-hypervisor:   0.027736s: <vcpu0> DEBUG:pci/src/msix.rs:231 -- MSI-X enabled for device 0x8
+cloud-hypervisor:   0.028832s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.028873s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.028911s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.028950s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.028987s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.029026s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.029064s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x0
+cloud-hypervisor:   0.029113s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:353 -- read_common_config_dword: offset 0x4
+cloud-hypervisor:   0.029152s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x0
+cloud-hypervisor:   0.029189s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:353 -- read_common_config_dword: offset 0x4
+cloud-hypervisor:   0.029228s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x8
+cloud-hypervisor:   0.029266s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0xc
+cloud-hypervisor:   0.029304s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x8
+cloud-hypervisor:   0.029342s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0xc
+cloud-hypervisor:   0.029380s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.029419s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.029492s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x16
+cloud-hypervisor:   0.029530s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x18
+cloud-hypervisor:   0.029568s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1e
+cloud-hypervisor:   0.029610s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x0 data 0xfee00000
+cloud-hypervisor:   0.029651s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x4 data 0x0
+cloud-hypervisor:   0.029691s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x8 data 0x27
+cloud-hypervisor:   0.029732s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0xc data 0x0
+cloud-hypervisor:   0.029818s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1a
+cloud-hypervisor:   0.029856s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1a
+cloud-hypervisor:   0.029895s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x20
+cloud-hypervisor:   0.029934s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x24
+cloud-hypervisor:   0.029972s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x28
+cloud-hypervisor:   0.030010s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x2c
+cloud-hypervisor:   0.030048s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x30
+cloud-hypervisor:   0.030086s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x34
+cloud-hypervisor:   0.030124s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1c
+cloud-hypervisor:   0.030174s: <vcpu0> INFO:virtio-devices/src/block.rs:1089 -- Changing cache mode to writeback
+cloud-hypervisor:   0.030212s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.030251s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.030283s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1288 -- _virtio-pci-_disk0: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.030311s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1293 -- _virtio-pci-_disk0: Needs activation; returning barrier
+cloud-hypervisor:   0.030343s: <vcpu0> INFO:vmm/src/vm.rs:488 -- Waiting for barrier
+cloud-hypervisor:   0.030319s: <vmm> INFO:vmm/src/lib.rs:2108 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.030409s: <vmm> INFO:virtio-devices/src/block.rs:1089 -- Changing cache mode to writeback
+cloud-hypervisor:   0.030633s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _disk0
+cloud-hypervisor:   0.030673s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:347 -- _virtio-pci-_disk0: Waiting for barrier
+cloud-hypervisor:   0.030698s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:349 -- _virtio-pci-_disk0: Barrier released
+cloud-hypervisor:   0.030705s: <vcpu0> INFO:vmm/src/vm.rs:490 -- Barrier released
+cloud-hypervisor:   0.031393s: <vcpu0> DEBUG:pci/src/msix.rs:231 -- MSI-X enabled for device 0x10
+cloud-hypervisor:   0.032829s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.032870s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.032909s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.032948s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.032985s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.033024s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.033063s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x0
+cloud-hypervisor:   0.033101s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:353 -- read_common_config_dword: offset 0x4
+cloud-hypervisor:   0.033140s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x0
+cloud-hypervisor:   0.033178s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:353 -- read_common_config_dword: offset 0x4
+cloud-hypervisor:   0.033217s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x8
+cloud-hypervisor:   0.033255s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0xc
+cloud-hypervisor:   0.033293s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x8
+cloud-hypervisor:   0.033331s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0xc
+cloud-hypervisor:   0.033369s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.033408s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.034439s: <vcpu0> DEBUG:pci/src/msix.rs:231 -- MSI-X enabled for device 0x18
+cloud-hypervisor:   0.035628s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.035669s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.035708s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.035746s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.035795s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.035835s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.035883s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x0
+cloud-hypervisor:   0.035921s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:353 -- read_common_config_dword: offset 0x4
+cloud-hypervisor:   0.035960s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x0
+cloud-hypervisor:   0.035998s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:353 -- read_common_config_dword: offset 0x4
+cloud-hypervisor:   0.036039s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x8
+cloud-hypervisor:   0.036078s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0xc
+cloud-hypervisor:   0.036117s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x8
+cloud-hypervisor:   0.036155s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0xc
+cloud-hypervisor:   0.036192s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.036231s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.036269s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x16
+cloud-hypervisor:   0.036307s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x18
+cloud-hypervisor:   0.036346s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1e
+cloud-hypervisor:   0.036387s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x0 data 0xfee00000
+cloud-hypervisor:   0.036428s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x4 data 0x0
+cloud-hypervisor:   0.036469s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x8 data 0x28
+cloud-hypervisor:   0.036510s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0xc data 0x0
+cloud-hypervisor:   0.036591s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1a
+cloud-hypervisor:   0.036630s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1a
+cloud-hypervisor:   0.036669s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x20
+cloud-hypervisor:   0.036707s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x24
+cloud-hypervisor:   0.036746s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x28
+cloud-hypervisor:   0.036797s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x2c
+cloud-hypervisor:   0.036835s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x30
+cloud-hypervisor:   0.036873s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x34
+cloud-hypervisor:   0.036911s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1c
+cloud-hypervisor:   0.036949s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.036988s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.037018s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1288 -- _virtio-pci-__rng: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.037045s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1293 -- _virtio-pci-__rng: Needs activation; returning barrier
+cloud-hypervisor:   0.037082s: <vcpu0> INFO:vmm/src/vm.rs:488 -- Waiting for barrier
+cloud-hypervisor:   0.037052s: <vmm> INFO:vmm/src/lib.rs:2108 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.037248s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = __rng
+cloud-hypervisor:   0.037285s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:347 -- _virtio-pci-__rng: Waiting for barrier
+cloud-hypervisor:   0.037310s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:349 -- _virtio-pci-__rng: Barrier released
+cloud-hypervisor:   0.037317s: <vcpu0> INFO:vmm/src/vm.rs:490 -- Barrier released
+cloud-hypervisor:   0.038275s: <vcpu0> DEBUG:pci/src/msix.rs:231 -- MSI-X enabled for device 0x20
+cloud-hypervisor:   0.039695s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.039736s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.039785s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.039824s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.039862s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.039900s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.039938s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x0
+cloud-hypervisor:   0.039977s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:353 -- read_common_config_dword: offset 0x4
+cloud-hypervisor:   0.040017s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x0
+cloud-hypervisor:   0.040054s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:353 -- read_common_config_dword: offset 0x4
+cloud-hypervisor:   0.040093s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x8
+cloud-hypervisor:   0.040131s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0xc
+cloud-hypervisor:   0.040170s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x8
+cloud-hypervisor:   0.040208s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0xc
+cloud-hypervisor:   0.040246s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.040285s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.040335s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x16
+cloud-hypervisor:   0.040373s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x18
+cloud-hypervisor:   0.040412s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1e
+cloud-hypervisor:   0.040454s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x0 data 0xfee00000
+cloud-hypervisor:   0.040495s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x4 data 0x0
+cloud-hypervisor:   0.040536s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x8 data 0x29
+cloud-hypervisor:   0.040577s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0xc data 0x0
+cloud-hypervisor:   0.040664s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1a
+cloud-hypervisor:   0.040703s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1a
+cloud-hypervisor:   0.040748s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x20
+cloud-hypervisor:   0.040799s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x24
+cloud-hypervisor:   0.040838s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x28
+cloud-hypervisor:   0.040876s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x2c
+cloud-hypervisor:   0.040914s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x30
+cloud-hypervisor:   0.040952s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x34
+cloud-hypervisor:   0.040990s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1c
+cloud-hypervisor:   0.041029s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x16
+cloud-hypervisor:   0.041066s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x18
+cloud-hypervisor:   0.041105s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1e
+cloud-hypervisor:   0.041146s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x10 data 0xfee00000
+cloud-hypervisor:   0.041187s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x14 data 0x0
+cloud-hypervisor:   0.041228s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x18 data 0x2a
+cloud-hypervisor:   0.041268s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x1c data 0x0
+cloud-hypervisor:   0.041378s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1a
+cloud-hypervisor:   0.041417s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1a
+cloud-hypervisor:   0.041456s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x20
+cloud-hypervisor:   0.041495s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x24
+cloud-hypervisor:   0.041534s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x28
+cloud-hypervisor:   0.041572s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x2c
+cloud-hypervisor:   0.041611s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x30
+cloud-hypervisor:   0.041649s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x34
+cloud-hypervisor:   0.041688s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1c
+cloud-hypervisor:   0.041727s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x16
+cloud-hypervisor:   0.041778s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x18
+cloud-hypervisor:   0.041817s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1e
+cloud-hypervisor:   0.041858s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x20 data 0xfee00000
+cloud-hypervisor:   0.041899s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x24 data 0x0
+cloud-hypervisor:   0.041940s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x28 data 0x2b
+cloud-hypervisor:   0.041981s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x2c data 0x0
+cloud-hypervisor:   0.042087s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1a
+cloud-hypervisor:   0.042133s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1a
+cloud-hypervisor:   0.042173s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x20
+cloud-hypervisor:   0.042211s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x24
+cloud-hypervisor:   0.042249s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x28
+cloud-hypervisor:   0.042288s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x2c
+cloud-hypervisor:   0.042327s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x30
+cloud-hypervisor:   0.042365s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x34
+cloud-hypervisor:   0.042403s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1c
+cloud-hypervisor:   0.042478s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.042517s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.042550s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1288 -- _virtio-pci-_vsock2: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.042576s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1293 -- _virtio-pci-_vsock2: Needs activation; returning barrier
+cloud-hypervisor:   0.042602s: <vcpu0> INFO:vmm/src/vm.rs:488 -- Waiting for barrier
+cloud-hypervisor:   0.042582s: <vmm> INFO:vmm/src/lib.rs:2108 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.042777s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _vsock2
+cloud-hypervisor:   0.042820s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:347 -- _virtio-pci-_vsock2: Waiting for barrier
+cloud-hypervisor:   0.042844s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:349 -- _virtio-pci-_vsock2: Barrier released
+cloud-hypervisor:   0.042851s: <vcpu0> INFO:vmm/src/vm.rs:490 -- Barrier released
+cloud-hypervisor:   0.042931s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:247 -- vsock: RX queue event
+cloud-hypervisor:   0.044647s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x16
+cloud-hypervisor:   0.044691s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x18
+cloud-hypervisor:   0.044730s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1e
+cloud-hypervisor:   0.044788s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x0 data 0xfee00000
+cloud-hypervisor:   0.044829s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x4 data 0x0
+cloud-hypervisor:   0.044870s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x8 data 0x2c
+cloud-hypervisor:   0.044911s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0xc data 0x0
+cloud-hypervisor:   0.045020s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1a
+cloud-hypervisor:   0.045059s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1a
+cloud-hypervisor:   0.045098s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x20
+cloud-hypervisor:   0.045136s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x24
+cloud-hypervisor:   0.045175s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x28
+cloud-hypervisor:   0.045220s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x2c
+cloud-hypervisor:   0.045258s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x30
+cloud-hypervisor:   0.045296s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x34
+cloud-hypervisor:   0.045335s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1c
+cloud-hypervisor:   0.045373s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x16
+cloud-hypervisor:   0.045411s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x18
+cloud-hypervisor:   0.045449s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1e
+cloud-hypervisor:   0.045491s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x10 data 0xfee00000
+cloud-hypervisor:   0.045532s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x14 data 0x0
+cloud-hypervisor:   0.045573s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x18 data 0x2d
+cloud-hypervisor:   0.045614s: <vcpu0> DEBUG:pci/src/msix.rs:363 -- MSI_W TABLE offset 0x1c data 0x0
+cloud-hypervisor:   0.045713s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1a
+cloud-hypervisor:   0.045759s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:255 -- read_common_config_word: offset 0x1a
+cloud-hypervisor:   0.045804s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x20
+cloud-hypervisor:   0.045843s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x24
+cloud-hypervisor:   0.045881s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x28
+cloud-hypervisor:   0.045920s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x2c
+cloud-hypervisor:   0.045958s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x30
+cloud-hypervisor:   0.045996s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:373 -- write_common_config_dword: offset 0x34
+cloud-hypervisor:   0.046034s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:278 -- write_common_config_word: offset 0x1c
+cloud-hypervisor:   0.046904s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:232 -- read_common_config_byte: offset 0x14
+cloud-hypervisor:   0.046950s: <vcpu0> DEBUG:virtio-devices/src/transport/pci_common_config.rs:245 -- write_common_config_byte: offset 0x14
+cloud-hypervisor:   0.046983s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1288 -- _virtio-pci-_net1: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.047010s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1293 -- _virtio-pci-_net1: Needs activation; returning barrier
+cloud-hypervisor:   0.047036s: <vcpu0> INFO:vmm/src/vm.rs:488 -- Waiting for barrier
+cloud-hypervisor:   0.047019s: <vmm> INFO:vmm/src/lib.rs:2108 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.047259s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _net1
+cloud-hypervisor:   0.047296s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:347 -- _virtio-pci-_net1: Waiting for barrier
+cloud-hypervisor:   0.047321s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:349 -- _virtio-pci-_net1: Barrier released
+cloud-hypervisor:   0.047329s: <vcpu0> INFO:vmm/src/vm.rs:490 -- Barrier released
+cloud-hypervisor:   0.047381s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:357 -- Listener registered at start
+cloud-hypervisor:   0.047435s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:319 -- Signalling RX queue
+cloud-hypervisor:   0.049997s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:292 -- Not signalling TX queue
+cloud-hypervisor:   0.056974s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:265 -- vsock: TX queue event
+cloud-hypervisor:   0.057006s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:176 -- vsock: epoll_handler::process_tx()
+cloud-hypervisor:   0.057031s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 64, 3, 0, 0, 0, 0, 0]
+cloud-hypervisor:   0.057208s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:115 -- vsock: raising IRQ
+cloud-hypervisor:   0.057236s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:129 -- vsock: epoll_handler::process_rx()
+cloud-hypervisor:   0.057260s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:207 -- vsock muxer: RX pkt: [2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 136, 19, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+cloud-hypervisor:   0.057392s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:115 -- vsock: raising IRQ
+cloud-hypervisor:   0.057439s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:247 -- vsock: RX queue event
+cloud-hypervisor:   0.059247s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:265 -- vsock: TX queue event
+cloud-hypervisor:   0.059272s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:176 -- vsock: epoll_handler::process_tx()
+cloud-hypervisor:   0.059296s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 33, 0, 0, 0, 1, 0, 5, 0, 0, 0, 0, 0, 0, 64, 3, 0, 0, 0, 0, 0]
+cloud-hypervisor:   0.059435s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:115 -- vsock: raising IRQ
+cloud-hypervisor:   0.059472s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:304 -- vsock: backend event
+cloud-hypervisor:   0.059494s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:314 -- vsock: muxer received kick
+cloud-hypervisor:   0.059517s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:405 -- vsock: muxer processing event: fd=141, event_set=Events(EPOLLIN | EPOLLHUP)
+cloud-hypervisor:   0.059551s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:176 -- vsock: epoll_handler::process_tx()
+cloud-hypervisor:   0.059573s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:129 -- vsock: epoll_handler::process_rx()
+cloud-hypervisor:   0.059615s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:207 -- vsock muxer: RX pkt: [2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 136, 19, 0, 0, 0, 4, 0, 0, 34, 0, 0, 0, 1, 0, 5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 33, 0, 0, 0]
+cloud-hypervisor:   0.059857s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:115 -- vsock: raising IRQ
+cloud-hypervisor:   0.059900s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:304 -- vsock: backend event
+cloud-hypervisor:   0.059937s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:314 -- vsock: muxer received kick
+cloud-hypervisor:   0.059977s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:405 -- vsock: muxer processing event: fd=141, event_set=Events(EPOLLIN | EPOLLHUP)
+cloud-hypervisor:   0.060042s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:176 -- vsock: epoll_handler::process_tx()
+cloud-hypervisor:   0.060080s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:129 -- vsock: epoll_handler::process_rx()
+cloud-hypervisor:   0.060124s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:207 -- vsock muxer: RX pkt: [2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 136, 19, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 1, 0, 4, 0, 3, 0, 0, 0, 0, 0, 1, 0, 33, 0, 0, 0]
+cloud-hypervisor:   0.060356s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:115 -- vsock: raising IRQ
+cloud-hypervisor:   0.060400s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:247 -- vsock: RX queue event
+cloud-hypervisor:   0.060440s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:265 -- vsock: TX queue event
+cloud-hypervisor:   0.060479s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:176 -- vsock: epoll_handler::process_tx()
+cloud-hypervisor:   0.060518s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 1, 0, 0, 0]
+cloud-hypervisor:   0.060751s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 1, 0, 0, 0]
+cloud-hypervisor:   0.061008s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 2, 0, 0, 0]
+cloud-hypervisor:   0.061241s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 2, 0, 0, 0]
+cloud-hypervisor:   0.061485s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 3, 0, 0, 0]
+cloud-hypervisor:   0.061718s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 3, 0, 0, 0]
+cloud-hypervisor:   0.061984s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 4, 0, 0, 0]
+cloud-hypervisor:   0.062218s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 4, 0, 0, 0]
+cloud-hypervisor:   0.062465s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 5, 0, 0, 0]
+cloud-hypervisor:   0.062700s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 5, 0, 0, 0]
+cloud-hypervisor:   0.062969s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 6, 0, 0, 0]
+cloud-hypervisor:   0.063204s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 6, 0, 0, 0]
+cloud-hypervisor:   0.063450s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 7, 0, 0, 0]
+cloud-hypervisor:   0.063685s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 7, 0, 0, 0]
+cloud-hypervisor:   0.063942s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 8, 0, 0, 0]
+cloud-hypervisor:   0.064176s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 8, 0, 0, 0]
+cloud-hypervisor:   0.064423s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 9, 0, 0, 0]
+cloud-hypervisor:   0.064657s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 9, 0, 0, 0]
+cloud-hypervisor:   0.064913s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 10, 0, 0, 0]
+cloud-hypervisor:   0.065149s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 10, 0, 0, 0]
+cloud-hypervisor:   0.065394s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 11, 0, 0, 0]
+cloud-hypervisor:   0.065629s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 11, 0, 0, 0]
+cloud-hypervisor:   0.065891s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 12, 0, 0, 0]
+cloud-hypervisor:   0.066127s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 12, 0, 0, 0]
+cloud-hypervisor:   0.066380s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 13, 0, 0, 0]
+cloud-hypervisor:   0.066617s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 13, 0, 0, 0]
+cloud-hypervisor:   0.066876s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 14, 0, 0, 0]
+cloud-hypervisor:   0.067111s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 14, 0, 0, 0]
+cloud-hypervisor:   0.067357s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 15, 0, 0, 0]
+cloud-hypervisor:   0.067592s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 15, 0, 0, 0]
+cloud-hypervisor:   0.067875s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 16, 0, 0, 0]
+cloud-hypervisor:   0.068110s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 16, 0, 0, 0]
+cloud-hypervisor:   0.068357s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 17, 0, 0, 0]
+cloud-hypervisor:   0.068592s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 17, 0, 0, 0]
+cloud-hypervisor:   0.068851s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 18, 0, 0, 0]
+cloud-hypervisor:   0.069086s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 18, 0, 0, 0]
+cloud-hypervisor:   0.069332s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 19, 0, 0, 0]
+cloud-hypervisor:   0.069568s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 19, 0, 0, 0]
+cloud-hypervisor:   0.069837s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 20, 0, 0, 0]
+cloud-hypervisor:   0.070072s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 20, 0, 0, 0]
+cloud-hypervisor:   0.070319s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 21, 0, 0, 0]
+cloud-hypervisor:   0.070554s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 21, 0, 0, 0]
+cloud-hypervisor:   0.070812s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 22, 0, 0, 0]
+cloud-hypervisor:   0.071047s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 22, 0, 0, 0]
+cloud-hypervisor:   0.071294s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 23, 0, 0, 0]
+cloud-hypervisor:   0.071529s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 23, 0, 0, 0]
+cloud-hypervisor:   0.071787s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 24, 0, 0, 0]
+cloud-hypervisor:   0.072023s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 24, 0, 0, 0]
+cloud-hypervisor:   0.072269s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 25, 0, 0, 0]
+cloud-hypervisor:   0.072504s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 25, 0, 0, 0]
+cloud-hypervisor:   0.072750s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 26, 0, 0, 0]
+cloud-hypervisor:   0.072994s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 26, 0, 0, 0]
+cloud-hypervisor:   0.073250s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 27, 0, 0, 0]
+cloud-hypervisor:   0.073485s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 27, 0, 0, 0]
+cloud-hypervisor:   0.073731s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 28, 0, 0, 0]
+cloud-hypervisor:   0.073982s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 28, 0, 0, 0]
+cloud-hypervisor:   0.074229s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 29, 0, 0, 0]
+cloud-hypervisor:   0.074464s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 29, 0, 0, 0]
+cloud-hypervisor:   0.074710s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 30, 0, 0, 0]
+cloud-hypervisor:   0.074957s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 30, 0, 0, 0]
+cloud-hypervisor:   0.075205s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 31, 0, 0, 0]
+cloud-hypervisor:   0.075440s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 31, 0, 0, 0]
+cloud-hypervisor:   0.075686s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 32, 0, 0, 0]
+cloud-hypervisor:   0.075932s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 32, 0, 0, 0]
+cloud-hypervisor:   0.076180s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 33, 0, 0, 0]
+cloud-hypervisor:   0.076414s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 33, 0, 0, 0]
+cloud-hypervisor:   0.076667s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 34, 0, 0, 0]
+cloud-hypervisor:   0.076914s: <_vsock2> DEBUG:virtio-devices/src/vsock/csm/connection.rs:447 -- vsock: dropping invalid TX pkt for connection: state=LocalClosed(true, true), pkt.hdr=[3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 64, 3, 0, 34, 0, 0, 0]
+cloud-hypervisor:   0.077161s: <_vsock2> DEBUG:virtio-devices/src/vsock/unix/muxer.rs:230 -- vsock: muxer.send[rxq.len=0]: [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 136, 19, 0, 0, 0, 0, 0, 0, 1, 0, 3, 0, 0, 0, 0, 0, 0, 64, 3, 0, 34, 0, 0, 0]
+cloud-hypervisor:   0.062238s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:292 -- Not signalling TX queue
+cloud-hypervisor:   0.077409s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:115 -- vsock: raising IRQ
+cloud-hypervisor:   0.077439s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:319 -- Signalling RX queue
+cloud-hypervisor:   0.077481s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:247 -- vsock: RX queue event
+cloud-hypervisor:   0.077551s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:265 -- vsock: TX queue event
+cloud-hypervisor:   0.077593s: <_vsock2> DEBUG:/home/runner/work/cloud-hypervisor/cloud-hypervisor/virtio-devices/src/vsock/device.rs:176 -- vsock: epoll_handler::process_tx()
+cloud-hypervisor:   0.077533s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:292 -- Not signalling TX queue
+cloud-hypervisor:   0.077666s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:319 -- Signalling RX queue
+cloud-hypervisor:   0.077709s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:292 -- Not signalling TX queue
+cloud-hypervisor:   0.079886s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:292 -- Not signalling TX queue
+cloud-hypervisor:   0.079924s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:319 -- Signalling RX queue
+cloud-hypervisor:   0.079950s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:   0.080704s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:292 -- Not signalling TX queue
+cloud-hypervisor:   0.082012s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:292 -- Not signalling TX queue
+cloud-hypervisor:   0.082044s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:319 -- Signalling RX queue
+cloud-hypervisor:   0.085588s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x0
+cloud-hypervisor:   0.085636s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x0
+cloud-hypervisor:   0.579961s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:319 -- Signalling RX queue
+cloud-hypervisor:   0.708097s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:   1.732014s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:   2.227879s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:   5.123949s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:   5.636111s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:   6.147932s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:   7.171854s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:  13.316067s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:  28.675861s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+cloud-hypervisor:  59.907955s: <_net1_qp0> DEBUG:virtio-devices/src/net.rs:321 -- Not signalling RX queue
+
+===== run verdict =====
+HOST: VERDICT vsock=PASS t+0.192995s
+HOST: VERDICT net=PASS t+0.193000s
+IGKM-A: VERDICT vsock=PASS
+IGKM-A: VERDICT net=PASS
+
+===== cleanup =====
+cloud-hypervisor pid 177153 still running -> SIGTERM
+
+===== post-run host state (must match pre-run) =====
+links added:   
+links removed: 
+cloud-hypervisor processes before: [] after: []
+tap igkma0 present: no
+run dir present: no
+leftover listener/CH pids: 

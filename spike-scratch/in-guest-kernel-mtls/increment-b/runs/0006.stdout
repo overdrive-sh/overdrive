@@ -1,0 +1,129 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=b53904b5e30fd27f831fd15c pid=185438
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 145,834 bytes  received 2,867 bytes  59,480.40 bytes/sec
+total size is 156,582,841  speedup is 1,053.00
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo 
+firecracker processes: []
+
+===== versions / artifacts =====
+7.0.0-29-generic
+Firecracker v1.11.0
+
+2026-09-28T06:46:17.488591758 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0
+aad473aad2f73a9893d5c32be333f2796725ab82
+8f0ea0c508d690b288079709830ca6aa037f75cea3dc9ddd48b2aa0ab0b448d5  <metal-home>/igkm-spike-a/firecracker/v1.11.0/release-v1.11.0-x86_64/firecracker-v1.11.0-x86_64
+c99b7da38017ee74d5e1999ae1f76654420ffca859972a25a1637aa87ef9f521  <metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img
+27157a22bd2ceb9d0167248b3b04bb68add394368c2840e2f8ffce75a542beec  <metal-home>/igkm-spike-a/out/nanos-vsock.img
+--- kernel ELF entry and notes (PVH = Xen note type 0x12)
+  Entry point address:               0x201d87
+  Xen                  0x00000004	Unknown note type: (0x00000012)
+   description data: dc 00 20 00 
+
+===== create tap igkmb0 (the only host network change) =====
+igkmb0           DOWN           192.168.203.1/24 
+
+===== firecracker config =====
+{
+  "boot-source": {
+    "kernel_image_path": "<metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "<metal-home>/igkm-spike-a/runs-fc/20260928T064617Z-185788/disk.img",
+      "is_root_device": false,
+      "is_read_only": false
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": 1,
+    "mem_size_mib": 512
+  },
+  "network-interfaces": [
+    {
+      "iface_id": "net0",
+      "guest_mac": "52:54:00:1a:03:02",
+      "host_dev_name": "igkmb0"
+    }
+  ],
+  "vsock": {
+    "vsock_id": "vsock0",
+    "guest_cid": 3,
+    "uds_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064617Z-185788/vsock.sock"
+  },
+  "logger": {
+    "log_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064617Z-185788/fc.log",
+    "level": "Debug",
+    "show_level": true,
+    "show_log_origin": true
+  },
+  "metrics": {
+    "metrics_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064617Z-185788/fc.metrics"
+  }
+}
+
+===== launch =====
+Firecracker command: <metal-home>/igkm-spike-a/firecracker/v1.11.0/release-v1.11.0-x86_64/firecracker-v1.11.0-x86_64 --no-api --config-file <metal-home>/igkm-spike-a/runs-fc/20260928T064617Z-185788/vm.json --id igkm-b 
+firecracker pid=185838 listener pid=185834 T0=1790577977.599594798 firecracker-start=t+0.060921s
+firecracker exited on its own: exit=1 at t+0.083s (<=0.05s poll)
+listener exit=1
+
+===== host listener log =====
+HOST: vsock-leg listening on unix <metal-home>/igkm-spike-a/runs-fc/20260928T064617Z-185788/vsock.sock_5000 t+0.016199s
+HOST: net-leg listening on tcp 192.168.203.1:5001 (IP_FREEBIND) t+0.016262s
+HOST: vsock-leg NO CONNECTION before deadline t+60.117419s
+HOST: net-leg NO CONNECTION before deadline t+60.117485s
+HOST: VERDICT vsock=FAIL t+60.117634s
+HOST: VERDICT net=FAIL t+60.117648s
+
+===== guest serial console (Nanos, = firecracker stdout) =====
+2026-09-28T06:46:17.663312159 [igkm-b:main] Running Firecracker v1.11.0
+2026-09-28T06:46:17.663499641 [igkm-b:main] RunWithoutApiError error: Failed to build MicroVM from Json: Configuration for VMM from one single json failed: Logger error: Failed to open target file: No such file or directory (os error 2)
+2026-09-28T06:46:17.663570968 [igkm-b:main] Firecracker exiting with error. exit_code=1
+
+===== firecracker stderr =====
+Error: RunWithoutApiError(BuildMicroVMFromJson(ParseFromJson(Logger(LoggerUpdateError(Os { code: 2, kind: NotFound, message: "No such file or directory" })))))
+
+===== firecracker log (Debug) =====
+cat: <metal-home>/igkm-spike-a/runs-fc/20260928T064617Z-185788/fc.log: No such file or directory
+
+===== firecracker metrics (every flushed line; non-zero counters only; counters are per-flush deltas) =====
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: '<metal-home>/igkm-spike-a/runs-fc/20260928T064617Z-185788/fc.metrics'
+(no metrics)
+
+===== run verdict =====
+HOST: VERDICT vsock=FAIL t+60.117634s
+HOST: VERDICT net=FAIL t+60.117648s
+
+===== cleanup =====
+deleting tap igkmb0
+
+===== post-run host state (must match pre-run) =====
+links added:   
+links removed: 
+firecracker processes before: [] after: []
+tap igkmb0 present: no
+192.168.203.x on host: 0
+run dir present: no
+leftover listener/firecracker pids: 

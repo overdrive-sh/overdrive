@@ -1,0 +1,7 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- bash spike-scratch/in-guest-kernel-mtls/increment-a/run-boot.sh <metal-home>/igkm-spike-a/out/kernel-pvhfix.img`
+xtask: running metal run (one bootstrap lease session)
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.

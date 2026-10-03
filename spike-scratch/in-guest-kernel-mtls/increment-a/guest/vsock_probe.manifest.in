@@ -1,0 +1,13 @@
+(
+    children:(
+        vsock_probe:(contents:(host:@GUEST_BIN@))
+    )
+    program:/vsock_probe
+    arguments:[vsock_probe]
+    environment:(PWD:/)
+    # prints NET: static IP config / default-interface lines
+    log_level:info
+    ipaddr:192.168.203.2
+    netmask:255.255.255.0
+    gateway:192.168.203.1
+)

@@ -1,0 +1,75 @@
+From 5c52eca63378b9595291393c02a9ddc7a39fed82 Mon Sep 17 00:00:00 2001
+From: Overdrive spike <spike@invalid>
+Date: Mon, 28 Sep 2026 22:38:54 +0200
+Subject: [PATCH] posix-socket: add accept post-hook for in-guest mTLS spike
+ (GH #303)
+
+---
+ lib/posix-socket/exportsyms.uk       |  1 +
+ lib/posix-socket/include/uk/socket.h | 10 ++++++++++
+ lib/posix-socket/socket.c            | 12 ++++++++++++
+ 3 files changed, 23 insertions(+)
+
+diff --git a/lib/posix-socket/exportsyms.uk b/lib/posix-socket/exportsyms.uk
+index 5c824e3..e43e9ca 100644
+--- a/lib/posix-socket/exportsyms.uk
++++ b/lib/posix-socket/exportsyms.uk
+@@ -26,3 +26,4 @@ uk_socket_accept
+ uk_sys_socket
+ uk_sys_socketpair
+ uk_socket_connect_hook
++uk_socket_accept_hook
+diff --git a/lib/posix-socket/include/uk/socket.h b/lib/posix-socket/include/uk/socket.h
+index d34fe46..bc5d7c9 100644
+--- a/lib/posix-socket/include/uk/socket.h
++++ b/lib/posix-socket/include/uk/socket.h
+@@ -76,6 +76,16 @@ int uk_socket_connect_hook(const struct uk_file *sock,
+ 			   const struct sockaddr *addr, socklen_t addr_len,
+ 			   int blocking, int ret);
+ 
++/**
++ * Accept post-hook (Overdrive GH #303 spike). Called by accept()/accept4()
++ * for every accepted connection, after the address-family driver's accept
++ * and BEFORE the new socket gets a file descriptor. A non-zero (negative
++ * errno) return drops the connection and makes accept() fail with it. The
++ * default weak definition returns 0.
++ */
++int uk_socket_accept_hook(const struct uk_file *listener,
++			  const struct uk_file *sock, int blocking, int flags);
++
+ struct uk_file *uk_socket_create(int family, int type, int protocol);
+ 
+ int uk_socketpair_create(int family, int type, int protocol,
+diff --git a/lib/posix-socket/socket.c b/lib/posix-socket/socket.c
+index 5a82c77..ea52886 100644
+--- a/lib/posix-socket/socket.c
++++ b/lib/posix-socket/socket.c
+@@ -370,6 +370,13 @@ const struct uk_file *uk_socket_accept(const struct uk_file *sock, int blocking,
+ 	return &al->f;
+ }
+ 
++__weak int uk_socket_accept_hook(const struct uk_file *listener __unused,
++				 const struct uk_file *sock __unused,
++				 int blocking __unused, int flags __unused)
++{
++	return 0;
++}
++
+ #if CONFIG_LIBPOSIX_FDTAB
+ int uk_sys_accept(const struct uk_file *sock, int blocking,
+ 		  struct sockaddr *addr, socklen_t *addr_len, int flags)
+@@ -384,6 +391,11 @@ int uk_sys_accept(const struct uk_file *sock, int blocking,
+ 	sockfile = uk_socket_accept(sock, blocking, addr, addr_len, flags);
+ 	if (unlikely(PTRISERR(sockfile)))
+ 		return PTR2ERR(sockfile);
++	fd = uk_socket_accept_hook(sock, sockfile, blocking, flags);
++	if (unlikely(fd)) {
++		uk_file_release(sockfile);
++		return fd;
++	}
+ 
+ 	if (flags & SOCK_NONBLOCK)
+ 		mode |= O_NONBLOCK;
+-- 
+2.52.0
+

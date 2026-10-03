@@ -1,0 +1,58 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=ae7482aeed8d797b9057f8c9 pid=184797
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 150,368 bytes  received 2,942 bytes  61,324.00 bytes/sec
+total size is 156,577,616  speedup is 1,021.31
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [fetch] firecracker v1.11.0  (06:45:57)
+--- published checksum file
+38ad6fb34273b2fa616956237b15ea6e064cf21336b0d990d5de347b35b9328b  firecracker-v1.11.0-x86_64.tgz
+--- verify
+firecracker-v1.11.0-x86_64.tgz: OK
+total 21016
+-rw-r--r-- 1 ubuntu ubuntu   11358 Mar 18  2025 LICENSE
+-rw-r--r-- 1 ubuntu ubuntu     535 Mar 18  2025 NOTICE
+-rw-r--r-- 1 ubuntu ubuntu    2140 Mar 18  2025 SHA256SUMS
+-rw-r--r-- 1 ubuntu ubuntu    1562 Mar 18  2025 THIRD-PARTY
+-rw-r--r-- 1 ubuntu ubuntu    1650 Mar 18  2025 c3-v1.11.0.json
+-rwxr-xr-x 1 ubuntu ubuntu 2243616 Mar 18  2025 cpu-template-helper-v1.11.0-x86_64
+-rw-r--r-- 1 ubuntu ubuntu 2008720 Mar 18  2025 cpu-template-helper-v1.11.0-x86_64.debug
+-rwxr-xr-x 1 ubuntu ubuntu 2719408 Mar 18  2025 firecracker-v1.11.0-x86_64
+-rw-r--r-- 1 ubuntu ubuntu 2157856 Mar 18  2025 firecracker-v1.11.0-x86_64.debug
+-rw-r--r-- 1 ubuntu ubuntu   42583 Mar 18  2025 firecracker_spec-v1.11.0.yaml
+-rwxr-xr-x 1 ubuntu ubuntu 2250528 Mar 18  2025 jailer-v1.11.0-x86_64
+-rw-r--r-- 1 ubuntu ubuntu 1978496 Mar 18  2025 jailer-v1.11.0-x86_64.debug
+-rwxr-xr-x 1 ubuntu ubuntu  521824 Mar 18  2025 rebase-snap-v1.11.0-x86_64
+-rw-r--r-- 1 ubuntu ubuntu 1586224 Mar 18  2025 rebase-snap-v1.11.0-x86_64.debug
+-rw-r--r-- 1 ubuntu ubuntu   38674 Mar 18  2025 seccomp-filter-v1.11.0-x86_64.json
+-rwxr-xr-x 1 ubuntu ubuntu 1118096 Mar 18  2025 seccompiler-bin-v1.11.0-x86_64
+-rw-r--r-- 1 ubuntu ubuntu 1962088 Mar 18  2025 seccompiler-bin-v1.11.0-x86_64.debug
+-rwxr-xr-x 1 ubuntu ubuntu 1073456 Mar 18  2025 snapshot-editor-v1.11.0-x86_64
+-rw-r--r-- 1 ubuntu ubuntu 1737792 Mar 18  2025 snapshot-editor-v1.11.0-x86_64.debug
+-rw-r--r-- 1 ubuntu ubuntu    1868 Mar 18  2025 t2-v1.11.0.json
+-rw-r--r-- 1 ubuntu ubuntu    1868 Mar 18  2025 t2a-v1.11.0.json
+-rw-r--r-- 1 ubuntu ubuntu    1991 Mar 18  2025 t2cl-v1.11.0.json
+-rw-r--r-- 1 ubuntu ubuntu    1991 Mar 18  2025 t2s-v1.11.0.json
+-rw-r--r-- 1 ubuntu ubuntu     612 Mar 18  2025 v1n1-v1.11.0.json
+--- binary identity
+8f0ea0c508d690b288079709830ca6aa037f75cea3dc9ddd48b2aa0ab0b448d5  <metal-home>/igkm-spike-a/firecracker/v1.11.0/release-v1.11.0-x86_64/firecracker-v1.11.0-x86_64
+<metal-home>/igkm-spike-a/firecracker/v1.11.0/release-v1.11.0-x86_64/firecracker-v1.11.0-x86_64: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=53e6b22ed61925320d6f91b023ea1e5a7df78fb1, not stripped
+Firecracker v1.11.0
+
+2026-09-28T06:45:58.499963383 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0

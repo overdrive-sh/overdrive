@@ -1,0 +1,43 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=571dc88b6531a33d93a615bd pid=583291
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 189,324 bytes  received 2,595 bytes  20,202.00 bytes/sec
+total size is 162,657,882  speedup is 847.53
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+host uname -r:                7.0.0-29-generic
+--- HOST kernel untouched (our module must NOT be on the host) ---
+igkm* modules on host:        []
+  (expected empty: the .ko was insmod'd ONLY inside the disposable guest)
+host tainted?:                0 (nonzero only if something loaded an OOT module ON THE HOST; our guest taint does not count here)
+--- no leaked probe objects on the host (this increment AND any interrupted prior attempt) ---
+firecracker procs:            []
+peer/relay/inclient procs:    []
+tcpdump procs:                []
+igk* taps on host (igkd/igkh): []
+192.168.204.x/205.x on host:  0
+test listeners 5001/6443-6451/7100: []
+igkmd/igkmh run dirs left:    [none]
+vsock unix sockets under scratch: 0
+health-dir residue under scratch: [none]
+--- retained (intended) throwaway artifacts in the unsynced scratch tree ---
+27M	<metal-home>/igkm-spike-a/igkmd
+-rw-rw-r-- 1 ubuntu ubuntu 1931698 Oct  3 16:27 <metal-home>/igkm-spike-a/igkmd/out/initramfs-mesh.cpio.gz
+-rw-rw-r-- 1 ubuntu ubuntu  847280 Oct  3 16:27 <metal-home>/igkm-spike-a/igkmd/out/module/igkmd_mtls.ko
+--- host /boot kernel is the stock image we copied (sha) ---
+b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682  <metal-home>/igkm-spike-a/igkmd/kernel/vmlinuz-host
+VERDICT: host clean = YES

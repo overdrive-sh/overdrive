@@ -1,0 +1,79 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=fc611c78b5b12775814cb71b pid=188566
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 150,920 bytes  received 3,590 bytes  44,145.71 bytes/sec
+total size is 156,767,902  speedup is 1,014.61
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [tools] GNU keyring (for .sig verification of m4/bison)  (07:08:11)
+b136fbe57ade4ee5270ca66c402cae7b50349fd07646b5b3de7962d58d4df608  <metal-home>/igkm-spike-a/unikraft/tools/src/gnu-keyring.gpg
+/usr/bin/gpgv
+
+##### [tools] m4 1.4.19  (07:08:12)
+63aede5c6d33b6d9b13511cd0be2cac046f2e70fd0a07aa9573a04a82783af96  <metal-home>/igkm-spike-a/unikraft/tools/src/m4-1.4.19.tar.xz
+m4 (GNU M4) 1.4.19
+
+##### [tools] verify m4 signature  (07:08:49)
+gpgv: Signature made Fri May 28 21:55:07 2021 UTC
+gpgv:                using RSA key 71C2CC22B1C4602927D2F3AAA7A16B4A2527436A
+gpgv: Good signature from "Eric Blake <eblake@redhat.com>"
+gpgv:                 aka "Eric Blake (Free Software Programmer) <ebb9@byu.net>"
+gpgv:                 aka "[invalid image]"
+
+##### [tools] bison 3.8.2  (07:08:49)
+9bba0214ccf7f1079c5d59210045227bcf619519840ebfa80cd3849cff5a5bf2  <metal-home>/igkm-spike-a/unikraft/tools/src/bison-3.8.2.tar.xz
+bison (GNU Bison) 3.8.2
+
+##### [tools] verify bison signature  (07:09:20)
+gpgv: Signature made Sat Sep 25 09:30:33 2021 UTC
+gpgv:                using DSA key 7DF84374B1EE1F9764BBE25D0DDCAA3278D5264E
+gpgv: Good signature from "Akim Demaille <demaille@enst.fr>"
+gpgv:                 aka "Akim Demaille <akim@lrde.epita.fr>"
+gpgv:                 aka "Akim Demaille <akim@epita.fr>"
+gpgv:                 aka "Akim Demaille <akim@freefriends.org>"
+gpgv:                 aka "Akim Demaille <akim@gnu.org>"
+
+##### [tools] flex 2.6.4  (07:09:20)
+e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995  <metal-home>/igkm-spike-a/unikraft/tools/src/flex-2.6.4.tar.gz
+flex 2.6.4
+
+##### [tools] compare flex tarball with the GitHub release asset digest  (07:09:29)
+flex-2.6.4.tar.gz None
+flex-2.6.4.tar.gz.sig None
+flex-2.6.4.tar.lz None
+flex-2.6.4.tar.lz.sig None
+
+##### [tools] tool versions on PATH  (07:09:29)
+m4     <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/m4  m4 (GNU M4) 1.4.19
+bison  <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/bison  bison (GNU Bison) 3.8.2
+flex   <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/flex  flex 2.6.4
+
+##### [tools] clone unikraft at eb8fa2368618cea11c9bde196f79e6e6b9caeed5  (07:09:29)
+HEAD=eb8fa2368618cea11c9bde196f79e6e6b9caeed5 tree=48639ed4fe5ce6133789c54a043d1ae86fed4f61
+dirty files: 0
+commit date=2026-09-15T16:46:18Z subject=lib/ukprint: Fix uk_pr_* logs
+
+##### [tools] clone lib-lwip at ec55ae17618feeb57c8c10109bcf5c42723e8e95  (07:09:31)
+HEAD=ec55ae17618feeb57c8c10109bcf5c42723e8e95 tree=16e828f2b3af7b73787307189f624538cffd8974
+dirty files: 0
+commit date=2026-04-15T03:25:17+02:00 subject=sockets: Remove redundant set of SOCK_NONBLOCK
+
+##### [tools] done  (07:09:32)
+98M	<metal-home>/igkm-spike-a/unikraft/tools
+24M	<metal-home>/igkm-spike-a/unikraft/unikraft
+940K	<metal-home>/igkm-spike-a/unikraft/lib-lwip

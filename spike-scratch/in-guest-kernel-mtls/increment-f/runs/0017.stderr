@@ -1,0 +1,5 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run -- bash spike-scratch/in-guest-kernel-mtls/increment-f/run-boot-fc.sh http-busybox`
+xtask: running metal run (one bootstrap lease session)
+Connecting to 192.168.204.1:6451 (192.168.204.1:6451)
+wget: error getting response

@@ -1,0 +1,10 @@
+run_id=0003
+label=build-all
+started_utc=2026-10-03T15:48:35Z
+ended_utc=2026-10-03T15:51:53Z
+exit_code=1
+local_commit=f3b2ae745aae2251496f1395c5c5ca35adca13f1
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- spike-scratch/in-guest-kernel-mtls/increment-j/build-all.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=03a88ddd84b3ac2045ab8c3be438ef2368afa4d4dca959b2a0d1e05d61ad7c38
+stderr_sha256=7dfcba3af2c31fcc5fcb073a6b51327d79a86da7a3c02845bfb090b61b223cec

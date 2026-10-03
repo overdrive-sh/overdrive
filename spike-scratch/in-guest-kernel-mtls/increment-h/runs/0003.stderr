@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask metal run -- bash spike-scratch/in-guest-kernel-mtls/increment-h/run-mesh-fc.sh`
+xtask: running metal run (one bootstrap lease session)

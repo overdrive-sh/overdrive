@@ -1,0 +1,92 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=1d4e3e073be30677803d71b3 pid=171469
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 152,576 bytes  received 1,991 bytes  103,044.67 bytes/sec
+total size is 156,125,448  speedup is 1,010.08
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-patched] worktree <metal-home>/igkm-spike-a/nanos-pvhfix at aad473aad2f73a9893d5c32be333f2796725ab82  (06:13:39)
+aad473aad2f73a9893d5c32be333f2796725ab82
+vendored acpica   e01cc6b3d12b5f73f44d46fa15a7f569c793b328
+vendored lwip     e27f9b7af7e5b025a5b8803899f12b1d35f7d968
+vendored mbedtls  729a04f67c64363ded0ed8fc3a408fdf5c40797c
+
+##### [build-patched] kernel-pvhfix (patch 0001 only)  (06:13:40)
+ src/x86_64/init.s | 1 +
+ 1 file changed, 1 insertion(+)
+make FAILED
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/runtime/rbtree.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/runtime/runtime_init.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/runtime/sg.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/runtime/string.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/runtime/symbol.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/runtime/table.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/runtime/tuple.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/runtime/vector.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/fs/fs.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/fs/tfs.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/fs/tlog.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/x86_64/elf64.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/x86_64/page.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/x86_64/uefi.o
+AS	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi/x86_64/uefi-crt0.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/platform/pc/boot/stage2.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/boot/elf.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/drivers/ata.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/kernel/elf.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/kernel/page.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/buffer.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/extra_prints.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/format.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/memops.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/merge.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/range.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/rbtree.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/runtime_init.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/sg.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/string.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/symbol.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/table.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/timer.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/tuple.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/runtime/vector.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/x86_64/page.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/x86_64/serial.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/fs/fs.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/fs/tfs.o
+CC	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/src/fs/tlog.o
+LD	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/uefi.so
+OBJCOPY	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/bootx64.efi
+LD	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/bin/stage2.elf
+STRIP	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/stage2.strip
+OBJCOPY	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/stage2.bin
+DD	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/stage2.pad
+94+1 records in
+95+0 records out
+48640 bytes (49 kB, 48 KiB) copied, 0.000333962 s, 49 MB/s
+NASM_LD	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/stage1
+CAT	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/boot.img
+make[2]: Leaving directory '<metal-home>/igkm-spike-a/nanos-pvhfix/platform/pc/boot'
+make[1]: Leaving directory '<metal-home>/igkm-spike-a/nanos-pvhfix/platform/pc'
+make[1]: Entering directory '<metal-home>/igkm-spike-a/nanos-pvhfix/platform/pc'
+make[1]: *** No rule to make target '<metal-home>/igkm-spike-a/nanos-pvhfix/.git/index', needed by '<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/gitversion.c'.  Stop.
+make[1]: *** Waiting for unfinished jobs....
+CONTGEN	<metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/closure_templates.h
+make[1]: Leaving directory '<metal-home>/igkm-spike-a/nanos-pvhfix/platform/pc'
+make: *** [Makefile:62: kernel] Error 2
+make: Leaving directory '<metal-home>/igkm-spike-a/nanos-pvhfix'

@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running `target/debug/xtask metal run -- bash spike-scratch/in-guest-kernel-mtls/increment-i/run-mesh-fc.sh`
+xtask: running metal run (one bootstrap lease session)
+ls: cannot access '<metal-home>/igkm-spike-a/runs-igkmd/20261003T144705Z-554445/tap.pcap': No such file or directory
+sha256sum: <metal-home>/igkm-spike-a/runs-igkmd/20261003T144705Z-554445/tap.pcap: No such file or directory
+base64: <metal-home>/igkm-spike-a/runs-igkmd/20261003T144705Z-554445/tap.pcap: No such file or directory

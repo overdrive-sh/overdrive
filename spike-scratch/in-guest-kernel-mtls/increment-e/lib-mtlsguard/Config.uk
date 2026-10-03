@@ -1,0 +1,11 @@
+# Spike B2 (GH #303, increment-e): in-guest mTLS hook for Unikraft. Throwaway probe.
+menuconfig LIBMTLSGUARD
+	bool "mtlsguard: in-guest mTLS (guard thread, readiness, NewSessionTicket, KeyUpdate)"
+	default n
+	select LIBPOSIX_SOCKET
+	select LIBUKVSOCKDEV
+	select LIBUKLIBPARAM
+	select LIBUKALLOC
+	select LIBUKSCHED
+	select LIBUKLOCK
+	select LIBUKLOCK_MUTEX

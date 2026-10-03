@@ -1,0 +1,204 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f55dba965920fb2cb49bbbda pid=567220
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 2,061,308 bytes  received 1,571,695 bytes  382,421.37 bytes/sec
+total size is 162,103,024  speedup is 44.62
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+=== substrate probes (testing.md, fail closed) ===
+uname -a: Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+uname -m: x86_64
+uname -r: 7.0.0-29-generic
+systemd-detect-virt: none (exit 1)
+cpu vmx/svm flag count: 16
+cpu aes flag count: 16
+crw-rw---- 1 root kvm 10, 232 Oct  3 15:27 /dev/kvm
+KVM_GET_API_VERSION=12 KVM_CREATE_VM=ok
+model name	: AMD EPYC 8024P 8-Core Processor
+nproc=16
+/dev/md1        847G  146G  658G  19% /
+
+=== Firecracker v1.17.0 (Spike A2 binary, reuse) ===
+99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5  <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64
+Firecracker v1.17.0
+
+=== HOST running kernel: kTLS + vsock config + module availability ===
+--- /boot/config-7.0.0-29-generic ---
+CONFIG_TLS=m
+CONFIG_TLS_DEVICE=y
+CONFIG_VHOST_VSOCK=m
+CONFIG_VIRTIO_BLK=y
+CONFIG_VIRTIO_MMIO=y
+CONFIG_VIRTIO_NET=y
+CONFIG_VIRTIO_VSOCKETS=m
+CONFIG_VSOCKETS=m
+--- loadable tls / vsock modules present on host (NOT loaded by us) ---
+/lib/modules/7.0.0-29-generic/kernel/net/tls/tls.ko.zst
+/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/hv_sock.ko.zst
+/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_vmci_transport.ko.zst
+/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst
+/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock_loopback.ko.zst
+/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock_diag.ko.zst
+/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst
+/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+modinfo tls vermagic: 7.0.0-29-generic SMP preempt mod_unload modversions 
+modinfo vsock vermagic: 7.0.0-29-generic SMP preempt mod_unload modversions 
+
+=== GATE B: kernel build headers for OOT module (host kernel) ===
+build symlink: lrwxrwxrwx 1 root root 39 Jul 17 16:57 /lib/modules/7.0.0-29-generic/build -> /usr/src/linux-headers-7.0.0-29-generic
+has Makefile: yes
+Module.symvers: -rw-r--r-- 1 root root 2382007 Jul 17 16:57 /lib/modules/7.0.0-29-generic/build/Module.symvers
+.config: -rw-r--r-- 1 root root 308473 Jul 17 16:57 /lib/modules/7.0.0-29-generic/build/.config
+include/generated/utsrelease.h: #define UTS_RELEASE "7.0.0-29-generic"#define UTS_UBUNTU_RELEASE_ABI 29
+/usr/src/linux-headers-7.0.0-29
+/usr/src/linux-headers-7.0.0-29-generic
+/usr/src/linux-headers-7.0.0-34
+/usr/src/linux-headers-7.0.0-34-generic
+
+=== GATE A: any Firecracker-bootable Linux vmlinux ELF already in scratch? ===
+empty  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/framework/data_files/pkcs7_zerolendata.bin
+ASCII text, with CRLF line terminators  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/framework/data_files/pkcs7_data.bin
+ASCII text, with CRLF line terminators  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/framework/data_files/pkcs7_data_1.bin
+Linux kernel x86 boot executable, bzImage, version 7.0.0-29-  <metal-home>/igkm-spike-a/igkmh/kernel/vmlinuz-host
+data  <metal-home>/igkm-spike-a/nanos-pvhfix/output/platform/pc/boot/stage2.bin
+Linux kernel x86 boot executable, bzImage, version 7.0.0-29-  <metal-home>/igkm-spike-a/igkmg/kernel/vmlinuz-host
+Linux kernel x86 boot executable, bzImage, version 7.0.0-29-  <metal-home>/igkm-spike-a/igkmd/kernel/vmlinuz-host
+data  <metal-home>/igkm-spike-a/nanos/output/platform/pc/boot/stage2.bin
+
+=== GATE A: outbound network to fetch a prebuilt stock kernel (presence only) ===
+reachable: s3.amazonaws.com:443
+UNREACHABLE: mirrors.ubuntu.com:443
+reachable: cdn.kernel.org:443
+reachable: github.com:443
+
+=== host C / OOT-module build toolchain (presence only, NO installs) ===
+gcc        /usr/bin/gcc
+make       /usr/bin/make
+ld         /usr/bin/ld
+flex       MISSING
+bison      MISSING
+bc         /usr/bin/bc
+cpio       /usr/bin/cpio
+gzip       /usr/bin/gzip
+xz         /usr/bin/xz
+zstd       /usr/bin/zstd
+busybox    /usr/bin/busybox
+qemu-img   /usr/bin/qemu-img
+mkfs.ext4  /usr/sbin/mkfs.ext4
+depmod     /usr/sbin/depmod
+file       /usr/bin/file
+readelf    /usr/bin/readelf
+objdump    /usr/bin/objdump
+strings    /usr/bin/strings
+curl       /usr/bin/curl
+wget       /usr/bin/wget
+tar        /usr/bin/tar
+python3    /usr/bin/python3
+rustc      <metal-home>/.cargo/bin/rustc
+cargo      <metal-home>/.cargo/bin/cargo
+gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+kernel-build prerequisite packages (query only):
+  build-essential 12.12ubuntu2.26.04.2
+  libelf-dev 0.194-4
+  linux-headers-7.0.0-29-generic 7.0.0-29.29
+
+=== reusable Spike C scratch (igkmh out/certs, FC, staged kernel, CARGO_HOME) + any leftover from an interrupted Spike D attempt ===
+spike-private CARGO_HOME: <metal-home>/igkm-spike-a/cargo-home
+Spike C out dir (igkmh): <metal-home>/igkm-spike-a/igkmh/out
+Spike C staged kernel: -rw-r--r-- 1 root root 17295752 Oct  1 15:54 <metal-home>/igkm-spike-a/igkmh/kernel/vmlinuz-host
+Spike D out dir (igkmd, this increment -- expected ABSENT until build-all): <metal-home>/igkm-spike-a/igkmd/out
+Spike D host target (igkmd-host-target -- expected ABSENT): <metal-home>/igkm-spike-a/igkmd-host-target
+
+=== port / subnet / tap availability (increment-i plans 192.168.204.0/24 backends :6443/:6444, VIPs 10.80.0.x, taps igkd<...>) ===
+igk* links (igkd/igkh -- must be none): []
+192.168.204.x on host: 0
+10.80.0.x on host (VIP subnet -- must be 0): 0
+no listener on 5001/6443-6452/7100
+firecracker procs: []
+
+=== GATE E: kernel header signatures the Spike E accept()/non-blocking hooks depend on ===
+kernel build tree: /lib/modules/7.0.0-29-generic/build
+--- struct proto .accept member (include/net/sock.h) ---
+1297:	struct sock *		(*accept)(struct sock *sk,
+1298-					  struct proto_accept_arg *arg);
+1083:static inline void sk_acceptq_removed(struct sock *sk)
+1088:static inline void sk_acceptq_added(struct sock *sk)
+1095: * Then please take a look at commit 64a146513f8f ("[NET]: Revert incorrect accept queue backlog changes.")
+1097:static inline bool sk_acceptq_is_full(const struct sock *sk)
+1276:struct proto_accept_arg {
+1297:	struct sock *		(*accept)(struct sock *sk,
+1298:					  struct proto_accept_arg *arg);
+1942:int sock_no_accept(struct socket *, struct socket *, struct proto_accept_arg *);
+--- struct proto_accept_arg (search headers) ---
+--- inet_csk_accept prototype (include/net/inet_connection_sock.h) ---
+263:struct sock *inet_csk_accept(struct sock *sk, struct proto_accept_arg *arg);
+264-
+265-int inet_csk_get_port(struct sock *sk, unsigned short snum);
+--- struct proto_ops .poll member (include/linux/net.h) ---
+178:	__poll_t	(*poll)	     (struct file *file, struct socket *sock,
+179-				      struct poll_table_struct *wait);
+--- inet_sk address fields (include/net/inet_sock.h): inet_saddr/inet_daddr/inet_dport/inet_num/inet_sport ---
+202: * @inet_daddr - Foreign IPv4 addr
+203: * @inet_rcv_saddr - Bound local IPv4 addr
+204: * @inet_dport - Destination port
+205: * @inet_num - Local port
+207: * @inet_saddr - Sending source
+209: * @inet_sport - Source port
+226:#define inet_daddr		sk.__sk_common.skc_daddr
+227:#define inet_rcv_saddr		sk.__sk_common.skc_rcv_saddr
+228:#define inet_dport		sk.__sk_common.skc_dport
+229:#define inet_num		sk.__sk_common.skc_num
+232:	__be32			inet_saddr;
+234:	__be16			inet_sport;
+--- struct sock callback fields we wake (sk_state_change/sk_write_space/sk_data_ready/sk_error_report/sk_err) ---
+284:  *	@sk_err: last error
+334:  *	@sk_state_change: callback to indicate change in the state of the sock
+335:  *	@sk_data_ready: callback to indicate there is data to be processed
+336:  *	@sk_write_space: callback to indicate there is bf sending space available
+337:  *	@sk_error_report: callback to indicate errors (e.g. %MSG_ERRQUEUE)
+448:	void			(*sk_data_ready)(struct sock *sk);
+454:	int			sk_err;
+575:	void			(*sk_state_change)(struct sock *sk);
+576:	void			(*sk_write_space)(struct sock *sk);
+577:	void			(*sk_error_report)(struct sock *sk);
+996:	SOCK_USE_WRITE_QUEUE, /* whether to call sk->sk_write_space in sock_wfree */
+2522:	 * This is racy since another cpu/thread can change sk_err under us.
+2524:	if (likely(data_race(!sk->sk_err)))
+2527:	err = xchg(&sk->sk_err, 0);
+2531:void sk_error_report(struct sock *sk);
+--- kthread + waitqueue + EPOLL masks present? ---
+kthread.h: /lib/modules/7.0.0-29-generic/build/include/linux/kthread.h
+wait.h:    /lib/modules/7.0.0-29-generic/build/include/linux/wait.h
+poll.h:    /lib/modules/7.0.0-29-generic/build/include/linux/poll.h
+31:#define EPOLLIN		(__force __poll_t)0x00000001
+33:#define EPOLLOUT	(__force __poll_t)0x00000004
+34:#define EPOLLERR	(__force __poll_t)0x00000008
+35:#define EPOLLHUP	(__force __poll_t)0x00000010
+37:#define EPOLLRDNORM	(__force __poll_t)0x00000040
+39:#define EPOLLWRNORM	(__force __poll_t)0x00000100
+--- tcp_poll + inet_stream_ops + inet_csk_accept + kallsyms symbols (kallsyms presence) ---
+  tcp_poll               T
+  inet_stream_ops        D
+  inet_csk_accept        T
+  tcp_prot               T
+  tcp_set_ulp            T
+  kallsyms_lookup_name   T
+--- does the stock kernel export a usable sk_prot->accept on tcp_prot? (modinfo not needed; symbol presence above) ---
+
+=== verdict ===
+SUBSTRATE OK

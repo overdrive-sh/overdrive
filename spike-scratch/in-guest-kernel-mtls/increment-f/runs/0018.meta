@@ -1,0 +1,10 @@
+run_id=0018
+label=build-go-client
+started_utc=2026-09-29T11:05:59Z
+ended_utc=2026-09-29T11:06:19Z
+exit_code=1
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-f/build-go-client.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=41717eb1f5d127d83b9a7d18203ef4cd58e3b6c6b8db7a0c03cceffe7ffc52e0
+stderr_sha256=ee8ed982c95b5e469c11d44a710be96ccc54a3abbbf09a990f7577427efdf187

@@ -1,0 +1,100 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=d04d507329813f1f217b09cd pid=163101
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 612,578 bytes  received 836,117 bytes  579,478.00 bytes/sec
+total size is 156,031,990  speedup is 107.71
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+=== substrate probes ===
+uname -m: x86_64
+uname -r: 7.0.0-29-generic
+systemd-detect-virt: none (exit 1)
+cpu vmx/svm flag count: 16
+crw-rw---- 1 root kvm 10, 232 Sep 28 06:03 /dev/kvm
+KVM_GET_API_VERSION=12 KVM_CREATE_VM=ok
+model name	: AMD EPYC 8024P 8-Core Processor
+16
+               total        used        free      shared  buff/cache   available
+Mem:              62           1           4           0          57          60
+
+=== cloud hypervisor ===
+/usr/local/bin/cloud-hypervisor
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+
+=== identity / scratch ===
+uid=0(root) gid=0(root) groups=0(root)
+HOME=<metal-home>
+/dev/md1        847G  135G  669G  17% /
+
+=== build tooling ===
+gcc        /usr/bin/gcc
+cc         /usr/bin/cc
+make       /usr/bin/make
+nasm       MISSING
+ld         /usr/bin/ld
+objcopy    /usr/bin/objcopy
+strip      /usr/bin/strip
+git        /usr/bin/git
+curl       /usr/bin/curl
+wget       /usr/bin/wget
+python3    /usr/bin/python3
+socat      MISSING
+qemu-img   /usr/bin/qemu-img
+tar        /usr/bin/tar
+xz         /usr/bin/xz
+rustc      <metal-home>/.cargo/bin/rustc
+cargo      <metal-home>/.cargo/bin/cargo
+go         MISSING
+gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+/usr/lib/x86_64-linux-gnu/libc.a
+/usr/include/linux/vm_sockets.h
+aarch64-unknown-linux-musl
+x86_64-unknown-linux-gnu
+x86_64-unknown-linux-musl
+
+=== network reachability (HEAD requests only) ===
+https://github.com -> 200
+https://storage.googleapis.com/nanos/release/latest.txt -> 200
+https://www.nasm.us -> 200
+0.1.56
+
+
+=== host routes (to pick a non-colliding tap subnet) ===
+lo               UNKNOWN        127.0.0.1/8 
+eno12399np0      UP             <redacted-metal-host>/24 metric 100 
+default via <redacted-provider-ip> dev eno12399np0 proto dhcp src <redacted-metal-host> metric 100 
+<redacted-provider-ip>/24 dev eno12399np0 proto kernel scope link src <redacted-metal-host> metric 100 
+<redacted-provider-ip> dev eno12399np0 proto dhcp scope link src <redacted-metal-host> metric 100 
+<redacted-provider-ip> via <redacted-provider-ip> dev eno12399np0 proto dhcp src <redacted-metal-host> metric 100 
+<redacted-provider-ip> via <redacted-provider-ip> dev eno12399np0 proto dhcp src <redacted-metal-host> metric 100 
+
+=== staging files for preflight ===
+total 32536
+drwxr-xr-x 4 root root       95 Sep 22 22:36 gti-failure-serve-BxF37V
+drwxr-xr-x 4 root root       95 Sep 22 22:31 gti-failure-serve-iGHl3d
+drwxr-xr-x 3 root root      125 Aug 29 17:42 gti-mesh-rNMmre
+drwxr-xr-x 3 root root       33 Aug 28 20:30 gti-net-apply-failure-K9y6OS
+drwxr-xr-x 3 root root       20 Aug 30 01:17 gti-resolver-refusal-7IqZMm
+drwxr-xr-x 4 root root       35 Sep 22 22:29 gti-resolver-refusal-WArgHG
+drwxr-xr-x 4 root root       35 Sep 22 22:35 gti-resolver-refusal-eoGBYv
+drwxr-xr-x 5 root root      188 Sep 23 04:58 gti-restart-reinstall-failure-6jWnm8
+drwxr-xr-x 5 root root      188 Sep 23 07:50 gti-restart-reinstall-failure-AGn9Kh
+
+=== verdict ===
+SUBSTRATE OK

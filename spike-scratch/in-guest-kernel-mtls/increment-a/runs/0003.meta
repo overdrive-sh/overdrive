@@ -1,0 +1,10 @@
+run_id=0003
+label=boot
+started_utc=2026-09-28T06:09:13Z
+ended_utc=2026-09-28T06:10:26Z
+exit_code=1
+local_commit=6cd4d702cb8d39656da0e7e3f47b353cf088faa0
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img OVERDRIVE_METAL_ROOTFS=<metal-home>/igkm-spike-a/out/nanos-vsock.img cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-a/run-boot.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=861d144cf644a5a491b816b3b8d085d60e81d23b3a74b12ec43b125682eabfb7
+stderr_sha256=0b5a6151bd9b204e85a24341fe08874bccd590bddc57cf4fac06217ee164ab15

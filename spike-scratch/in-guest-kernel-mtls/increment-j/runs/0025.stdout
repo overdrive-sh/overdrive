@@ -1,0 +1,151 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=9a9dc2f4f5f01a008495d8fb pid=579345
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 2,098,639 bytes  received 877,499 bytes  160,872.32 bytes/sec
+total size is 162,341,942  speedup is 54.55
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+##### [build-all] host rustls programs + PKI (relay resolve/LB, two backends)
+=== increment-i host sources (relay resolve/LB + two labelled backends) ===
+b86ad0cf8b767d209e02fee53979004b5ce292a019085e42bb47fc86a907997a  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-j/host/src/lib.rs
+779aa25aa07f3f8826f1e3d4fb43ad6744ec90f77ce52f4d3e2763571185bd9b  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-j/host/src/bin/gencerts.rs
+4d31c8047cc11aff27b0fd867880902fa4416d0ecda0e9208a5ed57792713172  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-j/host/src/bin/inclient.rs
+d1bed7e7302e75f1434ada660d80ff0569d52ea092c637dc419398a6d56a456d  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-j/host/src/bin/peer.rs
+ab013031e394ae0ee01c5aad276343577c871d4d0cb8e877ec8bfd1828ab6cc7  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-j/host/src/bin/relay.rs
+rustc 1.95.0 (59807616e 2026-04-14)
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+=== cargo build --release --locked ===
+    Finished `release` profile [optimized] target(s) in 0.03s
+77efaea9d4535076d0cefc15d1a35b216b0c6575aac03c649192e81bb9fe4f26  <metal-home>/igkm-spike-a/igkmd-host-target/release/gencerts
+4544461b2b61e45c08d44b8e269ec64a2da1f08108b90bdc1b890b4b862a2d63  <metal-home>/igkm-spike-a/igkmd-host-target/release/peer
+fd9c3e3bd2571af0c5ae487bdf9913a4e6b162f26e065b0353b3251dee3d9e18  <metal-home>/igkm-spike-a/igkmd-host-target/release/relay
+df9bee8591b9b8eff8c322239aacd25e4438e82d267a4c6b3c54f8882920a127  <metal-home>/igkm-spike-a/igkmd-host-target/release/inclient
+=== test PKI -> <metal-home>/igkm-spike-a/igkmd/out/certs (IP SANs 192.168.204.1/.2; regenerated only if absent) ===
+exists; not regenerated
+ca.key
+ca.pem
+client.key
+client.pem
+guest-server.key
+guest-server.pem
+peer-allowed.key
+peer-allowed.pem
+peer-client-denied.key
+peer-client-denied.pem
+peer-client.key
+peer-client.pem
+peer-denied.key
+peer-denied.pem
+##### [build-all] out-of-tree kernel module igkmd_mtls.ko
+=== building igkmd_mtls.ko against /lib/modules/7.0.0-29-generic/build (gcc 15) ===
+make: Entering directory '/usr/src/linux-headers-7.0.0-29-generic'
+make[1]: Entering directory '<metal-home>/igkm-spike-a/igkmd/out/module/build-igkmd_mtls'
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  You are using:           gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+warning: pahole version differs from the one used to build the kernel
+  The kernel was built with: 131
+  You are using:             0
+  CC [M]  igkmd_mtls.o
+  MODPOST Module.symvers
+  CC [M]  igkmd_mtls.mod.o
+  CC [M]  .module-common.o
+  LD [M]  igkmd_mtls.ko
+  BTF [M] igkmd_mtls.ko
+Skipping BTF generation for igkmd_mtls.ko due to unavailability of vmlinux
+make[1]: Leaving directory '<metal-home>/igkm-spike-a/igkmd/out/module/build-igkmd_mtls'
+make: Leaving directory '/usr/src/linux-headers-7.0.0-29-generic'
+=== built ===
+-rw-rw-r-- 1 ubuntu ubuntu 847280 Oct  3 16:27 <metal-home>/igkm-spike-a/igkmd/out/module/igkmd_mtls.ko
+filename:       <metal-home>/igkm-spike-a/igkmd/out/module/igkmd_mtls.ko
+license:        GPL
+depends:        
+vermagic:       7.0.0-29-generic SMP preempt mod_unload modversions 
+host kernel vermagic: 7.0.0-29-generic
+##### [build-all] static guest app igkmd_app
+=== gcc -static guest app ===
+<metal-home>/igkm-spike-a/igkmd/out/bin/igkmd_app: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=341abd2d764eaa81712a3a982660921eb5f011fb, for GNU/Linux 3.2.0, not stripped
+-rwxrwxr-x 1 ubuntu ubuntu 847776 Oct  3 16:27 <metal-home>/igkm-spike-a/igkmd/out/bin/igkmd_app
+##### [build-all] mesh initramfs
+=== static busybox ===
+=== stock tls + vsock modules (decompress host .ko.zst, same vermagic) ===
+  staged tls.ko (294569 B)
+  staged vsock.ko (128033 B)
+  staged vmw_vsock_virtio_transport_common.ko (106585 B)
+  staged vmw_vsock_virtio_transport.ko (53457 B)
+=== increment-i module + app ===
+=== /init (Spike E, phase-dispatched by igkm_phase= on the kernel cmdline) ===
+=== pack cpio.gz ===
+-rw-rw-r-- 1 ubuntu ubuntu 1931698 Oct  3 16:27 <metal-home>/igkm-spike-a/igkmd/out/initramfs-mesh.cpio.gz
+e1db584350336042787c4b2c81cd8a50e303b40a05f5bad1751e018743f631f1  <metal-home>/igkm-spike-a/igkmd/out/initramfs-mesh.cpio.gz
+=== contents ===
+  .
+  ./app
+  ./app/igkmd_app
+  ./bin
+  ./bin/busybox
+  ./bin/cat
+  ./bin/cut
+  ./bin/dmesg
+  ./bin/echo
+  ./bin/grep
+  ./bin/head
+  ./bin/hexdump
+  ./bin/ifconfig
+  ./bin/insmod
+  ./bin/ip
+  ./bin/ls
+  ./bin/lsmod
+  ./bin/mkdir
+  ./bin/mknod
+  ./bin/modprobe
+  ./bin/mount
+  ./bin/od
+  ./bin/poweroff
+  ./bin/rmmod
+  ./bin/route
+  ./bin/sh
+  ./bin/sleep
+  ./bin/sync
+  ./bin/tail
+  ./bin/tr
+  ./bin/umount
+  ./bin/uname
+  ./bin/wc
+  ./dev
+  ./etc
+  ./init
+  ./mod
+  ./mod/igkmd_mtls.ko
+  ./mod/tls.ko
+  ./mod/vmw_vsock_virtio_transport.ko
+  ./mod/vmw_vsock_virtio_transport_common.ko
+  ./mod/vsock.ko
+  ./proc
+  ./sbin
+  ./sys
+##### [build-all] artifact summary (sha256)
+93199dac1ae6ef46e120485cf2380286d6981a5e54f50f6c873c33ca78247ada  <metal-home>/igkm-spike-a/igkmd/out/module/igkmd_mtls.ko
+e1db584350336042787c4b2c81cd8a50e303b40a05f5bad1751e018743f631f1  <metal-home>/igkm-spike-a/igkmd/out/initramfs-mesh.cpio.gz
+ede84b7304b2ae3459d0cafd37e6b19d3164364dd19bda9ecb2ca499dad9a9d0  <metal-home>/igkm-spike-a/igkmd/out/bin/igkmd_app
+4544461b2b61e45c08d44b8e269ec64a2da1f08108b90bdc1b890b4b862a2d63  <metal-home>/igkm-spike-a/igkmd-host-target/release/peer
+fd9c3e3bd2571af0c5ae487bdf9913a4e6b162f26e065b0353b3251dee3d9e18  <metal-home>/igkm-spike-a/igkmd-host-target/release/relay
+##### [build-all] ownership (must be the login user, NOT root)
+-rwxrwxr-x 2 ubuntu ubuntu 2674128 Oct  3 16:03 <metal-home>/igkm-spike-a/igkmd-host-target/release/peer
+-rw-rw-r-- 1 ubuntu ubuntu 1931698 Oct  3 16:27 <metal-home>/igkm-spike-a/igkmd/out/initramfs-mesh.cpio.gz
+-rw-rw-r-- 1 ubuntu ubuntu  847280 Oct  3 16:27 <metal-home>/igkm-spike-a/igkmd/out/module/igkmd_mtls.ko
+##### [build-all] DONE

@@ -1,0 +1,53 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f6aef5a404165599645a695a pid=291501
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 155,346 bytes  received 3,030 bytes  63,350.40 bytes/sec
+total size is 159,205,502  speedup is 1,005.24
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-binary] toolchain (stock Ubuntu packages, unmodified)  (10:49:57)
+gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+GNU ld (GNU Binutils for Ubuntu) 2.46
+ldd (Ubuntu GLIBC 2.43-2ubuntu2.4) 2.43
+binutils 2.46-3ubuntu2
+gcc-15 15.2.0-16ubuntu1
+libc6 2.43-2ubuntu2.4
+libc6-dev 2.43-2ubuntu2.4
+d7aab71aa63c5e47bb52244f0a345eefcb0374e4b9c244e1943f538ab0b050a2  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/app-linux/igkmf_app.c
+--- the source includes only standard Linux/POSIX/glibc headers:
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include <gnu/libc-version.h>
+#include <sys/auxv.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/utsname.h>
+#include <netinet/in.h>
+
+##### [build-binary] compile: gcc -static-pie (the form app-elfloader loads: ET_DYN, no PT_INTERP)  (10:49:57)
+gcc -O2 -g0 -Wall -Wextra -fPIE -static-pie -o <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/app-linux/igkmf_app.c
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/app-linux/igkmf_app.c: In function ‘case_stretch’:
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/app-linux/igkmf_app.c:915:41: error: implicit declaration of function ‘accept4’; did you mean ‘accept’? [-Wimplicit-function-declaration]
+  915 |                                 int c = accept4(lfd, (struct sockaddr *)&peer,
+      |                                         ^~~~~~~
+      |                                         accept

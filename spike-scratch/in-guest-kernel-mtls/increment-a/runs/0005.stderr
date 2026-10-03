@@ -1,0 +1,7 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-a/build-patched.sh`
+xtask: running metal run (one bootstrap lease session)
+Checking patch src/x86_64/init.s...
+Applied patch src/x86_64/init.s cleanly.
+Checking patch src/virtio/virtio_socket.c...
+Applied patch src/virtio/virtio_socket.c cleanly.
