@@ -1,0 +1,7 @@
+{
+  "provenance": "recorded after returned canonical launcher tool result; remote source sync copy of native-launch.log had overwritten the local log during extraction",
+  "canonical_launcher_exit": 0,
+  "launcher_with_retrieval_wall_s": 76.4688506249804,
+  "private_raw_archive_sha256": "19db25c62bc0b8daa3d775a20edea986557226bd959704ca59acb8df3ab92c58",
+  "exact_native_evidence_receipts_preserved": true
+}

@@ -1,0 +1,10 @@
+[package]
+name = "kernel-vsock-proxy-probe"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+libc = "0.2"
+serde_json = "1"

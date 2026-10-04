@@ -1,0 +1,12 @@
+{
+  "timestamp_epoch_s": 1791134066.15951,
+  "attempt": "increment-i",
+  "source": "canonical metal synchronized source increment/evidence",
+  "remote_tar_exit": 0,
+  "private_archive_sha256": "d62e2b5856990c117de7893536d94809c43627ee805c0e99cf6ac1cfbd73d0de",
+  "retrieved_evidence_files": [
+    "source-manifest.json",
+    "native-launch.log",
+    "launch.executed.py"
+  ]
+}

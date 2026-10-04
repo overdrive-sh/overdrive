@@ -1,0 +1,34 @@
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+ip link set lo up
+echo SHMPROXY_HOST_ROLE_KERNEL
+uname -a
+echo SHMPROXY_INITIAL_MODULES
+cat /proc/modules
+insmod /vsock.ko || poweroff -f
+insmod /vhost_iotlb.ko || poweroff -f
+insmod /vhost.ko || poweroff -f
+insmod /vmw_vsock_virtio_transport_common.ko || poweroff -f
+insmod /vhost_vsock.ko || poweroff -f
+insmod /shmproxy.ko || poweroff -f
+echo SHMPROXY_EXECUTED_HASHES
+sha256sum /probe /shmproxy.ko
+echo SHMPROXY_MODULES_LOADED
+cat /proc/modules
+echo SHMPROXY_LINKS
+ls /sys/class/net
+/probe
+rc=$?
+echo SHMPROXY_HARNESS_EXIT=$rc
+cat /proc/shmproxy
+rmmod shmproxy
+unload=$?
+echo SHMPROXY_MODULE_UNLOAD_EXIT=$unload
+cat /proc/modules
+echo SHMPROXY_FINAL_LINKS
+ls /sys/class/net
+dmesg
+echo SHMPROXY_COMPLETE_EXIT=$rc
+poweroff -f

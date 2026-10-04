@@ -1,0 +1,11 @@
+{
+  "/lib/modules/7.0.0-34-generic/kernel/drivers/vhost/vhost.ko.zst": "7f879fd6c88ec3b699a26d13c5023956571039e068cef0a82b054e2a32e43483",
+  "/lib/modules/7.0.0-34-generic/kernel/drivers/vhost/vhost_iotlb.ko.zst": "56e71906b74f1939650a01b6d5890006e1321104ffe42635ae17178fb07a3088",
+  "/lib/modules/7.0.0-34-generic/kernel/drivers/vhost/vhost_vsock.ko.zst": "170b8510173d26fe42a1bf8183e1155639117c3879663e1698daa750398a6b3a",
+  "/lib/modules/7.0.0-34-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst": "7c788bdd6adeff727c65348328ba31539e2cb7f66357c039c93d218443342d65",
+  "/lib/modules/7.0.0-34-generic/kernel/net/vmw_vsock/vsock.ko.zst": "3dabb4a728ca59ede7b7bd3c21040ab4accc45ebe266152e5f3bc9317b36e286",
+  "busybox": "c2f279d1d5640a0f327890d41cad594c0f059f3fed3f96dd72fdcc4f5e18ec02",
+  "module": "4c60690c38939d507b8e921b776346043f14ecef9f2be96f270754967e3d9b79",
+  "probe_binary": "d5f5d1b2eca6a6528c2ec67808725a4ea225f2349b8c98903cf12f55cb20c67a",
+  "stock_kernel_image": "0bad41327e67c7c79d79b7e5f0ee833d0202be2ddf0f7cbbb984b4cb9c94e108"
+}

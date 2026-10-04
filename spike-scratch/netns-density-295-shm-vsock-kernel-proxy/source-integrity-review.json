@@ -1,0 +1,78 @@
+{
+  "activity": "post-execution mechanical hash verification; no runtime rerun",
+  "checks": [
+    {
+      "attempt": "increment-i",
+      "source_hashes_match_original_manifest": true,
+      "sources": {
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-i/Cargo.lock": {
+          "original_prelaunch_sha256": "544fb9bcb7797bc122af6f218c4bb4610df9e3f73e03519d66393f1943a721ac",
+          "current_sha256": "544fb9bcb7797bc122af6f218c4bb4610df9e3f73e03519d66393f1943a721ac",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-i/Cargo.toml": {
+          "original_prelaunch_sha256": "4863cae0d601b09192bcc8728f189f7d73646c7d37b4405dfa211a209434d339",
+          "current_sha256": "4863cae0d601b09192bcc8728f189f7d73646c7d37b4405dfa211a209434d339",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-i/module/Makefile": {
+          "original_prelaunch_sha256": "1f47a2e0fd53d5ba73074f4826592e8d39efeefe627ca5c649ad3b83c9e7219c",
+          "current_sha256": "1f47a2e0fd53d5ba73074f4826592e8d39efeefe627ca5c649ad3b83c9e7219c",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-i/module/shmproxy.c": {
+          "original_prelaunch_sha256": "bfbf5bc795bbe333cb08b2fa9897784a40babf4fa8b8eee2fb0c62ee5139f4c1",
+          "current_sha256": "bfbf5bc795bbe333cb08b2fa9897784a40babf4fa8b8eee2fb0c62ee5139f4c1",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-i/run.py": {
+          "original_prelaunch_sha256": "9309dff0669e644f18f649eeeed924eb498e60f333db4919fba5643f3ba2576d",
+          "current_sha256": "9309dff0669e644f18f649eeeed924eb498e60f333db4919fba5643f3ba2576d",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-i/src/main.rs": {
+          "original_prelaunch_sha256": "143719b3dece9d76dc288619a15dd8f9045c199402950b6f6e5a3f0c0fd7aa97",
+          "current_sha256": "143719b3dece9d76dc288619a15dd8f9045c199402950b6f6e5a3f0c0fd7aa97",
+          "matches": true
+        }
+      }
+    },
+    {
+      "attempt": "increment-k",
+      "source_hashes_match_original_manifest": true,
+      "sources": {
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-k/Cargo.lock": {
+          "original_prelaunch_sha256": "544fb9bcb7797bc122af6f218c4bb4610df9e3f73e03519d66393f1943a721ac",
+          "current_sha256": "544fb9bcb7797bc122af6f218c4bb4610df9e3f73e03519d66393f1943a721ac",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-k/Cargo.toml": {
+          "original_prelaunch_sha256": "4863cae0d601b09192bcc8728f189f7d73646c7d37b4405dfa211a209434d339",
+          "current_sha256": "4863cae0d601b09192bcc8728f189f7d73646c7d37b4405dfa211a209434d339",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-k/module/Makefile": {
+          "original_prelaunch_sha256": "1f47a2e0fd53d5ba73074f4826592e8d39efeefe627ca5c649ad3b83c9e7219c",
+          "current_sha256": "1f47a2e0fd53d5ba73074f4826592e8d39efeefe627ca5c649ad3b83c9e7219c",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-k/module/shmproxy.c": {
+          "original_prelaunch_sha256": "bfbf5bc795bbe333cb08b2fa9897784a40babf4fa8b8eee2fb0c62ee5139f4c1",
+          "current_sha256": "bfbf5bc795bbe333cb08b2fa9897784a40babf4fa8b8eee2fb0c62ee5139f4c1",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-k/run.py": {
+          "original_prelaunch_sha256": "cb5ebeac93126c7bc021db364b9c4c3887b57da05ceceebe356858b0c26200c9",
+          "current_sha256": "cb5ebeac93126c7bc021db364b9c4c3887b57da05ceceebe356858b0c26200c9",
+          "matches": true
+        },
+        "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-k/src/main.rs": {
+          "original_prelaunch_sha256": "472d6a7a25a0123b65bcd873e1bac5acc59fe240a1fab30c0a44eab15388a822",
+          "current_sha256": "472d6a7a25a0123b65bcd873e1bac5acc59fe240a1fab30c0a44eab15388a822",
+          "matches": true
+        }
+      }
+    }
+  ],
+  "python_syntax_valid": true
+}

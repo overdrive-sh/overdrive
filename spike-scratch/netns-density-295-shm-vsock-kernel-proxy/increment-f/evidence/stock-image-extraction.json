@@ -1,0 +1,8 @@
+{
+  "zboot_header_offset": 6350848,
+  "payload_offset": 111352,
+  "compressed_length": 17355758,
+  "stock_vmlinuz_sha256": "0bad41327e67c7c79d79b7e5f0ee833d0202be2ddf0f7cbbb984b4cb9c94e108",
+  "executed_Image_sha256": "d3df97f638ee6828d320ed9a1ebec1c335a5fa4e16560635e750bd5262ebc308",
+  "decompression_only_no_patch_or_rebuild": true
+}

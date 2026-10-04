@@ -1,0 +1,11 @@
+{
+  "exit": 0,
+  "executed_readback_sha256": "50c09d4bb648100d2f9a73a1a076440ec908c92b18298fcb3698b932db76157b",
+  "result": {
+    "owned_qemu_processes": [],
+    "physical_host_shmproxy_module_present": false,
+    "canonical_lease_owner_metadata_present": false,
+    "clock_ticks_per_s": 100,
+    "physical_host_kernel": "7.0.0-29-generic"
+  }
+}

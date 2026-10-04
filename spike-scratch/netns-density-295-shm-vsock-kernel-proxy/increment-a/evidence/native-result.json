@@ -1,0 +1,8 @@
+{
+  "native_module_build_exit": 2,
+  "module_loaded": false,
+  "vhost_devices": 0,
+  "failure": "installed 7.0 kernel_bind/kernel_connect requires sockaddr_unsized",
+  "build_output": "commands.jsonl",
+  "all_callbacks_sockets_workers_created": 0
+}

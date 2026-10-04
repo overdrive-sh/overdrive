@@ -1,0 +1,303 @@
+{
+  "provenance": "selected exact JSON events parsed from immutable original native-launch.log after execution",
+  "events": [
+    {
+      "event": "begin",
+      "initial_fds": 4,
+      "initial_tasks": 1,
+      "kernel": "7.0.0-29-generic",
+      "placement": "host-role isolated QEMU VM; module adapts; Rust endpoints only"
+    },
+    {
+      "after": "accepted=1 closed=0 to_net=262144 to_peer=51733 zero_udp=0 truncated=0 rejected=0 send_waits=152",
+      "before": "accepted=1 closed=0 to_net=262144 to_peer=51733 zero_udp=0 truncated=0 rejected=0 send_waits=3",
+      "event": "backpressure_hold",
+      "rx_descriptors_posted_during_hold": 0
+    },
+    {
+      "bytes_each_direction": 262144,
+      "cid": 295001,
+      "event": "tcp_pass",
+      "guest_memory": "0x728ed3617000",
+      "half_close_tail": "after-half-close",
+      "split_sizes": [
+        1,
+        2,
+        3071,
+        1733
+      ],
+      "stats": "accepted=1 closed=1 to_net=262144 to_peer=262160 zero_udp=0 truncated=0 rejected=0 send_waits=168",
+      "vhost_fd": 4,
+      "virtqueue_rx_packets": 159
+    },
+    {
+      "datagram_boundary": true,
+      "event": "udp_outbound_pass",
+      "kernel_local_port": 57649,
+      "len": 0,
+      "remote_port": 52640
+    },
+    {
+      "datagram_boundary": true,
+      "event": "udp_outbound_pass",
+      "kernel_local_port": 57649,
+      "len": 1,
+      "remote_port": 52640
+    },
+    {
+      "datagram_boundary": true,
+      "event": "udp_outbound_pass",
+      "kernel_local_port": 57649,
+      "len": 1431,
+      "remote_port": 52640
+    },
+    {
+      "datagram_boundary": true,
+      "event": "udp_outbound_pass",
+      "kernel_local_port": 57649,
+      "len": 59000,
+      "remote_port": 52640
+    },
+    {
+      "actual_vhost_devices": 2,
+      "cids": [
+        295002,
+        295003
+      ],
+      "event": "held_transport_owners",
+      "fds": [
+        4,
+        3
+      ],
+      "kernel_udp_ports": [
+        57649,
+        57537
+      ],
+      "memory": [
+        "0x728ed3617000",
+        "0x728ed34ef000"
+      ],
+      "process_fds": 16,
+      "stats": "accepted=3 closed=1 to_net=322576 to_peer=322592 zero_udp=1 truncated=0 rejected=0 send_waits=168",
+      "status": "Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t108\nNgid:\t0\nPid:\t108\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t64\nGroups:\t \nNStgid:\t108\nNSpid:\t108\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t  136892 kB\nVmSize:\t   72516 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t    3700 kB\nVmRSS:\t    3700 kB\nRssAnon:\t    1044 kB\nRssFile:\t       8 kB\nRssShmem:\t    2648 kB\nVmData:\t    3836 kB\nVmStk:\t     132 kB\nVmExe:\t     400 kB\nVmLib:\t    1972 kB\nVmPTE:\t      56 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t3\nSigQ:\t0/57570\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t447\nnonvoluntary_ctxt_switches:\t1\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n"
+    },
+    {
+      "datagram_boundary": true,
+      "event": "udp_inbound_pass",
+      "len": 0,
+      "server_port": 57537,
+      "source_peer_port": 43780
+    },
+    {
+      "datagram_boundary": true,
+      "event": "udp_inbound_pass",
+      "len": 17,
+      "server_port": 57537,
+      "source_peer_port": 50785
+    },
+    {
+      "datagram_boundary": true,
+      "event": "udp_inbound_pass",
+      "len": 59000,
+      "server_port": 57537,
+      "source_peer_port": 43780
+    },
+    {
+      "datagram_boundary": true,
+      "event": "udp_inbound_pass",
+      "len": 1500,
+      "server_port": 57537,
+      "source_peer_port": 50785
+    },
+    {
+      "bound": 60000,
+      "event": "udp_truncation_pass",
+      "input_len": 61000,
+      "partial_payload_delivered": false,
+      "stats": "accepted=3 closed=1 to_net=383093 to_peer=383109 zero_udp=2 truncated=1 rejected=0 send_waits=168"
+    },
+    {
+      "event": "negative_bad_registration",
+      "stats": "accepted=4 closed=4 to_net=383093 to_peer=383109 zero_udp=2 truncated=1 rejected=1 send_waits=168"
+    },
+    {
+      "actual_kernel_udp_adapter_sockets": 16,
+      "actual_started_vhost_devices": 16,
+      "distinct_open_vhost_fds": 16,
+      "elapsed_s": 0.097206476,
+      "event": "kernel_capacity_stage",
+      "every_owner_tagged_bidirectional_datagram": true,
+      "first_cid": 300000,
+      "held_process_fd_count": 85,
+      "held_process_task_count": 18,
+      "independent_guest_memory_contexts": 16,
+      "independently_observed_udp_bindings": 17,
+      "kernel_adapter_stats": "accepted=20 closed=4 to_net=383877 to_peer=383893 zero_udp=2 truncated=1 rejected=1 send_waits=168",
+      "kernel_default_pid_max": "65536",
+      "kernel_default_threads_max": "115140",
+      "last_cid": 300015,
+      "meminfo": "MemTotal:       16347192 kB\nMemFree:        16233424 kB\nMemAvailable:   16063024 kB\nBuffers:               0 kB\nCached:             6468 kB\nSwapCached:            0 kB\nActive:             7840 kB\nInactive:              0 kB\nActive(anon):       7840 kB\nInactive(anon):        0 kB\nActive(file):          0 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:          1176 kB\nMapped:             4116 kB\nShmem:              6468 kB\nKReclaimable:       4268 kB\nSlab:              43060 kB\nSReclaimable:       4268 kB\nSUnreclaim:        38792 kB\nKernelStack:        2960 kB\nPageTables:          640 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:      14436 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:        8520 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1589248 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       42880 kB\nDirectMap2M:     4151296 kB\nDirectMap1G:    14680064 kB\n",
+      "module_input_kernel_workers": 16,
+      "module_reverse_kernel_workers": 16,
+      "pool_traffic_check_s": 0.02388042,
+      "process_status": "Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t108\nNgid:\t0\nPid:\t108\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t128\nGroups:\t \nNStgid:\t108\nNSpid:\t108\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t  136892 kB\nVmSize:\t   75948 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t    3944 kB\nVmRSS:\t    3944 kB\nRssAnon:\t    1288 kB\nRssFile:\t       8 kB\nRssShmem:\t    2648 kB\nVmData:\t    7264 kB\nVmStk:\t     132 kB\nVmExe:\t     400 kB\nVmLib:\t    1972 kB\nVmPTE:\t      64 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t18\nSigQ:\t0/57570\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t1063\nnonvoluntary_ctxt_switches:\t2\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n"
+    },
+    {
+      "actual_kernel_udp_adapter_sockets": 64,
+      "actual_started_vhost_devices": 64,
+      "distinct_open_vhost_fds": 64,
+      "elapsed_s": 0.458207542,
+      "event": "kernel_capacity_stage",
+      "every_owner_tagged_bidirectional_datagram": true,
+      "first_cid": 300000,
+      "held_process_fd_count": 325,
+      "held_process_task_count": 66,
+      "independent_guest_memory_contexts": 64,
+      "independently_observed_udp_bindings": 65,
+      "kernel_adapter_stats": "accepted=68 closed=4 to_net=387013 to_peer=387029 zero_udp=2 truncated=1 rejected=1 send_waits=168",
+      "kernel_default_pid_max": "65536",
+      "kernel_default_threads_max": "115140",
+      "last_cid": 300063,
+      "meminfo": "MemTotal:       16347192 kB\nMemFree:        16214048 kB\nMemAvailable:   16044096 kB\nBuffers:               0 kB\nCached:             6652 kB\nSwapCached:            0 kB\nActive:             8804 kB\nInactive:              0 kB\nActive(anon):       8800 kB\nInactive(anon):        0 kB\nActive(file):          4 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:          2504 kB\nMapped:             4448 kB\nShmem:              6652 kB\nKReclaimable:       5160 kB\nSlab:              60420 kB\nSReclaimable:       5160 kB\nSUnreclaim:        55260 kB\nKernelStack:        5376 kB\nPageTables:          420 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:      26724 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:       10824 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1589248 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       42880 kB\nDirectMap2M:     4151296 kB\nDirectMap1G:    14680064 kB\n",
+      "module_input_kernel_workers": 64,
+      "module_reverse_kernel_workers": 64,
+      "pool_traffic_check_s": 0.083681135,
+      "process_status": "Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t108\nNgid:\t0\nPid:\t108\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t512\nGroups:\t \nNStgid:\t108\nNSpid:\t108\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t  136892 kB\nVmSize:\t   88236 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t    5096 kB\nVmRSS:\t    5096 kB\nRssAnon:\t    2440 kB\nRssFile:\t       8 kB\nRssShmem:\t    2648 kB\nVmData:\t   19552 kB\nVmStk:\t     132 kB\nVmExe:\t     400 kB\nVmLib:\t    1972 kB\nVmPTE:\t      88 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t66\nSigQ:\t0/57570\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t2750\nnonvoluntary_ctxt_switches:\t4\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n"
+    },
+    {
+      "actual_kernel_udp_adapter_sockets": 256,
+      "actual_started_vhost_devices": 256,
+      "distinct_open_vhost_fds": 256,
+      "elapsed_s": 1.6007958009999999,
+      "event": "kernel_capacity_stage",
+      "every_owner_tagged_bidirectional_datagram": true,
+      "first_cid": 300000,
+      "held_process_fd_count": 1285,
+      "held_process_task_count": 258,
+      "independent_guest_memory_contexts": 256,
+      "independently_observed_udp_bindings": 257,
+      "kernel_adapter_stats": "accepted=260 closed=4 to_net=399813 to_peer=399829 zero_udp=2 truncated=1 rejected=1 send_waits=168",
+      "kernel_default_pid_max": "65536",
+      "kernel_default_threads_max": "115140",
+      "last_cid": 300255,
+      "meminfo": "MemTotal:       16347192 kB\nMemFree:        16136440 kB\nMemAvailable:   15967568 kB\nBuffers:               0 kB\nCached:             6652 kB\nSwapCached:            0 kB\nActive:            13516 kB\nInactive:              0 kB\nActive(anon):      13512 kB\nInactive(anon):        0 kB\nActive(file):          4 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:          7112 kB\nMapped:             4448 kB\nShmem:              6652 kB\nKReclaimable:       7316 kB\nSlab:             127480 kB\nSReclaimable:       7316 kB\nSUnreclaim:       120164 kB\nKernelStack:       14592 kB\nPageTables:          552 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:      76004 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:       20040 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1589248 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       42880 kB\nDirectMap2M:     4151296 kB\nDirectMap1G:    14680064 kB\n",
+      "module_input_kernel_workers": 256,
+      "module_reverse_kernel_workers": 256,
+      "pool_traffic_check_s": 0.3349432,
+      "process_status": "Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t108\nNgid:\t0\nPid:\t108\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t2048\nGroups:\t \nNStgid:\t108\nNSpid:\t108\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t  137548 kB\nVmSize:\t  137516 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t    9736 kB\nVmRSS:\t    9736 kB\nRssAnon:\t    7080 kB\nRssFile:\t       8 kB\nRssShmem:\t    2648 kB\nVmData:\t   68832 kB\nVmStk:\t     132 kB\nVmExe:\t     400 kB\nVmLib:\t    1972 kB\nVmPTE:\t     184 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t258\nSigQ:\t0/57570\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t9960\nnonvoluntary_ctxt_switches:\t6\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n"
+    },
+    {
+      "actual_kernel_udp_adapter_sockets": 1024,
+      "actual_started_vhost_devices": 1024,
+      "distinct_open_vhost_fds": 1024,
+      "elapsed_s": 6.054455132,
+      "event": "kernel_capacity_stage",
+      "every_owner_tagged_bidirectional_datagram": true,
+      "first_cid": 300000,
+      "held_process_fd_count": 5125,
+      "held_process_task_count": 1026,
+      "independent_guest_memory_contexts": 1024,
+      "independently_observed_udp_bindings": 1025,
+      "kernel_adapter_stats": "accepted=1028 closed=4 to_net=452037 to_peer=452053 zero_udp=2 truncated=1 rejected=1 send_waits=168",
+      "kernel_default_pid_max": "65536",
+      "kernel_default_threads_max": "115140",
+      "last_cid": 301023,
+      "meminfo": "MemTotal:       16347192 kB\nMemFree:        15814820 kB\nMemAvailable:   15650260 kB\nBuffers:               0 kB\nCached:             6652 kB\nSwapCached:            0 kB\nActive:            32312 kB\nInactive:              0 kB\nActive(anon):      32308 kB\nInactive(anon):        0 kB\nActive(file):          4 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:         25920 kB\nMapped:             4448 kB\nShmem:              6652 kB\nKReclaimable:      15944 kB\nSlab:             396424 kB\nSReclaimable:      15944 kB\nSUnreclaim:       380480 kB\nKernelStack:       51456 kB\nPageTables:         1088 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:     273004 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:       56904 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1589248 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       42880 kB\nDirectMap2M:     4151296 kB\nDirectMap1G:    14680064 kB\n",
+      "module_input_kernel_workers": 1024,
+      "module_reverse_kernel_workers": 1024,
+      "pool_traffic_check_s": 1.6744962289999998,
+      "process_status": "Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t108\nNgid:\t0\nPid:\t108\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t8192\nGroups:\t \nNStgid:\t108\nNSpid:\t108\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t  334516 kB\nVmSize:\t  334516 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t   28528 kB\nVmRSS:\t   28528 kB\nRssAnon:\t   25872 kB\nRssFile:\t       8 kB\nRssShmem:\t    2648 kB\nVmData:\t  265832 kB\nVmStk:\t     132 kB\nVmExe:\t     400 kB\nVmLib:\t    1972 kB\nVmPTE:\t     576 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t1026\nSigQ:\t0/57570\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t38433\nnonvoluntary_ctxt_switches:\t45\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n"
+    },
+    {
+      "actual_kernel_udp_adapter_sockets": 4096,
+      "actual_started_vhost_devices": 4096,
+      "distinct_open_vhost_fds": 4096,
+      "elapsed_s": 24.091239074,
+      "event": "kernel_capacity_stage",
+      "every_owner_tagged_bidirectional_datagram": true,
+      "first_cid": 300000,
+      "held_process_fd_count": 20485,
+      "held_process_task_count": 4098,
+      "independent_guest_memory_contexts": 4096,
+      "independently_observed_udp_bindings": 4097,
+      "kernel_adapter_stats": "accepted=4100 closed=4 to_net=660933 to_peer=660949 zero_udp=2 truncated=1 rejected=1 send_waits=168",
+      "kernel_default_pid_max": "65536",
+      "kernel_default_threads_max": "115140",
+      "last_cid": 304095,
+      "meminfo": "MemTotal:       16347192 kB\nMemFree:        14469024 kB\nMemAvailable:   14321884 kB\nBuffers:               0 kB\nCached:             6652 kB\nSwapCached:            0 kB\nActive:           107540 kB\nInactive:              0 kB\nActive(anon):     107536 kB\nInactive(anon):        0 kB\nActive(file):          4 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:        101044 kB\nMapped:             4448 kB\nShmem:              6652 kB\nKReclaimable:      50780 kB\nSlab:            1472208 kB\nSReclaimable:      50780 kB\nSUnreclaim:      1421428 kB\nKernelStack:      198912 kB\nPageTables:         3200 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:    1061452 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:      204360 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1589248 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       42880 kB\nDirectMap2M:     4151296 kB\nDirectMap1G:    14680064 kB\n",
+      "module_input_kernel_workers": 4096,
+      "module_reverse_kernel_workers": 4096,
+      "pool_traffic_check_s": 6.76136745,
+      "process_status": "Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t108\nNgid:\t0\nPid:\t108\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t32768\nGroups:\t \nNStgid:\t108\nNSpid:\t108\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t 1122964 kB\nVmSize:\t 1122964 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  103824 kB\nVmRSS:\t  103824 kB\nRssAnon:\t  101168 kB\nRssFile:\t       8 kB\nRssShmem:\t    2648 kB\nVmData:\t 1054280 kB\nVmStk:\t     132 kB\nVmExe:\t     400 kB\nVmLib:\t    1972 kB\nVmPTE:\t    2116 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t4098\nSigQ:\t0/57570\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t153020\nnonvoluntary_ctxt_switches:\t336\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n"
+    },
+    {
+      "actual_kernel_udp_adapter_sockets": 8192,
+      "actual_started_vhost_devices": 8192,
+      "distinct_open_vhost_fds": 8192,
+      "elapsed_s": 53.277455015,
+      "event": "kernel_capacity_stage",
+      "every_owner_tagged_bidirectional_datagram": true,
+      "first_cid": 300000,
+      "held_process_fd_count": 40965,
+      "held_process_task_count": 8194,
+      "independent_guest_memory_contexts": 8192,
+      "independently_observed_udp_bindings": 8193,
+      "kernel_adapter_stats": "accepted=8196 closed=4 to_net=1078725 to_peer=1078741 zero_udp=2 truncated=1 rejected=1 send_waits=168",
+      "kernel_default_pid_max": "65536",
+      "kernel_default_threads_max": "115140",
+      "last_cid": 308191,
+      "meminfo": "MemTotal:       16347192 kB\nMemFree:        12752196 kB\nMemAvailable:   12628232 kB\nBuffers:               0 kB\nCached:             6652 kB\nSwapCached:            0 kB\nActive:           208416 kB\nInactive:              0 kB\nActive(anon):     208412 kB\nInactive(anon):        0 kB\nActive(file):          4 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:        202044 kB\nMapped:             4448 kB\nShmem:              6652 kB\nKReclaimable:      97132 kB\nSlab:            2906692 kB\nSReclaimable:      97132 kB\nSUnreclaim:      2809560 kB\nKernelStack:      395520 kB\nPageTables:         6036 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:    2113620 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:      400968 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1589248 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       42880 kB\nDirectMap2M:     4151296 kB\nDirectMap1G:    14680064 kB\n",
+      "module_input_kernel_workers": 8192,
+      "module_reverse_kernel_workers": 8192,
+      "pool_traffic_check_s": 13.763968456,
+      "process_status": "Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t108\nNgid:\t0\nPid:\t108\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t65536\nGroups:\t \nNStgid:\t108\nNSpid:\t108\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t 2175132 kB\nVmSize:\t 2175132 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  204636 kB\nVmRSS:\t  204636 kB\nRssAnon:\t  201980 kB\nRssFile:\t       8 kB\nRssShmem:\t    2648 kB\nVmData:\t 2106448 kB\nVmStk:\t     132 kB\nVmExe:\t     400 kB\nVmLib:\t    1972 kB\nVmPTE:\t    4176 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t8194\nSigQ:\t0/57570\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t333185\nnonvoluntary_ctxt_switches:\t1102\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n"
+    },
+    {
+      "actual_kernel_udp_adapter_sockets": 16384,
+      "actual_started_vhost_devices": 16384,
+      "distinct_open_vhost_fds": 16384,
+      "elapsed_s": 112.937676243,
+      "event": "kernel_capacity_stage",
+      "every_owner_tagged_bidirectional_datagram": true,
+      "first_cid": 300000,
+      "held_process_fd_count": 81925,
+      "held_process_task_count": 16386,
+      "independent_guest_memory_contexts": 16384,
+      "independently_observed_udp_bindings": 16385,
+      "kernel_adapter_stats": "accepted=16388 closed=4 to_net=1930693 to_peer=1930709 zero_udp=2 truncated=1 rejected=1 send_waits=168",
+      "kernel_default_pid_max": "65536",
+      "kernel_default_threads_max": "115140",
+      "last_cid": 316383,
+      "meminfo": "MemTotal:       16347192 kB\nMemFree:         9266920 kB\nMemAvailable:    9199764 kB\nBuffers:               0 kB\nCached:             6652 kB\nSwapCached:            0 kB\nActive:           409832 kB\nInactive:              0 kB\nActive(anon):     409828 kB\nInactive(anon):        0 kB\nActive(file):          4 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:        403580 kB\nMapped:             4448 kB\nShmem:              6652 kB\nKReclaimable:     189968 kB\nSlab:            5774976 kB\nSReclaimable:     189968 kB\nSUnreclaim:      5585008 kB\nKernelStack:      788736 kB\nPageTables:        11672 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:    4217420 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:      794184 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1589248 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       42880 kB\nDirectMap2M:     4151296 kB\nDirectMap1G:    14680064 kB\n",
+      "module_input_kernel_workers": 16384,
+      "module_reverse_kernel_workers": 16384,
+      "pool_traffic_check_s": 28.565969839,
+      "process_status": "Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t108\nNgid:\t0\nPid:\t108\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t131072\nGroups:\t \nNStgid:\t108\nNSpid:\t108\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t 4278932 kB\nVmSize:\t 4278932 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  406356 kB\nVmRSS:\t  406356 kB\nRssAnon:\t  403700 kB\nRssFile:\t       8 kB\nRssShmem:\t    2648 kB\nVmData:\t 4210248 kB\nVmStk:\t     132 kB\nVmExe:\t     400 kB\nVmLib:\t    1972 kB\nVmPTE:\t    8292 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t16386\nSigQ:\t0/57570\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t693518\nnonvoluntary_ctxt_switches:\t4616\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n"
+    },
+    {
+      "adapter_stats": "accepted=16388 closed=16388 to_net=1930693 to_peer=1930709 zero_udp=2 truncated=1 rejected=1 send_waits=168",
+      "capacity_elapsed_s": 380.28041197699997,
+      "event": "kernel_capacity_cleanup",
+      "process_fds": 4,
+      "process_tasks": 1,
+      "released_vhost_devices": 16384
+    },
+    {
+      "application_forwarding_userspace_processes": 0,
+      "elapsed_s": 380.883598151,
+      "event": "complete",
+      "final_fds": 4,
+      "final_tasks": 1,
+      "functional_check_max_concurrent_vhost_devices": 2,
+      "functional_kernel_proxy_sessions": 3,
+      "functional_transport_owners_total": 4,
+      "guest_ordinary_socket_adaptation_validated": false,
+      "max_concurrent_vhost_devices": 16384,
+      "stats": "accepted=16388 closed=16388 to_net=1930693 to_peer=1930709 zero_udp=2 truncated=1 rejected=1 send_waits=168"
+    },
+    {
+      "launcher_rc": 0,
+      "wall_s": 495.92053745800513
+    }
+  ]
+}

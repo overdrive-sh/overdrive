@@ -1,0 +1,22 @@
+{
+  "repository": "/Users/marcus/git/linux",
+  "revision": "502d45774af09f1c681c754c4b7cdfb5d7f72fd9",
+  "Makefile_version": "7.2.0 development tree; reference ONLY; executed kernel 7.0.0-34-generic stock Ubuntu",
+  "sources": {
+    "drivers/vhost/vsock.c": "f38a0b3fce2165469dae3b2cd831b352456a1b73664446b16c898258997597c4",
+    "drivers/vhost/vhost.c": "8c8b1dce4d52075366ab6ed68b78b26c3356d22e53202d4f177ce240a0b50cab",
+    "net/vmw_vsock/virtio_transport_common.c": "76d6849c505bfc2854095ab55759e2d332f0412ccb196704ada4b1c4ea0aafb9",
+    "net/vmw_vsock/af_vsock.c": "cd14bb9f32fe2d6dd17c565508bad48c107ebf9b9271684dff474a7d6ac56721",
+    "net/socket.c": "2a22530e9b5ee06c7023beac9e31c8a1bbadc75d3e42cd77c11198ae61fe8c20",
+    "include/uapi/linux/vhost.h": "80b8a82f8cf158a3fbe3c973b8cdf1a24ff4cef1b654f4e1e529b695cd027a6c",
+    "include/uapi/linux/vhost_types.h": "522933c75e8736da129f652a09426b82298f2923c11bd3a974ba7ecdbdd91cb9",
+    "include/uapi/linux/virtio_vsock.h": "ef8889ae5f5804ba714ed3fbae81749ded2341c1c07bf4d91f35c914385e858a",
+    "net/vmw_vsock/vsock_bpf.c": "989ed0503f4ce8b39733e235c82c6e7ec52264dc262be0c3d3fcbe3c4426d420",
+    "net/core/sock_map.c": "d715316e058dd3808f37a1d85f61970f0b1d414aabf14d33e86471aa00feeb42",
+    "net/core/skmsg.c": "a648cd7e7eae8da954134e5fa068c98fa242dbe8dd8dc75dd72de3d43aa2697d",
+    "net/core/filter.c": "44a79a839e54e1df1152f2222c53546a0b7b29d6adae90425a7467161f54e753",
+    "net/tls/tls_main.c": "043ede690e86b6a0330ce4af9d8529a28a7a779df71008750a50071f54d7847c",
+    "drivers/firmware/efi/libstub/zboot-header.S": "4af094225b43895c8aabe1cf9831c5e6e117b3509902be50bc4c6dcabf16b647",
+    "drivers/firmware/efi/libstub/zboot-decompress-zstd.c": "2954abeb75fbe2b6128e197eef7bcc82dcb7ce9bae6c4a24e4051c066470342a"
+  }
+}

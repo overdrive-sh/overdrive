@@ -1,0 +1,76 @@
+{
+  "timestamp_epoch_s": 1791132772.1388593,
+  "activity": "read-only config and object symbols; NOT BPF forwarding validation",
+  "receipts": [
+    {
+      "argv": [
+        "uname",
+        "-r"
+      ],
+      "exit": 0,
+      "selected_readonly_output": [
+        "7.0.0-34-generic"
+      ],
+      "unfiltered_output_sha256": "4f4334b811d04ad2bdd00f295aa258b4b308ff971b978d68e0f194d792fb7a49"
+    },
+    {
+      "argv": [
+        "cat",
+        "/boot/config-7.0.0-34-generic"
+      ],
+      "exit": 0,
+      "selected_readonly_output": [
+        "CONFIG_BPF=y",
+        "CONFIG_BPF_SYSCALL=y",
+        "CONFIG_BPF_JIT=y",
+        "CONFIG_BPF_JIT_ALWAYS_ON=y",
+        "CONFIG_BPF_JIT_DEFAULT_ON=y",
+        "CONFIG_BPF_UNPRIV_DEFAULT_OFF=y",
+        "# CONFIG_BPF_PRELOAD is not set",
+        "CONFIG_BPF_LSM=y",
+        "CONFIG_VSOCKETS=m",
+        "CONFIG_VSOCKETS_DIAG=m",
+        "CONFIG_VSOCKETS_LOOPBACK=m",
+        "CONFIG_BPF_STREAM_PARSER=y",
+        "CONFIG_NET_SOCK_MSG=y",
+        "CONFIG_VHOST_VSOCK=m",
+        "CONFIG_BPF_EVENTS=y",
+        "CONFIG_BPF_KPROBE_OVERRIDE=y"
+      ],
+      "unfiltered_output_sha256": "635b2950b445fcb66111c44d2bbae95d859caa4c78e676b5c9aa6b042f240bc5"
+    },
+    {
+      "argv": [
+        "nm",
+        "-a",
+        "/Users/marcus/conductor/workspaces/helios/wellington-v2/spike-scratch/netns-density-295-shm-vsock-kernel-proxy/out/increment-h/rootfs/vsock.ko"
+      ],
+      "exit": 0,
+      "selected_readonly_output": [
+        "                 U sk_psock_drop",
+        "00000000000001a8 T vsock_bpf_build_proto",
+        "0000000000001fa0 b vsock_bpf_prot",
+        "0000000000006bf8 t vsock_bpf_recvmsg",
+        "0000000000007070 T vsock_bpf_update_proto",
+        "0000000000000f08 t vsock_read_skb"
+      ],
+      "unfiltered_output_sha256": "a662bedc7b7578fbaa64759852991c65c629012f03510ce72f18da61120daa39"
+    },
+    {
+      "argv": [
+        "nm",
+        "-a",
+        "/Users/marcus/conductor/workspaces/helios/wellington-v2/spike-scratch/netns-density-295-shm-vsock-kernel-proxy/out/increment-h/rootfs/vmw_vsock_virtio_transport_common.ko"
+      ],
+      "exit": 0,
+      "selected_readonly_output": [
+        "0000000000000064 r __crc_virtio_transport_read_skb",
+        "00000000000004da r __kstrtab_virtio_transport_read_skb",
+        "00000000000004f4 r __kstrtabns_virtio_transport_read_skb",
+        "000000000000012c r __ksymtab_virtio_transport_read_skb",
+        "0000000000003258 T virtio_transport_read_skb"
+      ],
+      "unfiltered_output_sha256": "801ad803f1787f38aaa02713b8ff2ab18c395a32ffccc92813e4a0b3db099b9a"
+    }
+  ]
+}

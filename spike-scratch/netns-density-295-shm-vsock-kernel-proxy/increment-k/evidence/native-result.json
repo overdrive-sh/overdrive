@@ -1,0 +1,8 @@
+{
+  "qemu_exit": 0,
+  "host_role_pass": true,
+  "wall_s": 2.8568579023703933,
+  "qemu_pid_absent": true,
+  "module_loaded_only_inside_qemu": true,
+  "lease_release_after_result": true
+}

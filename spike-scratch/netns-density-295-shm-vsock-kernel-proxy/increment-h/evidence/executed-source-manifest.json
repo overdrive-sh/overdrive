@@ -1,0 +1,11 @@
+{
+  "kernel": "7.0.0-34-generic",
+  "source_hashes": {
+    "Cargo.toml": "4863cae0d601b09192bcc8728f189f7d73646c7d37b4405dfa211a209434d339",
+    "run.py": "eef2dd8260ce755e8ed554dccab8d62e91c5602cd050854cd47af596cb163614",
+    "Cargo.lock": "544fb9bcb7797bc122af6f218c4bb4610df9e3f73e03519d66393f1943a721ac",
+    "module/Makefile": "1f47a2e0fd53d5ba73074f4826592e8d39efeefe627ca5c649ad3b83c9e7219c",
+    "module/shmproxy.c": "65e57ff958c9de02050f7c5b9f9664b39da784c012fa9509b8e31de5672cb358",
+    "src/main.rs": "c5987ecae80b596dad399efe7b245710298e69659e1410648e940a2c475b3961"
+  }
+}

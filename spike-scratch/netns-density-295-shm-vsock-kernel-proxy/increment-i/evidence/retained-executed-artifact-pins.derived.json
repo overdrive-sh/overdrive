@@ -1,0 +1,28 @@
+{
+  "provenance": "derived AFTER execution from exact original ignored native out archive, SHA256=9ce703db16577ac0c35e28d31182c8f155d277f191bd5b6cc4c570b4e4e9546e; executable/module hashes also printed in original native-launch.log",
+  "hashes": {
+    "Image": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+    "kernel": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+    "rootfs/probe": "3e5c566b32a498c10c019632739733dbafda1d84a2936fe525cd4c4027682a7f",
+    "rootfs/shmproxy.ko": "736801736b5ee5468e0f6c190474d84c56afb07cc047d536003122367be36df5",
+    "rootfs/vhost_vsock.ko": "a7a6b718894c06e49dea0593b97f51645d6b251706ecccb20bc5901d5e23b553",
+    "rootfs/vsock.ko": "a765eca13b720c56d0025590e2f6b933305a0d39cb2e8a029bc31bc9215ef332",
+    "rootfs/vmw_vsock_virtio_transport_common.ko": "f5a156b5d6511018d114bda4a3e5b633dac9794e19ec740d463c43bae91728b6",
+    "rootfs/init": "d65606dee683562f6e5c3cf368b047d8b6fee2e240e99f9e1687b2bc7cea7fb5"
+  },
+  "original_native_evidence_JSON_lost_to_later_source_sync": [
+    "executed-source-manifest.json",
+    "executed-artifact-pins.json",
+    "commands.jsonl",
+    "native-result.json",
+    "qemu-resources.json",
+    "qemu-command.json",
+    "host-admission-budget.json"
+  ],
+  "surviving_original_receipts": [
+    "native-launch.log",
+    "source-manifest.json",
+    "launch.executed.py",
+    "ignored native original out archive"
+  ]
+}

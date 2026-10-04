@@ -1,0 +1,5 @@
+{
+  "command": "ssh canonical metal target: read-only stock tools, headers, KVM and resources",
+  "exit": 0,
+  "output": "7.0.0-29-generic\nSTOCK_HEADERS_PRESENT\n/usr/bin/qemu-system-x86_64\n/usr/bin/cpio\n/usr/bin/zstd\nKVM_READABLE\nROOT_KVM_READABLE\nMemTotal:       65401772 kB\nMemFree:        21522712 kB\nMemAvailable:   63446380 kB\nBuffers:         1052128 kB\n"
+}
