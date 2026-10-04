@@ -1890,7 +1890,6 @@ fn member_convergences(calls: &[InterceptCall]) -> Vec<InterceptMembers> {
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 08-03 (S-ND295-61)"]
 async fn member_loss_is_an_ipsets_failure_and_repair_restores_exactly_the_member() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
     let worker = worker(intercept.clone());
@@ -1957,7 +1956,6 @@ enum ProtectionLoss {
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 08-03 (S-ND295-61)"]
 #[allow(
     clippy::too_many_lines,
     reason = "one repair narrative keeps detection, the equal-identity re-converge, the guard handover, and the later admission together"
@@ -2079,7 +2077,6 @@ async fn policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 08-03 (S-ND295-61)"]
 #[allow(
     clippy::too_many_lines,
     reason = "the never-rewritten refusal and its absent-program control share one owner so the contrast is one population"

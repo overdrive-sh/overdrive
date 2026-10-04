@@ -5144,7 +5144,6 @@ mod tests {
     /// `InterceptMarkGuardAbsent` row is R18-conditional: DELIVER step 08-01
     /// removes it with the variant if R18 is withdrawn.
     #[test]
-    #[ignore = "pending DELIVER step 08-03 (S-ND295-61)"]
     fn every_shared_owner_error_reports_its_one_component() {
         use super::MtlsSharedOwnerError as E;
         use overdrive_core::guest_network::SharedGuestNetworkComponent as Component;
