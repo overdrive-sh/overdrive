@@ -1,0 +1,28 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-aya-vsock-proxy/increment-a/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=879571bad6cdd5e0059691f2 pid=840696
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <redacted canonical metal target>:/home/ubuntu/overdrive
+file has vanished: "/Users/marcus/conductor/workspaces/helios/wellington-v2/.code-review-graph/graph.db-shm"
+file has vanished: "/Users/marcus/conductor/workspaces/helios/wellington-v2/.code-review-graph/graph.db-wal"
+
+sent 4,017,644 bytes  received 118,326 bytes  113,314.25 bytes/sec
+total size is 1,093,786,449  speedup is 264.46
+rsync warning: some files vanished before they could be transferred (code 24) at main.c(1356) [sender=3.4.4]
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 24[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1300[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 72.57734137499938}

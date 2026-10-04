@@ -1,0 +1,1944 @@
+{
+  "source": "native-serial.log",
+  "events": [
+    {
+      "controller_payload_reads_writes": 0,
+      "event": "begin",
+      "initial_fds": 4,
+      "kernel": "7.0.0-29-generic"
+    },
+    {
+      "event": "bpf_loaded",
+      "jitted_bytes": 192,
+      "map_ids": [
+        6,
+        5,
+        4
+      ],
+      "program_id": 8,
+      "program_tag": "9edc478960b90593",
+      "verified_instructions": 33
+    },
+    {
+      "cookies": [
+        1,
+        2
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        19,
+        16
+      ],
+      "keys": [
+        0,
+        1
+      ]
+    },
+    {
+      "bpf_counters": [
+        0,
+        152
+      ],
+      "bytes_sent_by_application": 262144,
+      "event": "tcp_backpressure_hold",
+      "guest_rx_descriptors_posted": 0
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1574,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 159,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1415,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 318,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1256,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 477,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1097,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 636,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 938,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 795,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 779,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 954,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 1733,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 461,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 0,
+      "op": 6
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 16,
+      "op": 5
+    },
+    {
+      "bytes_each_direction": 262144,
+      "cid": 295101,
+      "counters": [
+        86,
+        153
+      ],
+      "event": "tcp_large_halfclose_backpressure_pass",
+      "fin_propagation": "userspace controller shutdown control, zero payload reads/writes",
+      "memory": "0x7e3f5d74e000",
+      "real_vhost_fd": 11,
+      "reverse_after_guest_fin": true
+    },
+    {
+      "cookies": [
+        4097,
+        4098
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        20,
+        16
+      ],
+      "keys": [
+        2,
+        3
+      ]
+    },
+    {
+      "actual_adapter": "127.0.0.1:37067",
+      "actual_peer": "127.0.0.2:56618",
+      "cid": 295110,
+      "counters": [
+        86,
+        153,
+        0,
+        1
+      ],
+      "event": "udp_boundary_probe",
+      "forward_byte_exact": true,
+      "forward_flags": [],
+      "forward_one_datagram": false,
+      "forward_packet_lengths": [],
+      "input_len": 0,
+      "reverse_byte_exact": true,
+      "reverse_one_datagram": false,
+      "reverse_udp_lengths": []
+    },
+    {
+      "cookies": [
+        4099,
+        4100
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        20,
+        16
+      ],
+      "keys": [
+        2,
+        3
+      ]
+    },
+    {
+      "actual_adapter": "127.0.0.1:52657",
+      "actual_peer": "127.0.0.3:38695",
+      "cid": 295111,
+      "counters": [
+        86,
+        153,
+        1,
+        2
+      ],
+      "event": "udp_boundary_probe",
+      "forward_byte_exact": true,
+      "forward_flags": [
+        1
+      ],
+      "forward_one_datagram": true,
+      "forward_packet_lengths": [
+        1
+      ],
+      "input_len": 1,
+      "reverse_byte_exact": true,
+      "reverse_one_datagram": true,
+      "reverse_udp_lengths": [
+        1
+      ]
+    },
+    {
+      "cookies": [
+        8193,
+        8194
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        20,
+        16
+      ],
+      "keys": [
+        2,
+        3
+      ]
+    },
+    {
+      "actual_adapter": "127.0.0.1:33623",
+      "actual_peer": "127.0.0.2:36565",
+      "cid": 295112,
+      "counters": [
+        86,
+        153,
+        2,
+        3
+      ],
+      "event": "udp_boundary_probe",
+      "forward_byte_exact": true,
+      "forward_flags": [
+        1
+      ],
+      "forward_one_datagram": true,
+      "forward_packet_lengths": [
+        1431
+      ],
+      "input_len": 1431,
+      "reverse_byte_exact": true,
+      "reverse_one_datagram": true,
+      "reverse_udp_lengths": [
+        1431
+      ]
+    },
+    {
+      "cookies": [
+        8195,
+        8196
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        20,
+        16
+      ],
+      "keys": [
+        2,
+        3
+      ]
+    },
+    {
+      "actual_adapter": "127.0.0.1:48544",
+      "actual_peer": "127.0.0.3:41505",
+      "cid": 295113,
+      "counters": [
+        86,
+        153,
+        3,
+        4
+      ],
+      "event": "udp_boundary_probe",
+      "forward_byte_exact": true,
+      "forward_flags": [
+        1,
+        1
+      ],
+      "forward_one_datagram": false,
+      "forward_packet_lengths": [
+        32768,
+        26232
+      ],
+      "input_len": 59000,
+      "reverse_byte_exact": true,
+      "reverse_one_datagram": false,
+      "reverse_udp_lengths": [
+        32768,
+        16384,
+        8192,
+        1656
+      ]
+    },
+    {
+      "controller_payload_reads_writes": 0,
+      "event": "complete",
+      "final_fds": 7,
+      "scale_attempted": false
+    }
+  ]
+}

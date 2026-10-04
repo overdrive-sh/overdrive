@@ -1,0 +1,10 @@
+{
+  "kernel": "7.0.0-29-generic",
+  "source_hashes": {
+    "run.py": "f8edaaeb440c28f8a01b9a73f064b52e7e30730c766ab545d4aede6fdfb7aa41",
+    "Cargo.toml": "ae72e428b443551291349c37bcc3f06c9713d22260f48156e3883f8e5e48f856",
+    "bpf/Cargo.toml": "2e08d3a5341ee03af6ce061858cd5dbbc63f2e04029d42823b2b13e347ee232f",
+    "src/main.rs": "3d37b9d4c2ba83cb1009f08b95cee039d9f7efb60c2205b6cebe65ba8d1829fa",
+    "bpf/src/main.rs": "be58869bfa183eb977d40ce1b2af020f8fcf92a4aee32b247a6d78ca0a5e4ed8"
+  }
+}

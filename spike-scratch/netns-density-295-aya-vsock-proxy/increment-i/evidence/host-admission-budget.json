@@ -1,0 +1,9 @@
+{
+  "host_memavailable_kib": 62651260,
+  "private_vm_memory_kib": 1048576,
+  "host_reserve_kib": 8388608,
+  "cpu_boot": 4,
+  "cpu_possible": 64,
+  "kernel_default_pid_budget_uses_possible_cpus": true,
+  "no_sysctl_tuning": true
+}

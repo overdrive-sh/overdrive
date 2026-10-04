@@ -1,0 +1,259 @@
+[
+  {
+    "increment": "increment-a",
+    "native_result": null,
+    "evidence_files": [
+      "native-launch.log",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-b",
+    "native_result": null,
+    "evidence_files": [
+      "commands.jsonl",
+      "executed-source-manifest.json",
+      "native-launch.log",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-c",
+    "native_result": null,
+    "evidence_files": [
+      "commands.jsonl",
+      "executed-source-manifest.json",
+      "native-launch.log",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-d",
+    "native_result": {
+      "qemu_exit": 0,
+      "host_role_pass": true,
+      "wall_s": 2.7835827814415097,
+      "qemu_pid_absent": true,
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "lease_release_after_result": true
+    },
+    "evidence_files": [
+      "Cargo.lock.executed",
+      "bpf.Cargo.lock.executed",
+      "commands.jsonl",
+      "events.derived.json",
+      "executed-artifact-pins.json",
+      "executed-source-manifest.json",
+      "host-admission-budget.json",
+      "init.executed",
+      "kernel-btf.sha256",
+      "kernel-config.selected.txt",
+      "native-launch.log",
+      "native-result.json",
+      "native-serial.log",
+      "qemu-command.json",
+      "qemu-resources.json",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-e",
+    "native_result": {
+      "qemu_exit": 0,
+      "host_role_pass": true,
+      "wall_s": 4.377056637778878,
+      "qemu_pid_absent": true,
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "lease_release_after_result": true
+    },
+    "evidence_files": [
+      "Cargo.lock.executed",
+      "bpf.Cargo.lock.executed",
+      "commands.jsonl",
+      "events.derived.json",
+      "executed-artifact-pins.json",
+      "executed-source-manifest.json",
+      "host-admission-budget.json",
+      "init.executed",
+      "kernel-btf.sha256",
+      "kernel-config.selected.txt",
+      "native-launch.log",
+      "native-result.json",
+      "native-serial.log",
+      "qemu-command.json",
+      "qemu-resources.json",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-f",
+    "native_result": {
+      "qemu_exit": 0,
+      "host_role_pass": false,
+      "wall_s": 281.6478792857379,
+      "qemu_pid_absent": true,
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "lease_release_after_result": true
+    },
+    "evidence_files": [
+      "Cargo.lock.executed",
+      "bpf.Cargo.lock.executed",
+      "commands.jsonl",
+      "events.derived.json",
+      "executed-artifact-pins.json",
+      "executed-source-manifest.json",
+      "host-admission-budget.json",
+      "init.executed",
+      "kernel-btf.sha256",
+      "kernel-config.selected.txt",
+      "native-launch.log",
+      "native-result.json",
+      "native-serial.log",
+      "qemu-command.json",
+      "qemu-resources.json",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-g",
+    "native_result": null,
+    "evidence_files": [
+      "commands.jsonl",
+      "executed-source-manifest.json",
+      "native-launch.log",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-h",
+    "native_result": {
+      "qemu_exit": 0,
+      "host_role_pass": true,
+      "wall_s": 284.9820811441168,
+      "qemu_pid_absent": true,
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "lease_release_after_result": true
+    },
+    "evidence_files": [
+      "Cargo.lock.executed",
+      "bpf.Cargo.lock.executed",
+      "commands.jsonl",
+      "events.derived.json",
+      "executed-artifact-pins.json",
+      "executed-source-manifest.json",
+      "host-admission-budget.json",
+      "init.executed",
+      "kernel-btf.sha256",
+      "kernel-config.selected.txt",
+      "native-launch.log",
+      "native-result.json",
+      "native-serial.log",
+      "physical-host-after.json",
+      "physical-host-before.json",
+      "qemu-command.json",
+      "qemu-resources.json",
+      "resource-summary.derived.json",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-i",
+    "native_result": {
+      "qemu_exit": 0,
+      "host_role_pass": false,
+      "wall_s": 2.8159913206472993,
+      "qemu_pid_absent": true,
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "lease_release_after_result": true
+    },
+    "evidence_files": [
+      "Cargo.lock.executed",
+      "bpf.Cargo.lock.executed",
+      "commands.jsonl",
+      "events.derived.json",
+      "executed-artifact-pins.json",
+      "executed-source-manifest.json",
+      "host-admission-budget.json",
+      "init.executed",
+      "kernel-btf.sha256",
+      "kernel-config.selected.txt",
+      "launch.executed.py",
+      "native-launch.log",
+      "native-result.json",
+      "native-serial.log",
+      "qemu-command.json",
+      "qemu-resources.json",
+      "rsync-filter.executed.sh",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-j",
+    "native_result": {
+      "qemu_exit": 0,
+      "host_role_pass": true,
+      "wall_s": 5.125587367452681,
+      "qemu_pid_absent": true,
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "lease_release_after_result": true
+    },
+    "evidence_files": [
+      "Cargo.lock.executed",
+      "bpf.Cargo.lock.executed",
+      "commands.jsonl",
+      "events.derived.json",
+      "executed-artifact-pins.json",
+      "executed-source-manifest.json",
+      "host-admission-budget.json",
+      "init.executed",
+      "kernel-btf.sha256",
+      "kernel-config.selected.txt",
+      "launch.executed.py",
+      "native-launch.log",
+      "native-result.json",
+      "native-serial.log",
+      "qemu-command.json",
+      "qemu-resources.json",
+      "rsync-filter.executed.sh",
+      "source-manifest.json"
+    ]
+  },
+  {
+    "increment": "increment-k",
+    "native_result": {
+      "qemu_exit": 0,
+      "host_role_pass": true,
+      "wall_s": 6.1600223975256085,
+      "qemu_pid_absent": true,
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "lease_release_after_result": true
+    },
+    "evidence_files": [
+      "Cargo.lock.executed",
+      "bpf.Cargo.lock.executed",
+      "commands.jsonl",
+      "events.derived.json",
+      "executed-artifact-pins.json",
+      "executed-source-manifest.json",
+      "host-admission-budget.json",
+      "init.executed",
+      "kernel-btf.sha256",
+      "kernel-config.selected.txt",
+      "launch.executed.py",
+      "native-launch.log",
+      "native-result.json",
+      "native-serial.log",
+      "qemu-command.json",
+      "qemu-resources.json",
+      "rsync-filter.executed.sh",
+      "source-manifest.json"
+    ]
+  }
+]

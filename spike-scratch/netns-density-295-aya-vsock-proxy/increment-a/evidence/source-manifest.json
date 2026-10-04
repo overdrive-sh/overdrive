@@ -1,0 +1,11 @@
+{
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-aya-vsock-proxy/increment-a/run.py",
+  "head": "99e1b28e1822bb37e55c5fa2143f6c7c8f7c9bdb",
+  "sources": {
+    "spike-scratch/netns-density-295-aya-vsock-proxy/increment-a/Cargo.toml": "ae72e428b443551291349c37bcc3f06c9713d22260f48156e3883f8e5e48f856",
+    "spike-scratch/netns-density-295-aya-vsock-proxy/increment-a/bpf/Cargo.toml": "2e08d3a5341ee03af6ce061858cd5dbbc63f2e04029d42823b2b13e347ee232f",
+    "spike-scratch/netns-density-295-aya-vsock-proxy/increment-a/bpf/src/main.rs": "d14a4b1c18b813ebc8c0b5d495d0b6e69f7ceca2dd3c1fdfc00287b9f9d24093",
+    "spike-scratch/netns-density-295-aya-vsock-proxy/increment-a/run.py": "d5f3828f5aeaadaeed7a999d37692388964d31fa624a69b942fcaad19c5d431b",
+    "spike-scratch/netns-density-295-aya-vsock-proxy/increment-a/src/main.rs": "5b59800573c01e8203b0f2f234e074f63b7f42f3a157f97ebc4e09f4f291941c"
+  }
+}

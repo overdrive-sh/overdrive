@@ -1,0 +1,136 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-aya-vsock-proxy/increment-b/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=496d400f8d7bd1baa33f81d5 pid=841256
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <redacted canonical metal target>:/home/ubuntu/overdrive
+
+sent 513,044 bytes  received 8,881 bytes  54,939.47 bytes/sec
+total size is 823,356,524  speedup is 1,577.54
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+7.0.0-29-generic
+
+    Updating crates.io index
+     Locking 33 packages to latest compatible versions
+      Adding aya v0.13.1 (available: v0.14.0)
+ Downloading crates ...
+  Downloaded assert_matches v1.5.0
+  Downloaded cfg-if v1.0.5
+  Downloaded allocator-api2 v0.2.21
+  Downloaded core-error v0.0.0
+  Downloaded bitflags v2.13.2
+  Downloaded itoa v1.0.18
+  Downloaded equivalent v1.0.2
+  Downloaded version_check v0.9.5
+  Downloaded thiserror v1.0.69
+  Downloaded zmij v1.0.23
+  Downloaded unicode-ident v1.0.26
+  Downloaded serde_core v1.0.229
+  Downloaded bytes v1.12.1
+  Downloaded proc-macro2 v1.0.107
+  Downloaded indexmap v2.14.2
+  Downloaded memchr v2.8.3
+  Downloaded serde_json v1.0.151
+  Downloaded hashbrown v0.17.1
+  Downloaded aya v0.13.1
+  Downloaded hashbrown v0.15.5
+  Downloaded aya-obj v0.2.1
+  Downloaded log v0.4.34
+  Downloaded crc32fast v1.5.2
+  Downloaded once_cell v1.21.4
+  Downloaded syn v2.0.119
+  Downloaded thiserror-impl v1.0.69
+  Downloaded object v0.36.7
+  Downloaded quote v1.0.47
+  Downloaded foldhash v0.1.5
+  Downloaded libc v0.2.190
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.26
+   Compiling version_check v0.9.5
+   Compiling crc32fast v1.5.2
+   Compiling equivalent v1.0.2
+   Compiling object v0.36.7
+   Compiling foldhash v0.1.5
+   Compiling allocator-api2 v0.2.21
+   Compiling hashbrown v0.17.1
+   Compiling cfg-if v1.0.5
+   Compiling memchr v2.8.3
+   Compiling thiserror v1.0.69
+   Compiling libc v0.2.190
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling log v0.4.34
+   Compiling bytes v1.12.1
+   Compiling serde_json v1.0.151
+   Compiling assert_matches v1.5.0
+   Compiling itoa v1.0.18
+   Compiling bitflags v2.13.2
+   Compiling once_cell v1.21.4
+   Compiling core-error v0.0.0
+   Compiling hashbrown v0.15.5
+   Compiling indexmap v2.14.2
+   Compiling syn v2.0.119
+   Compiling thiserror-impl v1.0.69
+   Compiling aya-obj v0.2.1
+   Compiling aya v0.13.1
+   Compiling aya-vsock-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-aya-vsock-proxy/increment-b)
+error[E0308]: mismatched types
+  --> src/main.rs:62:58
+   |
+62 |  for (k,fd) in [(key,a),(key+1,b)]{if let Err(e)=m.set(k,fd,0){event(json!({"event":"map_insert_failed","key":k,"fd":fd,"error":form...
+   |                                                    ---   ^^ expected `&_`, found `i32`
+   |                                                    |
+   |                                                    arguments to this method are incorrect
+   |
+   = note: expected reference `&_`
+                   found type `i32`
+note: method defined here
+  --> /home/ubuntu/overdrive/spike-scratch/netns-density-295-aya-vsock-proxy/out/cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/aya-0.13.1/src/maps/sock/sock_map.rs:86:12
+   |
+86 |     pub fn set<I: AsRawFd>(&mut self, index: u32, socket: &I, flags: u64) -> Result<(), MapError> {
+   |            ^^^
+help: consider borrowing here
+   |
+62 |  for (k,fd) in [(key,a),(key+1,b)]{if let Err(e)=m.set(k,&fd,0){event(json!({"event":"map_insert_failed","key":k,"fd":fd,"error":format!("{e:?}")}));return false}}
+   |                                                          +
+
+warning: variable does not need to be mutable
+  --> src/main.rs:27:7
+   |
+27 |   let mut p=Self{typ,fd,mem,kicks,calls,cid,port,rx_av:0,rx_used:0,tx_av:0,tx_used:0,fwd:0,stream:vec![],packets:0};
+   |       ----^
+   |       |
+   |       help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0308`.
+warning: `aya-vsock-probe` (bin "aya-vsock-probe") generated 1 warning
+error: could not compile `aya-vsock-probe` (bin "aya-vsock-probe") due to 1 previous error; 1 warning emitted
+
+Traceback (most recent call last):
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-aya-vsock-proxy/increment-b/run.py", line 24, in <module>
+    run(['cargo','build','--release','--manifest-path',str(INC/'Cargo.toml')],env=env)
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-aya-vsock-proxy/increment-b/run.py", line 18, in run
+    if p.returncode: raise RuntimeError(f'{args}: exit {p.returncode}')
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: ['cargo', 'build', '--release', '--manifest-path', '/home/ubuntu/overdrive/spike-scratch/netns-density-295-aya-vsock-proxy/increment-b/Cargo.toml']: exit 101
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1300[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 61.21596349999891}

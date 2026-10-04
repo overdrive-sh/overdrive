@@ -1,0 +1,294 @@
+{
+  "source": "native-serial.log",
+  "events": [
+    {
+      "event": "bpf_loaded",
+      "map_ids": [
+        4,
+        6,
+        8,
+        5,
+        7
+      ],
+      "program_tag": "b3ead938f76cfde6",
+      "verified_instructions": 83
+    },
+    {
+      "cid": 295200,
+      "event": "vhost_feature_readback",
+      "negotiated_hex": "0000000100000002",
+      "offered_hex": "000000033d000002",
+      "seqpacket_offered": true
+    },
+    {
+      "cookies": [
+        1,
+        2
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        14,
+        20
+      ],
+      "keys": [
+        0,
+        1
+      ]
+    },
+    {
+      "cid": 295201,
+      "event": "vhost_feature_readback",
+      "negotiated_hex": "0000000100000002",
+      "offered_hex": "000000033d000002",
+      "seqpacket_offered": true
+    },
+    {
+      "cookies": [
+        3,
+        4
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        22,
+        28
+      ],
+      "keys": [
+        2,
+        3
+      ]
+    },
+    {
+      "actual_peer": "127.0.0.2:55260",
+      "cid": 295200,
+      "event": "udp_same_server_peer_association_pass",
+      "server_port": 41265,
+      "tag_bytes": [
+        32,
+        129,
+        4,
+        0
+      ]
+    },
+    {
+      "actual_peer": "127.0.0.3:44225",
+      "cid": 295201,
+      "event": "udp_same_server_peer_association_pass",
+      "server_port": 41265,
+      "tag_bytes": [
+        33,
+        129,
+        4,
+        0
+      ]
+    },
+    {
+      "event": "udp_linearized_large_pass",
+      "flags_eom_last_only": true,
+      "forward_flags": [
+        1
+      ],
+      "forward_vsock_packet_lengths": [
+        59000
+      ],
+      "input_len": 59000,
+      "reverse_one_datagram": true,
+      "reverse_udp_len": 59000
+    },
+    {
+      "cid": 295200,
+      "event": "message_control_credit",
+      "op": 6
+    },
+    {
+      "cid": 295200,
+      "event": "message_control_credit",
+      "op": 6
+    },
+    {
+      "event": "udp_endpoint_truncation_pass",
+      "input_len": 1431,
+      "next_datagram_preserved": true,
+      "receive_buffer": 8
+    },
+    {
+      "cid": 295210,
+      "event": "vhost_feature_readback",
+      "negotiated_hex": "0000000100000002",
+      "offered_hex": "000000033d000002",
+      "seqpacket_offered": true
+    },
+    {
+      "cookies": [
+        4097,
+        4098
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        30,
+        36
+      ],
+      "keys": [
+        4,
+        5
+      ]
+    },
+    {
+      "delivered": false,
+      "event": "negative_fail_closed_pass",
+      "failures": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "mode": "missing_source_route"
+    },
+    {
+      "cid": 295211,
+      "event": "vhost_feature_readback",
+      "negotiated_hex": "0000000100000002",
+      "offered_hex": "000000033d000002",
+      "seqpacket_offered": true
+    },
+    {
+      "cookies": [
+        5,
+        6
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        30,
+        36
+      ],
+      "keys": [
+        4,
+        5
+      ]
+    },
+    {
+      "delivered": false,
+      "event": "negative_fail_closed_pass",
+      "failures": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "mode": "missing_target_map_entry"
+    },
+    {
+      "cid": 295212,
+      "event": "vhost_feature_readback",
+      "negotiated_hex": "0000000100000002",
+      "offered_hex": "000000033d000002",
+      "seqpacket_offered": true
+    },
+    {
+      "cookies": [
+        8193,
+        8194
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        30,
+        36
+      ],
+      "keys": [
+        4,
+        5
+      ]
+    },
+    {
+      "delivered": false,
+      "event": "negative_fail_closed_pass",
+      "failures": [
+        1,
+        2,
+        0,
+        0
+      ],
+      "mode": "vsock_target_ingress_flag"
+    },
+    {
+      "cid": 295215,
+      "event": "vhost_feature_readback",
+      "negotiated_hex": "0000000100000002",
+      "offered_hex": "000000033d000002",
+      "seqpacket_offered": true
+    },
+    {
+      "cookies": [
+        8195,
+        8196
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        30,
+        36
+      ],
+      "keys": [
+        4,
+        5
+      ]
+    },
+    {
+      "counter_after": [
+        4,
+        4,
+        1,
+        1,
+        0,
+        2
+      ],
+      "counter_before": [
+        4,
+        4,
+        1,
+        1,
+        0,
+        1
+      ],
+      "event": "linearized_bpf_zero_datagram_probe",
+      "failure_counters": [
+        1,
+        2,
+        0,
+        0
+      ],
+      "forward_wire": null,
+      "reverse_errno": 11,
+      "reverse_udp_receive": null
+    },
+    {
+      "cid": 295220,
+      "event": "vhost_feature_readback",
+      "negotiated_hex": "0000000100000002",
+      "offered_hex": "000000033d000002",
+      "seqpacket_offered": true
+    },
+    {
+      "event": "native_seqpacket_zero_endpoint_baseline",
+      "send_return": 0,
+      "socket_in_bpf_map": false,
+      "zero_wire_packet": null
+    },
+    {
+      "errno": null,
+      "event": "native_seqpacket_zero_receive_baseline",
+      "receive_return": 0,
+      "socket_in_bpf_map": false
+    },
+    {
+      "errno": 19,
+      "event": "vsock_dgram_socket_native",
+      "fd": -1,
+      "stock_vhost_dgram_route_proven": false
+    },
+    {
+      "controller_payload_reads_writes": 0,
+      "event": "complete",
+      "final_fds": 4,
+      "initial_fds": 4
+    }
+  ]
+}

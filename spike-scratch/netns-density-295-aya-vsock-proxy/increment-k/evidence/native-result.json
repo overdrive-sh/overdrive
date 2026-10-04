@@ -1,0 +1,9 @@
+{
+  "qemu_exit": 0,
+  "host_role_pass": true,
+  "wall_s": 6.1600223975256085,
+  "qemu_pid_absent": true,
+  "bpf_loaded_only_inside_qemu": true,
+  "custom_kernel_module_loaded": false,
+  "lease_release_after_result": true
+}

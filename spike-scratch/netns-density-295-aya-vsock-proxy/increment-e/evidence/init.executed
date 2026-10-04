@@ -1,0 +1,32 @@
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+ip link set lo up
+echo AYAPROXY_HOST_ROLE_KERNEL
+uname -a
+echo AYAPROXY_STOCK_DEFAULT_LIMITS
+cat /proc/sys/kernel/pid_max /proc/sys/kernel/threads-max
+cat /sys/devices/system/cpu/online /sys/devices/system/cpu/possible
+echo AYAPROXY_INITIAL_MODULES
+cat /proc/modules
+insmod /vsock.ko || poweroff -f
+insmod /vhost_iotlb.ko || poweroff -f
+insmod /vhost.ko || poweroff -f
+insmod /vmw_vsock_virtio_transport_common.ko || poweroff -f
+insmod /vhost_vsock.ko || poweroff -f
+echo AYAPROXY_EXECUTED_HASHES
+sha256sum /probe /program.o
+echo AYAPROXY_MODULES_LOADED
+cat /proc/modules
+echo AYAPROXY_LINKS
+ls /sys/class/net
+/strace -v -s 65536 -e trace=bpf /probe
+rc=$?
+echo AYAPROXY_HARNESS_EXIT=$rc
+cat /proc/modules
+echo AYAPROXY_FINAL_LINKS
+ls /sys/class/net
+dmesg
+echo AYAPROXY_COMPLETE_EXIT=$rc
+poweroff -f

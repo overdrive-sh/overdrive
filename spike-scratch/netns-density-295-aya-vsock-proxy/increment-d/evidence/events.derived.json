@@ -1,0 +1,85 @@
+{
+  "source": "native-serial.log",
+  "events": [
+    {
+      "controller_payload_reads_writes": 0,
+      "event": "begin",
+      "initial_fds": 4,
+      "kernel": "7.0.0-29-generic"
+    },
+    {
+      "event": "bpf_loaded",
+      "info": "ProgramInfo(bpf_prog_info { type_: 14, id: 8, tag: [158, 220, 71, 137, 96, 185, 5, 147], jited_prog_len: 192, xlated_prog_len: 312, jited_prog_insns: 0, xlated_prog_insns: 0, load_time: 1565084291, created_by_uid: 0, nr_map_ids: 3, map_ids: 4, name: [114, 111, 117, 116, 101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ifindex: 0, _bitfield_align_1: [], _bitfield_1: __BindgenBitfieldUnit { storage: [1, 0, 0, 0] }, netns_dev: 0, netns_ino: 0, nr_jited_ksyms: 1, nr_jited_func_lens: 1, jited_ksyms: 0, jited_func_lens: 0, btf_id: 0, func_info_rec_size: 8, func_info: 0, nr_func_info: 0, nr_line_info: 0, line_info: 0, jited_line_info: 0, nr_jited_line_info: 0, line_info_rec_size: 16, jited_line_info_rec_size: 8, nr_prog_tags: 1, prog_tags: 0, run_time_ns: 0, run_cnt: 0, recursion_misses: 0, verified_insns: 33, attach_btf_obj_id: 0, attach_btf_id: 0 })"
+    },
+    {
+      "cookies": [
+        1,
+        2
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        19,
+        16
+      ],
+      "keys": [
+        0,
+        1
+      ]
+    },
+    {
+      "cid": 295101,
+      "event": "wire_rx",
+      "flags": 0,
+      "len": 19,
+      "op": 5
+    },
+    {
+      "cid": 295101,
+      "counters": [
+        4,
+        1
+      ],
+      "event": "tcp_bidirectional_pass",
+      "memory": "0x7a1bddbb5000",
+      "real_vhost_fd": 11
+    },
+    {
+      "cookies": [
+        4097,
+        4098
+      ],
+      "event": "map_pair_registered",
+      "fds": [
+        20,
+        16
+      ],
+      "keys": [
+        2,
+        3
+      ]
+    },
+    {
+      "cid": 295102,
+      "event": "wire_rx",
+      "flags": 1,
+      "len": 19,
+      "op": 5
+    },
+    {
+      "counters": [
+        4,
+        1,
+        1,
+        1
+      ],
+      "event": "udp_seqpacket_bidirectional_pass",
+      "peer": "127.0.0.2:39780",
+      "proxy": "127.0.0.1:34748"
+    },
+    {
+      "controller_payload_reads_writes": 0,
+      "event": "complete",
+      "final_fds": 8
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "reference_repository": "/Users/marcus/git/linux",
+  "head": "502d45774af09f1c681c754c4b7cdfb5d7f72fd9",
+  "version": "7.2 source reference; native executed kernel was stock 7.0.0-29 (7.0.12), not this source build",
+  "files": {
+    "net/core/sock_map.c": "d715316e058dd3808f37a1d85f61970f0b1d414aabf14d33e86471aa00feeb42",
+    "net/core/skmsg.c": "a648cd7e7eae8da954134e5fa068c98fa242dbe8dd8dc75dd72de3d43aa2697d",
+    "net/core/skbuff.c": "8800c55a6c321f22b22d8c55d2aefbc1c0d8da1a371eacb592676a683314c42e",
+    "net/core/filter.c": "44a79a839e54e1df1152f2222c53546a0b7b29d6adae90425a7467161f54e753",
+    "net/vmw_vsock/vsock_bpf.c": "989ed0503f4ce8b39733e235c82c6e7ec52264dc262be0c3d3fcbe3c4426d420",
+    "net/vmw_vsock/virtio_transport_common.c": "76d6849c505bfc2854095ab55759e2d332f0412ccb196704ada4b1c4ea0aafb9",
+    "drivers/vhost/vsock.c": "f38a0b3fce2165469dae3b2cd831b352456a1b73664446b16c898258997597c4",
+    "include/uapi/linux/virtio_vsock.h": "ef8889ae5f5804ba714ed3fbae81749ded2341c1c07bf4d91f35c914385e858a"
+  }
+}

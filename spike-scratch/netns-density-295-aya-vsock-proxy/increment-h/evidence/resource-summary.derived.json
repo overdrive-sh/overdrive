@@ -1,0 +1,12 @@
+{
+  "source": "qemu-resources.json",
+  "clock_tick_source": "commands.jsonl: getconf CLK_TCK returned 100",
+  "clock_ticks_per_second": 100,
+  "sample_count": 284,
+  "first_elapsed_s": 1.0007182089611888,
+  "last_elapsed_s": 284.15382070373744,
+  "cpu_seconds_between_samples": 211.38,
+  "mean_cpu_cores_between_samples": 0.7465219280226663,
+  "peak_qemu_rss_kib": 4459736,
+  "max_outer_qemu_fds": 19
+}
