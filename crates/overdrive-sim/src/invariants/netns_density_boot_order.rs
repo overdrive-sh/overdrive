@@ -659,7 +659,6 @@ mod tests {
         /// converges the program before admitting work.
         /// CONTRACT_SHAPE: bounded-change.
         #[test]
-        #[ignore = "pending DELIVER step 08-02 (S-ND295-13A)"]
         fn reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm(
             seed in any::<u64>(),
         ) {

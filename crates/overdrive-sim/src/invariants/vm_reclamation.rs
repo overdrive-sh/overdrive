@@ -468,3 +468,246 @@ mod ending_in_flight_teeth {
         );
     }
 }
+
+#[cfg(all(test, feature = "integration-tests"))]
+mod service_vm_boot_redrive {
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use overdrive_control_plane::dataplane_config::DataplaneConfig;
+    use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
+    use overdrive_core::aggregate::{
+        DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent, WorkloadKind,
+    };
+    use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+    use overdrive_core::guest_network::GuestNetworkExecWiring;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::traits::driver::{Driver, DriverType};
+    use overdrive_core::traits::intent_store::IntentStore;
+    use overdrive_core::traits::observation_store::{
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, TransitionSource,
+    };
+    use overdrive_core::traits::vm_host_state::VmHostState;
+    use overdrive_core::wall_clock::UnixInstant;
+    use overdrive_store_local::LocalIntentStore;
+    use overdrive_worker::cgroup_manager::CgroupManager;
+
+    use crate::adapters::clock::SimClock;
+    use crate::adapters::dataplane::SimDataplane;
+    use crate::adapters::driver::SimDriver;
+    use crate::adapters::guest_network::SimSharedGuestNetworkOwner;
+    use crate::adapters::observation_store::SimObservationStore;
+    use crate::adapters::vm_host_state::SimVmHostState;
+    use crate::adapters::{SimCgroupFs, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
+
+    const FIRST_GUEST_LEASE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(100, 95, 0, 2);
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one seeded production-boot path keeps the persisted Service, VM host state, and replacement lease together"
+    )]
+    async fn run_service_vm_reclaim(seed: u64) -> Result<(), String> {
+        let root = tempfile::tempdir().map_err(|error| format!("seed={seed}: tempdir: {error}"))?;
+        let data_dir = root.path().join("data");
+        let operator_config_dir = root.path().join("config");
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|error| format!("seed={seed}: data dir: {error}"))?;
+        std::fs::create_dir_all(&operator_config_dir)
+            .map_err(|error| format!("seed={seed}: config dir: {error}"))?;
+
+        let node_id =
+            NodeId::new("local").map_err(|error| format!("seed={seed}: node: {error}"))?;
+        let workload_id = WorkloadId::new(&format!("service-vm-{seed:016x}"))
+            .map_err(|error| format!("seed={seed}: workload id: {error}"))?;
+        let old_alloc = AllocationId::new(&format!("service-vm-old-{seed:016x}"))
+            .map_err(|error| format!("seed={seed}: allocation id: {error}"))?;
+        let old_guest = FIRST_GUEST_LEASE;
+        let service = Service::from_submit(ServiceSpecInput {
+            id: workload_id.to_string(),
+            replicas: 1,
+            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            driver: DriverInput::Vm(VmInput {
+                command: "/bin/serve".to_owned(),
+                args: Vec::new(),
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
+            }),
+            listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+            startup_probes: Vec::new(),
+            readiness_probes: Vec::new(),
+            liveness_probes: Vec::new(),
+        })
+        .map_err(|error| format!("seed={seed}: Service spec: {error}"))?;
+        let intent = WorkloadIntent::Service(service);
+        let intent_redb_path = data_dir.join("intent.redb");
+        {
+            let store = Arc::new(
+                LocalIntentStore::open(&intent_redb_path)
+                    .map_err(|error| format!("seed={seed}: open intent store: {error}"))?,
+            );
+            let key = IntentKey::for_workload(&workload_id);
+            let archived = intent
+                .archive_for_store()
+                .map_err(|error| format!("seed={seed}: archive Service intent: {error}"))?;
+            store
+                .put(key.as_bytes(), archived.as_ref())
+                .await
+                .map_err(|error| format!("seed={seed}: persist Service intent: {error}"))?;
+            let kind_key = IntentKey::for_workload_kind(&workload_id);
+            store
+                .put(kind_key.as_bytes(), &[WorkloadKind::Service.discriminator_byte()])
+                .await
+                .map_err(|error| format!("seed={seed}: persist workload kind: {error}"))?;
+            let allocator = overdrive_control_plane::test_default_allocator(
+                Arc::clone(&store) as Arc<dyn IntentStore>
+            );
+            let digest = intent
+                .spec_digest()
+                .map_err(|error| format!("seed={seed}: Service digest: {error}"))?;
+            allocator
+                .lock()
+                .await
+                .allocate(*digest.as_bytes())
+                .await
+                .map_err(|error| format!("seed={seed}: persist Service VIP: {error}"))?;
+        }
+
+        let observations = Arc::new(SimObservationStore::single_peer(node_id.clone(), seed));
+        let old_row = AllocStatusRow {
+            alloc_id: old_alloc.clone(),
+            workload_id: workload_id.clone(),
+            node_id: node_id.clone(),
+            state: AllocState::Running,
+            updated_at: LogicalTimestamp { counter: 1, writer: node_id.clone() },
+            reason: None,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
+            workload_addr: Some(old_guest),
+            last_terminated: None,
+            restart_count: 0,
+        };
+        observations
+            .write_alloc_lifecycle(old_row, TransitionSource::Driver(DriverType::Vm))
+            .await
+            .map_err(|error| format!("seed={seed}: seed Running Service row: {error}"))?;
+
+        let vm_host = Arc::new(SimVmHostState::new());
+        vm_host.set_scope(old_alloc.clone(), BTreeSet::from([4242]));
+        vm_host.set_run_dir(old_alloc.clone());
+        vm_host.set_clone(
+            old_alloc.clone(),
+            PathBuf::from(format!("/var/lib/overdrive/vm-clones/{old_alloc}.img")),
+        );
+
+        // The fresh SimDriver has no live claim. This is the process-loss
+        // state: the durable Service intent and Running row remain while the
+        // previous process's VM-exclusive host surfaces are still present.
+        let clock = Arc::new(SimClock::new());
+        let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
+        let shared_owner =
+            Arc::new(SimSharedGuestNetworkOwner::with_sweep_host_state(vm_host.as_ref().clone()));
+        let intercept = Arc::new(SimMtlsIntercept::new());
+        let mut config = ServerConfig::new(
+            Arc::new(SimKek::for_boot()),
+            intercept,
+            Arc::new(SimGuestDnsFactory::default()),
+        );
+        config.bind = "127.0.0.1:0"
+            .parse()
+            .map_err(|error| format!("seed={seed}: loopback bind: {error}"))?;
+        config.data_dir.clone_from(&data_dir);
+        config.operator_config_dir.clone_from(&operator_config_dir);
+        config.clock = clock.clone();
+        config.tick_cadence = Duration::from_millis(10);
+        config.dataplane =
+            Some(DataplaneConfig { client_iface: "lo".to_owned(), backend_iface: "lo".to_owned() });
+        config.dataplane_override = Some(Arc::new(SimDataplane::new()));
+        let wiring = GuestNetworkExecWiring::new(clock.clone());
+        let handle = run_server_with_obs_and_driver(
+            config,
+            Arc::clone(&observations) as Arc<dyn ObservationStore>,
+            driver.clone() as Arc<dyn Driver>,
+            vm_host.clone() as Arc<dyn VmHostState>,
+            shared_owner,
+            wiring,
+            CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
+        )
+        .await
+        .map_err(|error| format!("seed={seed}: fresh production boot: {error}"))?;
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut replacement = None;
+        while Instant::now() < deadline {
+            let rows = observations
+                .alloc_status_rows()
+                .await
+                .map_err(|error| format!("seed={seed}: observe allocation rows: {error}"))?;
+            replacement = rows.into_iter().find(|row| {
+                row.workload_id == workload_id
+                    && row.alloc_id != old_alloc
+                    && row.state == AllocState::Running
+            });
+            if replacement.is_some() {
+                break;
+            }
+            clock.tick(Duration::from_millis(10));
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        let prior_after_boot = observations.latest_alloc_status(&old_alloc);
+        let prior_reclaimed = prior_after_boot.as_ref().is_some_and(|row| {
+            row.state == AllocState::Terminated
+                && matches!(
+                    &row.reason,
+                    Some(overdrive_core::transition_reason::TransitionReason::Stopped {
+                        by: overdrive_core::transition_reason::StoppedBy::PlatformReclaimed
+                    })
+                )
+        });
+        let replacement_admitted = replacement.as_ref().is_some_and(|row| {
+            row.workload_addr == Some(FIRST_GUEST_LEASE)
+                && row.kind == WorkloadKind::Service
+                && row.state == AllocState::Running
+        });
+        let result = if prior_reclaimed
+            && replacement_admitted
+            && !vm_host.has_scope(&old_alloc)
+            && vm_host.artifacts_absent(&old_alloc)
+        {
+            Ok(())
+        } else {
+            Err(format!(
+                "seed={seed}: expected the fresh boot to write the Service predecessor's \
+                 PlatformReclaimed ending, remove its VM host surfaces, and admit a new \
+                 allocation at {FIRST_GUEST_LEASE}; prior={prior_after_boot:?}, \
+                 replacement={replacement:?}, host={:?}",
+                vm_host.observe().await
+            ))
+        };
+        handle
+            .shutdown(Duration::from_secs(5))
+            .await
+            .map_err(|error| format!("seed={seed}: clean simulated boot shutdown: {error}"))?;
+        result
+    }
+
+    /// Outcome anchor: S-ND295-13C's first replacement lease after killed-mode boot.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the required Contract Shape declaration uses an exact parser token"
+    )]
+    async fn a_service_vm_running_before_process_loss_is_reclaimed_and_replaced_after_boot() {
+        const SEED: u64 = 0;
+        let result = run_service_vm_reclaim(SEED).await;
+        assert!(result.is_ok(), "seed={SEED}: {result:?}");
+    }
+}

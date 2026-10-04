@@ -18,7 +18,8 @@
 //!    the three dynamic sets of `table ip overdrive-mtls` to empty in one
 //!    atomic batch that mutates no program object.
 //! 4. Program convergence and read-back (steps 6.5 and 6.6). The constant
-//!    program, retargeted to the fresh listeners in the D-295-R19 rule order,
+//!    program, retargeted to the fresh listeners in the retained canonical
+//!    mark → TPROXY → accept order (R19's reorder was withdrawn),
 //!    the policy route, and, while D-295-R18 stands, the intercept-mark guard
 //!    table are converged and read back with zero members.
 //! 5. Admission (step 9). Only then may an allocation insert members. The
@@ -510,21 +511,27 @@ fn policy_route_observation() -> Result<bool, String> {
 }
 
 /// Each rule of a kernel listing of `table ip overdrive-mtls` that TPROXYs,
-/// with whether its tail runs `tproxy`, then `meta mark set`, then `accept`
-/// (the D-295-R19 order, FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the R19 contract)).
+/// with whether its tail runs `meta mark set 0x1`, then `tproxy`, then `accept`.
+/// This is the retained canonical order in FD § "R19 contract (withdrawn
+/// 2026-10-03, ADR-0140)"; no alternate-order recognizer is accepted.
 fn tproxy_rule_orders(listing: &str) -> Vec<(String, bool)> {
     listing
         .lines()
         .map(str::trim)
         .filter(|line| line.contains("tproxy"))
         .map(|line| {
-            let r19_order = line.find("tproxy").is_some_and(|tproxy| {
-                line[tproxy..].find("mark set").is_some_and(|mark| {
-                    let mark = tproxy + mark;
-                    line[mark..].contains("accept")
-                })
+            let retained_order = line.find("meta mark set ").is_some_and(|mark| {
+                let tail = &line[mark + "meta mark set ".len()..];
+                let policy_mark = tail.split_whitespace().next().and_then(|value| {
+                    value.strip_prefix("0x").map_or_else(
+                        || value.parse::<u32>().ok(),
+                        |hex| u32::from_str_radix(hex, 16).ok(),
+                    )
+                });
+                policy_mark == Some(1)
+                    && tail.find("tproxy").is_some_and(|tproxy| tail[tproxy..].contains("accept"))
             });
-            (line.to_owned(), r19_order)
+            (line.to_owned(), retained_order)
         })
         .collect()
 }
@@ -655,8 +662,16 @@ struct MonitorLine {
 
 impl NftMonitor {
     fn start(evidence: &Evidence) -> Self {
+        // Diagnostic-only tool selection. nft 1.1.6's monitor evicts retained
+        // named sets on DELRULE, omitting later genuine member notifications.
+        // A privately corrected monitor keeps the same output and every M0
+        // loss/stderr gate; all other nft commands still use the host tool.
+        let monitor_binary =
+            std::env::var_os("OVERDRIVE_TEST_NFT_MONITOR_BIN").unwrap_or_else(|| "nft".into());
         let mut child = Command::new("stdbuf")
-            .args(["-oL", "-eL", "nft", "monitor"])
+            .args(["-oL", "-eL"])
+            .arg(monitor_binary)
+            .arg("monitor")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -1722,7 +1737,8 @@ fn evaluate(
         .as_ref()
         .map(|listing| tproxy_rule_orders(listing))
         .unwrap_or_default();
-    let r19_order = tproxy_rules.len() == 2 && tproxy_rules.iter().all(|(_, r19)| *r19);
+    let retained_order =
+        tproxy_rules.len() == 2 && tproxy_rules.iter().all(|(_, retained)| *retained);
 
     // V4a — the fresh listeners bind new ephemeral ports, so boot two must
     // rewrite the program (both ports coinciding with the dead server's is the
@@ -1747,15 +1763,15 @@ fn evaluate(
         && no_program_before_clear
         && program_read_back.is_some()
         && canonical
-        && r19_order;
+        && retained_order;
     verdicts.push(
-        "V4a program_converges_after_the_clear_in_r19_order",
+        "V4a program_converges_after_the_clear_in_retained_canonical_order",
         v4a,
         format!(
             "clear_ms={:?}; program_batches_ms={:?}; post_convergence_read={:?}; \
              admission_bound_ms={}; typed_final_state={}; boot_one_identity={:016x}; \
              final_identity={final_identity:x?} (fresh listeners: expected to differ); \
-             tproxy_rules={tproxy_rules:?}; r19_order={r19_order}; program_or_guard_batches={}",
+             tproxy_rules={tproxy_rules:?}; retained_order={retained_order}; program_or_guard_batches={}",
             clear_at.map(|at| at.as_millis()),
             order.program.iter().map(|index| closed_at(*index).as_millis()).collect::<Vec<_>>(),
             program_read_back.map(|sample| (&sample.members, sample.identity)),
@@ -1993,7 +2009,8 @@ struct ProofOutcome {
 /// data and config roots, must reclaim the VM before any owned-table commit
 /// (V1), sweep the attachment and delete exactly the three stale members in
 /// one batch before any program mutation (V2), read back zero members (V3),
-/// and only after that clear converge the program in the D-295-R19 order
+/// and only after that clear converge the program in the retained canonical
+/// mark → TPROXY → accept order
 /// (V4a), the policy route (V4b), and the guard table (V4c), each read back
 /// converged after the clear and before admission; boot (V0), and only then
 /// admit (V5) a replacement at `100.95.0.2` (A1) with every predecessor object
@@ -2005,13 +2022,13 @@ struct ProofOutcome {
 /// `overdrive_netlink::nft::observe_intercept_mark_guard` (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the R18-B contract: the provisional guard observe and converge functions)): if
 /// 08-01 withdraws R18 it deletes that surface and verdict V4c with it
 /// (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional-parts table, column "Shape without R18")). D-295-R19 is conditional in the same
-/// way (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts: the E14 withdrawal conditions)); the order clause expects the R19 tail the scenario
-/// names.
+/// way (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts: the E14 withdrawal conditions)); its reorder was withdrawn on 2026-10-03. V4a requires
+/// the retained canonical mark → TPROXY → accept tail named by the current
+/// R19 contract, alongside the independent normalized identity assertion.
 ///
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 08-02 (S-ND295-13C)"]
 #[serial(cgroup)]
 fn a_killed_serve_reboot_reclaims_clears_stale_intercept_members_then_admits() {
     // SAFETY: `geteuid` has no preconditions and cannot fail.
@@ -2051,8 +2068,8 @@ fn a_killed_serve_reboot_reclaims_clears_stale_intercept_members_then_admits() {
     // Node-shared objects (the constant program with EMPTY sets, the bridge
     // guard, `ovd-gbr0`) legitimately survive a graceful shutdown. Only
     // dynamic allocation residue would contaminate the measured baseline. A
-    // program the typed observer rejects (for example a pre-R19 rule order
-    // left by an earlier #295 build) is stale node-global state the operator
+    // program the typed observer rejects (a genuinely foreign or malformed
+    // owned shape) is stale node-global state the operator
     // clears first (FD § "[REF] Required downstream changes (not edited by DESIGN)" (development and test hosts)).
     let pre_state = observe_state();
     evidence.record("precondition_intercept_state", &summarize_state(&pre_state));
@@ -2287,9 +2304,11 @@ fn run_proof(
         if owner.is_some() {
             let deadline = Instant::now() + Duration::from_secs(60);
             while replacement.is_none() && Instant::now() < deadline {
-                if let Ok(out) =
+                let observed =
                     describe(DescribeArgs { id: WORKLOAD_ID.to_owned(), config_path: cfg.clone() })
-                        .await
+                        .await;
+                evidence.record("boot_two_describe", &format!("{observed:?}"));
+                if let Ok(out) = observed
                     && let Some(row) = out.snapshot.rows.iter().find(|row| {
                         row.state == AllocStateWire::Running
                             && row.alloc_id != residue.alloc.as_str()

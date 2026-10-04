@@ -2143,6 +2143,7 @@ impl MtlsInterceptWorker {
     async fn start_shared_owner_inner(
         self: &Arc<Self>,
     ) -> Result<SharedOwner, MtlsSharedOwnerError> {
+        self.clear_boot_members()?;
         let prior = self
             .intercept
             .observe_shared()
@@ -2183,6 +2184,7 @@ impl MtlsInterceptWorker {
                     observed: None,
                 },
             })?;
+        self.verify_boot_intercept_state(&expected)?;
         let stop = CancellationToken::new();
         let tasks = Arc::new(SharedListenerTaskOwner::new(
             shared_listener_task(
@@ -2215,6 +2217,62 @@ impl MtlsInterceptWorker {
             return Err(source);
         }
         Ok(owner)
+    }
+
+    fn clear_boot_members(&self) -> Result<(), MtlsSharedOwnerError> {
+        let empty = crate::mtls_intercept_port::InterceptMembers::default();
+        let cleared = self
+            .intercept
+            .converge_allocation_elements(&empty)
+            .map_err(|source| MtlsSharedOwnerError::BootMemberClear { source })?;
+        if let Some(state) = cleared
+            && state.members != empty
+        {
+            return Err(MtlsSharedOwnerError::BootMemberClear {
+                source: InterceptError::MembersRemain { observed: state.members },
+            });
+        }
+        Ok(())
+    }
+
+    fn verify_boot_intercept_state(
+        &self,
+        expected: &InterceptPostcondition,
+    ) -> Result<(), MtlsSharedOwnerError> {
+        let observed = self
+            .intercept
+            .observe_shared_state()
+            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?
+            .ok_or_else(|| MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PostconditionMismatch {
+                    expected: expected.clone(),
+                    observed: None,
+                },
+            })?;
+        if observed.program != *expected {
+            return Err(MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PostconditionMismatch {
+                    expected: expected.clone(),
+                    observed: Some(observed.program),
+                },
+            });
+        }
+        if !observed.policy_route {
+            return Err(MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PolicyRouteAbsent,
+            });
+        }
+        if !observed.intercept_mark_guard {
+            return Err(MtlsSharedOwnerError::Intercept {
+                source: InterceptError::InterceptMarkGuardAbsent,
+            });
+        }
+        if observed.members != crate::mtls_intercept_port::InterceptMembers::default() {
+            return Err(MtlsSharedOwnerError::BootMemberClear {
+                source: InterceptError::MembersRemain { observed: observed.members },
+            });
+        }
+        Ok(())
     }
 
     fn audit_shared_owner_snapshot(&self, owner: &SharedOwner) -> Result<(), MtlsSharedOwnerError> {
@@ -3530,7 +3588,7 @@ mod tests {
             Some(crate::mtls_intercept_port::InterceptState {
                 program,
                 policy_route: true,
-                intercept_mark_guard: false,
+                intercept_mark_guard: true,
                 members: self.members.lock().members.clone(),
             })
         }

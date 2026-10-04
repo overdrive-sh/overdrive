@@ -491,7 +491,6 @@ fn assert_refused_without_publication(
 /// refuses with `BootMemberClear` whose source is the clear's own error, and
 /// the rejected clear left the prior process's members unchanged.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 08-02 (S-ND295-13D)"]
 async fn a_rejected_boot_member_clear_refuses_the_composed_boot_with_its_own_cause() {
     assert!(
         is_root(),
@@ -524,7 +523,6 @@ async fn a_rejected_boot_member_clear_refuses_the_composed_boot_with_its_own_cau
 /// whose source is `InterceptError::MembersRemain` naming exactly those
 /// members.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 08-02 (S-ND295-13D)"]
 async fn a_boot_member_clear_that_leaves_members_refuses_with_the_members_it_observed() {
     assert!(
         is_root(),
@@ -559,7 +557,6 @@ async fn a_boot_member_clear_that_leaves_members_refuses_with_the_members_it_obs
 /// returned. The late success resurrects nothing: the gate stays BootClosed
 /// and no further intercept call is made.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 08-02 (S-ND295-13D)"]
 async fn a_boot_member_clear_that_commits_after_the_refusal_publishes_nothing() {
     assert!(
         is_root(),

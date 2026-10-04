@@ -1191,18 +1191,88 @@ impl MtlsIntercept for HostMtlsIntercept {
         self.shared_inbound(virt, agent_leg_c_port)
     }
 
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-02")]
     fn observe_shared_state(&self) -> Result<Option<InterceptState>> {
-        todo!("RED scaffold: D-295-R15 observe_shared_state — DELIVER step 08-02")
+        let Some(state) =
+            overdrive_netlink::nft::observe_shared_ip_intercept_state().map_err(|source| {
+                InterceptError::NftRuleInstallFailed { op: "observe-shared-state", source }
+            })?
+        else {
+            return Ok(None);
+        };
+        let policy_route = crate::mtls_intercept::observe_shared_policy_route()?;
+        let intercept_mark_guard =
+            overdrive_netlink::nft::observe_intercept_mark_guard().map_err(|source| {
+                InterceptError::NftRuleInstallFailed {
+                    op: "intercept-mark-guard-read-back",
+                    source,
+                }
+            })?;
+        Ok(Some(InterceptState {
+            program: postcondition_from_shared_identity(state.identity()),
+            policy_route,
+            intercept_mark_guard,
+            members: InterceptMembers {
+                managed_guest_ips: state.managed_guest_ips().clone(),
+                outbound_sources: state.outbound_sources().clone(),
+                inbound_destinations: state.inbound_destinations().clone(),
+            },
+        }))
     }
 
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-02")]
     fn converge_allocation_elements(
         &self,
         expected: &InterceptMembers,
     ) -> Result<Option<InterceptState>> {
-        let _ = expected;
-        todo!("RED scaffold: D-295-R12 converge_allocation_elements — DELIVER step 08-02")
+        let _counts = self.elements.counts.lock();
+        let Some(before) =
+            overdrive_netlink::nft::observe_shared_ip_intercept_state().map_err(|source| {
+                InterceptError::NftRuleInstallFailed { op: "converge-shared-members", source }
+            })?
+        else {
+            return Ok(None);
+        };
+        let observed_program = postcondition_from_shared_identity(before.identity());
+        let expected_program =
+            self.program.lock().clone().unwrap_or_else(|| before.identity().clone());
+        let expected_postcondition = postcondition_from_shared_identity(&expected_program);
+        if observed_program != expected_postcondition {
+            return Err(InterceptError::PostconditionMismatch {
+                expected: expected_postcondition,
+                observed: Some(observed_program),
+            });
+        }
+
+        let netlink_expected = overdrive_netlink::nft::SharedIpInterceptMembers {
+            managed_guest_ips: expected.managed_guest_ips.clone(),
+            outbound_sources: expected.outbound_sources.clone(),
+            inbound_destinations: expected.inbound_destinations.clone(),
+        };
+        let state = overdrive_netlink::nft::converge_shared_ip_intercept_members_atomically(
+            &expected_program,
+            &netlink_expected,
+        )
+        .map_err(|source| InterceptError::NftRuleInstallFailed {
+            op: "converge-shared-members",
+            source,
+        })?;
+        let policy_route = crate::mtls_intercept::observe_shared_policy_route()?;
+        let intercept_mark_guard =
+            overdrive_netlink::nft::observe_intercept_mark_guard().map_err(|source| {
+                InterceptError::NftRuleInstallFailed {
+                    op: "intercept-mark-guard-read-back",
+                    source,
+                }
+            })?;
+        Ok(Some(InterceptState {
+            program: postcondition_from_shared_identity(state.identity()),
+            policy_route,
+            intercept_mark_guard,
+            members: InterceptMembers {
+                managed_guest_ips: state.managed_guest_ips().clone(),
+                outbound_sources: state.outbound_sources().clone(),
+                inbound_destinations: state.inbound_destinations().clone(),
+            },
+        }))
     }
 
     fn remove_allocation_elements(

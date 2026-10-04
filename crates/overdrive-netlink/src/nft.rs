@@ -3036,13 +3036,6 @@ pub fn delete_shared_ip_intercept_elements_atomically(
     shared_ip::delete_elements(expected_program, source_addr, inbound_destinations)
 }
 
-#[doc(hidden)]
-pub fn clear_shared_ip_intercept_elements_atomically(
-    expected_program: &SharedIpInterceptIdentity,
-) -> Result<SharedIpInterceptState, NetlinkError> {
-    shared_ip::clear_elements(expected_program)
-}
-
 /// The complete dynamic member set of the node-shared IPv4 intercept program:
 /// a declarative whole-state target for
 /// [`converge_shared_ip_intercept_members_atomically`] (D-295-R12, R15).
@@ -3064,15 +3057,11 @@ pub struct SharedIpInterceptMembers {
 /// Requires a read-back equal to `expected` with the program and the foreign
 /// complement unchanged; a batch rejection preserves the pre-state.
 #[doc(hidden)]
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-02")]
 pub fn converge_shared_ip_intercept_members_atomically(
     expected_program: &SharedIpInterceptIdentity,
     expected: &SharedIpInterceptMembers,
 ) -> Result<SharedIpInterceptState, NetlinkError> {
-    let _ = (expected_program, expected);
-    todo!(
-        "RED scaffold: D-295-R12 converge_shared_ip_intercept_members_atomically — DELIVER step 08-02"
-    )
+    shared_ip::converge_members(expected_program, expected)
 }
 
 /// Observe the intercept-owned guard table `ip overdrive-mtls-guard` (D-295-R18).
@@ -4629,35 +4618,55 @@ mod shared_ip {
         mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
     }
 
-    pub(super) fn clear_elements(
+    pub(super) fn converge_members(
         expected: &SharedIpInterceptIdentity,
+        expected_members: &SharedIpInterceptMembers,
     ) -> Result<SharedIpInterceptState, NetlinkError> {
         let before = state_for(expected)?;
         let ids = set_ids()?;
-        let mut mutations = Vec::new();
-        for address in &before.managed_guest_ips {
-            mutations.push(ElementMutation {
-                set: ElementSet::ManagedGuestIps,
-                set_id: *ids.get(&ElementSet::ManagedGuestIps).expect("managed set id"),
-                key: address.octets().to_vec(),
-                add: false,
-            });
-        }
-        for address in &before.outbound_sources {
-            mutations.push(ElementMutation {
-                set: ElementSet::OutboundSources,
-                set_id: *ids.get(&ElementSet::OutboundSources).expect("outbound set id"),
-                key: address.octets().to_vec(),
-                add: false,
-            });
-        }
-        for destination in before.inbound_destinations.iter().copied() {
-            mutations.extend(member_mutations(&ids, [], [ElementKey::Destination(destination)])?);
-        }
+        let additions = expected_members
+            .managed_guest_ips
+            .difference(&before.managed_guest_ips)
+            .copied()
+            .map(ElementKey::ManagedGuest)
+            .chain(
+                expected_members
+                    .outbound_sources
+                    .difference(&before.outbound_sources)
+                    .copied()
+                    .map(ElementKey::OutboundSource),
+            )
+            .chain(
+                expected_members
+                    .inbound_destinations
+                    .difference(&before.inbound_destinations)
+                    .copied()
+                    .map(ElementKey::Destination),
+            );
+        let removals = before
+            .managed_guest_ips
+            .difference(&expected_members.managed_guest_ips)
+            .copied()
+            .map(ElementKey::ManagedGuest)
+            .chain(
+                before
+                    .outbound_sources
+                    .difference(&expected_members.outbound_sources)
+                    .copied()
+                    .map(ElementKey::OutboundSource),
+            )
+            .chain(
+                before
+                    .inbound_destinations
+                    .difference(&expected_members.inbound_destinations)
+                    .copied()
+                    .map(ElementKey::Destination),
+            );
+        let mutations = member_mutations(&ids, additions, removals)?;
         let mut expected_after = before.clone();
-        expected_after.managed_guest_ips.clear();
-        expected_after.outbound_sources.clear();
-        expected_after.inbound_destinations.clear();
+        expected_after.managed_guest_ips.clone_from(&expected_members.managed_guest_ips);
+        expected_after.outbound_sources.clone_from(&expected_members.outbound_sources);
+        expected_after.inbound_destinations.clone_from(&expected_members.inbound_destinations);
         mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
     }
 

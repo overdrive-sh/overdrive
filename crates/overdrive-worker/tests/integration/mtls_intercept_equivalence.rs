@@ -828,7 +828,6 @@ fn a_zero_listener_port_is_refused_before_any_program_change() {
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 08-02 (S-ND295-71)"]
 fn a_node_guard_dropped_with_no_members_leaves_no_member_state() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-71-no-member-drop-state");
@@ -869,7 +868,6 @@ fn a_node_guard_dropped_with_no_members_leaves_no_member_state() {
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 08-02 (S-ND295-71)"]
 fn a_node_guard_dropped_while_members_exist_keeps_the_program() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-71-drop-with-members");

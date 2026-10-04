@@ -326,10 +326,10 @@ impl Reconciler for VmReclamation {
 // ---------------------------------------------------------------------------
 
 /// Desired-side two-surface join for `VmReclamation` (ADR-0083 §D7): scan the
-/// whole-node `workloads/` intent prefix for `WorkloadIntent::Job` intents whose
+/// whole-node `workloads/` intent prefix for `Job` and `Service` intents whose
 /// driver is `WorkloadDriver::Vm`, then join that set against
 /// `ObservationStore::alloc_status_rows()` to populate `VmAllocFacts` per
-/// `AllocationId`.
+/// `AllocationId`. `Schedule` intents have no direct driver and are not joined.
 pub async fn hydrate_vm_reclamation_desired(
     ctx: &HydrationContext<'_>,
 ) -> Result<BTreeMap<AllocationId, VmAllocFacts>, HydrateError> {
@@ -339,9 +339,13 @@ pub async fn hydrate_vm_reclamation_desired(
 
     let mut vm_workloads: BTreeSet<WorkloadId> = BTreeSet::new();
     for (_key, intent) in records {
-        let WorkloadIntent::Job(job) = &intent else { continue };
-        if matches!(job.driver, WorkloadDriver::Vm(_)) {
-            vm_workloads.insert(job.id.clone());
+        let (workload_id, driver) = match &intent {
+            WorkloadIntent::Job(job) => (&job.id, &job.driver),
+            WorkloadIntent::Service(service) => (&service.id, &service.driver),
+            WorkloadIntent::Schedule(_) => continue,
+        };
+        if matches!(driver, WorkloadDriver::Vm(_)) {
+            vm_workloads.insert(workload_id.clone());
         }
     }
 

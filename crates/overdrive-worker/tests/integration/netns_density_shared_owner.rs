@@ -84,7 +84,7 @@ async fn shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree() {
     worker.audit_shared_owner().await.expect("full listener/task/rule read-back succeeds");
     let published = intercept.surface();
     assert_eq!(before.call_counts, (0, 0, 0));
-    assert_eq!(published.call_counts, (2, 1, 4));
+    assert_eq!(published.call_counts, (2, 1, 5));
     assert_eq!(published.listener_addresses.len(), 2);
     assert_ne!(published.listener_addresses[0], published.listener_addresses[1]);
     assert!(published.listener_addresses.iter().all(|address| address.port() != 0));
@@ -1712,7 +1712,6 @@ fn prior_process_state() -> (InterceptPostcondition, BTreeSet<SharedElement>) {
 /// S-ND295-13D — The fresh intercept owner refuses to start when stale members cannot be cleared.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 08-02 (S-ND295-13D)"]
 async fn a_fresh_owner_clears_stale_members_before_reading_the_program() {
     let (stale_program, stale_members) = prior_process_state();
     let intercept = Arc::new(RecordingSharedIntercept::left_by_a_prior_process(
@@ -1774,7 +1773,6 @@ async fn a_fresh_owner_clears_stale_members_before_reading_the_program() {
 /// S-ND295-13D — The fresh intercept owner refuses to start when stale members cannot be cleared.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 08-02 (S-ND295-13D)"]
 async fn a_failed_member_clear_refuses_startup_without_publication() {
     for script in [
         ConvergeElementsScript::Refuse { errno: libc::EBUSY },
