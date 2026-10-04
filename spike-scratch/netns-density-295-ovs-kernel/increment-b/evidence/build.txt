@@ -1,0 +1,2 @@
+   Compiling ovs-kernel-capacity-probe v0.1.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ovs-kernel/increment-b)
+    Finished `release` profile [optimized] target(s) in 0.65s

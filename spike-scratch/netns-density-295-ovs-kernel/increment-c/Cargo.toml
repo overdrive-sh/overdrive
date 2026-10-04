@@ -1,0 +1,10 @@
+[package]
+name = "ovs-kernel-capacity-probe"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+libc = "0.2"
+serde_json = "1"

@@ -1,0 +1,39 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-ovs-kernel/increment-b/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=3519d355cac117e963889c63 pid=833862
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <redacted canonical metal target>:/home/ubuntu/overdrive
+
+sent 819,080 bytes  received 111,962 bytes  109,534.35 bytes/sec
+total size is 1,013,888,410  speedup is 1,088.98
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+{"at_s": 0.00021617580205202103, "control": "stock OVS Generic Netlink UAPI direct configuration", "event": "identity", "guest_boots": 0, "lease_owner": "pid=833862\nstarted_at=2026-10-04T15:36:00Z\naction=run\nscenario=spike-ovs-kernel-increment-b\nworkspace=/Users/marcus/conductor/workspaces/helios/wellington-v2\ncommit=0fd3f756b584326ee38c939c130ab50ad955ec40\ntoken=3519d355cac117e963889c63\n", "namespace": "ok295-834212", "pid": 834212, "requested_taps": 16384, "uname": ["Linux", "em-determined-roentgen", "7.0.0-29-generic", "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026", "x86_64"], "userspace_forwarding_daemons": 0}
+{"at_s": 0.7781136836856604, "binary_sha256": "e9011a890718293478066e559cbf3cb785411804de03077b135d0af8e94c19e1", "event": "built", "rust_source_sha256": "d2125d23ab4ef327487f836cfaaaef7c546e1a53b80d49fa943dbb8f175929dd"}
+{"dp_ifindex":2,"event":"dp_ready","families":{"datapath":43,"flow":45,"vport":44},"packet_execute_requests":0,"pid":834291}
+{"at_s": 0.9638246595859528, "event": "local-gateway-configured", "global_gc_tuning": false, "namespace_only": true, "permanent_owned_neighbors": 16384}
+{"after":{"flows":0,"hit":0,"lost":1,"missed":1},"before":{"flows":0,"hit":0,"lost":0,"missed":0},"event":"cold_unconfigured_drop","reply_received":false,"upcall_pid":0}
+{"actual_tap_netdevices":4,"attach_and_flow_s":0.152381602,"byte_exact_icmp_roundtrips":8,"elapsed_s":0.152808794,"event":"stage_held","first_and_steady_roundtrips_each_port":2,"kernel_netdev_vports":4,"local_internal_vports":1,"packet_execute_requests":0,"pid":834291,"stats_after":{"flows":8,"hit":16,"lost":1,"missed":1},"stats_before":{"flows":8,"hit":0,"lost":1,"missed":1},"tap_fds":4,"traffic_s":0.000261113}
+{"all_upcall_pids_zero": true, "at_s": 1.1651038397103548, "distinct_ifindices": 4, "dp_stats": [16, 1, 1, 8], "event": "independent-audit", "exact_owner_fdinfo": 4, "held_taps": 4, "kernel_netdev_vports": 4, "local_internal_vports": 1, "output_only_flows": 8, "process_fds": 9, "process_threads": 1, "validated": true}
+{"actual_tap_netdevices":1024,"attach_and_flow_s":0.407747739,"byte_exact_icmp_roundtrips":2048,"elapsed_s":0.629670131,"event":"stage_held","first_and_steady_roundtrips_each_port":2,"kernel_netdev_vports":1024,"local_internal_vports":1,"packet_execute_requests":0,"pid":834291,"stats_after":{"flows":2048,"hit":4112,"lost":1,"missed":1},"stats_before":{"flows":2048,"hit":16,"lost":1,"missed":1},"tap_fds":1024,"traffic_s":0.020268447}
+{"all_upcall_pids_zero": true, "at_s": 1.8205136731266975, "distinct_ifindices": 1024, "dp_stats": [4112, 1, 1, 2048], "event": "independent-audit", "exact_owner_fdinfo": 1024, "held_taps": 1024, "kernel_netdev_vports": 1024, "local_internal_vports": 1, "output_only_flows": 2048, "process_fds": 1029, "process_threads": 1, "validated": true}
+{"actual_tap_netdevices":4096,"attach_and_flow_s":1.360899475,"byte_exact_icmp_roundtrips":8192,"elapsed_s":2.306608338,"event":"stage_held","first_and_steady_roundtrips_each_port":2,"kernel_netdev_vports":4096,"local_internal_vports":1,"packet_execute_requests":0,"pid":834291,"stats_after":{"flows":8192,"hit":20496,"lost":1,"missed":1},"stats_before":{"flows":8192,"hit":4112,"lost":1,"missed":1},"tap_fds":4096,"traffic_s":0.085827235}
+{"all_upcall_pids_zero": true, "at_s": 4.070639804936945, "distinct_ifindices": 4096, "dp_stats": [20496, 1, 1, 8192], "event": "independent-audit", "exact_owner_fdinfo": 4096, "held_taps": 4096, "kernel_netdev_vports": 4096, "local_internal_vports": 1, "output_only_flows": 8192, "process_fds": 4101, "process_threads": 1, "validated": true}
+{"actual_tap_netdevices":8192,"attach_and_flow_s":2.325804822,"byte_exact_icmp_roundtrips":16384,"elapsed_s":5.621414614,"event":"stage_held","first_and_steady_roundtrips_each_port":2,"kernel_netdev_vports":8192,"local_internal_vports":1,"packet_execute_requests":0,"pid":834291,"stats_after":{"flows":16384,"hit":53264,"lost":1,"missed":1},"stats_before":{"flows":16384,"hit":20496,"lost":1,"missed":1},"tap_fds":8192,"traffic_s":0.17589398}
+{"all_upcall_pids_zero": true, "at_s": 8.219690420664847, "distinct_ifindices": 8192, "dp_stats": [53264, 1, 1, 16384], "event": "independent-audit", "exact_owner_fdinfo": 8192, "held_taps": 8192, "kernel_netdev_vports": 8192, "local_internal_vports": 1, "output_only_flows": 16384, "process_fds": 8197, "process_threads": 1, "validated": true}
+{"actual_tap_netdevices":16384,"attach_and_flow_s":6.589108118,"byte_exact_icmp_roundtrips":32768,"elapsed_s":14.231536511,"event":"stage_held","first_and_steady_roundtrips_each_port":2,"kernel_netdev_vports":16384,"local_internal_vports":1,"packet_execute_requests":0,"pid":834291,"stats_after":{"flows":32768,"hit":118800,"lost":1,"missed":1},"stats_before":{"flows":32768,"hit":53264,"lost":1,"missed":1},"tap_fds":16384,"traffic_s":0.359051944}
+{"all_upcall_pids_zero": true, "at_s": 18.454117882996798, "distinct_ifindices": 16384, "dp_stats": [118800, 1, 1, 32768], "event": "independent-audit", "exact_owner_fdinfo": 16384, "held_taps": 16384, "kernel_netdev_vports": 16384, "local_internal_vports": 1, "output_only_flows": 32768, "process_fds": 16389, "process_threads": 1, "validated": true}
+{"after":{"flows":32767,"hit":118800,"lost":2,"missed":2},"before":{"flows":32768,"hit":118800,"lost":1,"missed":1},"event":"removed_flow_drop","held_taps":16384,"packet_execute_requests":0,"reply_received":false}
+{"deleted_exact_datapath":"ok295dp","event":"cleaned","generic_netlink_configuration_requests":49172,"packet_execute_requests":0,"released_taps":16384}
+{"at_s": 120.87164727691561, "event": "harness-exit", "full_population_validated": true, "rc": 0}
+{"at_s": 120.95032936707139, "different_keys": [], "event": "cleanup", "foreign_configuration_matched": true, "foreign_ovs_matched": true, "global_module_unload": false, "namespace": "ok295-834212", "namespace_absent": true, "new_oom_kills": 0, "owned_pid": 834291, "owned_process_absent": true, "stock_module_kept_loaded": true}
+{"at_s": 120.95585902035236, "event": "final", "passed": true, "wall_s": 120.9558577183634}
+{"launcher_rc": 0, "wall_s": 158.69594425000832}

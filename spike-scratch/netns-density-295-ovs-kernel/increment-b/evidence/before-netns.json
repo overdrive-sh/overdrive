@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "ip",
+    "netns",
+    "list"
+  ],
+  "rc": 0,
+  "stdout": "",
+  "stderr": ""
+}

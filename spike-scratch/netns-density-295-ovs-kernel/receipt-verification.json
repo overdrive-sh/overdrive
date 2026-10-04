@@ -1,0 +1,53 @@
+{
+  "bidirectional_pairs": 8192,
+  "gateway": [
+    {
+      "all_ids_covered": true,
+      "arp_roundtrips": 4,
+      "icmp_payload_roundtrips": 8,
+      "population": 4
+    },
+    {
+      "all_ids_covered": true,
+      "arp_roundtrips": 1024,
+      "icmp_payload_roundtrips": 2048,
+      "population": 1024
+    },
+    {
+      "all_ids_covered": true,
+      "arp_roundtrips": 4096,
+      "icmp_payload_roundtrips": 8192,
+      "population": 4096
+    },
+    {
+      "all_ids_covered": true,
+      "arp_roundtrips": 8192,
+      "icmp_payload_roundtrips": 16384,
+      "population": 8192
+    },
+    {
+      "all_ids_covered": true,
+      "arp_roundtrips": 16384,
+      "icmp_payload_roundtrips": 32768,
+      "population": 16384
+    }
+  ],
+  "lossless_receipt_hashes_passed": true,
+  "netlink_received_datagrams": 163886,
+  "netlink_sent_datagrams": 81943,
+  "packet_execute_requests": 0,
+  "passed": true,
+  "post_release_cleanup_passed": true,
+  "received_packet_family_messages": 0,
+  "request_family_command_counts": {
+    "(16, 3)": 4,
+    "(43, 1)": 1,
+    "(43, 2)": 1,
+    "(43, 3)": 16,
+    "(44, 1)": 16384,
+    "(45, 1)": 65536,
+    "(45, 2)": 1
+  },
+  "transparent_tcp_frames": 16384,
+  "userspace_actions_in_all_flow_installs": 0
+}

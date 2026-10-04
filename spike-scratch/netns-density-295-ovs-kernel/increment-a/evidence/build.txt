@@ -1,0 +1,10 @@
+    Updating crates.io index
+     Locking 12 packages to latest compatible versions
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling libc v0.2.190
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling ovs-kernel-capacity-probe v0.1.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ovs-kernel/increment-a)
+    Finished `release` profile [optimized] target(s) in 3.59s

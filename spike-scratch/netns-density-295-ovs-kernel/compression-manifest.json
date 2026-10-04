@@ -1,0 +1,98 @@
+[
+  {
+    "gzip_bytes": 310155,
+    "gzip_sha256": "8bfd379cfdc360b16f61106f8ca555d82eb736cfd082a172221a69748b4ebe78",
+    "original_bytes": 2164629,
+    "original_path": "increment-d/evidence/identities-16384.json",
+    "original_sha256": "d0d57720e4edbf5c234b285cec33969cb6be3003378ef8a741736d557ad5201a",
+    "retained_path": "increment-d/evidence/identities-16384.json.gz"
+  },
+  {
+    "gzip_bytes": 77332,
+    "gzip_sha256": "984209dcb7c73b8b33c78972178438b7967267b7db9e7bc04bb010c04271dbd9",
+    "original_bytes": 527627,
+    "original_path": "increment-d/evidence/identities-4096.json",
+    "original_sha256": "f7b13208f6f8538ce42dc107d3dc268a42508428dd0c38ec219b75916ddfc96e",
+    "retained_path": "increment-d/evidence/identities-4096.json.gz"
+  },
+  {
+    "gzip_bytes": 154437,
+    "gzip_sha256": "9fcca328cd49903d1555f3ecc8917c373b931176e16ded4195c1c49b5e07d8ca",
+    "original_bytes": 1064779,
+    "original_path": "increment-d/evidence/identities-8192.json",
+    "original_sha256": "499f88fde98ab222697b9117d15ad534c347b9d137d93c71f1956c7f8d475034",
+    "retained_path": "increment-d/evidence/identities-8192.json.gz"
+  },
+  {
+    "gzip_bytes": 93342,
+    "gzip_sha256": "39f558e1a12cc5b0e58093d630ee5bc281759a557be4d84969df52c2209d5172",
+    "original_bytes": 1219202,
+    "original_path": "increment-d/evidence/owned-neighbors.batch",
+    "original_sha256": "e30758141350f3a9b2fb147d6aa0923b29aa4bb4995ba72335d11b9592b55536",
+    "retained_path": "increment-d/evidence/owned-neighbors.batch.gz"
+  },
+  {
+    "gzip_bytes": 310071,
+    "gzip_sha256": "09e5da2c8dbb818bd8b154eb762d60961aa7e178d596d20aad4736188fb99340",
+    "original_bytes": 2164625,
+    "original_path": "increment-c/evidence/identities-16384.json",
+    "original_sha256": "e7c753db88aeb798dcc6bba23dd438e7d24449c7d09573e855cef16ca0a995bd",
+    "retained_path": "increment-c/evidence/identities-16384.json.gz"
+  },
+  {
+    "gzip_bytes": 77310,
+    "gzip_sha256": "670a2c0991eaafea6a943555c7a1f1bde90e0a3f97d06704974ebe4ca395e13f",
+    "original_bytes": 527624,
+    "original_path": "increment-c/evidence/identities-4096.json",
+    "original_sha256": "5ab060150e8ed3fa0c820928b154c52b053022c7d28ed14f7c388fac0fb6d736",
+    "retained_path": "increment-c/evidence/identities-4096.json.gz"
+  },
+  {
+    "gzip_bytes": 154399,
+    "gzip_sha256": "0be7d2723f734ad6f580f1c51e15445e3373ee78a39b7ccb4121ff24b3d33ffd",
+    "original_bytes": 1064776,
+    "original_path": "increment-c/evidence/identities-8192.json",
+    "original_sha256": "c1416007f580fa86c7e0c670d805ef1099966b708bcff6fcd76f35ca75caabfb",
+    "retained_path": "increment-c/evidence/identities-8192.json.gz"
+  },
+  {
+    "gzip_bytes": 93342,
+    "gzip_sha256": "39f558e1a12cc5b0e58093d630ee5bc281759a557be4d84969df52c2209d5172",
+    "original_bytes": 1219202,
+    "original_path": "increment-c/evidence/owned-neighbors.batch",
+    "original_sha256": "e30758141350f3a9b2fb147d6aa0923b29aa4bb4995ba72335d11b9592b55536",
+    "retained_path": "increment-c/evidence/owned-neighbors.batch.gz"
+  },
+  {
+    "gzip_bytes": 310071,
+    "gzip_sha256": "09e5da2c8dbb818bd8b154eb762d60961aa7e178d596d20aad4736188fb99340",
+    "original_bytes": 2164625,
+    "original_path": "increment-b/evidence/identities-16384.json",
+    "original_sha256": "e7c753db88aeb798dcc6bba23dd438e7d24449c7d09573e855cef16ca0a995bd",
+    "retained_path": "increment-b/evidence/identities-16384.json.gz"
+  },
+  {
+    "gzip_bytes": 77310,
+    "gzip_sha256": "670a2c0991eaafea6a943555c7a1f1bde90e0a3f97d06704974ebe4ca395e13f",
+    "original_bytes": 527624,
+    "original_path": "increment-b/evidence/identities-4096.json",
+    "original_sha256": "5ab060150e8ed3fa0c820928b154c52b053022c7d28ed14f7c388fac0fb6d736",
+    "retained_path": "increment-b/evidence/identities-4096.json.gz"
+  },
+  {
+    "gzip_bytes": 154399,
+    "gzip_sha256": "0be7d2723f734ad6f580f1c51e15445e3373ee78a39b7ccb4121ff24b3d33ffd",
+    "original_bytes": 1064776,
+    "original_path": "increment-b/evidence/identities-8192.json",
+    "original_sha256": "c1416007f580fa86c7e0c670d805ef1099966b708bcff6fcd76f35ca75caabfb",
+    "retained_path": "increment-b/evidence/identities-8192.json.gz"
+  },
+  {
+    "gzip_bytes": 93342,
+    "gzip_sha256": "39f558e1a12cc5b0e58093d630ee5bc281759a557be4d84969df52c2209d5172",
+    "original_bytes": 1219202,
+    "original_path": "increment-b/evidence/owned-neighbors.batch",
+    "original_sha256": "e30758141350f3a9b2fb147d6aa0923b29aa4bb4995ba72335d11b9592b55536",
+    "retained_path": "increment-b/evidence/owned-neighbors.batch.gz"
+  }
+]

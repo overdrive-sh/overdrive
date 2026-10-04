@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "sh",
+    "-c",
+    "command -v ovs-dpctl; command -v ovs-vswitchd; true"
+  ],
+  "rc": 0,
+  "stdout": "",
+  "stderr": ""
+}

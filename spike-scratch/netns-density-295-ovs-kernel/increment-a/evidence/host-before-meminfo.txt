@@ -1,0 +1,9 @@
+{
+  "argv": [
+    "cat",
+    "/proc/meminfo"
+  ],
+  "rc": 0,
+  "stdout": "MemTotal:       65401772 kB\nMemFree:        21832864 kB\nMemAvailable:   63451156 kB\nBuffers:         1050760 kB\nCached:         39007236 kB\nSwapCached:            0 kB\nActive:          8239600 kB\nInactive:       31905272 kB\nActive(anon):     157064 kB\nInactive(anon):   105136 kB\nActive(file):    8082536 kB\nInactive(file): 31800136 kB\nUnevictable:       15352 kB\nMlocked:            7252 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:             10140 kB\nWriteback:             0 kB\nAnonPages:        102904 kB\nMapped:           121508 kB\nShmem:            170436 kB\nKReclaimable:    2456108 kB\nSlab:            3059640 kB\nSReclaimable:    2456108 kB\nSUnreclaim:       603532 kB\nKernelStack:        5016 kB\nPageTables:         8344 kB\nSecPageTables:      5984 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    32700884 kB\nCommitted_AS:     528056 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:       37496 kB\nVmallocChunk:          0 kB\nPercpu:            91264 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:  23603200 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1966928 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      309812 kB\nDirectMap2M:    25464832 kB\nDirectMap1G:    40894464 kB\n",
+  "stderr": ""
+}
