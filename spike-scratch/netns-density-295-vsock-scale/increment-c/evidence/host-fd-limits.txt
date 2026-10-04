@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "sysctl",
+    "fs.file-max",
+    "fs.nr_open",
+    "kernel.threads-max",
+    "kernel.pid_max",
+    "vm.max_map_count"
+  ],
+  "rc": 0,
+  "stdout": "fs.file-max = 9223372036854775807\nfs.nr_open = 2147483584\nkernel.threads-max = 470322\nkernel.pid_max = 4194304\nvm.max_map_count = 1048576\n",
+  "stderr": ""
+}

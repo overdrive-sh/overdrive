@@ -1,0 +1,162 @@
+    Updating git repository `https://github.com/cloud-hypervisor/cloud-hypervisor`
+    Updating crates.io index
+     Locking 134 packages to latest Rust 1.95.0 compatible versions
+      Adding vfio-bindings v0.6.2 (available: v0.6.3)
+      Adding vfio_user v0.1.5 (available: v0.1.6)
+      Adding virtio-queue v0.17.0 (available: v0.18.0)
+      Adding vm-memory v0.17.1 (available: v0.17.2)
+ Downloading crates ...
+  Downloaded bitfield-struct v0.13.0
+  Downloaded darling v0.24.1
+  Downloaded debug-helper v0.3.14
+  Downloaded concat-idents v1.1.5
+  Downloaded bitflags v1.3.2
+  Downloaded open-enum-derive v0.5.3
+  Downloaded crc-any v3.1.0
+  Downloaded darling_macro v0.24.1
+  Downloaded enumn v0.1.14
+  Downloaded ident_case v1.0.1
+  Downloaded epoll v4.4.0
+  Downloaded thiserror-impl v2.0.21
+  Downloaded zstd-safe v7.3.0
+  Downloaded remain v0.2.16
+  Downloaded zstd v0.13.3
+  Downloaded vmm-sys-util v0.15.0
+  Downloaded darling_core v0.24.1
+  Downloaded uuid v1.27.0
+  Downloaded vm-memory v0.17.1
+  Downloaded vm-memory v0.18.0
+  Downloaded zerocopy-derive v0.8.59
+  Downloaded seccompiler v0.5.0
+  Downloaded itertools v0.15.0
+  Downloaded zlib-rs v0.6.8
+  Downloaded zerocopy v0.8.59
+  Downloaded syn v3.0.6
+  Downloaded virtio-bindings v0.2.7
+  Downloaded vhost v0.16.0
+  Downloaded serde_with v3.24.0
+  Downloaded virtio-queue v0.17.0
+  Downloaded zstd-sys v2.1.0+zstd.1.5.7
+  Downloaded rand v0.10.3
+  Downloaded cc v1.6.0
+  Downloaded kvm-ioctls v0.25.0
+  Downloaded kvm-bindings v0.14.1
+  Downloaded flate2 v1.1.10
+  Downloaded flume v0.12.0
+  Downloaded unicode-ident v1.0.26
+  Downloaded smallvec v1.16.2
+  Downloaded serde_with_macros v3.24.0
+  Downloaded thiserror v2.0.21
+  Downloaded spin v0.9.9
+  Downloaded find-msvc-tools v0.1.14
+  Downloaded simd-adler32 v0.3.10
+  Downloaded vfio_user v0.1.5
+  Downloaded open-enum v0.5.3
+  Downloaded vfio-bindings v0.6.2
+  Downloaded vfio-ioctls v0.7.0
+   Compiling libc v0.2.190
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling cfg-if v1.0.5
+   Compiling thiserror v2.0.21
+   Compiling rustversion v1.0.23
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.14
+   Compiling bitflags v1.3.2
+   Compiling log v0.4.34
+   Compiling bitflags v2.13.2
+   Compiling zerocopy v0.8.59
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling ident_case v1.0.1
+   Compiling strsim v0.11.1
+   Compiling itoa v1.0.18
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling memchr v2.8.3
+   Compiling pkg-config v0.3.34
+   Compiling kvm-ioctls v0.25.0
+   Compiling anyhow v1.0.104
+   Compiling untrusted v0.9.0
+   Compiling cpufeatures v0.3.1
+   Compiling zeroize v1.9.0
+   Compiling byteorder v1.5.0
+   Compiling scopeguard v1.2.0
+   Compiling chacha20 v0.10.2
+   Compiling virtio-bindings v0.2.7
+   Compiling rustls v0.23.45
+   Compiling crc32fast v1.5.2
+   Compiling zstd-safe v7.3.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling lock_api v0.4.14
+   Compiling subtle v2.6.1
+   Compiling either v1.18.0
+   Compiling simd-adler32 v0.3.10
+   Compiling once_cell v1.21.4
+   Compiling adler2 v2.0.1
+   Compiling miniz_oxide v0.9.1
+   Compiling spin v0.9.9
+   Compiling arc-swap v1.9.2
+   Compiling itertools v0.15.0
+   Compiling debug-helper v0.3.14
+   Compiling futures-core v0.3.34
+   Compiling futures-sink v0.3.34
+   Compiling fastrand v2.5.0
+   Compiling syn v3.0.6
+   Compiling syn v2.0.119
+   Compiling net_util v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling crc-any v3.1.0
+   Compiling smallvec v1.16.2
+   Compiling base64 v0.22.1
+   Compiling virtio-devices v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling flate2 v1.1.10
+   Compiling flume v0.12.0
+   Compiling serial_buffer v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling jobserver v0.1.35
+   Compiling getrandom v0.2.17
+   Compiling epoll v4.4.0
+   Compiling seccompiler v0.5.0
+   Compiling rand v0.10.3
+   Compiling cc v1.6.0
+   Compiling uuid v1.27.0
+   Compiling ring v0.17.14
+   Compiling zstd-sys v2.1.0+zstd.1.5.7
+   Compiling darling_core v0.24.1
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling remain v0.2.16
+   Compiling zerocopy-derive v0.8.59
+   Compiling open-enum-derive v0.5.3
+   Compiling concat-idents v1.1.5
+   Compiling bitfield-struct v0.13.0
+   Compiling enumn v0.1.14
+   Compiling open-enum v0.5.3
+   Compiling vm-memory v0.17.1
+   Compiling vm-memory v0.18.0
+   Compiling vm-allocator v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling darling_macro v0.24.1
+   Compiling darling v0.24.1
+   Compiling serde_with_macros v3.24.0
+   Compiling serde_with v3.24.0
+   Compiling vmm-sys-util v0.15.0
+   Compiling event_monitor v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling vfio-bindings v0.6.2
+   Compiling virtio-queue v0.17.0
+   Compiling rate_limiter v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling vhost v0.16.0
+   Compiling vfio_user v0.1.5
+   Compiling vm-virtio v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling rustls-webpki v0.103.15
+   Compiling kvm-bindings v0.14.1
+   Compiling vfio-ioctls v0.7.0
+   Compiling vm-migration v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling zstd v0.13.3
+   Compiling block v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling hypervisor v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling vm-device v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling pci v0.1.0 (https://github.com/cloud-hypervisor/cloud-hypervisor?rev=9ed824d6d08df3e96f7d5f50795d9449ac99f431#9ed824d6)
+   Compiling vsock-device-capacity-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-vsock-scale/increment-c)
+    Finished `release` profile [optimized] target(s) in 28.41s

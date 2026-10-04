@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"lease_acquired\": \"OVERDRIVE_METAL_LEASE_ACQUIRED token=d768a08145c03d7ef1c4fc26 pid=811085\", \"exact_owned_path\": \"/home/ubuntu/overdrive/spike-scratch/netns-density-295-vsock-scale/increment-a/__pycache__/snapshot.cpython-314.pyc\", \"exists_before\": true, \"cache_sha256\": \"7b421b7b20b882fdb0b23abb4f8007f3c1b3c0c96ca8926d62daee8338d4f25c\", \"exists_after\": false}\n{\"lease_exit\": 0, \"owner_exists_after\": false}\n",
+  "stderr": ""
+}

@@ -1,0 +1,61 @@
+{
+  "method": "Lossless gzip only, verified byte-for-byte decompression before replacing large text receipt. Canonical launcher redacts only configured target address in shared text; private exact archives remain ignored in out/.",
+  "files": [
+    {
+      "file": "increment-c/evidence/identities-16384.json",
+      "lossless_gzip_file": "increment-c/evidence/identities-16384.json.gz",
+      "original_bytes": 7342077,
+      "original_sha256": "23898cfdd4e36157176b6f39b28e7fe7c6f85b3d54522734892fead9ce74f8f9",
+      "gzip_sha256": "d773c85860973116f5c2f67a31b10cf424c4a1035747a52bc87252de913589d3",
+      "verified_round_trip": true
+    },
+    {
+      "file": "increment-c/evidence/identities-4096.json",
+      "lossless_gzip_file": "increment-c/evidence/identities-4096.json.gz",
+      "original_bytes": 1815448,
+      "original_sha256": "e2cfbf0f6850ebe4efc0f310a7fe34664f0ff023924d36456b51f6ea0d3d4c79",
+      "gzip_sha256": "69cf83a8ed3d4135352a9e3c15406e4d08a278c9a87e09392f8a16f227b84bb1",
+      "verified_round_trip": true
+    },
+    {
+      "file": "increment-c/evidence/before-processes.txt",
+      "lossless_gzip_file": "increment-c/evidence/before-processes.txt.gz",
+      "original_bytes": 19967,
+      "original_sha256": "808de481f70e9a06b205e7321124534af2f3a37e76e4bf5097ed90374f2de468",
+      "gzip_sha256": "57f5c004564994e6df8d46c804d50e594f1829541641eed16073c0baa2a33d31",
+      "verified_round_trip": true
+    },
+    {
+      "file": "increment-c/evidence/identities-8192.json",
+      "lossless_gzip_file": "increment-c/evidence/identities-8192.json.gz",
+      "original_bytes": 3654657,
+      "original_sha256": "92f1f79345377e4c5da0792ba2a0dba0899e189a5dbe60e2288cf593fd39ab2c",
+      "gzip_sha256": "df8ac69d074c05f93e90c78c4536ccbc409f189f5f427e7c1de514a8f5cf2eaf",
+      "verified_round_trip": true
+    },
+    {
+      "file": "increment-c/evidence/Cargo.lock.executed",
+      "lossless_gzip_file": "increment-c/evidence/Cargo.lock.executed.gz",
+      "original_bytes": 33066,
+      "original_sha256": "3ccf511ec010b89cbcd762d702a240e35254aabde3ef55a9c4f3df5e356f6663",
+      "gzip_sha256": "d779060867b6019f70f4e470f475ae4c6cfc1cab30ef56fe0adb9dc66e096696",
+      "verified_round_trip": true
+    },
+    {
+      "file": "increment-c/evidence/identities-1024.json",
+      "lossless_gzip_file": "increment-c/evidence/identities-1024.json.gz",
+      "original_bytes": 451480,
+      "original_sha256": "087ef3719f2ab38e9472df583a6d6c414141a93d4901cd0dc0f8ae12a9e4eae1",
+      "gzip_sha256": "dcd988704cbda4555e8420bf0c0214e3a2c0920dd02374c151da9f28f671404a",
+      "verified_round_trip": true
+    },
+    {
+      "file": "increment-c/evidence/after-processes.txt",
+      "lossless_gzip_file": "increment-c/evidence/after-processes.txt.gz",
+      "original_bytes": 19635,
+      "original_sha256": "3ab8d5b5585cc6766a59537429a005de65610c3d6c351c5e8bd379eb592b9821",
+      "gzip_sha256": "0c1b3b6a13e0c9b1dc6cfda35919b3cd2863036287a960d94658373abd452bdd",
+      "verified_round_trip": true
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "upstream_repository": "https://github.com/cloud-hypervisor/cloud-hypervisor",
+  "rev": "9ed824d6d08df3e96f7d5f50795d9449ac99f431",
+  "tag": "v53.0",
+  "read_only_local_source_clone": "/Users/marcus/git/cloud-hypervisor",
+  "sources": {
+    "virtio-devices/src/vsock/device.rs": {
+      "sha256": "08b305aa4cc1b745f0d40a8f7ecd6183fe63a3d6c9fb8c23b6b5b197e61b67a7",
+      "bytes": 34074
+    },
+    "virtio-devices/src/vsock/unix/muxer.rs": {
+      "sha256": "920b2294030159dce16a7d7fcf038f303a6656d5ba389785ec42d2f59b53f790",
+      "bytes": 67304
+    },
+    "virtio-devices/src/vsock/unix/mod.rs": {
+      "sha256": "db52ae2d35f3d009132250a9065c76b42b289902e4ef0443e4e3864d399946ee",
+      "bytes": 2744
+    },
+    "virtio-devices/src/device.rs": {
+      "sha256": "5c4a3603600a482aedafeac68528a350349b79da3e93101fc055ff2af7157c58",
+      "bytes": 21102
+    },
+    "virtio-devices/src/thread_helper.rs": {
+      "sha256": "cd83391f6f338fe93f81a2fd3f3838ca9bdc551a91a5fa60199cf658383c3c41",
+      "bytes": 2305
+    },
+    "vmm/src/device_manager.rs": {
+      "sha256": "31c2b0f7ccda0dbf85742a77116ef7828a7c19c178766d4e3ab513dbb64078b6",
+      "bytes": 230420
+    },
+    "Cargo.toml": {
+      "sha256": "bd656e48e132097e05668f7d9b30cd55755fd846d563169658af5de986dd537d",
+      "bytes": 3413
+    }
+  }
+}

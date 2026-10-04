@@ -1,0 +1,28 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-vsock-scale/increment-b/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=49b79f518d7e1a8ce665b801 pid=810746
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <redacted canonical metal target>:/home/ubuntu/overdrive
+rsync: [generator] delete_file: unlink(spike-scratch/netns-density-295-vsock-scale/increment-a/__pycache__/snapshot.cpython-314.pyc) failed: Permission denied (13)
+cannot delete non-empty directory: spike-scratch/netns-density-295-vsock-scale/increment-a/__pycache__
+
+sent 619,609 bytes  received 104,916 bytes  131,731.82 bytes/sec
+total size is 984,179,157  speedup is 1,358.38
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1356) [sender=3.4.4]
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 23[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1300[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 47.049266791989794}

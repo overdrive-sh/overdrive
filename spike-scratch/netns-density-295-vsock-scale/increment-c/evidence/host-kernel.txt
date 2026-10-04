@@ -1,0 +1,9 @@
+{
+  "argv": [
+    "uname",
+    "-a"
+  ],
+  "rc": 0,
+  "stdout": "Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux\n",
+  "stderr": ""
+}

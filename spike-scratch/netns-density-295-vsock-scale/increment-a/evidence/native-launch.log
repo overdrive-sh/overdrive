@@ -1,0 +1,31 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-vsock-scale/increment-a/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=803a1e28090ba06bf7215aee pid=809942
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <redacted canonical metal target>:/home/ubuntu/overdrive
+
+sent 4,270,813 bytes  received 152,218 bytes  421,241.05 bytes/sec
+total size is 984,102,889  speedup is 222.50
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+{"actual_guest_boots": 0, "at_s": 0.0011305613443255424, "event": "identity", "lease_owner": "pid=809942\nstarted_at=2026-10-04T11:00:52Z\naction=run\nscenario=spike-vsock-increment-a\nworkspace=/Users/marcus/conductor/workspaces/helios/wellington-v2\ncommit=5ea2d0c506f5c1f0672c2a4b5b7c5d0d415d6bde\ntoken=803a1e28090ba06bf7215aee\n", "pid": 810294, "requested_count": 16384, "runner_sha256": "fa73ba13c2ab4e2e9c8d03279d2af53d21f61ce7f75e83a796c248db1c0be0ad", "rust_source_sha256": "8363e2849f4a701e3aa081cd15a62e20ac8da58a3697f3a3d1eb8214f5629356", "uname": ["Linux", "em-determined-roentgen", "7.0.0-29-generic", "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026", "x86_64"], "upstream_git_rev": "9ed824d6d08df3e96f7d5f50795d9449ac99f431", "user_approved_boundary": "stock activated transport devices and independent muxers; no guest cohort"}
+{"at_s": 0.07753440085798502, "error": "name 'OUT' is not defined", "event": "probe-failure", "trace": "Traceback (most recent call last):\n  File \"/home/ubuntu/overdrive/spike-scratch/netns-density-295-vsock-scale/increment-a/run.py\", line 62, in <module>\n    raw('rustc-version.txt',['rustc','-Vv']);raw('host-limits.txt',['cat','/proc/self/limits']);raw('host-kernel.txt',['uname','-a']);raw('host-meminfo-before.txt',['cat','/proc/meminfo']);raw('host-vmstat-before.txt',['cat','/proc/vmstat']);raw('host-fd-limits.txt',['sysctl','fs.file-max','fs.nr_open','kernel.threads-max','kernel.pid_max','vm.max_map_count']);BEFORE=snapshot.snap('before')\n                                                                                                                                                                                                                                                                                                                                                                                  ~~~~~~~~~~~~~^^^^^^^^^^\n  File \"/home/ubuntu/overdrive/spike-scratch/netns-density-295-vsock-scale/increment-a/snapshot.py\", line 9, in snap\n    result[key]=pathlib.Path(path).read_text();(OUT/(prefix+'-'+key+'.txt')).write_text(result[key])\n                                                ^^^\nNameError: name 'OUT' is not defined\n"}
+{"actual_guest_boots": 0, "administrative_configuration_matched": true, "at_s": 0.07789824903011322, "different_keys": [], "event": "cleanup", "exact_owned_residual_sockets_removed_after_process_exit": [], "foreign_configuration_mutated": false, "global_limits_changed": false, "new_host_oom_kills": 0, "owned_pid": null, "owned_pid_alive": false, "owned_socket_directory": "/run/vs295-scale-810294", "owned_socket_directory_exists": false}
+{"at_s": 0.08373952098190784, "event": "final", "passed": false, "wall_s": 0.0837374571710825}
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1300[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 58.0093982500257}

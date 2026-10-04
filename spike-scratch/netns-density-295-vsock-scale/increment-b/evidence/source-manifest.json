@@ -1,0 +1,11 @@
+{
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-vsock-scale/increment-b/run.py",
+  "head": "5ea2d0c506f5c1f0672c2a4b5b7c5d0d415d6bde",
+  "sources": {
+    "spike-scratch/netns-density-295-vsock-scale/increment-b/Cargo.toml": "0d25b8c3fce98cec12ae0e08d17bdbd95dcd1688690d0e872040b5008d53715f",
+    "spike-scratch/netns-density-295-vsock-scale/increment-b/launch-executed.py": "85290adf3bb4a0081cd4c063bf48e6c5a98a4b00b72e1095ce9a817aea5be144",
+    "spike-scratch/netns-density-295-vsock-scale/increment-b/run.py": "34488c50322eb47ecf524b8b75a6c2559e62481bf09e0d08d92838e1f32042a1",
+    "spike-scratch/netns-density-295-vsock-scale/increment-b/snapshot.py": "5a2db62a0332f7785ad9fd4595098e29dee106a2e4c9d3d036a27a022ef383ff",
+    "spike-scratch/netns-density-295-vsock-scale/increment-b/src/main.rs": "8363e2849f4a701e3aa081cd15a62e20ac8da58a3697f3a3d1eb8214f5629356"
+  }
+}
