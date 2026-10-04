@@ -1,0 +1,40 @@
+{
+  "actual_vhost_empty_message_receipts": 8,
+  "all_empty_actual_udp_headers_len8_ip28": true,
+  "all_empty_recvs_return_zero_with_pollin": true,
+  "all_empty_sends_return_zero": true,
+  "ordinary_udp_empty_receipts": 8,
+  "payload_sequence_per_owner": {
+    "295300": [
+      0,
+      0,
+      1,
+      0,
+      1431,
+      59000,
+      0
+    ],
+    "295301": [
+      0,
+      0,
+      1,
+      0,
+      1431,
+      59000,
+      0
+    ]
+  },
+  "per_owner_tuple": [
+    {
+      "cid": 295300,
+      "peer": "127.0.0.2:36271",
+      "proxy": "127.0.0.1:49468"
+    },
+    {
+      "cid": 295301,
+      "peer": "127.0.0.3:52321",
+      "proxy": "127.0.0.1:49468"
+    }
+  ],
+  "roundtrips": 14
+}

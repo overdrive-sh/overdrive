@@ -1,0 +1,20 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.36s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-aya-zero-udp/increment-c/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+FATAL: lease holder did not acknowledge acquisition
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 75[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1300[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 73.36971224998706}

@@ -1,0 +1,8 @@
+{
+  "sample_count": 6,
+  "peak_qemu_rss_kib": 309284,
+  "observed_cpu_seconds_delta": 5.62,
+  "observed_wall_seconds_delta": 5.0027726804837584,
+  "clock_ticks": 100,
+  "scope": "QEMU boot, probe and shutdown; not transport throughput"
+}

@@ -1,0 +1,12 @@
+{
+  "/lib/modules/7.0.0-29-generic/kernel/drivers/vhost/vhost.ko.zst": "29c3feb0628be99e16eb7542e3021051e112707102cb0dd33cdaa4310bada070",
+  "/lib/modules/7.0.0-29-generic/kernel/drivers/vhost/vhost_iotlb.ko.zst": "eefbe86f4c53a97dd483b0fba6e6f7e5b5a4635b91836f76113e3e8dbc9babf0",
+  "/lib/modules/7.0.0-29-generic/kernel/drivers/vhost/vhost_vsock.ko.zst": "8b4cffb7c8d7e1d37e7ed38c33ed7949adcfeb143d8f4420c5b2a17be2884bcb",
+  "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst": "478dc2790cab03b9c494133a8a20d96ca4c126b43ad226b69e2df57968e27306",
+  "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst": "dcab15ab168919bfe43d49d3a9f5ba8d8b884acfe62e090d4684ea73eb43c680",
+  "bpf_elf": "7eeaef2c033a3ed7f23d16acb4480e7b4e6e6c5d06d2526eef672fd4123eef29",
+  "busybox": "df12634c17fcdca839ae5dc47d7627b7558511f7645de7c99ccf097a0f28ed5b",
+  "executed_initramfs_sha256": "7f87afda2017f1ca48acd58ed96cfec7e9d8bf17bb6ff0d08f8e94356825bbf6",
+  "probe_binary": "4fe83b0ef6144b1466006d7a20d75c4302a437a9a6e30046afe16ab81aad20ea",
+  "stock_kernel_image": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682"
+}

@@ -1,0 +1,31 @@
+{
+  "all_executed_source_manifests_match": true,
+  "captured_receipt_summary": "increment-f/evidence/receipt-summary.derived.json",
+  "complete_remote_evidence_retrieved_before_next_sync": [
+    "a",
+    "b",
+    "d",
+    "f"
+  ],
+  "current_original_archive_readback": "archive-readback.derived.json",
+  "findings_local_links_valid": true,
+  "generated_builds_ignored": true,
+  "historical_launcher_retrieval_receipts_retained": false,
+  "launcher_capture_scope": "metal command output and launcher exit/wall time; retrieval runs after the log file closes",
+  "native_terminal_exit": true,
+  "no_remote_sync_for": [
+    "c",
+    "e"
+  ],
+  "post_release_readback": "post-release-readback.json",
+  "private_vm_fd_before_after": [
+    4,
+    4
+  ],
+  "private_vm_sockhash_occupied_after_clear": 0,
+  "private_vm_tcx_empty_after_detach": true,
+  "private_vm_vhost_vsock_final_module_usage": 0,
+  "provenance_scope": "post-execution derived audit; not a captured launcher retrieval receipt",
+  "py_compile_exit": 0,
+  "retrieval_order_statement_scope": "probe-agent execution chronology; original archive availability and serial equality are verified by current readback"
+}

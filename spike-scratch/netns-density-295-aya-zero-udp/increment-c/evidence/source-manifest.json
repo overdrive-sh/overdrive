@@ -1,0 +1,13 @@
+{
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-aya-zero-udp/increment-c/run.py",
+  "head": "42f5d3689e7f038019b2d41c2d8c092898294bec",
+  "sources": {
+    "spike-scratch/netns-density-295-aya-zero-udp/increment-c/Cargo.lock": "dec7d2ff20878a26e4771a0288d528b9d915c8af8f42987cbf0b9fbf53866dbc",
+    "spike-scratch/netns-density-295-aya-zero-udp/increment-c/Cargo.toml": "ae72e428b443551291349c37bcc3f06c9713d22260f48156e3883f8e5e48f856",
+    "spike-scratch/netns-density-295-aya-zero-udp/increment-c/bpf/Cargo.lock": "b171f9848171a424269871240cb16c993ca0a548af94744cb8349ff1513abe1e",
+    "spike-scratch/netns-density-295-aya-zero-udp/increment-c/bpf/Cargo.toml": "2e08d3a5341ee03af6ce061858cd5dbbc63f2e04029d42823b2b13e347ee232f",
+    "spike-scratch/netns-density-295-aya-zero-udp/increment-c/bpf/src/main.rs": "22f91fafa95ce3382fb23f56dc744035124e0885424915744283f46067b70201",
+    "spike-scratch/netns-density-295-aya-zero-udp/increment-c/run.py": "d8441ec6df3afa77e09d120b28369f8e18ea451068d7a0d2f2864617c696e438",
+    "spike-scratch/netns-density-295-aya-zero-udp/increment-c/src/main.rs": "0785a14261b1feca16c47114a5d82b834ce0943d2911322ac9f6d9e51adac119"
+  }
+}

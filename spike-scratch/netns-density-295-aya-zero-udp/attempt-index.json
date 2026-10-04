@@ -1,0 +1,101 @@
+[
+  {
+    "current_archive_readback": "archive-readback.derived.json",
+    "executed_manifest": "increment-a/evidence/executed-source-manifest.json",
+    "executed_sources_match": true,
+    "historical_retrieval_receipt_retained": false,
+    "ignored_original_archive": "out/increment-a-private.tar.gz",
+    "increment": "increment-a",
+    "launcher_capture": "increment-a/evidence/native-launch.log",
+    "launcher_capture_scope": "metal command output and launcher exit/wall time; excludes post-close retrieval console messages",
+    "outcome": "Rust fixture compile error; no native BPF execution",
+    "remote_execution": true,
+    "source_manifest": "increment-a/evidence/source-manifest.json"
+  },
+  {
+    "current_archive_readback": "archive-readback.derived.json",
+    "executed_manifest": "increment-b/evidence/executed-source-manifest.json",
+    "executed_sources_match": true,
+    "historical_retrieval_receipt_retained": false,
+    "ignored_original_archive": "out/increment-b-private.tar.gz",
+    "increment": "increment-b",
+    "launcher_capture": "increment-b/evidence/native-launch.log",
+    "launcher_capture_scope": "metal command output and launcher exit/wall time; excludes post-close retrieval console messages",
+    "native_result": {
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "host_role_pass": false,
+      "lease_release_after_result": true,
+      "qemu_exit": 0,
+      "qemu_pid_absent": true,
+      "wall_s": 7.9071554793044925
+    },
+    "outcome": "Native repeated zero and small messages pass both ways; 59000-byte timeout",
+    "remote_execution": true,
+    "source_manifest": "increment-b/evidence/source-manifest.json"
+  },
+  {
+    "historical_retrieval_receipt_retained": false,
+    "increment": "increment-c",
+    "launcher_capture": "increment-c/evidence/native-launch.log",
+    "launcher_capture_scope": "metal command output and launcher exit/wall time; excludes post-close retrieval console messages",
+    "outcome": "Canonical lease acknowledgement failure before source sync",
+    "remote_execution": false,
+    "retained_failure_evidence": "lease-acquisition failure and launcher return code only; no retained retrieval-error receipt",
+    "source_manifest": "increment-c/evidence/source-manifest.json"
+  },
+  {
+    "current_archive_readback": "archive-readback.derived.json",
+    "executed_manifest": "increment-d/evidence/executed-source-manifest.json",
+    "executed_sources_match": true,
+    "historical_retrieval_receipt_retained": false,
+    "ignored_original_archive": "out/increment-d-private.tar.gz",
+    "increment": "increment-d",
+    "launcher_capture": "increment-d/evidence/native-launch.log",
+    "launcher_capture_scope": "metal command output and launcher exit/wall time; excludes post-close retrieval console messages",
+    "native_result": {
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "host_role_pass": false,
+      "lease_release_after_result": true,
+      "qemu_exit": 0,
+      "qemu_pid_absent": true,
+      "wall_s": 17.07028420176357
+    },
+    "outcome": "Native SK_SKB load accepted; TC witness verifier rejected variable zero-size read",
+    "remote_execution": true,
+    "source_manifest": "increment-d/evidence/source-manifest.json"
+  },
+  {
+    "historical_retrieval_receipt_retained": false,
+    "increment": "increment-e",
+    "launcher_capture": "increment-e/evidence/native-launch.log",
+    "launcher_capture_scope": "metal command output and launcher exit/wall time; excludes post-close retrieval console messages",
+    "outcome": "Canonical lease acknowledgement failure before source sync",
+    "remote_execution": false,
+    "retained_failure_evidence": "lease-acquisition failure and launcher return code only; no retained retrieval-error receipt",
+    "source_manifest": "increment-e/evidence/source-manifest.json"
+  },
+  {
+    "current_archive_readback": "archive-readback.derived.json",
+    "executed_manifest": "increment-f/evidence/executed-source-manifest.json",
+    "executed_sources_match": true,
+    "historical_retrieval_receipt_retained": false,
+    "ignored_original_archive": "out/increment-f-private.tar.gz",
+    "increment": "increment-f",
+    "launcher_capture": "increment-f/evidence/native-launch.log",
+    "launcher_capture_scope": "metal command output and launcher exit/wall time; excludes post-close retrieval console messages",
+    "native_result": {
+      "bpf_loaded_only_inside_qemu": true,
+      "custom_kernel_module_loaded": false,
+      "host_role_pass": true,
+      "lease_release_after_result": true,
+      "qemu_exit": 0,
+      "qemu_pid_absent": true,
+      "wall_s": 6.529951892793179
+    },
+    "outcome": "WORKS: native full zero/payload sequence, framing negatives, explicit cleanup",
+    "remote_execution": true,
+    "source_manifest": "increment-f/evidence/source-manifest.json"
+  }
+]

@@ -1,0 +1,42 @@
+{
+  "archives": [
+    {
+      "archive_has_native_serial": false,
+      "archive_sha256": "60359d92a61d1c83dc321eebe68661caa50bd9eab3d9869f5e1f571382556662",
+      "ignored_original_archive": "out/increment-a-private.tar.gz",
+      "increment": "increment-a",
+      "readback_scope": "current retained archive readback; not an original launcher retrieval receipt"
+    },
+    {
+      "archive_native_serial_member": "evidence/native-serial.log",
+      "archive_sha256": "f5deb23122ddb405c6b6e491c85545e107d61c3130fbd03b3d264e1904998000",
+      "ignored_original_archive": "out/increment-b-private.tar.gz",
+      "increment": "increment-b",
+      "native_serial_sha256": "9af62ed739ad1361c5b891100d40a33d80c5b7e3cb92a2128818b3697bbfc6c5",
+      "readback_scope": "current retained archive readback; not an original launcher retrieval receipt",
+      "retained_native_serial_byte_identical": true
+    },
+    {
+      "archive_native_serial_member": "evidence/native-serial.log",
+      "archive_sha256": "8f28bbc9de57584e734ebe75a87774a063c041f9d6bab3be6b07cbe24489da86",
+      "ignored_original_archive": "out/increment-d-private.tar.gz",
+      "increment": "increment-d",
+      "native_serial_sha256": "5944fcd196d7493f2f8000f3afdb75a13451296fdfc67a62bca3e8a1954269b2",
+      "readback_scope": "current retained archive readback; not an original launcher retrieval receipt",
+      "retained_native_serial_byte_identical": true
+    },
+    {
+      "archive_native_serial_member": "evidence/native-serial.log",
+      "archive_sha256": "253237d0ae93623f77f46ad59fdbfbef7a4eafe3747e80ee04ee945f6b6dd002",
+      "ignored_original_archive": "out/increment-f-private.tar.gz",
+      "increment": "increment-f",
+      "native_serial_sha256": "43c837e1c3c90e6c682b49971113c8cd8792d756ac52dd556adac6b28a78d1d5",
+      "readback_scope": "current retained archive readback; not an original launcher retrieval receipt",
+      "retained_native_serial_byte_identical": true
+    }
+  ],
+  "historical_launcher_retrieval_receipts_retained": false,
+  "kind": "derived post-execution R1 documentary readback",
+  "launcher_capture_scope": "metal command output and launcher exit/wall time; retrieval runs after the log file closes",
+  "readback_utc": "2026-10-04T19:41:32.133745+00:00"
+}
