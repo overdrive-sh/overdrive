@@ -1061,8 +1061,8 @@ fn shared_program_for_targets(
 
 fn observe_shared_ip_program() -> std::result::Result<Option<InterceptPostcondition>, NetlinkError>
 {
-    overdrive_netlink::nft::observe_shared_ip_intercept()
-        .map(|identity| identity.map(|identity| postcondition_from_shared_identity(&identity)))
+    overdrive_netlink::nft::observe_shared_ip_intercept_state()
+        .map(|state| state.map(|state| postcondition_from_shared_identity(state.identity())))
 }
 
 fn replace_shared_ip_program(

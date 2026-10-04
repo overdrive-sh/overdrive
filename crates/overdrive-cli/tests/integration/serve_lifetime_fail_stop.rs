@@ -799,7 +799,6 @@ fn a_shared_network_fail_stop_shutdown_is_abandoned_when_the_ten_second_bound_el
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 08-03 (S-ND295-68)"]
 fn a_repaired_shared_network_loss_never_ends_serve() {
     let capture = Capture::new();
     let (verdicts, trace) = on_current_thread(&capture, async {

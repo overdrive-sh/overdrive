@@ -1537,9 +1537,8 @@ impl SharedNetworkSupervisorHandle {
     }
 
     #[expect(
-        clippy::collapsible_match,
         clippy::too_many_lines,
-        reason = "RUN-295-B keeps component classification and the cadence/deadline state machine in one exact private owner future"
+        reason = "RUN-295-B keeps the cadence/deadline state machine in one exact private owner future"
     )]
     async fn run_mtls_owner(
         shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
@@ -1558,73 +1557,6 @@ impl SharedNetworkSupervisorHandle {
                         | overdrive_core::guest_network::SharedGuestNetworkComponent::Dns
                 )
             };
-        let component_for =
-            |error: &overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError| {
-                match error {
-                    overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerBind {
-                        leg, ..
-                    }
-                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerLocalAddr {
-                        leg, ..
-                    }
-                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerPostcondition {
-                        leg, ..
-                    }
-                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskReturned {
-                        leg,
-                    }
-                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskFailed {
-                        leg, ..
-                    }
-                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskPanicked {
-                        leg,
-                    }
-                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskCancelled {
-                        leg,
-                    } => match leg {
-                        overdrive_worker::mtls_intercept::InterceptLeg::F => {
-                            overdrive_core::guest_network::SharedGuestNetworkComponent::LegF
-                        }
-                        overdrive_worker::mtls_intercept::InterceptLeg::C => {
-                            overdrive_core::guest_network::SharedGuestNetworkComponent::LegC
-                        }
-                    },
-                    overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::Intercept {
-                        source,
-                    } => match source {
-                        overdrive_worker::mtls_intercept::InterceptError::PostconditionMismatch {
-                            ..
-                        }
-                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedReplaceFailed {
-                            ..
-                        }
-                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedRollbackFailed {
-                            ..
-                        }
-                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedRollbackPostconditionMismatch {
-                            ..
-                        }
-                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedReplacementMismatchRolledBack {
-                            ..
-                        }
-                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedReplacementReadFailedRolledBack {
-                            ..
-                        } => overdrive_core::guest_network::SharedGuestNetworkComponent::IpRules,
-                        _ => overdrive_core::guest_network::SharedGuestNetworkComponent::Supervisor,
-                    },
-                    overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::BootMemberClear {
-                        ..
-                    }
-                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::MemberMismatch {
-                        ..
-                    }
-                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::MemberRepair {
-                        ..
-                    } => overdrive_core::guest_network::SharedGuestNetworkComponent::IpSets,
-                    _ => overdrive_core::guest_network::SharedGuestNetworkComponent::Supervisor,
-                }
-            };
-
         loop {
             tokio::select! {
                 biased;
@@ -1634,7 +1566,7 @@ impl SharedNetworkSupervisorHandle {
 
             let (component, listener_task_exit) = match mtls_worker.audit_shared_owner().await {
                 Ok(()) => continue,
-                Err(source) => (component_for(&source), Self::listener_task_exit_leg(&source)),
+                Err(source) => (source.component(), Self::listener_task_exit_leg(&source)),
             };
             if !exec.begin_recovery(component) {
                 return Ok(());
@@ -1680,18 +1612,17 @@ impl SharedNetworkSupervisorHandle {
                 }
 
                 let first_remaining = if let Some(source) = supervisor_failure {
-                    Some((component_for(&source), None))
+                    Some((source.component(), None))
                 } else {
                     match mtls_worker.converge_shared_owner().await {
                         Ok(()) => match mtls_worker.audit_shared_owner().await {
                             Ok(()) => None,
-                            Err(source) => Some((
-                                component_for(&source),
-                                Self::listener_task_exit_leg(&source),
-                            )),
+                            Err(source) => {
+                                Some((source.component(), Self::listener_task_exit_leg(&source)))
+                            }
                         },
                         Err(source) => {
-                            Some((component_for(&source), Self::listener_task_exit_leg(&source)))
+                            Some((source.component(), Self::listener_task_exit_leg(&source)))
                         }
                     }
                 };

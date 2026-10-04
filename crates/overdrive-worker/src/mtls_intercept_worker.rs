@@ -268,11 +268,33 @@ impl MtlsSharedOwnerError {
     /// | `Intercept` | `IpRules` |
     /// | `MemberMismatch`, `MemberRepair`, `BootMemberClear` | `IpSets` |
     /// | `NotStarted`, `OwnerShutdown`, `TaskObserverClosed` | `Supervisor` |
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-03")]
+    #[allow(
+        clippy::missing_const_for_fn,
+        reason = "the accepted API pins component() as a non-const public method"
+    )]
     #[must_use]
     pub fn component(&self) -> overdrive_core::guest_network::SharedGuestNetworkComponent {
-        let _ = self;
-        todo!("RED scaffold: D-295-R15 MtlsSharedOwnerError::component — DELIVER step 08-03")
+        use overdrive_core::guest_network::SharedGuestNetworkComponent as Component;
+
+        match self {
+            Self::ListenerBind { leg, .. }
+            | Self::ListenerLocalAddr { leg, .. }
+            | Self::ListenerPostcondition { leg, .. }
+            | Self::TaskReturned { leg }
+            | Self::TaskFailed { leg, .. }
+            | Self::TaskPanicked { leg }
+            | Self::TaskCancelled { leg } => match leg {
+                crate::mtls_intercept::InterceptLeg::F => Component::LegF,
+                crate::mtls_intercept::InterceptLeg::C => Component::LegC,
+            },
+            Self::Intercept { .. } => Component::IpRules,
+            Self::MemberMismatch { .. }
+            | Self::MemberRepair { .. }
+            | Self::BootMemberClear { .. } => Component::IpSets,
+            Self::NotStarted | Self::OwnerShutdown | Self::TaskObserverClosed => {
+                Component::Supervisor
+            }
+        }
     }
 }
 
@@ -841,6 +863,7 @@ struct CapabilityRecord {
     capability: Capability,
     lifecycle: CapabilityLifecycle,
     elements: CapabilityElements,
+    has_acquired_elements: bool,
     handles: Vec<EnforcedConnection>,
     relays: Vec<JoinHandle<()>>,
     in_flight: usize,
@@ -938,6 +961,7 @@ impl CapabilityRegistry {
                 capability,
                 lifecycle: CapabilityLifecycle::Pending,
                 elements: CapabilityElements { outbound: None, inbound: Vec::new() },
+                has_acquired_elements: false,
                 handles: Vec::new(),
                 relays: Vec::new(),
                 in_flight: 0,
@@ -989,8 +1013,22 @@ impl CapabilityRegistry {
         Some(CapabilityRetirement { inner: Arc::clone(&self.inner), key })
     }
 
-    fn has_live_records(&self) -> bool {
-        !self.inner.state.lock().records.is_empty()
+    fn expected_intercept_members(&self) -> crate::mtls_intercept_port::InterceptMembers {
+        let state = self.inner.state.lock();
+        let mut expected = crate::mtls_intercept_port::InterceptMembers::default();
+        for record in state.records.values().filter(|record| record.has_acquired_elements) {
+            let source = record.capability.source_addr;
+            expected.managed_guest_ips.insert(source);
+            expected.outbound_sources.insert(source);
+            expected.inbound_destinations.extend(
+                record
+                    .capability
+                    .allowed_ports
+                    .iter()
+                    .map(|port| SocketAddrV4::new(source, port.get())),
+            );
+        }
+        expected
     }
 
     fn claim_locked(
@@ -1017,12 +1055,18 @@ impl PendingCapability {
     fn retain_outbound(&mut self, guard: Box<dyn InterceptGuard>) {
         if let Some(elements) = self.elements.as_mut() {
             elements.outbound = Some(guard);
+            if let Some(record) = self.inner.state.lock().records.get_mut(&self.key) {
+                record.has_acquired_elements = true;
+            }
         }
     }
 
     fn retain_inbound(&mut self, guard: Box<dyn InterceptGuard>) {
         if let Some(elements) = self.elements.as_mut() {
             elements.inbound.push(guard);
+            if let Some(record) = self.inner.state.lock().records.get_mut(&self.key) {
+                record.has_acquired_elements = true;
+            }
         }
     }
 
@@ -2115,7 +2159,10 @@ impl MtlsInterceptWorker {
             state.lifecycle = SharedOwnerLifecycle::Starting;
             owner
         };
-        let result = self.converge_shared_owner_inner(&mut owner);
+        let result = {
+            let _element_effects = self.element_effects.lock().await;
+            self.converge_shared_owner_inner(&mut owner)
+        };
         let mut state = self.shared_owner.lock();
         state.owner = Some(owner);
         state.lifecycle = SharedOwnerLifecycle::Published;
@@ -2129,6 +2176,7 @@ impl MtlsInterceptWorker {
         reason = "the exact seven-method worker surface remains async"
     )]
     pub async fn audit_shared_owner(&self) -> Result<(), MtlsSharedOwnerError> {
+        let _element_effects = self.element_effects.lock().await;
         let state = self.shared_owner.lock();
         let Some(owner) = state.owner.as_ref() else {
             return match state.lifecycle {
@@ -2210,7 +2258,11 @@ impl MtlsInterceptWorker {
             guard: Some(guard),
             expected,
         };
-        if let Err(source) = self.audit_shared_owner_snapshot(&owner) {
+        let audit = {
+            let _element_effects = self.element_effects.lock().await;
+            self.audit_shared_owner_snapshot(&owner)
+        };
+        if let Err(source) = audit {
             owner.stop.cancel();
             shutdown_shared_listener_tasks(Arc::clone(&owner.tasks)).await;
             drop(owner);
@@ -2312,25 +2364,41 @@ impl MtlsInterceptWorker {
                 observed: Some(observed_c),
             });
         }
-        // The host adapter's boot observation is intentionally strict about a
-        // zero dynamic-element complement. Once an allocation is live, its
-        // exact per-allocation rules/elements are owned by the capability
-        // registry and the worker's audit boundary covers listener/task/socket
-        // ownership; re-running the boot-only empty-complement observation
-        // would misclassify healthy allocation state as a node-owner failure.
-        if self.capabilities.has_live_records() {
-            return Ok(());
-        }
+        let expected_members = self.capabilities.expected_intercept_members();
         let observed = self
             .intercept
-            .observe_shared()
+            .observe_shared_state()
             .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
-        if observed != Some(owner.expected.clone()) {
+        let Some(observed) = observed else {
             return Err(MtlsSharedOwnerError::Intercept {
                 source: InterceptError::PostconditionMismatch {
                     expected: owner.expected.clone(),
-                    observed,
+                    observed: None,
                 },
+            });
+        };
+        if observed.program != owner.expected {
+            return Err(MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PostconditionMismatch {
+                    expected: owner.expected.clone(),
+                    observed: Some(observed.program),
+                },
+            });
+        }
+        if !observed.policy_route {
+            return Err(MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PolicyRouteAbsent,
+            });
+        }
+        if !observed.intercept_mark_guard {
+            return Err(MtlsSharedOwnerError::Intercept {
+                source: InterceptError::InterceptMarkGuardAbsent,
+            });
+        }
+        if observed.members != expected_members {
+            return Err(MtlsSharedOwnerError::MemberMismatch {
+                expected: expected_members,
+                observed: observed.members,
             });
         }
         Ok(())
@@ -2341,50 +2409,60 @@ impl MtlsInterceptWorker {
         self: &Arc<Self>,
         owner: &mut SharedOwner,
     ) -> Result<(), MtlsSharedOwnerError> {
-        // `observe_shared` is the boot-only zero-dynamic-member observation.
-        // With active allocations, the capability registry owns those exact
-        // members and the listener audit intentionally skips that complement;
-        // do the same during exact-port listener recovery.
-        if !self.capabilities.has_live_records() {
-            let observed = self
-                .intercept
-                .observe_shared()
-                .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
-            if observed != Some(owner.expected.clone()) {
+        if let Some(dead_leg) = owner.tasks.dead_leg() {
+            let (address, listener_slot) = match dead_leg {
+                InterceptLeg::F => (owner.leg_f_addr, &mut owner.leg_f_listener),
+                InterceptLeg::C => (owner.leg_c_addr, &mut owner.leg_c_listener),
+            };
+            drop(listener_slot.take());
+            let listener = self.intercept.bind_transparent(address).map_err(|source| {
+                MtlsSharedOwnerError::ListenerBind { leg: dead_leg, requested: address, source }
+            })?;
+            let rebound = shared_listener_address(dead_leg, &listener)?;
+            if rebound != address {
+                return Err(MtlsSharedOwnerError::ListenerPostcondition {
+                    leg: dead_leg,
+                    expected: address,
+                    observed: Some(rebound),
+                });
+            }
+            let task_listener = Arc::clone(&listener);
+            let task_stop = owner.stop.clone();
+            let task_worker = Arc::downgrade(self);
+            owner.tasks.replace_terminal(dead_leg, || {
+                shared_listener_task(task_listener, task_stop, task_worker, dead_leg)
+            })?;
+            *listener_slot = Some(listener);
+        }
+
+        let observed = self
+            .intercept
+            .observe_shared_state()
+            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
+        let prior = match observed {
+            None => None,
+            Some(state) if state.program == owner.expected => Some(owner.expected.clone()),
+            Some(state) => {
                 return Err(MtlsSharedOwnerError::Intercept {
                     source: InterceptError::PostconditionMismatch {
                         expected: owner.expected.clone(),
-                        observed,
+                        observed: Some(state.program),
                     },
                 });
             }
-        }
-        let Some(dead_leg) = owner.tasks.dead_leg() else {
-            return self.audit_shared_owner_snapshot(owner);
         };
-        let (address, listener_slot) = match dead_leg {
-            InterceptLeg::F => (owner.leg_f_addr, &mut owner.leg_f_listener),
-            InterceptLeg::C => (owner.leg_c_addr, &mut owner.leg_c_listener),
-        };
-        drop(listener_slot.take());
-        let listener = self.intercept.bind_transparent(address).map_err(|source| {
-            MtlsSharedOwnerError::ListenerBind { leg: dead_leg, requested: address, source }
-        })?;
-        let rebound = shared_listener_address(dead_leg, &listener)?;
-        if rebound != address {
-            return Err(MtlsSharedOwnerError::ListenerPostcondition {
-                leg: dead_leg,
-                expected: address,
-                observed: Some(rebound),
-            });
+        let guard = self
+            .intercept
+            .converge_shared(prior.as_ref(), owner.leg_f_addr, owner.leg_c_addr)
+            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
+        if let Some(prior_guard) = owner.guard.replace(guard) {
+            std::mem::forget(prior_guard);
         }
-        let task_listener = Arc::clone(&listener);
-        let task_stop = owner.stop.clone();
-        let task_worker = Arc::downgrade(self);
-        owner.tasks.replace_terminal(dead_leg, || {
-            shared_listener_task(task_listener, task_stop, task_worker, dead_leg)
-        })?;
-        *listener_slot = Some(listener);
+
+        let expected_members = self.capabilities.expected_intercept_members();
+        self.intercept
+            .converge_allocation_elements(&expected_members)
+            .map_err(|source| MtlsSharedOwnerError::MemberRepair { source })?;
         self.audit_shared_owner_snapshot(owner)
     }
 

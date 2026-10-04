@@ -959,7 +959,6 @@ async fn lose_and_repair(evidence: Evidence, loss: InterceptLoss) {
 /// and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER step 08-03 (S-ND295-61)"]
 async fn each_deleted_intercept_object_is_restored_exactly_with_live_allocations() {
     assert!(is_root(), "S-ND295-61 Lima evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-61");
@@ -989,7 +988,6 @@ async fn each_deleted_intercept_object_is_restored_exactly_with_live_allocations
 /// and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER step 08-03 (S-ND295-61)"]
 async fn the_intercept_mark_guard_table_is_restored_exactly_with_live_allocations() {
     assert!(is_root(), "S-ND295-61 Lima evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-61-guard");
