@@ -1,0 +1,18 @@
+[
+  {
+    "url": "https://github.com/overdrive-sh/overdrive/issues/303",
+    "title": "In-guest kernel mTLS for VM workloads: Camblet-style socket hook with a host-held key",
+    "state": "OPEN",
+    "headRefOid": null,
+    "body_sha256": "870c851ca4af9fe892a272b7648c21bfe672784996d77e2ce15b3fe8a3099b87",
+    "source": "provided current GitHub metadata/body receipt; original retained privately under .context; body is not independently executed proof"
+  },
+  {
+    "url": "https://github.com/overdrive-sh/overdrive/pull/306",
+    "title": "spike(in-guest-kernel-mtls): prove transparent mTLS in the guest \u2014 Linux module + Unikraft",
+    "state": "OPEN",
+    "headRefOid": "e0c1b4190cbcfaf44c82d325f405a224f2cc8ffc",
+    "body_sha256": "e0a8f0da77e52bac5dea5096fa88b93d3cb5b0eecadea2383c693fa36bcc5968",
+    "source": "provided current GitHub metadata/body receipt; original retained privately under .context; body is not independently executed proof"
+  }
+]

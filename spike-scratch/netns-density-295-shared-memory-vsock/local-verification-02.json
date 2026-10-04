@@ -1,0 +1,11 @@
+{
+  "source_manifests_verified": 14,
+  "preservation_records_verified": 398,
+  "cpu_quota_identities_verified": 64,
+  "vmm_threads_verified": 576,
+  "post_release_pids_absent": 334,
+  "post_release_paths_absent": 14,
+  "local_links_verified": true,
+  "literal_metal_address_absent": true,
+  "problems": []
+}

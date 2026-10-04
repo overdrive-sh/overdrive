@@ -1,0 +1,4 @@
+    Updating crates.io index
+     Locking 1 package to latest Rust 1.95.0 compatible version
+   Compiling shared-memory-vsock-probe-01 v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/increment-04-native-20261004T0951Z)
+    Finished `release` profile [optimized] target(s) in 0.51s

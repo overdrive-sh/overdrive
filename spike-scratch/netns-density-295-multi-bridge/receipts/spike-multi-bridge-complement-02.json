@@ -1,0 +1,5 @@
+{
+  "equal_after_gc_timer_normalization": true,
+  "justification": "gc_timer is the running bridge garbage-collection countdown, not administrative state; raw before/after are retained",
+  "raw_foreign_diff": "--- \n+++ \n@@ -332,7 +332,7 @@\n           \"fdb_max_learned\": 0,\n           \"fdb_n_learned\": 0,\n           \"forward_delay\": 1500,\n-          \"gc_timer\": 35.81,\n+          \"gc_timer\": 0.0,\n           \"group_addr\": \"01:80:c2:00:00:00\",\n           \"group_fwd_mask\": \"0\",\n           \"hello_time\": 200,\n"
+}

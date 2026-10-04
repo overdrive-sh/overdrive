@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "df",
+    "-h",
+    "/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/out/increment-13-quota0125-two-vm-20261004T1029Z"
+  ],
+  "rc": 0,
+  "stdout": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/md1        847G  153G  651G  20% /\n",
+  "stderr": ""
+}

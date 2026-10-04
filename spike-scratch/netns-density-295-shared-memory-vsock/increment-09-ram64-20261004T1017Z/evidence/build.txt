@@ -1,0 +1,2 @@
+   Compiling shared-memory-vsock-probe-01 v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z)
+    Finished `release` profile [optimized] target(s) in 0.48s

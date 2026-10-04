@@ -1,0 +1,1 @@
+{"argv": ["cloud-hypervisor", "--version"], "rc": 0, "stdout": "cloud-hypervisor v53.0\nMigration Protocol Versions: 0\n", "stderr": ""}

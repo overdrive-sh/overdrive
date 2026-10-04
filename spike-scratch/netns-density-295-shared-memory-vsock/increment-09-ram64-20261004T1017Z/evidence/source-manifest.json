@@ -1,0 +1,11 @@
+{
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/run.py",
+  "head": "5ea2d0c506f5c1f0672c2a4b5b7c5d0d415d6bde",
+  "sources": {
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/Cargo.lock": "f0d1142e3d125f9e2120b540f7e6c448ed68f8e6d84a43f22c62366b36172bbf",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/Cargo.toml": "59d405860dfff16bb03d17611463cd0b22539edd6afbc631f85226ae13e54b1f",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/launch-executed.py": "1bba92bc992c8d44d2533322aba35c509202211e1fa7fa1995b4665e1ab65eff",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/run.py": "687a1d19ab8b2dc5ba4402e427504843b87236e80bf7fe8dab49cadcd0cb07dc",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/src/main.rs": "147293a09f3e427e3cb91b2c4c8e082b71bcec763cacdd340372e461a936768b"
+  }
+}

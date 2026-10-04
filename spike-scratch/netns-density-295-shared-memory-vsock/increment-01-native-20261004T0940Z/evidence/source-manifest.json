@@ -1,0 +1,10 @@
+{
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-shared-memory-vsock/increment-01-native-20261004T0940Z/run.py",
+  "head": "5ea2d0c506f5c1f0672c2a4b5b7c5d0d415d6bde",
+  "sources": {
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-01-native-20261004T0940Z/Cargo.toml": "351f6fd793161feb8ed1168dec42108fa4e94d6db67d320fa93ea79c80068bbd",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-01-native-20261004T0940Z/__pycache__/run.cpython-314.pyc": "0b3cd32b84fc1cf7a9a149cf1f7c15d74fd6ff78b1b55ed946665164159284c2",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-01-native-20261004T0940Z/run.py": "923aab2dd062e1c2752e7d39b390112ed48a77f75d92547f421caef75a557b9c",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-01-native-20261004T0940Z/src/main.rs": "17562ef8bb7b36d139cbfa1ac8f70b0ff02e678e6e1e14560aa3fff0722732d4"
+  }
+}

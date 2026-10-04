@@ -1,0 +1,1 @@
+{"argv": ["systemd-detect-virt"], "rc": 1, "stdout": "none\n", "stderr": ""}

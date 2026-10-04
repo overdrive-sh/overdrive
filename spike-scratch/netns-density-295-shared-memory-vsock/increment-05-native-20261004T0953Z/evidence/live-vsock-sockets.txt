@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "ss",
+    "--vsock",
+    "-ap"
+  ],
+  "rc": 0,
+  "stdout": "Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\n",
+  "stderr": ""
+}

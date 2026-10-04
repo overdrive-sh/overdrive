@@ -1,0 +1,1 @@
+{"argv": ["sh", "-c", "command -v cloud-hypervisor; command -v debugfs; command -v tcpdump; command -v busybox"], "rc": 0, "stdout": "/usr/local/bin/cloud-hypervisor\n/usr/sbin/debugfs\n/usr/bin/tcpdump\n/usr/bin/busybox\n", "stderr": ""}

@@ -1,0 +1,10 @@
+[package]
+name = "shared-memory-vsock-probe-01"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libc = "0.2"

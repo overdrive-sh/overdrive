@@ -1,0 +1,1 @@
+{"argv": ["bpftool", "-j", "link", "show"], "rc": 0, "stdout": "[{\"id\":16094,\"type\":\"cgroup\",\"prog_id\":39298,\"cgroup_id\":1,\"attach_type\":\"cgroup_sysctl\"}]\n", "stderr": ""}

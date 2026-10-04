@@ -1,0 +1,6 @@
+{
+  "command": "read-only post-release exact probe PID/path/lease-owner attestation",
+  "rc": 1,
+  "stdout": "",
+  "stderr": "  File \"<string>\", line 2\n    paths=[/run/v295-792743,/run/v295-794479,/run/v295-795377,/run/v295-796422,/run/lock/overdrive-metal-shared.owner]\n           ^\nSyntaxError: invalid syntax\n"
+}

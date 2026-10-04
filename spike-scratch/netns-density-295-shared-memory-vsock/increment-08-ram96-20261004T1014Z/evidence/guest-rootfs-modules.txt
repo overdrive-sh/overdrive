@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "debugfs",
+    "-R",
+    "ls -l /lib/modules",
+    "/srv/vm/overdrive-testing/rootfs.ext4"
+  ],
+  "rc": 0,
+  "stdout": "",
+  "stderr": "debugfs 1.47.2 (1-Jan-2025)\n/lib/modules: File not found by ext2_lookup \n"
+}

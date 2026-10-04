@@ -1,0 +1,6 @@
+{
+  "path": "/sys/fs/cgroup/v295-quota-807801",
+  "cpu.max": "800000 100000\n",
+  "cgroup.subtree_control": "cpu\n",
+  "cpuset.cpus.effective": "cpuset controller not enabled here; inherit scheduler affinity, sampled per VMM"
+}

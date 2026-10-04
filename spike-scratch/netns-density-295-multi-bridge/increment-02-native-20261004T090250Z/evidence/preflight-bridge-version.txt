@@ -1,0 +1,1 @@
+{"argv": ["bridge", "-V"], "rc": 0, "stdout": "bridge utility, 6.19.0\n", "stderr": ""}

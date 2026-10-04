@@ -1,0 +1,4 @@
+cloud-hypervisor:   0.146633s: <vcpu0> ERROR:vmm/src/cpu.rs:1460 -- VCPU generated error: VcpuRun(Failed to run vcpu
+
+Caused by:
+    Unexpected exit reason on vcpu run: InternalError)

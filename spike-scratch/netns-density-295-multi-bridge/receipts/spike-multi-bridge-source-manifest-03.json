@@ -1,0 +1,17 @@
+{
+  "command": "cargo xtask metal run -- python3 -c <task-owned scratch probe materialization and exec>",
+  "files": {
+    "AGENTS.md": "74bd0fbe95cc9d2f5f4bfdf385981ae126b0acb433af1ca51425bc9c50622543",
+    "crates/overdrive-control-plane/Cargo.toml": "9705f3a071218e8f97031dee571db3e4877d9b9f2a2b5e63ed0653250752be69",
+    "crates/overdrive-control-plane/bin/netns_density_benchmark.rs": "c9784ab651ccb62e5ca8ab615b3ba890a8e84064e9ef4f870ecbf5da8daf7b0c",
+    "crates/overdrive-control-plane/src/guest_network.rs": "148b08ce97fad1246c7b01ff9da318b3fd224b5c5eb893e841a467c81f521e5d",
+    "crates/overdrive-dataplane/src/guest_tcx.rs": "f156611fb702f0568bc3d7d826cdd23df9b2c92db03c6a5dd36479768645b898",
+    "crates/overdrive-dataplane/tests/integration/guest_tcx_inventory.rs": "32f66a48cacceb563f7505b3062524c0cba5870e3bad7ad41f2f6bf68c26d515",
+    "crates/overdrive-worker/src/mtls_intercept_worker.rs": "5fc1185a493841a256aa87f0cc7fcbe69169cb093543f9c0826e9a799a320d98",
+    "docs/feature/netns-density-295/deliver/execution-log.json": "50f129dc3b47042c8e2efe62870067b5f5f7a15f38bd0dad875f29f940fe450b",
+    "docs/feature/netns-density-295/spike/multi-bridge-findings.md": "eacc951f09c1dd46b343d27ae3dbea361c903f4eb65fe3aa688538c5398ad4ab"
+  },
+  "head": "5ea2d0c506f5c1f0672c2a4b5b7c5d0d415d6bde",
+  "probe_sha256": "5e17ffc6c64f245848ad72374239f4163db92d76e7c3a7411efdd9e7cb089321",
+  "target": "<redacted canonical metal target>"
+}

@@ -1,0 +1,1 @@
+{"argv": ["file", "/tmp/spike_netns_density_295_multi_bridge/run-789691/guest-init"], "rc": 0, "stdout": "/tmp/spike_netns_density_295_multi_bridge/run-789691/guest-init: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=a2dc99feade073d1e52a4184987355c95c6eac3d, with debug_info, not stripped\n", "stderr": ""}

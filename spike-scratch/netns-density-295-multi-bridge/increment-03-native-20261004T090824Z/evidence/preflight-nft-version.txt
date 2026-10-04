@@ -1,0 +1,1 @@
+{"argv": ["nft", "--version"], "rc": 0, "stdout": "nftables v1.1.6 (Commodore Bullmoose #7)\n", "stderr": ""}

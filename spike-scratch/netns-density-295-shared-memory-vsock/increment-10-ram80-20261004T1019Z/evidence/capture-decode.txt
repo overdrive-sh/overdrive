@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "tcpdump",
+    "-n",
+    "-e",
+    "-r",
+    "/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/out/increment-10-ram80-20261004T1019Z/all-interfaces.pcap"
+  ],
+  "rc": 0,
+  "stdout": "",
+  "stderr": "reading from file /home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/out/increment-10-ram80-20261004T1019Z/all-interfaces.pcap, link-type LINUX_SLL2 (Linux cooked v2), snapshot length 262144\nWarning: interface names might be incorrect\n"
+}

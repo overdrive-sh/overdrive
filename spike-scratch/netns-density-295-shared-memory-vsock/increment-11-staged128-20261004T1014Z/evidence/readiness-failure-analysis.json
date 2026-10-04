@@ -1,0 +1,11 @@
+{
+  "failed_identity": "v101",
+  "final_console_checks": {
+    "loaded_executable_present": true,
+    "actual_cid_matched": true,
+    "echo_transport_passed": true,
+    "denial_count": 3,
+    "complete_terminal_ready_line": true
+  },
+  "inference": "Original wait returned on the prefix GUEST_PROBE_READY, allowing a read while its trailing result/newline was still being appended. Final console satisfies all checks. Original returned partial prefix was not frozen, so the precise failed predicate is not known. Corrected runner waits for the complete terminal ready line and preserves returned text/check details on failure."
+}

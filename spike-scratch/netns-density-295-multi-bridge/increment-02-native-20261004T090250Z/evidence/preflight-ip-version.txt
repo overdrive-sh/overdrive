@@ -1,0 +1,1 @@
+{"argv": ["ip", "-V"], "rc": 0, "stdout": "ip utility, iproute2-6.19.0, libbpf 1.6.3\n", "stderr": ""}

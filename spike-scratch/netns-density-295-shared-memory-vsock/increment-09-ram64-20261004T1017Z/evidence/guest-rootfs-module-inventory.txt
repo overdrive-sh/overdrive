@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "debugfs",
+    "-R",
+    "ls -l /modules",
+    "/srv/vm/overdrive-testing/rootfs.ext4"
+  ],
+  "rc": 0,
+  "stdout": "     17   40755 (2)      0      0    4096  3-Oct-2026 06:23 .\n      2   40755 (2)      0      0    4096  3-Oct-2026 06:23 ..\n     18  100644 (1)      0      0   53457 17-Jul-2026 16:57 vmw_vsock_virtio_transport.ko\n     19  100644 (1)      0      0   106585 17-Jul-2026 16:57 vmw_vsock_virtio_transport_common.ko\n     20  100644 (1)      0      0   128033 17-Jul-2026 16:57 vsock.ko\n\n",
+  "stderr": "debugfs 1.47.2 (1-Jan-2025)\n"
+}

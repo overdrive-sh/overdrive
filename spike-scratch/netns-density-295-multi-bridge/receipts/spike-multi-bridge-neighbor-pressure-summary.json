@@ -1,0 +1,79 @@
+{
+  "neighbor-pressure-after-tables.json": {
+    "allocs": 29725,
+    "destroys": 28700,
+    "entries": 1025,
+    "forced_gc_runs": 11,
+    "name": "arp_cache",
+    "table_fulls": 9,
+    "thresh1": 128,
+    "thresh2": 512,
+    "thresh3": 1024
+  },
+  "neighbor-pressure-before-tables.json": {
+    "allocs": 28702,
+    "destroys": 28695,
+    "entries": 7,
+    "forced_gc_runs": 0,
+    "name": "arp_cache",
+    "table_fulls": 0,
+    "thresh1": 128,
+    "thresh2": 512,
+    "thresh3": 1024
+  },
+  "pressure-100-tables.json": {
+    "allocs": 29002,
+    "destroys": 28695,
+    "entries": 307,
+    "forced_gc_runs": 0,
+    "name": "arp_cache",
+    "table_fulls": 0,
+    "thresh1": 128,
+    "thresh2": 512,
+    "thresh3": 1024
+  },
+  "pressure-300-tables.json": {
+    "allocs": 29602,
+    "destroys": 28696,
+    "entries": 906,
+    "forced_gc_runs": 1,
+    "name": "arp_cache",
+    "table_fulls": 0,
+    "thresh1": 128,
+    "thresh2": 512,
+    "thresh3": 1024
+  },
+  "pressure-342-tables.json": {
+    "allocs": 29725,
+    "destroys": 28700,
+    "entries": 1025,
+    "forced_gc_runs": 5,
+    "name": "arp_cache",
+    "table_fulls": 3,
+    "thresh1": 128,
+    "thresh2": 512,
+    "thresh3": 1024
+  },
+  "pressure-343-tables.json": {
+    "allocs": 29725,
+    "destroys": 28700,
+    "entries": 1025,
+    "forced_gc_runs": 8,
+    "name": "arp_cache",
+    "table_fulls": 6,
+    "thresh1": 128,
+    "thresh2": 512,
+    "thresh3": 1024
+  },
+  "pressure-344-tables.json": {
+    "allocs": 29725,
+    "destroys": 28700,
+    "entries": 1025,
+    "forced_gc_runs": 11,
+    "name": "arp_cache",
+    "table_fulls": 9,
+    "thresh1": 128,
+    "thresh2": 512,
+    "thresh3": 1024
+  }
+}

@@ -1,0 +1,16 @@
+    Updating crates.io index
+     Locking 1 package to latest Rust 1.95.0 compatible version
+ Downloading crates ...
+  Downloaded libc v0.2.190
+   Compiling libc v0.2.190
+   Compiling shared-memory-vsock-probe-01 v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/increment-01-native-20261004T0940Z)
+warning: unused import: `UnixStream`
+ --> src/main.rs:2:128
+  |
+2 | ...}, os::{fd::{AsRawFd, FromRawFd}, unix::net::{UnixListener, UnixStream}}, thread, time::{Duration, Instant}};
+  |                                                                ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `shared-memory-vsock-probe-01` (bin "shared-memory-vsock-probe-01") generated 1 warning (run `cargo fix --bin "shared-memory-vsock-probe-01" -p shared-memory-vsock-probe-01` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 1.78s

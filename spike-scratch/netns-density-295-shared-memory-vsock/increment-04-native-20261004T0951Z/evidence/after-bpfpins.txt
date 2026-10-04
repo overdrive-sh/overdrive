@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "find",
+    "/sys/fs/bpf/overdrive",
+    "-maxdepth",
+    "4",
+    "-printf",
+    "%P %y %i\n"
+  ],
+  "rc": 0,
+  "stdout": " d 52543604\nmtls-endpoints d 53384643\nmtls-endpoints/links d 53384730\nmtls-endpoints/maps d 53384644\nprobe d 52553264\n",
+  "stderr": ""
+}

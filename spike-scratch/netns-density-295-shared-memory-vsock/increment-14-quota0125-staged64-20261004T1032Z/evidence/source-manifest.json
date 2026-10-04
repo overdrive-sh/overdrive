@@ -1,0 +1,14 @@
+{
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/run.py",
+  "head": "5ea2d0c506f5c1f0672c2a4b5b7c5d0d415d6bde",
+  "sources": {
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/Cargo.lock": "f0d1142e3d125f9e2120b540f7e6c448ed68f8e6d84a43f22c62366b36172bbf",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/Cargo.toml": "59d405860dfff16bb03d17611463cd0b22539edd6afbc631f85226ae13e54b1f",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/__pycache__/quota.cpython-314.pyc": "d0b7acf26d9e73b8a2c20c7836a5caa11e4b4ef567766b655115a63d44004bff",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/__pycache__/run.cpython-314.pyc": "59e8ff61453d585ff27f3fa656f13d9894bc4b9bfcefdadd2779ec4b5b8f8738",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/launch-executed.py": "1bba92bc992c8d44d2533322aba35c509202211e1fa7fa1995b4665e1ab65eff",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/quota.py": "4ee943eef993ad7ebf0437e1c7fc6072fa91b0e66a98f128b862553684aa537a",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/run.py": "afa93fa52c00101b91f1a766de95427e2935317ddcc64acd9ae35c67630dd800",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-14-quota0125-staged64-20261004T1032Z/src/main.rs": "a7152f1977eb5458f5dd28511c4d6075b063264b983dc6d2758f743135f73e6a"
+  }
+}

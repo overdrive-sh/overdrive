@@ -1,0 +1,1 @@
+{"argv": ["dpkg-query", "-W", "linux-image-7.0.0-29-generic"], "rc": 0, "stdout": "linux-image-7.0.0-29-generic\t7.0.0-29.29\n", "stderr": ""}

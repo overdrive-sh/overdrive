@@ -1,0 +1,589 @@
+{
+  "files": [
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1022-fdb.json.gz",
+      "gzip_bytes": 31843,
+      "gzip_sha256": "dc3f6a7e0cd86b651b9089e4376dbc7cecd67468e786f674a288e1aa8b49124a",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1022-fdb.json",
+      "raw_bytes": 592862,
+      "raw_sha256": "a42db9c09a28ce65569ccdc6f739d219b8ddb19484a544473dbe4cb2603aacae"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1023-fdb.json.gz",
+      "gzip_bytes": 32049,
+      "gzip_sha256": "947c8e8f5cf6e88d7318839eedaf42aebd4c41ca71d5bf3d737613ca06f07a50",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1023-fdb.json",
+      "raw_bytes": 595887,
+      "raw_sha256": "3117f86752eb0b868b657acebb7e86e5552fbff5bfca619f8ff04fe55f3e5695"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1024-links.json.gz",
+      "gzip_bytes": 38096,
+      "gzip_sha256": "c0832d8701cd005e1714199587038f7f9031f21f77f876fcfe6c106f50b7bde3",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1024-links.json",
+      "raw_bytes": 1682519,
+      "raw_sha256": "bf6235f195065d4bb237dae0c45eb3067e70fd27881df1152608f6d33c6735d0"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-2044-bridge-ports.json.gz",
+      "gzip_bytes": 16783,
+      "gzip_sha256": "1ce3e51996b84dff32b6f7c17bc0a21e20cd5d1817649882691ef2e1b15f488d",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-2044-bridge-ports.json",
+      "raw_bytes": 1158232,
+      "raw_sha256": "71c006e6a030e83a0dcfc0696b990e49b82cde7f40f7098065f72dac9c3c9e86"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-2044-fdb.json.gz",
+      "gzip_bytes": 63471,
+      "gzip_sha256": "1d050be7eea78404c396519cd461879b761db3830d508a55d6ce31a7babbf3b6",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-2044-fdb.json",
+      "raw_bytes": 1185340,
+      "raw_sha256": "9bd3ca3feb79c82f9dd98873145f50ae8d56e7504a0b3dbdd4cdc00104210c12"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/preflight-kernel-config.txt.gz",
+      "gzip_bytes": 74182,
+      "gzip_sha256": "f992f2c1ea9436b4d6fbf54be6c8e1dcc76982f037420010e8ddca4adac907eb",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/preflight-kernel-config.txt",
+      "raw_bytes": 321993,
+      "raw_sha256": "55cb11f45639ac110ccd3dab17ebeca609b92578063ed0901f2ea0fa7b7130dd"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1023-links.json.gz",
+      "gzip_bytes": 38049,
+      "gzip_sha256": "ba26a2fcd1049f381e9c2ecd8cc52625a9964a1afeee51d728919c3d51b6827b",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1023-links.json",
+      "raw_bytes": 1680887,
+      "raw_sha256": "6db409dc0332faa348e56957574c6cbe4df71714c243482c361554d5ad69fbff"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-2044-links.json.gz",
+      "gzip_bytes": 73305,
+      "gzip_sha256": "b099ce1aed935fcd616f4fc95d79162bf1b17d9e1aac7579e9992c37ffd2b7ec",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-2044-links.json",
+      "raw_bytes": 3346895,
+      "raw_sha256": "a35947230d79364045356b148f1a81fdcce479cf1bc5dc6f7ba1efde09e1d060"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4096-links.json.gz",
+      "gzip_bytes": 146907,
+      "gzip_sha256": "9566db5734633055c418d4b13abdf3af0c8e7211e834ca9f4d9c6429b4b2df09",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4096-links.json",
+      "raw_bytes": 6709252,
+      "raw_sha256": "fe157fdfa464abd3115f0cf1d22877d3f01a76e45e01cf01c3f986f2b3b34d98"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1025-fdb.json.gz",
+      "gzip_bytes": 32129,
+      "gzip_sha256": "ed62113020d0959391fbe22e4e4f06dc4028b5c49c7c6213deaee1dccda95dae",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1025-fdb.json",
+      "raw_bytes": 597153,
+      "raw_sha256": "8a60cdb21cddbd5f6e4f7a38141c85dc8d8b2d7e204de614a2f75727c95e0493"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1024-fdb.json.gz",
+      "gzip_bytes": 32088,
+      "gzip_sha256": "14defeea98ae7f1180224cf77f21e92363c5a46be5ac44af96cb5a2f53d54d8d",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1024-fdb.json",
+      "raw_bytes": 596576,
+      "raw_sha256": "097502776a448c2ac2f8be54a124e8c6d350ebb4199558da763a8d7a6edc8c59"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4095-fdb.json.gz",
+      "gzip_bytes": 127247,
+      "gzip_sha256": "50bc80c77694b2a9e167850700ec16e96259f8af2d962985afaa5455db52f9ed",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4095-fdb.json",
+      "raw_bytes": 2379359,
+      "raw_sha256": "10e717fb1f4cd302f62bd7386bb5aee62366baf2f6e589df6dd55be7f099696b"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4095-links.json.gz",
+      "gzip_bytes": 146891,
+      "gzip_sha256": "d487f2e1c92f4f4fadd00a711ff63b02bc91a03c0eea7674f5669ca68c3f5251",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4095-links.json",
+      "raw_bytes": 6707625,
+      "raw_sha256": "c517a8aca8fa695ebd9974d793af0e54468c8c72a093f07d534c2b3bcc157ef7"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1025-bridge-ports.json.gz",
+      "gzip_bytes": 8723,
+      "gzip_sha256": "542ad1ffa722a65da52c454a1b379af7aa4af49cad0043a1113295c28ce76f4a",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1025-bridge-ports.json",
+      "raw_bytes": 581478,
+      "raw_sha256": "990f6a10aad8e65ad2982a8f8963264d11efb48c3629b0a9dbf2fc3d855de57b"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4096-bridge-ports.json.gz",
+      "gzip_bytes": 32922,
+      "gzip_sha256": "bd1ce72c18b5cf3bad518313864591d1973e7c27c0c6a3f483e63cce8851b723",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4096-bridge-ports.json",
+      "raw_bytes": 2323185,
+      "raw_sha256": "a7cf581d329e178e296e45446b56e4ed8ba4fea6345f9fbc76a39653af39dbc8"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1024-bridge-ports.json.gz",
+      "gzip_bytes": 8717,
+      "gzip_sha256": "fc28341d9b16d3a95f183353591a2767a114f2dd2b16193e4b4a4e3cdc84c5d0",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1024-bridge-ports.json",
+      "raw_bytes": 580912,
+      "raw_sha256": "8e995d881362d8bd6122fc02600c70189a035dc98ad087fb84910549ffcfa721"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4097-bridge-ports.json.gz",
+      "gzip_bytes": 32933,
+      "gzip_sha256": "558b0d00df5a4f5b9c216c3737dd3bb1c69680ce918d6bdfe868f94abee659f0",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4097-bridge-ports.json",
+      "raw_bytes": 2323751,
+      "raw_sha256": "aac6461013cd82fc0a7f6cee426c276ed7be58d1f7f1e725e02089e91bf881d7"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1025-links.json.gz",
+      "gzip_bytes": 38129,
+      "gzip_sha256": "77ae5593379e865e8dc2a1426b1c7eec29ea2b4ad1c0e95298367499d95d4d6f",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1025-links.json",
+      "raw_bytes": 1684149,
+      "raw_sha256": "84d1dab11249aaa4c1cfc42565148176f6bab6cd81c83ef9234fcd2b0ff00b06"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4097-links.json.gz",
+      "gzip_bytes": 146970,
+      "gzip_sha256": "75295bab0360243f77ebb2e073425124385be9b72373af1fd8654ecd61900339",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4097-links.json",
+      "raw_bytes": 6710191,
+      "raw_sha256": "73fd4307ddb158713891404f7984f2afa8d398993f978a453b295c9ff6be20f3"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1022-links.json.gz",
+      "gzip_bytes": 37165,
+      "gzip_sha256": "a563443a53862b627a80a1bce644669ddc4020b102b9225ed8f737980bdafe3d",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1022-links.json",
+      "raw_bytes": 1674236,
+      "raw_sha256": "8645d9ac4a1d796f07c4025cc2996857d69491f7d53a5a3821dcebe37d87e9d2"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4097-fdb.json.gz",
+      "gzip_bytes": 127369,
+      "gzip_sha256": "45b5d6e650d8500557620eeb92c5bd6f0a1d0f377b496063b2c88e10e7b8f313",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4097-fdb.json",
+      "raw_bytes": 2380961,
+      "raw_sha256": "37de0ac4acee4288ab730a1c4e1ecc98724eb3d357719d4ea2fc0e36fabbc114"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4096-fdb.json.gz",
+      "gzip_bytes": 127321,
+      "gzip_sha256": "bd5a3e359ce9a63f4fd6d44d10b0ce168ac5e4bab893415f0d4b116dc87360b4",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4096-fdb.json",
+      "raw_bytes": 2380272,
+      "raw_sha256": "1e7e4d64a656a18e1065103dd2eb8c8561321bdcb2b57b854353150b0e24ec0f"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1022-bridge-ports.json.gz",
+      "gzip_bytes": 8641,
+      "gzip_sha256": "32187950a2acfc1924932d486e1d4c38d19ae00eba034a17d7b1dc9fa9307fa0",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1022-bridge-ports.json",
+      "raw_bytes": 578607,
+      "raw_sha256": "002a3b3a62d87ec00ba0f5f49e65ea24b6ebce0c6f8ab3ee5edb302e0c0d3771"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-4095-bridge-ports.json.gz",
+      "gzip_bytes": 32914,
+      "gzip_sha256": "46f2905b156fc9480a327c41be45510158783080711f5f585da9e3b4686d09a2",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-4095-bridge-ports.json",
+      "raw_bytes": 2322619,
+      "raw_sha256": "42147e685658d727095c9f3720b147d90c7d5ae06117cb743642d34a40ccffc7"
+    },
+    {
+      "compressed_file": "increment-01-native-20261004T085711Z/evidence/stage-1023-bridge-ports.json.gz",
+      "gzip_bytes": 8709,
+      "gzip_sha256": "4322bd20c9c8eccc245abf3cdc168c0eea47adde32d20103bfd10c862c065908",
+      "original_retained": "out/uncompressed-evidence/increment-01-native-20261004T085711Z/stage-1023-bridge-ports.json",
+      "raw_bytes": 580346,
+      "raw_sha256": "f1e09e22bbcd3ca15f5af97b9046892311125e7163a8d70e0773f6ae6c868069"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/probe-final-routes.json.gz",
+      "gzip_bytes": 96793,
+      "gzip_sha256": "5f465d89fbb9957349f88addc4a51dc16261b87ac0eb4d89d781df95e68de4c4",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/probe-final-routes.json",
+      "raw_bytes": 2667883,
+      "raw_sha256": "012a65d16dae95e31427acd51db575c4fe5d3236a50d9ecfaaffb861a8521ce6"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1022-fdb.json.gz",
+      "gzip_bytes": 31901,
+      "gzip_sha256": "ca2b03f70fe840d8619c25998d3d42a4f1f702252253e20ed89e8d4ae37230f3",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1022-fdb.json",
+      "raw_bytes": 592862,
+      "raw_sha256": "e2bcd2920c32cae00e177081c17fc2fc37959a0c94a747aca11d00793345447b"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1023-fdb.json.gz",
+      "gzip_bytes": 32113,
+      "gzip_sha256": "5dd33897123e9347d71ce7c61e529470d794978fcab649fba79529d9c37d8059",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1023-fdb.json",
+      "raw_bytes": 595887,
+      "raw_sha256": "8482b80d31f3d589fdeb6e692fffe7043b8d114cfd410feef25e9bad40fa63b8"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/probe-final-fdb.json.gz",
+      "gzip_bytes": 127580,
+      "gzip_sha256": "75e5f2752371bf8be3ffbc2218f5d5639e82248ac9f07aa57dc97e68e691a26b",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/probe-final-fdb.json",
+      "raw_bytes": 2382309,
+      "raw_sha256": "4326329e53f4f50406b9c9616891a70cc8680fd68caf12becbb1f3230df292d9"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1024-links.json.gz",
+      "gzip_bytes": 38037,
+      "gzip_sha256": "672f7285c128459dbbb4e60cdb11de4e308edf1b561cca48efc37fc22da37c99",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1024-links.json",
+      "raw_bytes": 1682519,
+      "raw_sha256": "6dbcfcea7b9c142f37e5ebadcddb98716ab12f5bc39cc1e656babbbe682e4eee"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-2044-bridge-ports.json.gz",
+      "gzip_bytes": 16783,
+      "gzip_sha256": "46ad5f6b8980662e83fa73312d063aca28731a2108f9f7d59714ba7f760c27c1",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-2044-bridge-ports.json",
+      "raw_bytes": 1158232,
+      "raw_sha256": "52e2cad288334eccd2a6ed0baf65019d59510bf4abc91b6257831696cab4c555"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-2044-fdb.json.gz",
+      "gzip_bytes": 63512,
+      "gzip_sha256": "3d7ea3b25bc335549952ae822a7c16b3b5d82e9161d4c78ac029f6d4701e9689",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-2044-fdb.json",
+      "raw_bytes": 1185340,
+      "raw_sha256": "0dfbd6178eaf440d38e9cc4c4a17708c50a6040e0a8676a6dcfa9c04a5541b12"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/preflight-kernel-config.txt.gz",
+      "gzip_bytes": 74182,
+      "gzip_sha256": "f992f2c1ea9436b4d6fbf54be6c8e1dcc76982f037420010e8ddca4adac907eb",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/preflight-kernel-config.txt",
+      "raw_bytes": 321993,
+      "raw_sha256": "55cb11f45639ac110ccd3dab17ebeca609b92578063ed0901f2ea0fa7b7130dd"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1023-links.json.gz",
+      "gzip_bytes": 37991,
+      "gzip_sha256": "205c27d94442ec498473b825d4c59375631375ba7742c5a63b11a1d81840f511",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1023-links.json",
+      "raw_bytes": 1680887,
+      "raw_sha256": "614f7a8ee324a49bf72a77672db57966e70bb41b489efd12405082e78f8d17a9"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-2044-links.json.gz",
+      "gzip_bytes": 73158,
+      "gzip_sha256": "cc52e018d223596db98c106b677d549970470d8df163e711a5938ce238394e9e",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-2044-links.json",
+      "raw_bytes": 3346895,
+      "raw_sha256": "15715f08023306a00070bbc7634f932c8475c4501078d058ffab3c6ef246a711"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4096-links.json.gz",
+      "gzip_bytes": 146874,
+      "gzip_sha256": "0a36ecf568343c798768175e4f8355e3e18eb22442fa61faa5f2d44d20d27b49",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4096-links.json",
+      "raw_bytes": 6709213,
+      "raw_sha256": "3a7a4c4665b41768f5dce368d49534a947a355178caa370b3f11f2d58823c427"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1025-fdb.json.gz",
+      "gzip_bytes": 32197,
+      "gzip_sha256": "993ae97167951feec8981b6d7bfbcf0b93566aa4837cb5b9de834de3dd8f7d57",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1025-fdb.json",
+      "raw_bytes": 597265,
+      "raw_sha256": "28288e4a7fdd2092ceb4201656880e9cb062315095727afdb6ecb472761dbf8e"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1024-fdb.json.gz",
+      "gzip_bytes": 32153,
+      "gzip_sha256": "9b01cc00b07818914d71eef5f885885c38de7479df288446d2a535e857bc4815",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1024-fdb.json",
+      "raw_bytes": 596576,
+      "raw_sha256": "301abade56b5739cac943be0c2e5313967f2a993338deaa8a72cd3394c0676f4"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4095-fdb.json.gz",
+      "gzip_bytes": 127382,
+      "gzip_sha256": "59631311e0beec190d2d2fd595925d45cec5d3fd740ffbc447f9e38148471279",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4095-fdb.json",
+      "raw_bytes": 2379807,
+      "raw_sha256": "2545798183ff21cf34d5a3540582ed77806fab973532de3b7a9a22fbdbd64550"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4095-links.json.gz",
+      "gzip_bytes": 146833,
+      "gzip_sha256": "86d97327ae1349e741b02379fe3518a43767a50520b400e2cf6f30e6cab6ba13",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4095-links.json",
+      "raw_bytes": 6707625,
+      "raw_sha256": "3597c5b27a10d99daaf6f97207fe354bde21872d9053f5bb2ce737c31555dd22"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1025-bridge-ports.json.gz",
+      "gzip_bytes": 8726,
+      "gzip_sha256": "7457669cea607bb1e80afa6fe4690b50ab4c9a2bf602248a356a2401e33ed5d4",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1025-bridge-ports.json",
+      "raw_bytes": 581478,
+      "raw_sha256": "86ebccd614f8ce7ffe8d1b70eff46816f6033c5410ae46019e38d6a8c4a5b6e8"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4096-bridge-ports.json.gz",
+      "gzip_bytes": 32922,
+      "gzip_sha256": "70e5327cc9fd46e7afebeb71dca45fdfeb144b4210f461f103e61ec3fdb46ccd",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4096-bridge-ports.json",
+      "raw_bytes": 2323185,
+      "raw_sha256": "7225b0c006ff8a296c09de2d404b2ed32ad589c4f412ddae2a60a3b5d315f0c3"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1024-bridge-ports.json.gz",
+      "gzip_bytes": 8713,
+      "gzip_sha256": "c3ea2efbc2b0a7fc36ce698044042394661355f3674658ea75e3d61d05577125",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1024-bridge-ports.json",
+      "raw_bytes": 580912,
+      "raw_sha256": "871857bde7c7d07900c5b1ff3899390519a1965fb4e190eb9c716eeb2c8bde00"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4097-bridge-ports.json.gz",
+      "gzip_bytes": 32933,
+      "gzip_sha256": "70d4094874c279822017bc09bc2c575bdc388c23e544b34ecad1893a6f28718a",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4097-bridge-ports.json",
+      "raw_bytes": 2323751,
+      "raw_sha256": "28b21740babc8635eaa14924c53ef00a062fb519f5c1c1c595ac486a602297d0"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1025-links.json.gz",
+      "gzip_bytes": 38082,
+      "gzip_sha256": "2fa0de9ab568b97108df247191888a23b9e3a45b10c52b8933ac4e4d22028b74",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1025-links.json",
+      "raw_bytes": 1684149,
+      "raw_sha256": "00b52f36be17c4e93f1957fabfbae3145fe3cb9345eead22a5dd5be6cf1425f5"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4097-links.json.gz",
+      "gzip_bytes": 146926,
+      "gzip_sha256": "3a31d5d36ac456f799a51ea6c76d48108e4de55ba7792851bbc018734aacb10e",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4097-links.json",
+      "raw_bytes": 6710074,
+      "raw_sha256": "61678405aa0b230946490a78596499ddec52166eb7641e410db9f59f062b66c8"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1022-links.json.gz",
+      "gzip_bytes": 37121,
+      "gzip_sha256": "9c77e50bded6e500ec9a917c74b3512cd7ab356eae5c13c977c491f1f2e35be6",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1022-links.json",
+      "raw_bytes": 1674236,
+      "raw_sha256": "43eeb033e5f3783c202354577bd0e26140e4937d8988384b943b5012c4e57eda"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4097-fdb.json.gz",
+      "gzip_bytes": 127452,
+      "gzip_sha256": "75462e75b5551510f797d41dbcb0797c39aec62d12df67149917018ace7acd66",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4097-fdb.json",
+      "raw_bytes": 2380961,
+      "raw_sha256": "84d29fed29aea9c1f0b27285478313a580e24a48b9cb744cc6a600d73a648128"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4096-fdb.json.gz",
+      "gzip_bytes": 127413,
+      "gzip_sha256": "13a265a4722373f64567548b8fc6f2bbd108a86198acb9f8aa6f5198c6791c31",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4096-fdb.json",
+      "raw_bytes": 2380384,
+      "raw_sha256": "80b50900a4a20c1e6883e6cc6911836fac096a9c721612b0846deacba48f02e8"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1022-bridge-ports.json.gz",
+      "gzip_bytes": 8642,
+      "gzip_sha256": "84d2c1bba99676c44c62135b921851c71413e4bfcf2989551b5f1706b4d1ab72",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1022-bridge-ports.json",
+      "raw_bytes": 578607,
+      "raw_sha256": "7a96177ed3a3fd7298b9eedf00ab822357ca16d47d6de5bc588fbc4a1884c745"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-4095-bridge-ports.json.gz",
+      "gzip_bytes": 32914,
+      "gzip_sha256": "b9b04757c936afc2f0220bece367d178103963c74b246540d2126c6167298106",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-4095-bridge-ports.json",
+      "raw_bytes": 2322619,
+      "raw_sha256": "5db9caaec13b34189702d516bc0a77c88ceec8ded806a037d9693fc7de92a0ac"
+    },
+    {
+      "compressed_file": "increment-02-native-20261004T090250Z/evidence/stage-1023-bridge-ports.json.gz",
+      "gzip_bytes": 8709,
+      "gzip_sha256": "46c98993c68bdda277846425634d12ccd10a87ae9f9411c4a60f709b9a993799",
+      "original_retained": "out/uncompressed-evidence/increment-02-native-20261004T090250Z/stage-1023-bridge-ports.json",
+      "raw_bytes": 580346,
+      "raw_sha256": "ec69459b92f0b146bd77ed7e56a334741bd27bbe0af1c94b980adce438babf53"
+    },
+    {
+      "compressed_file": "increment-03-native-20261004T090824Z/evidence/probe-final-routes.json.gz",
+      "gzip_bytes": 21870,
+      "gzip_sha256": "24ea24ec2b11ff86e0ed5db78465bf38ab70d3e10bdc4e622e09a8bbe8d729a0",
+      "original_retained": "out/uncompressed-evidence/increment-03-native-20261004T090824Z/probe-final-routes.json",
+      "raw_bytes": 476363,
+      "raw_sha256": "cfc904964b0b4d38771b0f8deec47f4e66c24efda61e2e121fa286da27ba0522"
+    },
+    {
+      "compressed_file": "increment-03-native-20261004T090824Z/evidence/probe-final-fdb.json.gz",
+      "gzip_bytes": 32221,
+      "gzip_sha256": "f8f1b22b828ae1535420d9b6accea411f998acc0fa20bd32fda8ed3f1c94d4e5",
+      "original_retained": "out/uncompressed-evidence/increment-03-native-20261004T090824Z/probe-final-fdb.json",
+      "raw_bytes": 597476,
+      "raw_sha256": "15e402dce165384a8895f12507f7b1d5d7715c146b9c5b20005cf60af69a1a8e"
+    },
+    {
+      "compressed_file": "increment-03-native-20261004T090824Z/evidence/stage-1024-links.json.gz",
+      "gzip_bytes": 38110,
+      "gzip_sha256": "7aef15a82da7651485ae998cd4a654ddf0484c7dbb37a9bfd9558ffbfe112576",
+      "original_retained": "out/uncompressed-evidence/increment-03-native-20261004T090824Z/stage-1024-links.json",
+      "raw_bytes": 1681495,
+      "raw_sha256": "3f76c0edf97205ee4eb141e627632d8c435808ebdb6783f029a3f752701eec0e"
+    },
+    {
+      "compressed_file": "increment-03-native-20261004T090824Z/evidence/all-interfaces.pcap.gz",
+      "gzip_bytes": 246203,
+      "gzip_sha256": "b6b6b577cf0c16439cc6f835b4609db10873af8e7254f1f6bde2de13819f7721",
+      "original_retained": "out/uncompressed-evidence/increment-03-native-20261004T090824Z/all-interfaces.pcap",
+      "raw_bytes": 3180580,
+      "raw_sha256": "37edb64f286c2a5a8ae3a1b427ccb8bb19972fccf1c8514ef31168ad67fc656d"
+    },
+    {
+      "compressed_file": "increment-03-native-20261004T090824Z/evidence/preflight-kernel-config.txt.gz",
+      "gzip_bytes": 74182,
+      "gzip_sha256": "f992f2c1ea9436b4d6fbf54be6c8e1dcc76982f037420010e8ddca4adac907eb",
+      "original_retained": "out/uncompressed-evidence/increment-03-native-20261004T090824Z/preflight-kernel-config.txt",
+      "raw_bytes": 321993,
+      "raw_sha256": "55cb11f45639ac110ccd3dab17ebeca609b92578063ed0901f2ea0fa7b7130dd"
+    },
+    {
+      "compressed_file": "increment-03-native-20261004T090824Z/evidence/stage-1024-fdb.json.gz",
+      "gzip_bytes": 32160,
+      "gzip_sha256": "8f66c33fec9a4b1aef2f371aba4bfe8fdcf7d57a68009ac41a737ddba8944b0b",
+      "original_retained": "out/uncompressed-evidence/increment-03-native-20261004T090824Z/stage-1024-fdb.json",
+      "raw_bytes": 596800,
+      "raw_sha256": "4e11bfccff713688acccc556c51378da3fccb9a79fca65332424f9a704dea344"
+    },
+    {
+      "compressed_file": "increment-03-native-20261004T090824Z/evidence/capture-decode.txt.gz",
+      "gzip_bytes": 319735,
+      "gzip_sha256": "7ee3bf840f94335b226aaad0296757967a80cc22228a2f9707081a4e0851f214",
+      "original_retained": "out/uncompressed-evidence/increment-03-native-20261004T090824Z/capture-decode.txt",
+      "raw_bytes": 5742169,
+      "raw_sha256": "80cd07693903eb98636931b9878ef2fbbcb84449eea6736ee3f78ecdfa224d29"
+    },
+    {
+      "compressed_file": "increment-03-native-20261004T090824Z/evidence/stage-1024-bridge-ports.json.gz",
+      "gzip_bytes": 8717,
+      "gzip_sha256": "3f8d92e1f398a34fa1ea0acaa198f81e4267e664d231115d36179c65ed1c4ac2",
+      "original_retained": "out/uncompressed-evidence/increment-03-native-20261004T090824Z/stage-1024-bridge-ports.json",
+      "raw_bytes": 580912,
+      "raw_sha256": "0e866199799a45a4c8ed622612771dc62e83f0c5a949c4e130f575961c02eea4"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/probe-final-routes.json.gz",
+      "gzip_bytes": 21995,
+      "gzip_sha256": "8f32098fac3ffdff24073ede85d7c125c89cc0ad898c2c7c3c5001871917b8b8",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/probe-final-routes.json",
+      "raw_bytes": 493726,
+      "raw_sha256": "fc2210db8329901da497ccff39e6ca8555cbfcde7019ea36b491917f6dd9ef70"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/probe-final-fdb.json.gz",
+      "gzip_bytes": 39037,
+      "gzip_sha256": "15bb3c1bd48687ac0d955f607be83b61659aa8b3e90d330d94a1a0b243b98253",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/probe-final-fdb.json",
+      "raw_bytes": 756924,
+      "raw_sha256": "b3d4f8df03c7359aa08c91f051e01f58b414116364d759296452b97002b9a64d"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/pressure-343-tables.json.gz",
+      "gzip_bytes": 22892,
+      "gzip_sha256": "ad7d74c1b65fdf34d8988f5a11aa9fb50c68b7eda02286f413e1b05cb78be444",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/pressure-343-tables.json",
+      "raw_bytes": 803204,
+      "raw_sha256": "dd2388ede651126672e6cc39653eada1d2fadde296ba2f0676f8fc341a1a4d51"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/neighbor-pressure-after-tables.json.gz",
+      "gzip_bytes": 22978,
+      "gzip_sha256": "5f8a65b26561abd54221a28d0c89ddb57755a3f38394edd6af7c9c09a5033754",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/neighbor-pressure-after-tables.json",
+      "raw_bytes": 803212,
+      "raw_sha256": "834cf1b6a9f666d1c5b258f8c8c4634fcb445fe299b7af099275bc8cbbe06aa2"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/stage-1100-bridge-ports.json.gz",
+      "gzip_bytes": 9321,
+      "gzip_sha256": "18f30472f9d195dd23eb5aa0a931cd90c4621ccc663ebb79a2e0354badbf4e9b",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/stage-1100-bridge-ports.json",
+      "raw_bytes": 623928,
+      "raw_sha256": "426179ed7e0af3c80f3612a9228536597ce1dbf7cdd337957c41327b7a7efaaa"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/pressure-100-tables.json.gz",
+      "gzip_bytes": 22985,
+      "gzip_sha256": "38828c73821d5f10ee6a51292e06b6a76d4476b3d1a2e57c356cb64410338f73",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/pressure-100-tables.json",
+      "raw_bytes": 803196,
+      "raw_sha256": "a7aaa1859bc0d6632d149d2eec01b0ca889872e5ad79904c1c3999591a787884"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/preflight-kernel-config.txt.gz",
+      "gzip_bytes": 74182,
+      "gzip_sha256": "f992f2c1ea9436b4d6fbf54be6c8e1dcc76982f037420010e8ddca4adac907eb",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/preflight-kernel-config.txt",
+      "raw_bytes": 321993,
+      "raw_sha256": "55cb11f45639ac110ccd3dab17ebeca609b92578063ed0901f2ea0fa7b7130dd"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/stage-1100-links.json.gz",
+      "gzip_bytes": 40696,
+      "gzip_sha256": "138d0fb299b1fda7f020160c9b17794d90032950bac033a287c18eef21562296",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/stage-1100-links.json",
+      "raw_bytes": 1806463,
+      "raw_sha256": "0359a7cec887b2891c3aec0c57351798e70bce5f54e5ee44824b9967a45019e2"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/pressure-300-tables.json.gz",
+      "gzip_bytes": 22928,
+      "gzip_sha256": "23a994214c185573c0e5f5fe1c333148a2947a8fc1b2bd27ea2e0a2415d2071b",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/pressure-300-tables.json",
+      "raw_bytes": 803196,
+      "raw_sha256": "607e14873472a0324c43a23223e9cfd4f2f480c245901657f8b859e2ee33fce7"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/stage-1100-fdb.json.gz",
+      "gzip_bytes": 34465,
+      "gzip_sha256": "5c7bb513e314df502cb4a475215c55322d832492234e84f2224c1d7aad9930f9",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/stage-1100-fdb.json",
+      "raw_bytes": 640652,
+      "raw_sha256": "87df03646bcb24918182f6c9bfbc3f2e0814a19a5c740bf5142ae63bf37154b3"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/pressure-342-tables.json.gz",
+      "gzip_bytes": 22976,
+      "gzip_sha256": "d42cae572365dd8cbe7ab4871141d3010dc44daf5b03e00212cecfd6eeaf7200",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/pressure-342-tables.json",
+      "raw_bytes": 803204,
+      "raw_sha256": "1a88961b85954b273b6020bde8b0cef3d33dbcfe923bd23bbacd6a1001b75628"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/neighbor-pressure-before-tables.json.gz",
+      "gzip_bytes": 22932,
+      "gzip_sha256": "58520fe457d2b3552062c07db587c9532788366278113edcbde14984484b5841",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/neighbor-pressure-before-tables.json",
+      "raw_bytes": 803183,
+      "raw_sha256": "037af932ada9e98c104ff7145ab4122f08d6311934b24ec15b329c21bb3c0ff9"
+    },
+    {
+      "compressed_file": "increment-04-native-20261004T091503Z/evidence/pressure-344-tables.json.gz",
+      "gzip_bytes": 22960,
+      "gzip_sha256": "f9135abce732d5203ee0a9554fa0cf9a50d80cc063a5629ac45960cc41bbcf2d",
+      "original_retained": "out/uncompressed-evidence/increment-04-native-20261004T091503Z/pressure-344-tables.json",
+      "raw_bytes": 803212,
+      "raw_sha256": "b53b209ec310151ecfae699663638c33a1be50aa5c17ef93e0e922962d56c9c3"
+    }
+  ],
+  "format": "Lossless gzip only; original bytes remain in ignored out/uncompressed-evidence and original .context archives"
+}

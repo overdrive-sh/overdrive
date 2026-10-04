@@ -1,0 +1,51 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=0f0f2ae4b868ba388e8ce108 pid=799382
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <redacted canonical metal target>:/home/ubuntu/overdrive
+
+sent 683,028 bytes  received 105,278 bytes  121,277.85 bytes/sec
+total size is 978,710,236  speedup is 1,241.54
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+{"approval": "lets lower both so it fits within the machine", "at_s": 6.57886266708374e-05, "event": "user-decision", "scope": "lower probe resources and VM count only; original 16384 DESIGN/E18 contract remains pending"}
+{"at_s": 0.01003310177475214, "event": "identity", "lease_owner": "pid=799382\nstarted_at=2026-10-04T10:16:37Z\naction=run\nscenario=spike-vsock-increment-09-ram64-20261004T1017Z\nworkspace=/Users/marcus/conductor/workspaces/helios/wellington-v2\ncommit=5ea2d0c506f5c1f0672c2a4b5b7c5d0d415d6bde\ntoken=0f0f2ae4b868ba388e8ce108\n", "parent_executable": "/usr/bin/python3.14", "parent_executable_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41", "pid": 799733, "rlimit_nofile": [1024, 524288], "runner_sha256": "687a1d19ab8b2dc5ba4402e427504843b87236e80bf7fe8dab49cadcd0cb07dc", "source_sha256": "147293a09f3e427e3cb91b2c4c8e082b71bcec763cacdd340372e461a936768b", "uname": ["Linux", "em-determined-roentgen", "7.0.0-29-generic", "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026", "x86_64"]}
+{"at_s": 0.1746993064880371, "cloud_hypervisor_sha256": "448af3d4e59b22c2987f7df94c213ad40fb53a10d437e42b5ee6c4fce7c29ecc", "event": "fixture-identity", "kernel_path": "/srv/vm/overdrive-testing/kernel", "kernel_sha256": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682", "rootfs_bytes": 67108864, "rootfs_path": "/srv/vm/overdrive-testing/rootfs.ext4", "rootfs_sha256": "4f7f97841e22384f1aebb040e199d78844ab418ad4859e6c262809d557898d85"}
+{"at_s": 0.7424455545842648, "binary_bytes": 731184, "binary_sha256": "78a0b5b32f27637c449f210b1c928c020c06ba0e8267842153d0a84d293327c4", "elapsed_s": 0.5179057409986854, "event": "build"}
+{"at_s": 0.7963695283979177, "before_any_vmm_spawn": true, "event": "host-ready", "pid": 799799, "receiver_paths": ["/run/v295-799733/va_5000", "/run/v295-799733/vb_5000"]}
+{"at_s": 0.8474026005715132, "before_any_vmm_spawn": true, "event": "capture-armed", "limitation": "AF_PACKET cannot witness virtio-vsock payloads; Rust backend logs are sampled successful reads, not loss-accounted observers", "pid": 799802}
+{"at_s": 0.9808988813310862, "cid": 39501, "event": "staged-guest", "image_bytes": 67108864, "image_sha256": "2743a62a5d85f1ec29ee258da120a4bdf2fd2580714419a8f9dfbdf8d69132a8", "init_sha256": "78a0b5b32f27637c449f210b1c928c020c06ba0e8267842153d0a84d293327c4", "role": "a"}
+{"at_s": 0.9816258158534765, "cid": 39501, "event": "vmm-spawn", "host_net_devices_requested": 0, "net_option_present": false, "pid": 799807, "role": "a"}
+{"at_s": 1.0877798721194267, "cid": 39502, "event": "staged-guest", "image_bytes": 67108864, "image_sha256": "0aa66182298b38a11d5b2e34c178e14a0956d9e5c39f0024fab549c0cbb2e83d", "init_sha256": "78a0b5b32f27637c449f210b1c928c020c06ba0e8267842153d0a84d293327c4", "role": "b"}
+{"at_s": 1.0883501013740897, "cid": 39502, "event": "vmm-spawn", "host_net_devices_requested": 0, "net_option_present": false, "pid": 799819, "role": "b"}
+{"at_s": 1.189528027549386, "error": "process exited before GUEST_PROBE_READY ", "event": "probe-failure", "trace": "Traceback (most recent call last):\n  File \"/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/run.py\", line 107, in <module>\n    text=wait_text(console,'GUEST_PROBE_READY',proc,35)\n  File \"/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/increment-09-ram64-20261004T1017Z/run.py\", line 48, in wait_text\n    if proc.poll() is not None:raise RuntimeError('process exited before '+needle+' '+text[-3000:])\n                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: process exited before GUEST_PROBE_READY \n"}
+{"at_s": 1.220939315855503, "event": "owned-process-stopped", "pid": 799819, "returncode": 0}
+{"at_s": 1.2209995668381453, "event": "owned-process-stopped", "pid": 799807, "returncode": 0}
+{"at_s": 1.2362840417772532, "event": "owned-process-stopped", "pid": 799802, "returncode": 0}
+{"at_s": 1.237392259761691, "event": "owned-process-stopped", "pid": 799799, "returncode": -15}
+{"at_s": 1.2375526819378138, "event": "owned-path-removed", "path": "/run/v295-799733/va_5000"}
+{"at_s": 1.237584169022739, "event": "owned-path-removed", "path": "/run/v295-799733/vb_5000"}
+{"at_s": 1.237634925171733, "event": "owned-path-removed", "path": "/run/v295-799733/api-a.lock"}
+{"at_s": 1.2376594617962837, "event": "owned-path-removed", "path": "/run/v295-799733/api-b.lock"}
+{"at_s": 1.2388593079522252, "event": "owned-path-removed", "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/out/increment-09-ram64-20261004T1017Z/guest-a.ext4"}
+{"at_s": 1.2415124718099833, "event": "owned-path-removed", "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/out/increment-09-ram64-20261004T1017Z/guest-b.ext4"}
+{"at_s": 1.2415516208857298, "event": "owned-uds-directory-removed", "path": "/run/v295-799733"}
+{"administrative_configuration_matched": true, "at_s": 1.298787398263812, "different_keys": [], "event": "cleanup", "foreign_modules_unloaded": false, "new_host_netdevices_requested": 0, "owned_processes_alive": [], "owned_uds_remaining": [], "sysctls_tuned": false}
+{"at_s": 1.2988190157338977, "event": "final", "passed": false, "wall_s": 1.2988178543746471}
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1300[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 40.43383583298419}

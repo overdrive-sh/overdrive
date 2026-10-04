@@ -1,0 +1,129 @@
+HOST_RECEIVER_ARMED role=v000 path=/run/v295-807801/v000_5000
+HOST_RECEIVER_ARMED role=v001 path=/run/v295-807801/v001_5000
+HOST_RECEIVER_ARMED role=v002 path=/run/v295-807801/v002_5000
+HOST_RECEIVER_ARMED role=v003 path=/run/v295-807801/v003_5000
+HOST_RECEIVER_ARMED role=v004 path=/run/v295-807801/v004_5000
+HOST_RECEIVER_ARMED role=v005 path=/run/v295-807801/v005_5000
+HOST_RECEIVER_ARMED role=v006 path=/run/v295-807801/v006_5000
+HOST_RECEIVER_ARMED role=v007 path=/run/v295-807801/v007_5000
+HOST_RECEIVER_ARMED role=v008 path=/run/v295-807801/v008_5000
+HOST_RECEIVER_ARMED role=v009 path=/run/v295-807801/v009_5000
+HOST_RECEIVER_ARMED role=v010 path=/run/v295-807801/v010_5000
+HOST_RECEIVER_ARMED role=v011 path=/run/v295-807801/v011_5000
+HOST_RECEIVER_ARMED role=v012 path=/run/v295-807801/v012_5000
+HOST_RECEIVER_ARMED role=v013 path=/run/v295-807801/v013_5000
+HOST_RECEIVER_ARMED role=v014 path=/run/v295-807801/v014_5000
+HOST_RECEIVER_ARMED role=v015 path=/run/v295-807801/v015_5000
+HOST_RECEIVER_ARMED role=v016 path=/run/v295-807801/v016_5000
+HOST_RECEIVER_ARMED role=v017 path=/run/v295-807801/v017_5000
+HOST_RECEIVER_ARMED role=v018 path=/run/v295-807801/v018_5000
+HOST_RECEIVER_ARMED role=v019 path=/run/v295-807801/v019_5000
+HOST_RECEIVER_ARMED role=v020 path=/run/v295-807801/v020_5000
+HOST_RECEIVER_ARMED role=v021 path=/run/v295-807801/v021_5000
+HOST_RECEIVER_ARMED role=v022 path=/run/v295-807801/v022_5000
+HOST_RECEIVER_ARMED role=v023 path=/run/v295-807801/v023_5000
+HOST_RECEIVER_ARMED role=v024 path=/run/v295-807801/v024_5000
+HOST_RECEIVER_ARMED role=v025 path=/run/v295-807801/v025_5000
+HOST_RECEIVER_ARMED role=v026 path=/run/v295-807801/v026_5000
+HOST_RECEIVER_ARMED role=v027 path=/run/v295-807801/v027_5000
+HOST_RECEIVER_ARMED role=v028 path=/run/v295-807801/v028_5000
+HOST_RECEIVER_ARMED role=v029 path=/run/v295-807801/v029_5000
+HOST_RECEIVER_ARMED role=v030 path=/run/v295-807801/v030_5000
+HOST_RECEIVER_ARMED role=v031 path=/run/v295-807801/v031_5000
+HOST_RECEIVER_ARMED role=v032 path=/run/v295-807801/v032_5000
+HOST_RECEIVER_ARMED role=v033 path=/run/v295-807801/v033_5000
+HOST_RECEIVER_ARMED role=v034 path=/run/v295-807801/v034_5000
+HOST_RECEIVER_ARMED role=v035 path=/run/v295-807801/v035_5000
+HOST_RECEIVER_ARMED role=v036 path=/run/v295-807801/v036_5000
+HOST_RECEIVER_ARMED role=v037 path=/run/v295-807801/v037_5000
+HOST_RECEIVER_ARMED role=v038 path=/run/v295-807801/v038_5000
+HOST_RECEIVER_ARMED role=v039 path=/run/v295-807801/v039_5000
+HOST_RECEIVER_ARMED role=v040 path=/run/v295-807801/v040_5000
+HOST_RECEIVER_ARMED role=v041 path=/run/v295-807801/v041_5000
+HOST_RECEIVER_ARMED role=v042 path=/run/v295-807801/v042_5000
+HOST_RECEIVER_ARMED role=v043 path=/run/v295-807801/v043_5000
+HOST_RECEIVER_ARMED role=v044 path=/run/v295-807801/v044_5000
+HOST_RECEIVER_ARMED role=v045 path=/run/v295-807801/v045_5000
+HOST_RECEIVER_ARMED role=v046 path=/run/v295-807801/v046_5000
+HOST_RECEIVER_ARMED role=v047 path=/run/v295-807801/v047_5000
+HOST_RECEIVER_ARMED role=v048 path=/run/v295-807801/v048_5000
+HOST_RECEIVER_ARMED role=v049 path=/run/v295-807801/v049_5000
+HOST_RECEIVER_ARMED role=v050 path=/run/v295-807801/v050_5000
+HOST_RECEIVER_ARMED role=v051 path=/run/v295-807801/v051_5000
+HOST_RECEIVER_ARMED role=v052 path=/run/v295-807801/v052_5000
+HOST_RECEIVER_ARMED role=v053 path=/run/v295-807801/v053_5000
+HOST_RECEIVER_ARMED role=v054 path=/run/v295-807801/v054_5000
+HOST_RECEIVER_ARMED role=v055 path=/run/v295-807801/v055_5000
+HOST_RECEIVER_ARMED role=v056 path=/run/v295-807801/v056_5000
+HOST_RECEIVER_ARMED role=v057 path=/run/v295-807801/v057_5000
+HOST_RECEIVER_ARMED role=v058 path=/run/v295-807801/v058_5000
+HOST_RECEIVER_ARMED role=v059 path=/run/v295-807801/v059_5000
+HOST_RECEIVER_ARMED role=v060 path=/run/v295-807801/v060_5000
+HOST_RECEIVER_ARMED role=v061 path=/run/v295-807801/v061_5000
+HOST_RECEIVER_ARMED role=v062 path=/run/v295-807801/v062_5000
+HOST_RECEIVER_ARMED role=v063 path=/run/v295-807801/v063_5000
+HOST_ALL_RECEIVERS_READY
+HOST_RECEIVE role=v000 elapsed_us=61 bytes=29 payload="guest-to-host-v000-cid-41000\n"
+HOST_RECEIVE role=v001 elapsed_us=101 bytes=29 payload="guest-to-host-v001-cid-41001\n"
+HOST_RECEIVE role=v002 elapsed_us=80 bytes=29 payload="guest-to-host-v002-cid-41002\n"
+HOST_RECEIVE role=v003 elapsed_us=137 bytes=29 payload="guest-to-host-v003-cid-41003\n"
+HOST_RECEIVE role=v004 elapsed_us=82 bytes=29 payload="guest-to-host-v004-cid-41004\n"
+HOST_RECEIVE role=v005 elapsed_us=77 bytes=29 payload="guest-to-host-v005-cid-41005\n"
+HOST_RECEIVE role=v006 elapsed_us=112 bytes=29 payload="guest-to-host-v006-cid-41006\n"
+HOST_RECEIVE role=v007 elapsed_us=115 bytes=29 payload="guest-to-host-v007-cid-41007\n"
+HOST_RECEIVE role=v008 elapsed_us=76 bytes=29 payload="guest-to-host-v008-cid-41008\n"
+HOST_RECEIVE role=v009 elapsed_us=126 bytes=29 payload="guest-to-host-v009-cid-41009\n"
+HOST_RECEIVE role=v010 elapsed_us=145 bytes=29 payload="guest-to-host-v010-cid-41010\n"
+HOST_RECEIVE role=v012 elapsed_us=81 bytes=29 payload="guest-to-host-v012-cid-41012\n"
+HOST_RECEIVE role=v011 elapsed_us=143 bytes=29 payload="guest-to-host-v011-cid-41011\n"
+HOST_RECEIVE role=v013 elapsed_us=120 bytes=29 payload="guest-to-host-v013-cid-41013\n"
+HOST_RECEIVE role=v014 elapsed_us=149 bytes=29 payload="guest-to-host-v014-cid-41014\n"
+HOST_RECEIVE role=v015 elapsed_us=156 bytes=29 payload="guest-to-host-v015-cid-41015\n"
+HOST_RECEIVE role=v016 elapsed_us=116 bytes=29 payload="guest-to-host-v016-cid-41016\n"
+HOST_RECEIVE role=v017 elapsed_us=39 bytes=29 payload="guest-to-host-v017-cid-41017\n"
+HOST_RECEIVE role=v021 elapsed_us=136 bytes=29 payload="guest-to-host-v021-cid-41021\n"
+HOST_RECEIVE role=v019 elapsed_us=131 bytes=29 payload="guest-to-host-v019-cid-41019\n"
+HOST_RECEIVE role=v018 elapsed_us=88724 bytes=29 payload="guest-to-host-v018-cid-41018\n"
+HOST_RECEIVE role=v020 elapsed_us=130 bytes=29 payload="guest-to-host-v020-cid-41020\n"
+HOST_RECEIVE role=v022 elapsed_us=132 bytes=29 payload="guest-to-host-v022-cid-41022\n"
+HOST_RECEIVE role=v023 elapsed_us=111 bytes=29 payload="guest-to-host-v023-cid-41023\n"
+HOST_RECEIVE role=v024 elapsed_us=2612 bytes=29 payload="guest-to-host-v024-cid-41024\n"
+HOST_RECEIVE role=v026 elapsed_us=93 bytes=29 payload="guest-to-host-v026-cid-41026\n"
+HOST_RECEIVE role=v025 elapsed_us=95 bytes=29 payload="guest-to-host-v025-cid-41025\n"
+HOST_RECEIVE role=v027 elapsed_us=112 bytes=29 payload="guest-to-host-v027-cid-41027\n"
+HOST_RECEIVE role=v028 elapsed_us=183 bytes=29 payload="guest-to-host-v028-cid-41028\n"
+HOST_RECEIVE role=v029 elapsed_us=144 bytes=29 payload="guest-to-host-v029-cid-41029\n"
+HOST_RECEIVE role=v030 elapsed_us=114 bytes=29 payload="guest-to-host-v030-cid-41030\n"
+HOST_RECEIVE role=v031 elapsed_us=119 bytes=29 payload="guest-to-host-v031-cid-41031\n"
+HOST_RECEIVE role=v032 elapsed_us=120 bytes=29 payload="guest-to-host-v032-cid-41032\n"
+HOST_RECEIVE role=v033 elapsed_us=123 bytes=29 payload="guest-to-host-v033-cid-41033\n"
+HOST_RECEIVE role=v034 elapsed_us=133 bytes=29 payload="guest-to-host-v034-cid-41034\n"
+HOST_RECEIVE role=v036 elapsed_us=100 bytes=29 payload="guest-to-host-v036-cid-41036\n"
+HOST_RECEIVE role=v037 elapsed_us=130 bytes=29 payload="guest-to-host-v037-cid-41037\n"
+HOST_RECEIVE role=v035 elapsed_us=95 bytes=29 payload="guest-to-host-v035-cid-41035\n"
+HOST_RECEIVE role=v038 elapsed_us=128 bytes=29 payload="guest-to-host-v038-cid-41038\n"
+HOST_RECEIVE role=v039 elapsed_us=121 bytes=29 payload="guest-to-host-v039-cid-41039\n"
+HOST_RECEIVE role=v040 elapsed_us=146 bytes=29 payload="guest-to-host-v040-cid-41040\n"
+HOST_RECEIVE role=v042 elapsed_us=85 bytes=29 payload="guest-to-host-v042-cid-41042\n"
+HOST_RECEIVE role=v041 elapsed_us=124 bytes=29 payload="guest-to-host-v041-cid-41041\n"
+HOST_RECEIVE role=v044 elapsed_us=128 bytes=29 payload="guest-to-host-v044-cid-41044\n"
+HOST_RECEIVE role=v043 elapsed_us=96 bytes=29 payload="guest-to-host-v043-cid-41043\n"
+HOST_RECEIVE role=v045 elapsed_us=92 bytes=29 payload="guest-to-host-v045-cid-41045\n"
+HOST_RECEIVE role=v046 elapsed_us=208 bytes=29 payload="guest-to-host-v046-cid-41046\n"
+HOST_RECEIVE role=v047 elapsed_us=125 bytes=29 payload="guest-to-host-v047-cid-41047\n"
+HOST_RECEIVE role=v048 elapsed_us=97 bytes=29 payload="guest-to-host-v048-cid-41048\n"
+HOST_RECEIVE role=v049 elapsed_us=100 bytes=29 payload="guest-to-host-v049-cid-41049\n"
+HOST_RECEIVE role=v050 elapsed_us=126 bytes=29 payload="guest-to-host-v050-cid-41050\n"
+HOST_RECEIVE role=v051 elapsed_us=119 bytes=29 payload="guest-to-host-v051-cid-41051\n"
+HOST_RECEIVE role=v053 elapsed_us=130 bytes=29 payload="guest-to-host-v053-cid-41053\n"
+HOST_RECEIVE role=v052 elapsed_us=476 bytes=29 payload="guest-to-host-v052-cid-41052\n"
+HOST_RECEIVE role=v054 elapsed_us=122 bytes=29 payload="guest-to-host-v054-cid-41054\n"
+HOST_RECEIVE role=v055 elapsed_us=91 bytes=29 payload="guest-to-host-v055-cid-41055\n"
+HOST_RECEIVE role=v057 elapsed_us=115 bytes=29 payload="guest-to-host-v057-cid-41057\n"
+HOST_RECEIVE role=v056 elapsed_us=118 bytes=29 payload="guest-to-host-v056-cid-41056\n"
+HOST_RECEIVE role=v058 elapsed_us=89 bytes=29 payload="guest-to-host-v058-cid-41058\n"
+HOST_RECEIVE role=v059 elapsed_us=103 bytes=29 payload="guest-to-host-v059-cid-41059\n"
+HOST_RECEIVE role=v062 elapsed_us=113 bytes=29 payload="guest-to-host-v062-cid-41062\n"
+HOST_RECEIVE role=v060 elapsed_us=119 bytes=29 payload="guest-to-host-v060-cid-41060\n"
+HOST_RECEIVE role=v063 elapsed_us=148 bytes=29 payload="guest-to-host-v063-cid-41063\n"
+HOST_RECEIVE role=v061 elapsed_us=122 bytes=29 payload="guest-to-host-v061-cid-41061\n"

@@ -1,0 +1,5 @@
+{
+  "cgroup.controllers": "cpuset cpu io memory hugetlb pids rdma misc dmem\n",
+  "cgroup.subtree_control": "cpu io memory pids\n",
+  "cpuset.cpus.effective": "0-15\n"
+}

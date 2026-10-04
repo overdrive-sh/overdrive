@@ -1,0 +1,6 @@
+{
+  "command": "read-only post-release exact probe PID/path/lease-owner attestation",
+  "rc": 0,
+  "stdout": "{\"path_exists\": {\"/run/lock/overdrive-metal-shared.owner\": false, \"/run/v295-792743\": false, \"/run/v295-794479\": false, \"/run/v295-795377\": false, \"/run/v295-796422\": false}, \"prior_probe_pid_exists\": {\"792808\": false, \"792811\": false, \"792816\": false, \"792828\": false, \"794543\": false, \"794546\": false, \"794551\": false, \"794563\": false, \"795567\": false, \"795570\": false, \"795575\": false, \"795587\": false, \"796488\": false, \"796491\": false, \"796496\": false, \"796508\": false}, \"probe_scope_created\": false}\n",
+  "stderr": ""
+}

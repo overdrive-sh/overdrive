@@ -1,0 +1,9 @@
+{
+  "argv": [
+    "file",
+    "/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/target/x86_64-unknown-linux-musl/release/shared-memory-vsock-probe-01"
+  ],
+  "rc": 0,
+  "stdout": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-shared-memory-vsock/target/x86_64-unknown-linux-musl/release/shared-memory-vsock-probe-01: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=967cba8dfccbf3cd5fb60a7fccec333a7b4afd07, not stripped\n",
+  "stderr": ""
+}

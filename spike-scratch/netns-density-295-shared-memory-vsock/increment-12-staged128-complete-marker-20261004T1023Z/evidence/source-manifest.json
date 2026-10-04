@@ -1,0 +1,12 @@
+{
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-shared-memory-vsock/increment-12-staged128-complete-marker-20261004T1023Z/run.py",
+  "head": "5ea2d0c506f5c1f0672c2a4b5b7c5d0d415d6bde",
+  "sources": {
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-12-staged128-complete-marker-20261004T1023Z/Cargo.lock": "f0d1142e3d125f9e2120b540f7e6c448ed68f8e6d84a43f22c62366b36172bbf",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-12-staged128-complete-marker-20261004T1023Z/Cargo.toml": "59d405860dfff16bb03d17611463cd0b22539edd6afbc631f85226ae13e54b1f",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-12-staged128-complete-marker-20261004T1023Z/__pycache__/run.cpython-314.pyc": "c485cf09ff82ca3371948af04a877044da6c283fe737ae1f96c286b6c0515c1b",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-12-staged128-complete-marker-20261004T1023Z/launch-executed.py": "1bba92bc992c8d44d2533322aba35c509202211e1fa7fa1995b4665e1ab65eff",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-12-staged128-complete-marker-20261004T1023Z/run.py": "211ab486435e844369f636167a3f64cfd4b611df3f8a03fb99823bab5536a46d",
+    "spike-scratch/netns-density-295-shared-memory-vsock/increment-12-staged128-complete-marker-20261004T1023Z/src/main.rs": "a7152f1977eb5458f5dd28511c4d6075b063264b983dc6d2758f743135f73e6a"
+  }
+}

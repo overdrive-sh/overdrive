@@ -1,0 +1,39 @@
+{
+  "agents_changed_concurrently_outside_probe": true,
+  "changed_source_paths": [],
+  "commits_created_by_this_agent": 0,
+  "increment_source_checks": [
+    {
+      "epoch": "01",
+      "evidence_files": 58,
+      "sha256": "e9d1a7be00d3b5ad5de4a9948edad50e71659031013139bc36e215cf33ba9022",
+      "source_exact": true
+    },
+    {
+      "epoch": "02",
+      "evidence_files": 86,
+      "sha256": "1264cc87a882585f6a7b6ff9e9282ddb945c61c97e655064cd7dac965c8ab828",
+      "source_exact": true
+    },
+    {
+      "epoch": "03",
+      "evidence_files": 66,
+      "sha256": "5e17ffc6c64f245848ad72374239f4163db92d76e7c3a7411efdd9e7cb089321",
+      "source_exact": true
+    },
+    {
+      "epoch": "04",
+      "evidence_files": 67,
+      "sha256": "40dab97507c442d832c6a37b093d5fa466477d659fd813a36206c0d3d67f1641",
+      "source_exact": true
+    }
+  ],
+  "link_failures": [],
+  "native_mutations_after_epoch04": 0,
+  "preexisting_production_support_des_hashes_unchanged": true,
+  "task_added_scope": [
+    "docs/feature/netns-density-295/spike/multi-bridge-findings.md",
+    "spike-scratch/netns-density-295-multi-bridge/",
+    ".context/spike-multi-bridge-*"
+  ]
+}

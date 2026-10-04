@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "ip",
+    "-j",
+    "-s",
+    "neigh",
+    "show"
+  ],
+  "rc": 0,
+  "stdout": "[{\"dst\":\"151.115.99.1\",\"dev\":\"eno12399np0\",\"lladdr\":\"2c:4f:52:fc:65:d3\",\"refcnt\":1,\"used\":39,\"confirmed\":0,\"updated\":39,\"probes\":1,\"state\":[\"REACHABLE\"]},{\"dst\":\"2001:bc8:1f90:1f::1\",\"dev\":\"eno12399np0\",\"lladdr\":\"2c:4f:52:fc:65:d3\",\"router\":null,\"used\":1060,\"confirmed\":1060,\"updated\":1024,\"probes\":1,\"state\":[\"STALE\"]},{\"dst\":\"fe80::2e4f:52ff:fefc:65d3\",\"dev\":\"eno12399np0\",\"lladdr\":\"2c:4f:52:fc:65:d3\",\"router\":null,\"refcnt\":1,\"used\":24,\"confirmed\":24,\"updated\":24,\"probes\":1,\"state\":[\"REACHABLE\"]}]\n",
+  "stderr": ""
+}

@@ -1,0 +1,474 @@
+{
+  "binaries": [
+    {
+      "bytes": 17295752,
+      "path": "/boot/vmlinuz-7.0.0-29-generic",
+      "sha256": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682"
+    },
+    {
+      "bytes": 187237,
+      "path": "/lib/modules/7.0.0-29-generic/kernel/net/bridge/bridge.ko.zst",
+      "sha256": "572e0baa251e3f9ece7a039a105d556d29499ce6965488feeb7f0d702097f64a"
+    },
+    {
+      "bytes": 20319,
+      "path": "/lib/modules/7.0.0-29-generic/kernel/drivers/net/veth.ko.zst",
+      "sha256": "eb3e9c5d4e26ee6c123f0be46d515d60f38b4042eaab10e06371bbd9410954d6"
+    }
+  ],
+  "fd-after": {
+    "argv": [
+      "cat",
+      "/proc/sys/fs/file-nr"
+    ],
+    "rc": 0,
+    "stderr": "",
+    "stdout": "1116\t0\t9223372036854775807\n"
+  },
+  "host_links": [
+    {
+      "address": "00:00:00:00:00:00",
+      "allmulti": 0,
+      "broadcast": "00:00:00:00:00:00",
+      "flags": [
+        "LOOPBACK",
+        "UP",
+        "LOWER_UP"
+      ],
+      "gro_ipv4_max_size": 65536,
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_ipv4_max_size": 65536,
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 1,
+      "ifname": "lo",
+      "inet6_addr_gen_mode": "eui64",
+      "link_type": "loopback",
+      "linkmode": "DEFAULT",
+      "max_mtu": 0,
+      "min_mtu": 0,
+      "mtu": 65536,
+      "netns-immutable": true,
+      "num_rx_queues": 1,
+      "num_tx_queues": 1,
+      "operstate": "UNKNOWN",
+      "promiscuity": 0,
+      "qdisc": "noqueue",
+      "tso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "txqlen": 1000
+    },
+    {
+      "address": "14:23:f2:f4:50:e0",
+      "allmulti": 0,
+      "altnames": [
+        "enp1s0f0np0",
+        "enx1423f2f450e0"
+      ],
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST",
+        "UP",
+        "LOWER_UP"
+      ],
+      "gro_ipv4_max_size": 65536,
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_ipv4_max_size": 65536,
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 2,
+      "ifname": "eno12399np0",
+      "inet6_addr_gen_mode": "eui64",
+      "link_type": "ether",
+      "linkmode": "DEFAULT",
+      "max_mtu": 9600,
+      "min_mtu": 60,
+      "mtu": 1500,
+      "num_rx_queues": 74,
+      "num_tx_queues": 592,
+      "operstate": "UP",
+      "parentbus": "pci",
+      "parentdev": "0000:01:00.0",
+      "phys_port_name": "p0",
+      "phys_switch_id": "e050f4fefff22314",
+      "promiscuity": 0,
+      "qdisc": "mq",
+      "tso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "txqlen": 1000,
+      "vfinfo_list": []
+    },
+    {
+      "address": "6c:3c:8c:8b:69:3e",
+      "allmulti": 0,
+      "altnames": [
+        "enp199s0",
+        "enx6c3c8c8b693e"
+      ],
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST"
+      ],
+      "gro_ipv4_max_size": 65536,
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_ipv4_max_size": 65536,
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 3,
+      "ifname": "eno8303",
+      "inet6_addr_gen_mode": "eui64",
+      "link_type": "ether",
+      "linkmode": "DEFAULT",
+      "max_mtu": 9000,
+      "min_mtu": 60,
+      "mtu": 1500,
+      "num_rx_queues": 5,
+      "num_tx_queues": 5,
+      "operstate": "DOWN",
+      "parentbus": "pci",
+      "parentdev": "0000:c7:00.0",
+      "promiscuity": 0,
+      "qdisc": "noop",
+      "tso_max_segs": 65535,
+      "tso_max_size": 65536,
+      "txqlen": 1000
+    },
+    {
+      "address": "14:23:f2:f4:50:e1",
+      "allmulti": 0,
+      "altnames": [
+        "enp1s0f1np1",
+        "enx1423f2f450e1"
+      ],
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST"
+      ],
+      "gro_ipv4_max_size": 65536,
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_ipv4_max_size": 65536,
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 4,
+      "ifname": "eno12409np1",
+      "inet6_addr_gen_mode": "eui64",
+      "link_type": "ether",
+      "linkmode": "DEFAULT",
+      "max_mtu": 9600,
+      "min_mtu": 60,
+      "mtu": 1500,
+      "num_rx_queues": 74,
+      "num_tx_queues": 592,
+      "operstate": "DOWN",
+      "parentbus": "pci",
+      "parentdev": "0000:01:00.1",
+      "phys_port_name": "p1",
+      "phys_switch_id": "e050f4fefff22314",
+      "promiscuity": 0,
+      "qdisc": "noop",
+      "tso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "txqlen": 1000,
+      "vfinfo_list": []
+    },
+    {
+      "address": "36:2a:11:a3:1f:2c",
+      "allmulti": 0,
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST",
+        "UP",
+        "LOWER_UP"
+      ],
+      "gro_ipv4_max_size": 65536,
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_ipv4_max_size": 65536,
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 59537,
+      "ifname": "ovd-veth-bk",
+      "inet6_addr_gen_mode": "eui64",
+      "link": "ovd-veth-cli",
+      "link_type": "ether",
+      "linkinfo": {
+        "info_kind": "veth"
+      },
+      "linkmode": "DEFAULT",
+      "max_mtu": 65535,
+      "min_mtu": 68,
+      "mtu": 1500,
+      "num_rx_queues": 16,
+      "num_tx_queues": 16,
+      "operstate": "UP",
+      "promiscuity": 0,
+      "qdisc": "noqueue",
+      "tso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "txqlen": 1000
+    },
+    {
+      "address": "16:9f:ad:a9:86:2e",
+      "allmulti": 0,
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST",
+        "UP",
+        "LOWER_UP"
+      ],
+      "gro_ipv4_max_size": 65536,
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_ipv4_max_size": 65536,
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 59538,
+      "ifname": "ovd-veth-cli",
+      "inet6_addr_gen_mode": "eui64",
+      "link": "ovd-veth-bk",
+      "link_type": "ether",
+      "linkinfo": {
+        "info_kind": "veth"
+      },
+      "linkmode": "DEFAULT",
+      "max_mtu": 65535,
+      "min_mtu": 68,
+      "mtu": 1500,
+      "num_rx_queues": 16,
+      "num_tx_queues": 16,
+      "operstate": "UP",
+      "promiscuity": 0,
+      "qdisc": "noqueue",
+      "tso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "txqlen": 1000
+    },
+    {
+      "address": "02:01:00:00:00:01",
+      "allmulti": 0,
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "flags": [
+        "NO-CARRIER",
+        "BROADCAST",
+        "MULTICAST",
+        "UP"
+      ],
+      "gro_ipv4_max_size": 65536,
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_ipv4_max_size": 65536,
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 59539,
+      "ifname": "ovd-gbr0",
+      "inet6_addr_gen_mode": "eui64",
+      "link_type": "ether",
+      "linkinfo": {
+        "info_data": {
+          "ageing_time": 30000,
+          "bridge_id": "8000.2:1:0:0:0:1",
+          "fdb_local_vlan_0": 0,
+          "fdb_max_learned": 0,
+          "fdb_n_learned": 0,
+          "forward_delay": 1500,
+          "gc_timer": 167.16,
+          "group_addr": "01:80:c2:00:00:00",
+          "group_fwd_mask": "0",
+          "hello_time": 200,
+          "hello_timer": 0.0,
+          "max_age": 2000,
+          "mcast_hash_elasticity": 16,
+          "mcast_hash_max": 4096,
+          "mcast_igmp_version": 2,
+          "mcast_last_member_cnt": 2,
+          "mcast_last_member_intvl": 100,
+          "mcast_membership_intvl": 26000,
+          "mcast_mld_version": 1,
+          "mcast_querier": 0,
+          "mcast_querier_intvl": 25500,
+          "mcast_query_intvl": 12500,
+          "mcast_query_response_intvl": 1000,
+          "mcast_query_use_ifaddr": 0,
+          "mcast_router": 1,
+          "mcast_snooping": 1,
+          "mcast_startup_query_cnt": 2,
+          "mcast_startup_query_intvl": 3125,
+          "mcast_stats_enabled": 0,
+          "mcast_vlan_snooping": 0,
+          "mdb_offload_fail_notification": 0,
+          "mst_enabled": 0,
+          "nf_call_arptables": 0,
+          "nf_call_ip6tables": 0,
+          "nf_call_iptables": 1,
+          "no_linklocal_learn": 0,
+          "priority": 32768,
+          "root_id": "8000.2:1:0:0:0:1",
+          "root_path_cost": 0,
+          "root_port": 0,
+          "stp_state": 0,
+          "tcn_timer": 0.0,
+          "topology_change": 0,
+          "topology_change_detected": 0,
+          "topology_change_timer": 0.0,
+          "vlan_default_pvid": 1,
+          "vlan_filtering": 0,
+          "vlan_protocol": "802.1Q",
+          "vlan_stats_enabled": 0,
+          "vlan_stats_per_port": 0
+        },
+        "info_kind": "bridge"
+      },
+      "linkmode": "DEFAULT",
+      "max_mtu": 65535,
+      "min_mtu": 68,
+      "mtu": 1500,
+      "netns-immutable": true,
+      "num_rx_queues": 1,
+      "num_tx_queues": 1,
+      "operstate": "DOWN",
+      "promiscuity": 0,
+      "qdisc": "noqueue",
+      "tso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "txqlen": 1000
+    }
+  ],
+  "kernel-source-package": {
+    "argv": [
+      "dpkg-query",
+      "-W",
+      "-f",
+      "${Package} ${Version} source=${source:Package} ${source:Version}\n",
+      "linux-image-7.0.0-29-generic",
+      "linux-modules-7.0.0-29-generic"
+    ],
+    "rc": 0,
+    "stderr": "",
+    "stdout": "linux-image-7.0.0-29-generic 7.0.0-29.29 source=linux-signed 7.0.0-29.29\nlinux-modules-7.0.0-29-generic 7.0.0-29.29 source=linux 7.0.0-29.29\n"
+  },
+  "kernel-taint": {
+    "argv": [
+      "cat",
+      "/proc/sys/kernel/tainted"
+    ],
+    "rc": 0,
+    "stderr": "",
+    "stdout": "0\n"
+  },
+  "lease_owner_absent": true,
+  "loaded-bridge-srcversion": {
+    "argv": [
+      "cat",
+      "/sys/module/bridge/srcversion"
+    ],
+    "rc": 0,
+    "stderr": "",
+    "stdout": "8AE48B38B6BD1D04D607403\n"
+  },
+  "loaded-bridge-taint": {
+    "argv": [
+      "cat",
+      "/sys/module/bridge/taint"
+    ],
+    "rc": 0,
+    "stderr": "",
+    "stdout": "\n"
+  },
+  "memory-after": {
+    "argv": [
+      "cat",
+      "/proc/meminfo"
+    ],
+    "rc": 0,
+    "stderr": "",
+    "stdout": "MemTotal:       65401772 kB\nMemFree:         4076612 kB\nMemAvailable:   63340264 kB\nBuffers:         1138172 kB\nCached:         56521304 kB\nSwapCached:            0 kB\nActive:         12620216 kB\nInactive:       45116940 kB\nActive(anon):     222488 kB\nInactive(anon):    19760 kB\nActive(file):   12397728 kB\nInactive(file): 45097180 kB\nUnevictable:       15672 kB\nMlocked:            7572 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:              5812 kB\nWriteback:             0 kB\nAnonPages:         93452 kB\nMapped:           134528 kB\nShmem:            159304 kB\nKReclaimable:    2607344 kB\nSlab:            3203016 kB\nSReclaimable:    2607344 kB\nSUnreclaim:       595672 kB\nKernelStack:        5168 kB\nPageTables:         7324 kB\nSecPageTables:      5984 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    32700884 kB\nCommitted_AS:     503684 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:       37688 kB\nVmallocChunk:          0 kB\nPercpu:            94656 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:  30103552 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:          346588 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      309812 kB\nDirectMap2M:    25464832 kB\nDirectMap1G:    40894464 kB\n"
+  },
+  "module-package-integrity": {
+    "argv": [
+      "dpkg",
+      "-V",
+      "linux-modules-7.0.0-29-generic"
+    ],
+    "rc": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  "nic-eno12399np0": {
+    "-i": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "driver: bnxt_en\nversion: 7.0.0-29-generic\nfirmware-version: 229.2.75.0/pkg 22.92.07.50\nexpansion-rom-version: \nbus-info: 0000:01:00.0\nsupports-statistics: yes\nsupports-test: yes\nsupports-eeprom-access: yes\nsupports-register-dump: yes\nsupports-priv-flags: no\n"
+    },
+    "-k": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "Features for eno12399np0:\nrx-checksumming: on\ntx-checksumming: on\n\ttx-checksum-ipv4: on\n\ttx-checksum-ip-generic: off [fixed]\n\ttx-checksum-ipv6: on\n\ttx-checksum-fcoe-crc: off [fixed]\n\ttx-checksum-sctp: off [fixed]\nscatter-gather: on\n\ttx-scatter-gather: on\n\ttx-scatter-gather-fraglist: off [fixed]\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: off [fixed]\n\ttx-tcp-mangleid-segmentation: off\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: off [fixed]\ngeneric-segmentation-offload: on\ngeneric-receive-offload: on\nlarge-receive-offload: off\nrx-vlan-offload: on\ntx-vlan-offload: on\nntuple-filters: on\nreceive-hashing: on\nhighdma: on [fixed]\nrx-vlan-filter: off [fixed]\nvlan-challenged: off [fixed]\ntx-gso-robust: off [fixed]\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: off [fixed]\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-gso-partial: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: off [fixed]\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: off [fixed]\ntx-gso-list: off [fixed]\ntx-nocache-copy: off\nloopback: off [fixed]\nrx-fcs: off [fixed]\nrx-all: off [fixed]\ntx-vlan-stag-hw-insert: on\nrx-vlan-stag-hw-parse: on\nrx-vlan-stag-filter: off [fixed]\nl2-fwd-offload: off [fixed]\nhw-tc-offload: on\nesp-hw-offload: off [fixed]\nesp-tx-csum-hw-offload: off [fixed]\nrx-udp_tunnel-port-offload: on\ntls-hw-tx-offload: off [fixed]\ntls-hw-rx-offload: off [fixed]\nrx-gro-hw: on\ntls-hw-record: off [fixed]\nrx-gro-list: off\nmacsec-hw-offload: off [fixed]\nrx-udp-gro-forwarding: off\nhsr-tag-ins-offload: off [fixed]\nhsr-tag-rm-offload: off [fixed]\nhsr-fwd-offload: off [fixed]\nhsr-dup-offload: off [fixed]\n"
+    },
+    "-l": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "Channel parameters for eno12399np0:\nPre-set maximums:\nRX:\t\t37\nTX:\t\t37\nOther:\t\tn/a\nCombined:\t74\nCurrent hardware settings:\nRX:\t\t0\nTX:\t\t0\nOther:\t\tn/a\nCombined:\t4\n"
+    }
+  },
+  "nic-eno12409np1": {
+    "-i": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "driver: bnxt_en\nversion: 7.0.0-29-generic\nfirmware-version: 229.2.75.0/pkg 22.92.07.50\nexpansion-rom-version: \nbus-info: 0000:01:00.1\nsupports-statistics: yes\nsupports-test: yes\nsupports-eeprom-access: yes\nsupports-register-dump: yes\nsupports-priv-flags: no\n"
+    },
+    "-k": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "Features for eno12409np1:\nrx-checksumming: on\ntx-checksumming: on\n\ttx-checksum-ipv4: on\n\ttx-checksum-ip-generic: off [fixed]\n\ttx-checksum-ipv6: on\n\ttx-checksum-fcoe-crc: off [fixed]\n\ttx-checksum-sctp: off [fixed]\nscatter-gather: on\n\ttx-scatter-gather: on\n\ttx-scatter-gather-fraglist: off [fixed]\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: off [fixed]\n\ttx-tcp-mangleid-segmentation: off\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: off [fixed]\ngeneric-segmentation-offload: on\ngeneric-receive-offload: on\nlarge-receive-offload: off\nrx-vlan-offload: on\ntx-vlan-offload: on\nntuple-filters: on\nreceive-hashing: on\nhighdma: on [fixed]\nrx-vlan-filter: off [fixed]\nvlan-challenged: off [fixed]\ntx-gso-robust: off [fixed]\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: off [fixed]\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-gso-partial: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: off [fixed]\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: off [fixed]\ntx-gso-list: off [fixed]\ntx-nocache-copy: off\nloopback: off [fixed]\nrx-fcs: off [fixed]\nrx-all: off [fixed]\ntx-vlan-stag-hw-insert: on\nrx-vlan-stag-hw-parse: on\nrx-vlan-stag-filter: off [fixed]\nl2-fwd-offload: off [fixed]\nhw-tc-offload: on\nesp-hw-offload: off [fixed]\nesp-tx-csum-hw-offload: off [fixed]\nrx-udp_tunnel-port-offload: on\ntls-hw-tx-offload: off [fixed]\ntls-hw-rx-offload: off [fixed]\nrx-gro-hw: on\ntls-hw-record: off [fixed]\nrx-gro-list: off\nmacsec-hw-offload: off [fixed]\nrx-udp-gro-forwarding: off\nhsr-tag-ins-offload: off [fixed]\nhsr-tag-rm-offload: off [fixed]\nhsr-fwd-offload: off [fixed]\nhsr-dup-offload: off [fixed]\n"
+    },
+    "-l": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "Channel parameters for eno12409np1:\nPre-set maximums:\nRX:\t\t37\nTX:\t\t37\nOther:\t\tn/a\nCombined:\t74\nCurrent hardware settings:\nRX:\t\t0\nTX:\t\t0\nOther:\t\tn/a\nCombined:\t4\n"
+    }
+  },
+  "nic-eno8303": {
+    "-i": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "driver: tg3\nversion: 7.0.0-29-generic\nfirmware-version: FFV22.91.5 bc 5720-v1.39\nexpansion-rom-version: \nbus-info: 0000:c7:00.0\nsupports-statistics: yes\nsupports-test: yes\nsupports-eeprom-access: yes\nsupports-register-dump: yes\nsupports-priv-flags: no\n"
+    },
+    "-k": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "Features for eno8303:\nrx-checksumming: on\ntx-checksumming: on\n\ttx-checksum-ipv4: on\n\ttx-checksum-ip-generic: off [fixed]\n\ttx-checksum-ipv6: on\n\ttx-checksum-fcoe-crc: off [fixed]\n\ttx-checksum-sctp: off [fixed]\nscatter-gather: on\n\ttx-scatter-gather: on\n\ttx-scatter-gather-fraglist: off [fixed]\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: off\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: off [fixed]\ngeneric-segmentation-offload: on\ngeneric-receive-offload: on\nlarge-receive-offload: off [fixed]\nrx-vlan-offload: on [fixed]\ntx-vlan-offload: on [fixed]\nntuple-filters: off [fixed]\nreceive-hashing: off [fixed]\nhighdma: on\nrx-vlan-filter: off [fixed]\nvlan-challenged: off [fixed]\ntx-gso-robust: off [fixed]\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: off [fixed]\ntx-gre-csum-segmentation: off [fixed]\ntx-ipxip4-segmentation: off [fixed]\ntx-ipxip6-segmentation: off [fixed]\ntx-udp_tnl-segmentation: off [fixed]\ntx-udp_tnl-csum-segmentation: off [fixed]\ntx-gso-partial: off [fixed]\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: off [fixed]\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: off [fixed]\ntx-gso-list: off [fixed]\ntx-nocache-copy: off\nloopback: off [fixed]\nrx-fcs: off [fixed]\nrx-all: off [fixed]\ntx-vlan-stag-hw-insert: off [fixed]\nrx-vlan-stag-hw-parse: off [fixed]\nrx-vlan-stag-filter: off [fixed]\nl2-fwd-offload: off [fixed]\nhw-tc-offload: off [fixed]\nesp-hw-offload: off [fixed]\nesp-tx-csum-hw-offload: off [fixed]\nrx-udp_tunnel-port-offload: off [fixed]\ntls-hw-tx-offload: off [fixed]\ntls-hw-rx-offload: off [fixed]\nrx-gro-hw: off [fixed]\ntls-hw-record: off [fixed]\nrx-gro-list: off\nmacsec-hw-offload: off [fixed]\nrx-udp-gro-forwarding: off\nhsr-tag-ins-offload: off [fixed]\nhsr-tag-rm-offload: off [fixed]\nhsr-fwd-offload: off [fixed]\nhsr-dup-offload: off [fixed]\n"
+    },
+    "-l": {
+      "rc": 0,
+      "stderr": "",
+      "stdout": "Channel parameters for eno8303:\nPre-set maximums:\nRX:\t\t4\nTX:\t\t4\nOther:\t\tn/a\nCombined:\tn/a\nCurrent hardware settings:\nRX:\t\t4\nTX:\t\t4\nOther:\t\tn/a\nCombined:\tn/a\n"
+    }
+  },
+  "owned_processes": {
+    "787688": false,
+    "788789": false,
+    "789691": false,
+    "789789": false,
+    "789794": false,
+    "789805": false
+  },
+  "sysctls": {
+    "argv": [
+      "sh",
+      "-c",
+      "cat /proc/sys/fs/nr_open; cat /proc/sys/kernel/pid_max; for x in /proc/sys/net/ipv4/neigh/default/gc_thresh*; do test ! -e \"$x\" || cat \"$x\"; done"
+    ],
+    "rc": 0,
+    "stderr": "",
+    "stdout": "2147483584\n4194304\n128\n512\n1024\n"
+  }
+}

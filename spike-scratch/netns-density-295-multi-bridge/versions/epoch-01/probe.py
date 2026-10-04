@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""PROBE ONLY: actual TAP queue fanout through stock Linux leaf/root bridges."""
+import ctypes, fcntl, hashlib, json, os, pathlib, resource, select, shutil
+import socket, struct, subprocess, sys, time, traceback
+
+START = time.perf_counter()
+RUN = pathlib.Path(__file__).parent / ('run-' + str(os.getpid()))
+RUN.mkdir()
+LOG = open(RUN / 'events.jsonl', 'x')
+FDS = []
+OWNED = []
+PROCS = []
+TAG = 'm295' + format(os.getpid() & 65535, '04x')
+ROOT = TAG + 'r'
+LEAVES = []
+HOST_NS = os.open('/proc/self/ns/net', os.O_RDONLY)
+libc = ctypes.CDLL(None, use_errno=True)
+
+def emit(event, **data):
+    item = dict(event=event, elapsed_s=time.perf_counter()-START, **data)
+    line = json.dumps(item, sort_keys=True)
+    print(line, flush=True)
+    LOG.write(line+'\n'); LOG.flush()
+
+def run(args, check=True, input=None, timeout=30):
+    p = subprocess.run(args, input=input, text=True, capture_output=True, timeout=timeout)
+    if check and p.returncode:
+        raise RuntimeError(json.dumps(dict(argv=args, rc=p.returncode, stdout=p.stdout, stderr=p.stderr)))
+    return p
+
+def raw(name, args):
+    p = run(args, check=False)
+    (RUN / name).write_text(json.dumps(dict(argv=args, rc=p.returncode, stdout=p.stdout, stderr=p.stderr)))
+    return p.stdout
+
+def snap(prefix):
+    data = {}
+    for key,args in [('links',['ip','-j','-d','link']),('addrs',['ip','-j','address']),
+                     ('routes',['ip','-j','route','show','table','all']),('rules',['ip','-j','rule']),
+                     ('nft',['nft','-j','list','ruleset']),('netns',['ip','netns','list']),
+                     ('bpfmaps',['bpftool','-j','map','show']),('bpflinks',['bpftool','-j','link','show'])]:
+        out = raw(prefix+'-'+key+'.json',args)
+        try: data[key] = json.loads(out)
+        except ValueError: data[key] = out
+    for key,path in [('modules','/proc/modules'),('sysctl-ip-forward','/proc/sys/net/ipv4/ip_forward'),
+                     ('sysctl-rp-filter','/proc/sys/net/ipv4/conf/all/rp_filter')]:
+        out = pathlib.Path(path).read_text(); (RUN/(prefix+'-'+key+'.txt')).write_text(out); data[key]=out
+    raw(prefix+'-processes.txt',['ps','-e','-o','pid,ppid,comm,args'])
+    raw(prefix+'-bpfpins.txt',['find','/sys/fs/bpf/overdrive','-maxdepth','4','-printf','%P %y %i\n'])
+    return data
+
+def normalize(data):
+    # Preserve raw volatile values. Compare administrative configuration, not timers/counters.
+    ignored={'valid_life_time','preferred_life_time','expires','lastuse','used','updated','stats64',
+             'stats','cache','packets','bytes','memlock','load_time','bytes_mapped','bytes_user',
+             'querier','mcast_stats_enabled'}
+    def walk(x):
+        if isinstance(x,dict): return {k:walk(v) for k,v in sorted(x.items()) if k not in ignored}
+        if isinstance(x,list): return sorted([walk(v) for v in x], key=lambda v:json.dumps(v,sort_keys=True))
+        return x
+    # /proc/modules reference counts can change during activity; module names/size/address are retained.
+    result=walk(data)
+    result['modules']=[' '.join(line.split()[:2]+line.split()[4:]) for line in data['modules'].splitlines()]
+    return result
+
+def memory():
+    data={}
+    for name,path in [('meminfo','/proc/meminfo'),('status','/proc/self/status')]:
+        vals={}
+        for line in pathlib.Path(path).read_text().splitlines():
+            if ':' in line:
+                key,value=line.split(':',1)
+                if key in ('MemAvailable','MemFree','Slab','SReclaimable','SUnreclaim','VmRSS','VmHWM','VmSize','Threads'):
+                    vals[key]=value.strip()
+        data[name]=vals
+    data['fd_count']=len(list(pathlib.Path('/proc/self/fd').iterdir()))
+    data['file_nr']=pathlib.Path('/proc/sys/fs/file-nr').read_text().strip()
+    return data
+
+def checkpoint(count, create_s):
+    links=json.loads(raw('stage-'+str(count)+'-links.json',['ip','-j','-d','link']))
+    ports=json.loads(raw('stage-'+str(count)+'-bridge-ports.json',['bridge','-j','-d','link']))
+    fdb=json.loads(raw('stage-'+str(count)+'-fdb.json',['bridge','-j','fdb']))
+    master_counts={b:sum(l.get('master')==b for l in links) for b in [ROOT]+LEAVES}
+    tap_links=[l for l in links if l['ifname'].startswith(TAG+'t')]
+    owned_iff=[]
+    for fd in FDS:
+        text=pathlib.Path('/proc/self/fdinfo/'+str(fd)).read_text()
+        owned_iff += [line.split()[1] for line in text.splitlines() if line.startswith('iff:')]
+    if len(tap_links)!=count or len(owned_iff)!=count or len(set(owned_iff))!=count:
+        raise RuntimeError('TAP count/queue custody readback mismatch')
+    if any(n>1023 for n in master_counts.values()): raise RuntimeError('stock bridge port budget exceeded')
+    emit('stage',taps=count, held_queue_fds=len(FDS), kernel_tap_links=len(tap_links),
+         kernel_bridge_port_count=len(ports), bridges=len(LEAVES)+1, master_counts=master_counts,
+         fdb_entries=len(fdb), create_interval_s=create_s, memory=memory(), namespace=os.readlink('/proc/self/ns/net'))
+
+def checksum(data):
+    if len(data)%2: data+=b'\x00'
+    value=sum(struct.unpack('!'+str(len(data)//2)+'H',data))
+    value=(value&65535)+(value>>16); value=(value&65535)+(value>>16)
+    return (~value)&65535
+
+def ipbytes(ip): return socket.inet_aton(ip)
+def macbytes(mac): return bytes.fromhex(mac.replace(':',''))
+def arp(srcmac,srcip,target,reply=False,dstmac=b'\xff'*6):
+    return dstmac+srcmac+b'\x08\x06'+struct.pack('!HHBBH',1,0x800,6,4,2 if reply else 1)+srcmac+ipbytes(srcip)+(dstmac if reply else b'\x00'*6)+ipbytes(target)
+def ipv4(srcmac,dstmac,srcip,dstip,proto,payload):
+    hdr=struct.pack('!BBHHHBBH4s4s',0x45,0,20+len(payload),295,0,64,proto,0,ipbytes(srcip),ipbytes(dstip))
+    hdr=hdr[:10]+struct.pack('!H',checksum(hdr))+hdr[12:]
+    return dstmac+srcmac+b'\x08\x00'+hdr+payload
+
+def drain(fd):
+    while select.select([fd],[],[],0)[0]: os.read(fd,65536)
+def receive(fd,predicate,seconds=2):
+    until=time.perf_counter()+seconds
+    observed=[]
+    while time.perf_counter()<until:
+        if select.select([fd],[],[],max(0,until-time.perf_counter()))[0]:
+            frame=os.read(fd,65536); observed.append(frame.hex())
+            if predicate(frame): return frame,observed
+    return None,observed
+
+def packets():
+    a,b=FDS[0],FDS[1022]
+    aip,bip='100.95.0.2','100.95.4.0'
+    am,bm=macbytes('02:00:64:5f:00:02'),macbytes('02:00:64:5f:04:00')
+    gm=macbytes('02:01:00:00:00:01')
+    results=[]
+    def attempt(name,source,destination,frame,predicate):
+        drain(source); drain(destination); start=time.perf_counter(); os.write(source,frame)
+        got,seen=receive(destination,predicate)
+        result=dict(name=name,passed=got is not None,elapsed_s=time.perf_counter()-start,
+                    sent_hex=frame.hex(),received_hex=got.hex() if got else None,observed_frames=len(seen))
+        results.append(result); emit('packet',**result)
+        (RUN/(name+'-frames.json')).write_text(json.dumps(seen))
+    attempt('cross-leaf-arp-request',a,b,arp(am,aip,bip),lambda f:f[:6]==b'\xff'*6 and f[12:14]==b'\x08\x06' and f[28:32]==ipbytes(aip))
+    attempt('cross-leaf-arp-reply',b,a,arp(bm,bip,aip,True,am),lambda f:f[:12]==am+bm and f[20:22]==b'\x00\x02')
+    udp=struct.pack('!HHHH',19000,19001,8+16,0)+b'm295-peer-proof!'
+    # Correct UDP length for exact payload.
+    udp=struct.pack('!HHHH',19000,19001,8+len(b'm295-peer-proof!'),0)+b'm295-peer-proof!'
+    attempt('cross-leaf-unicast-ipv4',a,b,ipv4(am,bm,aip,bip,17,udp),lambda f:f[:12]==bm+am and b'm295-peer-proof!' in f)
+    attempt('cross-leaf-unicast-ipv4-reverse',b,a,ipv4(bm,am,bip,aip,17,udp),lambda f:f[:12]==am+bm and b'm295-peer-proof!' in f)
+    for fd,ip,mac,which in [(a,aip,am,'a'),(b,bip,bm,'b')]:
+        attempt('gateway-arp-'+which,fd,fd,arp(mac,ip,'100.95.0.1'),lambda f:f[:12]==mac+gm and f[20:22]==b'\x00\x02' and f[28:32]==ipbytes('100.95.0.1'))
+        payload=struct.pack('!BBHHH',8,0,0,295,1)+b'm295-gateway'
+        payload=payload[:2]+struct.pack('!H',checksum(payload))+payload[4:]
+        attempt('gateway-icmp-'+which,fd,fd,ipv4(mac,gm,ip,'100.95.0.1',1,payload),lambda f:f[:12]==mac+gm and f[12:14]==b'\x08\x00' and f[23]==1 and f[34]==0 and b'm295-gateway' in f)
+    # An off-subnet Service IP is represented by a scratch host-local address only;
+    # this proves gateway forwarding/local-delivery, not Overdrive service resolution/TPROXY.
+    run(['ip','addr','add','10.98.0.1/32','dev','lo'])
+    service=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); service.bind(('10.98.0.1',18951)); service.settimeout(2)
+    for fd,ip,mac,which in [(a,aip,am,'a'),(b,bip,bm,'b')]:
+        drain(fd); msg=('m295-service-'+which).encode()
+        frame=ipv4(mac,gm,ip,'10.98.0.1',17,struct.pack('!HHHH',18952,18951,8+len(msg),0)+msg)
+        start=time.perf_counter(); os.write(fd,frame)
+        try:
+            got,peer=service.recvfrom(4096); service.sendto(b'reply-'+got,peer)
+            reply,seen=receive(fd,lambda f:f[:6]==mac and b'reply-'+msg in f)
+            emit('service',guest=which,passed=got==msg and reply is not None,peer=peer,
+                 original_destination='10.98.0.1:18951',elapsed_s=time.perf_counter()-start,
+                 received_hex=reply.hex() if reply else None)
+        except socket.timeout: emit('service',guest=which,passed=False,error='timeout')
+    service.close()
+    emit('traffic-summary',packet_results=results,scope='primitive TAP queues; no real VMs or production TCX/TPROXY/kTLS')
+
+before=None
+switched=False
+error=None
+try:
+    emit('identity',source_path=str(pathlib.Path(__file__).resolve()),source_sha256=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
+         parent_pid=os.getpid(),parent_executable=os.readlink('/proc/'+str(os.getpid())+'/exe'),
+         parent_executable_sha256=hashlib.sha256(pathlib.Path('/proc/'+str(os.getpid())+'/exe').read_bytes()).hexdigest(),run_dir=str(RUN))
+    for name,args in [('uname',['uname','-a']),('cpu',['lscpu','-J']),('virt',['systemd-detect-virt']),
+                      ('ch-version',['cloud-hypervisor','--version']),('ip-version',['ip','-V']),('bridge-version',['bridge','-V']),
+                      ('nft-version',['nft','--version']),('module-tun',['modinfo','tun']),('module-bridge',['modinfo','bridge']),
+                      ('kernel-package',['dpkg-query','-W','linux-image-'+os.uname().release]),
+                      ('tool-availability',['sh','-c','command -v cloud-hypervisor; command -v debugfs; command -v tcpdump; command -v busybox'])]:
+        raw('preflight-'+name+'.txt',args)
+    kernel=os.environ.get('OVERDRIVE_METAL_KERNEL'); rootfs=os.environ.get('OVERDRIVE_METAL_ROOTFS')
+    for name,path in [('ch',shutil.which('cloud-hypervisor')),('guest-kernel',kernel),('guest-rootfs',rootfs),('kernel-config','/boot/config-'+os.uname().release)]:
+        if path and pathlib.Path(path).is_file():
+            emit('artifact',name=name,path=path,bytes=pathlib.Path(path).stat().st_size,sha256=hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest())
+    if rootfs: raw('preflight-rootfs-bin.txt',['debugfs','-R','ls -l /bin',rootfs])
+    raw('preflight-memory.txt',['cat','/proc/meminfo'])
+    raw('preflight-slab.txt',['cat','/proc/slabinfo'])
+    raw('preflight-kernel-config.txt',['cat','/boot/config-'+os.uname().release])
+    before=snap('host-before')
+    emit('preflight',resources=memory(),rlimit_nofile=resource.getrlimit(resource.RLIMIT_NOFILE),lease_owner=pathlib.Path('/run/lock/overdrive-metal-shared.owner').read_text())
+    oldlimit=resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE,(min(16384,oldlimit[1]),oldlimit[1]))
+    emit('process-rlimit',before=oldlimit,after=resource.getrlimit(resource.RLIMIT_NOFILE))
+    if libc.unshare(0x40000000): raise OSError(ctypes.get_errno(),'unshare node-level network domain')
+    switched=True
+    emit('namespace',original_fd=HOST_NS,namespace=os.readlink('/proc/self/ns/net'),role='one isolated node domain, no per-VM namespaces')
+    run(['ip','link','set','lo','up'])
+    run(['ip','link','add',ROOT,'type','bridge'])
+    OWNED.append(ROOT)
+    run(['ip','link','set',ROOT,'address','02:01:00:00:00:01'])
+    run(['ip','addr','add','100.95.0.1/16','dev',ROOT])
+    run(['ip','link','set',ROOT,'up'])
+    baseline=memory(); emit('topology-baseline',memory=baseline)
+    last=0
+    for goal in [2,1022,1023,1024,1025,2044,4095,4096,4097]:
+        start=time.perf_counter(); batch=[]
+        for index in range(last,goal):
+            group=index//1022
+            if group==len(LEAVES):
+                leaf=TAG+'b'+str(group); up=TAG+'u'+str(group); rp=TAG+'p'+str(group)
+                run(['ip','link','add',leaf,'type','bridge']); OWNED.append(leaf); LEAVES.append(leaf)
+                run(['ip','link','set',leaf,'address','02:01:00:00:01:'+format(group+1,'02x')])
+                run(['ip','link','set',leaf,'up'])
+                run(['ip','link','add',up,'type','veth','peer','name',rp]); OWNED.append(up)
+                run(['ip','link','set',up,'master',leaf]); run(['ip','link','set',rp,'master',ROOT])
+                run(['ip','link','set',up,'up']); run(['ip','link','set',rp,'up'])
+            name=TAG+'t'+format(index,'04x')
+            fd=os.open('/dev/net/tun',os.O_RDWR|os.O_CLOEXEC|os.O_NONBLOCK)
+            FDS.append(fd)
+            fcntl.ioctl(fd,0x400454ca,struct.pack('16sH',name.encode(),0x1002))
+            fcntl.ioctl(fd,0x400454cc,0)
+            fcntl.ioctl(fd,0x400454d0,0)
+            batch+=['link set '+name+' master '+LEAVES[group],'link set '+name+' up']
+        run(['ip','-batch','-'],input='\n'.join(batch)+'\n',timeout=120)
+        checkpoint(goal,time.perf_counter()-start)
+        last=goal
+    packets()
+    raw('probe-final-routes.json',['ip','-j','route','show','table','all'])
+    raw('probe-final-neighbors.json',['ip','-j','neigh'])
+    raw('probe-final-fdb.json',['bridge','-j','fdb'])
+    raw('probe-final-nstat.txt',['nstat','-az'])
+    raw('probe-final-arp-thresholds.txt',['sh','-c','for x in /proc/sys/net/ipv4/neigh/default/gc_thresh*; do test ! -e "$x" || cat "$x"; done'])
+    emit('attachment-verdict',verdict='WORKS',taps=len(FDS),vm_count=0,bridges=len(LEAVES)+1)
+except BaseException as exc:
+    error=str(exc); emit('error',error=error,traceback=traceback.format_exc())
+finally:
+    clean_start=time.perf_counter(); cleanup_errors=[]
+    for proc in PROCS:
+        if proc.poll() is None:
+            proc.terminate()
+            try: proc.wait(timeout=5)
+            except subprocess.TimeoutExpired: proc.kill(); proc.wait()
+    for fd in reversed(FDS):
+        try: os.close(fd)
+        except OSError as exc: cleanup_errors.append(str(exc))
+    if switched:
+        for name in reversed(OWNED):
+            p=run(['ip','link','del',name],check=False)
+            if p.returncode: cleanup_errors.append(p.stderr.strip())
+        links=json.loads(raw('probe-cleanup-links.json',['ip','-j','-d','link']))
+        emit('namespace-cleanup',owned_remaining=[l['ifname'] for l in links if l['ifname'].startswith(TAG)],elapsed_s=time.perf_counter()-clean_start,errors=cleanup_errors)
+        if libc.setns(HOST_NS,0x40000000): raise OSError(ctypes.get_errno(),'restore host namespace')
+    if before is not None:
+        after=snap('host-after'); bn=normalize(before); an=normalize(after)
+        (RUN/'host-before-normalized.json').write_text(json.dumps(bn,sort_keys=True,indent=2))
+        (RUN/'host-after-normalized.json').write_text(json.dumps(an,sort_keys=True,indent=2))
+        emit('foreign-complement',equal=bn==an,changed_sections=[k for k in bn if bn[k]!=an[k]],normalization='raw values retained; omit lifetime/counter/timer fields and module use counts only')
+    os.close(HOST_NS)
+    emit('complete',error=error,total_s=time.perf_counter()-START,code_retained=True,run_dir=str(RUN),cleanup_errors=cleanup_errors)
+    LOG.close()
+sys.exit(1 if error else 0)

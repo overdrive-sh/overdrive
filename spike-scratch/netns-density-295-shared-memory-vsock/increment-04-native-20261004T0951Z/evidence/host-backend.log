@@ -1,0 +1,5 @@
+HOST_RECEIVER_ARMED role=a path=/run/v295-794479/va_5000
+HOST_RECEIVER_ARMED role=b path=/run/v295-794479/vb_5000
+HOST_ALL_RECEIVERS_READY
+HOST_RECEIVE role=a elapsed_us=73 bytes=26 payload="guest-to-host-a-cid-39501\n"
+HOST_RECEIVE role=b elapsed_us=155 bytes=26 payload="guest-to-host-b-cid-39502\n"

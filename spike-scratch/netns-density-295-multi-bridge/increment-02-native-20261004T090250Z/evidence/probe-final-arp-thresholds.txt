@@ -1,0 +1,1 @@
+{"argv": ["sh", "-c", "for x in /proc/sys/net/ipv4/neigh/default/gc_thresh*; do test ! -e \"$x\" || cat \"$x\"; done"], "rc": 0, "stdout": "", "stderr": ""}
