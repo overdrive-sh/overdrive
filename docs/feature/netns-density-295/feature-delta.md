@@ -5,6 +5,16 @@
 correctness-recovery replacement DESIGN (application/components scope, Propose
 mode, all priorities) was **accepted by the user on 2026-09-24**.
 **Interaction mode:** Propose
+**Current validation (2026-10-04): PENDING — E18's single-bridge T1 population
+premise is falsified by native production-owner provisioning; DELIVER is stopped
+at 08-04 and roadmap validation is pending.** The bounded status and dependency
+record is [Native E18 bridge-port falsification](deliver/native-e18-bridge-capacity-falsification.md).
+No replacement topology or measurement population is selected. The 16,384
+placeholder, exact T1 profiles, security outcomes, lifecycle rules, and existing
+interface contracts remain recorded without amendment; their dependent
+measurement/fit validation cannot proceed on the contradicted premise. The
+independent R18/R19 decisions and completed correct step reviews are preserved.
+
 **Recorded decision (2026-10-03): D-295-R19 ordering change withdrawn under its accepted native condition; LegF/LegC listener-loss no-quiescence classification resolved on the named-Service E14(e) native result. Roadmap revalidation and DELIVER remain a separate downstream gate.**
 Native E14(c) and E14(d) reproduce healthy controls and fail-closed behavior
 with the existing mark-before-TPROXY implementation, so D-295-R19's required
@@ -28,7 +38,48 @@ the R19-dependent DESIGN only: independent review of the listener-loss
 classification and roadmap revalidation of step 08-01 are the remaining
 downstream gates, and DELIVER/08-01 is not authorized by this record.
 
-### Native falsification register — 2026-10-03
+### Native falsification register — 2026-10-04: E18 single-bridge population
+
+The native `e18-t1-base` attempt at the unchanged N=16,384/M=0
+profile returned the existing typed `GuestNetworkError::Netlink` with
+`operation: TapAttachBridge`, `NetlinkError::Link` operation `set-master`, and
+kernel netlink code `-54` (`EXFULL`) on physical x86_64 Linux
+`7.0.0-29-generic`. Its completion row has `measurement_ok=false`,
+`cleanup_ok=true`, and no cleanup errors; the independently captured normalized
+foreign inventories compare equal. Raw evidence remains at
+`target/benchmarks/netns-density-295/E18/attempt-08-04-20261004/e18-t1-base/`.
+It is a failed provisioning attempt, not an E18 latency or capacity receipt.
+
+Linux v7.0 defines 1,024 bridge-port slots, reserves zero, and returns
+`-EXFULL` when the remaining slots are occupied. On the observed initially empty
+shared bridge and the fixture's exclusive sequential attachment path, 1,023
+completed attachments followed by failure of the 1,024th is an **inference**
+from the kernel path and fixture ordering, not a directly sampled at-failure
+inventory. The native refusal itself and source correlation are directly
+recorded. Independent review verified 891 synchronized source-manifest entries;
+that correspondence does not attest compiled benchmark identity. The preserved
+raw `executable_sha256` field hashes the `sha256sum` subprocess through
+`/proc/self/exe`, so it is a utility fingerprint, and a benchmark executable
+digest is unavailable. Exact primary-source citations, raw-file digests,
+production-path references, the read-only mechanism reproduction, and the limits
+of this inference are in the bounded record above.
+
+| Dependent clause | Current disposition |
+|---|---|
+| ADR-0114's sole node-local bridge together with ADR-0117's claim that T1 is reproducibly attachable | **PENDING:** feasibility of that combination at the recorded T1 population is invalidated; bounded shared-bridge evidence and the independent owner/security contracts are preserved. |
+| This document's *Attachment-capacity contract*, T1-BASE/T1-PORT4 receipt table, and CAP-295-A's live-attachment population | **PENDING:** the exact N/M requirements stay recorded; their single-bridge execution premise is contradicted. No smaller population is substituted. |
+| E18 evidence-lane row; runtime-supervisor E18-derived L/Q/W bounds, K and double-loss restatement, recovery-window fit; R15 member-audit hold-time threshold validation | **PENDING:** the required population was not provisioned, so no derived value, fit, exposure duration, or threshold verdict is available. The accepted rules and outcomes remain intact. R15's mutex branch is not disproved or replaced by this failure. |
+| Roadmap 08-04, dependent 09-01, and 10-05's T1 receipts | **PENDING / NON-EXECUTABLE:** the roadmap's overall validation is pending; later steps cannot advance past their existing dependencies. Frozen phases and completed correct steps are not reopened. |
+| ADR-0114, *One bridge per workload* | **REOPENED FOR RECONSIDERATION:** its rejection relied on the single shared-switch density model; no alternative is selected. ADR-0117's 32,768/100,000 rejections have independent address/map/VMM grounds and are not reopened by this evidence alone. |
+
+DELIVER resumes only after an exact replacement DESIGN is recorded, any new
+architecture or normative contract amendment receives the required explicit
+user approval and independent DESIGN review, and the affected roadmap is
+revalidated. Lowering T1, changing timing or error semantics, and weakening any
+zero-frame, fail-closed, ownership, cleanup, or held-lease requirement are not
+authorized by this status record.
+
+### Native falsification register — 2026-10-03 (R19; preserved)
 
 - Evidence: [.context/distill-native-08-01.md](../../../.context/distill-native-08-01.md),
   final ordinary-flow receipt `5e43658a-438a-40b8-ae5e-3a27a1875bfa`; the

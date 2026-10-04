@@ -2,6 +2,17 @@
 
 ## Status
 
+**Current validation — PENDING IN PART (2026-10-04).** Native E18 T1-BASE
+provisioning through the real owner returned bridge-port `EXFULL`; the sole
+node-local bridge's feasibility at the recorded N=16,384 T1 population is
+invalidated. The *One bridge per workload* rejection is reopened because its
+density-model premise depends on this shared-switch choice. No replacement
+topology is selected, and no owner, interface, activation, or security contract
+is amended. Prior bounded shared-bridge evidence remains valid. See the
+[native falsification record](../../feature/netns-density-295/deliver/native-e18-bridge-capacity-falsification.md)
+for the exact scope and resumption gates; dependent DESIGN and roadmap
+validation are pending.
+
 **Accepted — the current #295 contract is user-approved and independently
 approved, including D-295-DISTILL-5 at review iteration 6 on 2026-09-16.**
 Runtime ownership is defined by ADR-0124. **Amended 2026-09-24** by the

@@ -1400,7 +1400,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "E18 receipt-only step; scenario_ids is intentionally empty. DISTILL owns the accepted non-EDD test-support harness at crates/overdrive-control-plane/bin/netns_density_benchmark.rs. This is the accepted test-support shape and is not an operator-facing overdrive command. 09-01 is the later capture/constants step and the sole source-rustdoc record home for values derived from this receipt."
+          "implementation_notes": "Current validation 2026-10-04: PENDING / NON-EXECUTABLE. The native T1-BASE production-owner attempt returned TapAttachBridge/set-master EXFULL before full-population read-back or density samples; the single-bridge T1 premise is falsified. Independent review verified 891 synchronized source-manifest entries; this does not attest compiled benchmark identity. The raw executable_sha256 field is a sha256sum utility fingerprint, not benchmark attestation; the benchmark executable digest is unavailable in this receipt. Preserve N=16,384/M=0 and T1-PORT4 N=16,384/M=65,536 as recorded; failed attempts are not E18 receipts and authorize no population substitute or replacement topology. See docs/feature/netns-density-295/deliver/native-e18-bridge-capacity-falsification.md. E18 receipt-only step; scenario_ids is intentionally empty. DISTILL owns the accepted non-EDD test-support harness at crates/overdrive-control-plane/bin/netns_density_benchmark.rs. This is the accepted test-support shape and is not an operator-facing overdrive command. 09-01 is the later capture/constants step and the sole source-rustdoc record home for values derived from this receipt."
         }
       ]
     },
@@ -1463,7 +1463,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "R13, R14 (R14 kill scope user ruling), R15, E18, E23, DISTILL review H1/M8. VmKillCapability::new is a const fn where the pin shows fn (DR-21). S-ND295-34 and S-ND295-10 are layered IDs recording supervisor participation, not new bodies. DISTILL pins the 09-01 E23 owner to overdrive-worker/tests/integration/real_cgroup_fs/refused_thread_kill.rs; activate that authored Lima-root body and do not author a replacement. Assert ADR-0124 cadence as contract, never private constant values. A failed E18 threshold or fit is a native-falsification stop, not permission for DELIVER to change timing, security, kill, or R15 ownership."
+          "implementation_notes": "Current validation 2026-10-04: PENDING / NON-EXECUTABLE through 08-04 native population falsification. No qualifying E18 L/Q/W/K, recovery-fit result, or R15 hold-time threshold verdict is available; no bound, source rustdoc value, or successful measurement report may be derived from the failed or partial population. Accepted cadence, fit/threshold rules, ownership, kill, and security contracts remain recorded. See docs/feature/netns-density-295/deliver/native-e18-bridge-capacity-falsification.md. R13, R14 (R14 kill scope user ruling), R15, E18, E23, DISTILL review H1/M8. VmKillCapability::new is a const fn where the pin shows fn (DR-21). S-ND295-34 and S-ND295-10 are layered IDs recording supervisor participation, not new bodies. DISTILL pins the 09-01 E23 owner to overdrive-worker/tests/integration/real_cgroup_fs/refused_thread_kill.rs; activate that authored Lima-root body and do not author a replacement. Assert ADR-0124 cadence as contract, never private constant values. A failed E18 threshold or fit is a native-falsification stop, not permission for DELIVER to change timing, security, kill, or R15 ownership."
         },
         {
           "id": "09-02",
@@ -1684,7 +1684,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "CAP-295-A receipt-only step (benchmark ids, not S-ND295 bodies), mirroring the prior 04-04 capacity receipts. DISTILL owns the accepted shared non-EDD test-support harness at crates/overdrive-control-plane/bin/netns_density_benchmark.rs; this is the accepted test-support shape and is not an operator-facing overdrive command. Never place it under verification/expectations/ or turn it into a pass/fail body."
+          "implementation_notes": "Current validation 2026-10-04: PENDING / NON-EXECUTABLE. Both exact T1 receipts require the same N=16,384 single-bridge live-attachment premise falsified by the qualified E18 T1-BASE attempt. Receipt criteria and populations are unchanged; no replacement architecture or population is selected. See docs/feature/netns-density-295/deliver/native-e18-bridge-capacity-falsification.md. CAP-295-A receipt-only step (benchmark ids, not S-ND295 bodies), mirroring the prior 04-04 capacity receipts. DISTILL owns the accepted shared non-EDD test-support harness at crates/overdrive-control-plane/bin/netns_density_benchmark.rs; this is the accepted test-support shape and is not an operator-facing overdrive command. Never place it under verification/expectations/ or turn it into a pass/fail body."
         }
       ]
     }
@@ -1724,8 +1724,8 @@
     ]
   },
   "validation": {
-    "status": "approved",
-    "reviewer": "R19-dependent replacement DESIGN finalized and independently reviewed 2026-10-03 (docs/feature/netns-density-295/deliver/review-design-r19-finalization.md; prior review-design-r19-native-falsification.md approved the ordinary withdrawal). R19 reorder withdrawn on native E14 evidence; R18 stands; roadmap reconciled and approved.",
-    "approved_at": "2026-10-03T00:00:00Z"
+    "status": "pending",
+    "reviewer": "Native falsification 2026-10-04: qualified E18 T1-BASE production-owner attachment returned EXFULL on the single shared bridge; the operative 16,384-attachment population and dependent bounds require exact replacement DESIGN and independent review before execution resumes. R18/R19 conclusions are unaffected. Prior approval context: R19-dependent replacement DESIGN finalized and independently reviewed 2026-10-03 (docs/feature/netns-density-295/deliver/review-design-r19-finalization.md; prior review-design-r19-native-falsification.md approved the ordinary withdrawal). R19 reorder withdrawn on native E14 evidence; R18 stands; roadmap reconciled and approved.",
+    "approved_at": null
   }
 }

@@ -2,6 +2,17 @@
 
 ## Status
 
+**Current validation — PENDING IN PART (2026-10-04).** Native E18 T1-BASE
+provisioning through the real owner returned bridge-port `EXFULL`. The Decision's
+premise that T1-BASE/T1-PORT4 can reproducibly attach N=16,384 on ADR-0114's sole
+node-local bridge is invalidated; the dependent measurement and runtime-bound
+validation is pending. The fixed placeholder is not a density promise or
+completion target, and this evidence does not create one or change the number,
+address/map sizing, admission semantics, or exact receipt populations. The
+32,768/100,000 alternatives' independent rejection grounds are preserved. See
+the [native falsification record](../../feature/netns-density-295/deliver/native-e18-bridge-capacity-falsification.md).
+No replacement population or topology is selected.
+
 **Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
 GH #295 DESIGN stage 1. This records D-295-3 with CAP-295-A; ADR-0125 records
 PORT-295-C.

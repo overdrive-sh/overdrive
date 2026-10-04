@@ -2,6 +2,16 @@
 
 ## Status
 
+**Current population-dependent validation — PENDING (2026-10-04).** E18's
+recorded T1 population cannot be provisioned on the sole node-local bridge;
+its measured call bounds, recovery-window fit, and double-loss exposure
+restatement are unavailable. The accepted cadence, security outcomes, full
+audit/restore condition, kill scope/order, and R18/R19 conclusions are preserved;
+none is replaced or weakened. See the
+[native E18 falsification record](../../feature/netns-density-295/deliver/native-e18-bridge-capacity-falsification.md)
+and the feature delta's 2026-10-04 dependency register. The affected DESIGN and
+roadmap validation is pending.
+
 **Accepted — the current #295 contract is user-approved and independently
 approved through D-295-DISTILL-8 at review iteration 9 on 2026-09-17;
 D-295-DISTILL-11 component/task/S37 evidence is autonomously authorized and
