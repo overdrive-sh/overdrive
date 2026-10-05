@@ -1,0 +1,965 @@
+[
+  {
+    "scope": "completed native phase",
+    "original": "increment-a/evidence/02-aya-udp/native-serial.log",
+    "archive": "increment-a/evidence/02-aya-udp/native-serial.log.gz",
+    "original_sha256": "753914a1df14be730634cacf422cfd80dc6d028e6483e2d32020abb64cb5217c",
+    "archive_sha256": "cce95bfd75a25477760be78712dfe20f413a371849de0a4cee4a81e6de0c192f",
+    "original_bytes": 5515417,
+    "archive_bytes": 573264
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-a/evidence/02-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-a/evidence/02-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "ab8f6aed52def9126efe2be2e506a72f89c0934f442cda88455be15d7d26aaa6",
+    "archive_sha256": "3b341f5a5e3078fdefb575ae790291f9cb5458e76129d364d75983518cd61828",
+    "original_bytes": 2915890,
+    "archive_bytes": 76873
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-a/evidence/00-kernel-tcp/native-serial.log",
+    "archive": "increment-a/evidence/00-kernel-tcp/native-serial.log.gz",
+    "original_sha256": "07a9339bcd07ab19171cb5e76d75158c3c73470110f85101efbb1bf7cbd4737e",
+    "archive_sha256": "455cf7257dd620b8566006a807fc1287d80e991f46dc9eb00d29a95f7b55aed4",
+    "original_bytes": 2661181,
+    "archive_bytes": 484480
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-a/evidence/00-kernel-tcp/qemu-resources.jsonl",
+    "archive": "increment-a/evidence/00-kernel-tcp/qemu-resources.jsonl.gz",
+    "original_sha256": "603fd7bc52128c8f92bbc592e9c3d538bd78aa8bc3f0c035f93c9515ab6886e4",
+    "archive_sha256": "aea66e53c274e6217504d54f769f487f95a32745b78372960de414a3172c3f1d",
+    "original_bytes": 1793224,
+    "archive_bytes": 51760
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-a/evidence/01-aya-tcp/native-serial.log",
+    "archive": "increment-a/evidence/01-aya-tcp/native-serial.log.gz",
+    "original_sha256": "00eb06ed8aef7cf3b00cc7608e73c80461c85f6a5968b5990bdc8ac88e58d4d5",
+    "archive_sha256": "f71f3cfc53cedab01b3d0a09ffca34d81c244d5d48666ab30f40af8975371f4b",
+    "original_bytes": 3970583,
+    "archive_bytes": 459950
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-a/evidence/01-aya-tcp/qemu-resources.jsonl",
+    "archive": "increment-a/evidence/01-aya-tcp/qemu-resources.jsonl.gz",
+    "original_sha256": "dbec435cafab17a61f45cf580bfacfe263208d29d6f5c7bcb2bcf4c96373278b",
+    "archive_sha256": "e0441b0cb104e588a0558da9ee3fb213bd70eca3e904d8d034be722f5fd0d402",
+    "original_bytes": 2161488,
+    "archive_bytes": 61094
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-a/evidence/03-kernel-udp/native-serial.log",
+    "archive": "increment-a/evidence/03-kernel-udp/native-serial.log.gz",
+    "original_sha256": "5b5d16195db999b26e45a84e02a25e267c485186ae57e3aadfa4e3c864e9bbcf",
+    "archive_sha256": "28d14abb0acc670165476941a271878de6a61a1532c94f2d45edeafb19ffc33c",
+    "original_bytes": 3906836,
+    "archive_bytes": 770197
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-a/evidence/03-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-a/evidence/03-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "f497e19ebb8c375ef017bf0bf11fd6ff077e4868c8c238d3957304126b810310",
+    "archive_sha256": "693dd385d6c9b9c47bc38008fadc05c3487bb674dc8df0156ae54071051c6bbd",
+    "original_bytes": 2451506,
+    "archive_bytes": 66680
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-c/evidence/00-kernel-tcp/event-observer.jsonl",
+    "archive": "increment-c/evidence/00-kernel-tcp/event-observer.jsonl.gz",
+    "original_sha256": "bdb952e1b118a6e3fe21dfb32984236081fa0f2b715653772315bef4d6d214f1",
+    "archive_sha256": "5c8ab98e80619edf5eeb524687aafd9db6f9cd56125861bab912cd219203b56e",
+    "original_bytes": 93492,
+    "archive_bytes": 10943
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-c/evidence/00-kernel-tcp/native-serial.log",
+    "archive": "increment-c/evidence/00-kernel-tcp/native-serial.log.gz",
+    "original_sha256": "d14e581ccb06daadc24a7eeb8246d0cbaf2606e08d187c88a7672339faef8238",
+    "archive_sha256": "5ad5287328e1a0cbd129bd1115cdc4b33395e156149013a224206d2c1238dc51",
+    "original_bytes": 9292406,
+    "archive_bytes": 2172031
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-c/evidence/00-kernel-tcp/qemu-resources.jsonl",
+    "archive": "increment-c/evidence/00-kernel-tcp/qemu-resources.jsonl.gz",
+    "original_sha256": "2ec0c2c8bbd4a7637fe473c619380c09ed73ae68ab13f9f4c1f107ceb18de617",
+    "archive_sha256": "b5aa7b617191270680631389baa3af8c8c9bdaeb69198149b9271ce69be64397",
+    "original_bytes": 12285690,
+    "archive_bytes": 341691
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-c/evidence/01-aya-tcp/event-observer.jsonl",
+    "archive": "increment-c/evidence/01-aya-tcp/event-observer.jsonl.gz",
+    "original_sha256": "28e7a1bbf7d1ff533fcdb224c3f0467af3ea60e106ce2e265372647e45e213e6",
+    "archive_sha256": "a46e8f5e67c8f4aebab746eee35dadd2e2d32d335b065432a132266bea5d4357",
+    "original_bytes": 1139,
+    "archive_bytes": 285
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-c/evidence/01-aya-tcp/native-serial.log",
+    "archive": "increment-c/evidence/01-aya-tcp/native-serial.log.gz",
+    "original_sha256": "71d5fa14beee1eb122fff8dd97e1d4746f3f4d07f28a4e18431cd2282f76e06d",
+    "archive_sha256": "57e87d73f3414c2ddedf4b5ebc6fad23ac1d746a013b7a0922fc4f14ee7dc449",
+    "original_bytes": 213886,
+    "archive_bytes": 39583
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-c/evidence/01-aya-tcp/qemu-resources.jsonl",
+    "archive": "increment-c/evidence/01-aya-tcp/qemu-resources.jsonl.gz",
+    "original_sha256": "0104c9a0fca0ef290ed24d3c6f06e386cd8820bdd838593413e476c80a3df035",
+    "archive_sha256": "d6b63162880efd5193491b37db33c07d6945cc256c4361138ea605e8c1fc1871",
+    "original_bytes": 95478,
+    "archive_bytes": 4891
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/03-aya-udp/event-observer.jsonl",
+    "archive": "increment-e/evidence/03-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "706d8c8dc101d50142612aa3c4a6da5b906b32d27967202e57db911b3b27fae0",
+    "archive_sha256": "a4dcc90cffa480fb84773ea5133de67eeb41d52644eaa18d843cd5cd072d1314",
+    "original_bytes": 8932,
+    "archive_bytes": 1255
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/03-aya-udp/native-serial.log",
+    "archive": "increment-e/evidence/03-aya-udp/native-serial.log.gz",
+    "original_sha256": "5e8f00445051862e0cf2a72aaa739f665addbcd09c8a667c51e8b299ae338546",
+    "archive_sha256": "0c82e3691a909a515a266df798361f8ec12e302a01774d01ea2569a8e5da5c4e",
+    "original_bytes": 830646,
+    "archive_bytes": 219151
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/03-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-e/evidence/03-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "cdf388d4e3a8e048249cf90040b2552fad35f66510b5d52ac821b339a0a66ab5",
+    "archive_sha256": "6d293c0954265eddb8e46601078c8e09cfa92b4ec708885169048bffecbaed1f",
+    "original_bytes": 24135988,
+    "archive_bytes": 447884
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/02-kernel-udp/event-observer.jsonl",
+    "archive": "increment-e/evidence/02-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "2862a7d35dc749ce91c45eda80a6f83cd9cf99766716e7a298b6962bdcd0d940",
+    "archive_sha256": "bedb644796da280fae9cec89e63597b1ea69c72ba7b0093c1be662997cb87bbe",
+    "original_bytes": 21626,
+    "archive_bytes": 2735
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/02-kernel-udp/native-serial.log",
+    "archive": "increment-e/evidence/02-kernel-udp/native-serial.log.gz",
+    "original_sha256": "5bbc2fe0d5d115678d221b3fe08ec109b9c07cd5030ba60a45088b1448ce8487",
+    "archive_sha256": "74114fd066151cff37af964c4fabec3fe185d64131735d0718884511e9dcd9a4",
+    "original_bytes": 1589478,
+    "archive_bytes": 404577
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/02-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-e/evidence/02-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "0699c22a6dee9cc98319952cf88f05dca9aba2bf5fa8b2dba08c431c4415c3e1",
+    "archive_sha256": "8a23da901a3ae74c38f609770d005f74ef54b7f28fdacba01328d04df323911d",
+    "original_bytes": 2459793,
+    "archive_bytes": 65197
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/00-kernel-tcp/event-observer.jsonl",
+    "archive": "increment-e/evidence/00-kernel-tcp/event-observer.jsonl.gz",
+    "original_sha256": "d0f4ef4fd52d83c09c3d829f46cf340bd650a4f688c1ab8f076e1e4960386fd9",
+    "archive_sha256": "73e4b22afb2c063515663988fdbad8d18e595cf50707ed2edb07f332b4bc8b99",
+    "original_bytes": 1685,
+    "archive_bytes": 414
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/00-kernel-tcp/native-serial.log",
+    "archive": "increment-e/evidence/00-kernel-tcp/native-serial.log.gz",
+    "original_sha256": "2ac34b5fb6ecd288b1aad38a882017b187d4df1b0f811b02c15d37b1797d5ae7",
+    "archive_sha256": "6e14e9c840da734fb4757543d810977e4adfb2116e5ce74222437f65cff00ae0",
+    "original_bytes": 318892,
+    "archive_bytes": 52487
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/00-kernel-tcp/qemu-resources.jsonl",
+    "archive": "increment-e/evidence/00-kernel-tcp/qemu-resources.jsonl.gz",
+    "original_sha256": "1216b2e1ac3fe7ed63905492724004db37f1290713ef27d01ba95eeae3b270c7",
+    "archive_sha256": "1ebb2ccb431ea76322b55c5d3fe2fc0afda2c136a3cf3351c74d50b4788d5f89",
+    "original_bytes": 120099,
+    "archive_bytes": 5390
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/01-aya-tcp/event-observer.jsonl",
+    "archive": "increment-e/evidence/01-aya-tcp/event-observer.jsonl.gz",
+    "original_sha256": "19affedacb1b7c097e2dc533269950f4fb3cb86a3cfc7231537e345a9c9967b3",
+    "archive_sha256": "d42a64e451d7663c7f456f039fd29ca4db75e1227d549b114df8688848514a0f",
+    "original_bytes": 91312,
+    "archive_bytes": 10873
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/01-aya-tcp/native-serial.log",
+    "archive": "increment-e/evidence/01-aya-tcp/native-serial.log.gz",
+    "original_sha256": "084826e2871433a582812b535136ddee5d248863f0bb2c34c2f0ee457b8ec7c3",
+    "archive_sha256": "35ba0f9ca2640c51243ad8310005cbcba551403f59b65b6b8289af1340e629ec",
+    "original_bytes": 16949341,
+    "archive_bytes": 2100735
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-e/evidence/01-aya-tcp/qemu-resources.jsonl",
+    "archive": "increment-e/evidence/01-aya-tcp/qemu-resources.jsonl.gz",
+    "original_sha256": "264f97078d38b0422dcc78e7f7759c29bf33be2720b978f9a76a1bfd9696ecbc",
+    "archive_sha256": "bdb19eb717fbae03d3fba18a727a860cf39045b4442693374f06c90b4dcfabfe",
+    "original_bytes": 13585334,
+    "archive_bytes": 355933
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-h/evidence/00-kernel-udp/event-observer.jsonl",
+    "archive": "increment-h/evidence/00-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "21f3bf1ce2a67129574c8c87aa9ef75a8e465a782046f62e9df8d9ca6fac5e40",
+    "archive_sha256": "1e8005453bfec0beb76df26fcad25fa91532245ab38464f672175e50cf725c25",
+    "original_bytes": 31519,
+    "archive_bytes": 4063
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-h/evidence/00-kernel-udp/native-serial.log",
+    "archive": "increment-h/evidence/00-kernel-udp/native-serial.log.gz",
+    "original_sha256": "380c5fe0d039b2315d0f6206f7eabbf4973f84b4f9f20c9076d1304d680edfab",
+    "archive_sha256": "99272b6a82c2eb577d55b08b6c2a0c4b339aba021e7f81833d51621b987eea91",
+    "original_bytes": 8738284,
+    "archive_bytes": 2171431
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-h/evidence/00-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-h/evidence/00-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "7e85d81888e689c6dc5c677bf6080881d47fc90fb37b1a49a561f0077dec65bd",
+    "archive_sha256": "db65a1e78bca57d96e5ea42b5c51d930d319361f4b29d4093262afb24ec88c3c",
+    "original_bytes": 10185637,
+    "archive_bytes": 315428
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-h/evidence/01-aya-udp/event-observer.jsonl",
+    "archive": "increment-h/evidence/01-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "fac004cc49d9ea68a3cc8ad127a67816bc5fa5ac661a49865dd88fad5de96f32",
+    "archive_sha256": "5daf80d8844a1226b6c95cf30697d6d0666810c4b59b6f9723c24bed3b51b991",
+    "original_bytes": 11653,
+    "archive_bytes": 1788
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-h/evidence/01-aya-udp/native-serial.log",
+    "archive": "increment-h/evidence/01-aya-udp/native-serial.log.gz",
+    "original_sha256": "6b63c1bc34f06fccb2c84b197b714001bc17b0cca743f71b885967a4fa1cf041",
+    "archive_sha256": "2f3cf978c3823706d01e0689d68e16bd99310c85c4b64ac423ec0f169368be55",
+    "original_bytes": 4231672,
+    "archive_bytes": 973689
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-h/evidence/01-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-h/evidence/01-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "05a0d2d7eb27fd0d5cff56a654b816a5f146d431fc390858c119073b16b727e5",
+    "archive_sha256": "3c3c6f1b52ad5c9061e9a7e227a33259b2a441a2545f8f44dda5f261ae383106",
+    "original_bytes": 2175366,
+    "archive_bytes": 66350
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-i/evidence/00-aya-udp/event-observer.jsonl",
+    "archive": "increment-i/evidence/00-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "5aa386462a95954facfe4b8fd71f0349ea0337ed97a841354afce27b39a91df9",
+    "archive_sha256": "18223aa4cd65e886bd29ed302921ea7dedc4eb19b494b068a02daacc2b99dd3c",
+    "original_bytes": 9096,
+    "archive_bytes": 1503
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-i/evidence/00-aya-udp/native-serial.log",
+    "archive": "increment-i/evidence/00-aya-udp/native-serial.log.gz",
+    "original_sha256": "77596780ef9eb60263a219cd65107c43d64f92a699056f1ba2775825f1f7b741",
+    "archive_sha256": "cc36fb3cf24dfc4bb65aa22c4cb17178621aeccaebbe5bf66cc036356b46c0dc",
+    "original_bytes": 2741780,
+    "archive_bytes": 467917
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-i/evidence/00-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-i/evidence/00-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "fd2d10ad162d89a7062799a19f533755fd92f4bbc02a55ad1da7cd426374f87f",
+    "archive_sha256": "aec4a4139f2ec06cb3436a20f40edc4b2870b99b56642c6761af4438e22ce1b9",
+    "original_bytes": 1522894,
+    "archive_bytes": 47649
+  },
+  {
+    "scope": "partial environment-interrupted original",
+    "original": "increment-j/evidence/00-aya-udp/event-observer.jsonl",
+    "archive": "increment-j/evidence/00-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "539a985fa24e0361c4ade97be5d0361ce51318417c0546e7c444595a14db55f2",
+    "archive_sha256": "b3924a14fbd278d60dbbc9eb5b89a9b48b70c7faba99c4344d88740e423ee570",
+    "original_bytes": 4661,
+    "archive_bytes": 773
+  },
+  {
+    "scope": "partial environment-interrupted original",
+    "original": "increment-j/evidence/00-aya-udp/native-serial.log",
+    "archive": "increment-j/evidence/00-aya-udp/native-serial.log.gz",
+    "original_sha256": "088b60c8af732fe45bd05748ef17d340fa9840c02ee79d67bdab494f043e724e",
+    "archive_sha256": "2a07b448babf1f2317167586b94fc0d5289c4837b6f8d412d7bf398df6282630",
+    "original_bytes": 848127,
+    "archive_bytes": 106294
+  },
+  {
+    "scope": "partial environment-interrupted original",
+    "original": "increment-j/evidence/00-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-j/evidence/00-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "85f183307c8f79ce01a70a473d3065dddbcf8a3e2134ecf6524a0a46f9e59ef2",
+    "archive_sha256": "85de17310d4960f702cdcca36cb27a9671d63361ae6b2a94c1d9b4d5a6efa57e",
+    "original_bytes": 56976896,
+    "archive_bytes": 1108725
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/10-aya-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/10-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "4b76ee068df4cb5dcbe50100aadb3ff0ba4a3d76f1147ac0a89c4dbce13cbf98",
+    "archive_sha256": "389dc43751768c8f1258b25dbb9383ab767e03da4bd7b4c274f1f57bc30ba18c",
+    "original_bytes": 8268,
+    "archive_bytes": 1292
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/10-aya-udp/native-serial.log",
+    "archive": "increment-k/evidence/10-aya-udp/native-serial.log.gz",
+    "original_sha256": "4e03643c4b0b5d42d85ed060253e4cb9ce244cab738a6081835cb3658877b520",
+    "archive_sha256": "f787226d6a0253f8299c608d5c409840137f58873bff8a712a1adb0320e5a0bf",
+    "original_bytes": 722899,
+    "archive_bytes": 122126
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/10-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/10-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "67279f20e9ec0d535b8531cc85df9710160b7a2e4068aa2f50a0e194947aa19a",
+    "archive_sha256": "1fb5679f3a542b766a90bd810f3da76380e96256b529a9204707c6f11b71503b",
+    "original_bytes": 601277,
+    "archive_bytes": 20234
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/00-aya-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/00-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "4346bb41fc23c2f3543a025a1f8039e077810157ad7a464ee619d08cfb662303",
+    "archive_sha256": "8c258f074236fe2f94cd7003b75c02e6192c50d9d746fc4352c26627b7f6b43c",
+    "original_bytes": 6295,
+    "archive_bytes": 1045
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/00-aya-udp/native-serial.log",
+    "archive": "increment-k/evidence/00-aya-udp/native-serial.log.gz",
+    "original_sha256": "d71a86d41ee4122eb19ce94f57f05b4f52ea0ff5dec6dfc4986b0566f8493aa1",
+    "archive_sha256": "5233ed049c76f519134c38186fce6bc84182537e9fcceada386e7029d81c8825",
+    "original_bytes": 1427203,
+    "archive_bytes": 182592
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/00-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/00-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "d1d5ac7bf3eea77b7ca028345e262dc0ee2676fe341759d80a9728a930e07597",
+    "archive_sha256": "fb955fd671f25c12c5fab9665d9bf5189da8ab60493947dcc9e5fb31d2f55db6",
+    "original_bytes": 5139833,
+    "archive_bytes": 144159
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/01-kernel-tcp/event-observer.jsonl",
+    "archive": "increment-k/evidence/01-kernel-tcp/event-observer.jsonl.gz",
+    "original_sha256": "5780f55a3ca1e99ed6a20c53937310d3292943f6191824262dec26ed2473c597",
+    "archive_sha256": "3a95c1c2c788615b4308b7d247176ed3c1ff5b93f08d50652b6d076fff781ffd",
+    "original_bytes": 5208,
+    "archive_bytes": 943
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/01-kernel-tcp/native-serial.log",
+    "archive": "increment-k/evidence/01-kernel-tcp/native-serial.log.gz",
+    "original_sha256": "789b9a78c64967372c46575060c7de7c52e65a9f20f834c91afe46bcfbbfd60e",
+    "archive_sha256": "1486ecb35a65e6c7b45028e40d4172e5ee3af00aa472bc099311297e6b0ea926",
+    "original_bytes": 1427974,
+    "archive_bytes": 186413
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/01-kernel-tcp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/01-kernel-tcp/qemu-resources.jsonl.gz",
+    "original_sha256": "6de9d0502c84704d669aa033c6a0a92c78afed603a0a4cb85f86704e16607bc4",
+    "archive_sha256": "258a98da7339d453676bc69efe9100e9e522a333edb758f6ed247cc50be019ae",
+    "original_bytes": 7289908,
+    "archive_bytes": 228077
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/08-aya-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/08-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "65ffe50b9068ea5a98c1d0c9e3e231650cfc5c58b86aceafa3f609bda9eac7e7",
+    "archive_sha256": "2a416e1ffc6c54deaf39a6172419f581f72ac58048de4b5d2cf6e456dd65c296",
+    "original_bytes": 11499,
+    "archive_bytes": 1719
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/08-aya-udp/native-serial.log",
+    "archive": "increment-k/evidence/08-aya-udp/native-serial.log.gz",
+    "original_sha256": "213b07192f4489d92f559b6e68e41971f5df8fb184d7c5c420503865ab262b6d",
+    "archive_sha256": "c01ca28343d2baf2d9f6a78780fbe9d06ef53ca81165c2f396eadd04c245e97d",
+    "original_bytes": 2311916,
+    "archive_bytes": 311930
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/08-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/08-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "c85a0e77358430c4c79dadabedaf6a54b14789f22a073a0119db0e01c01a9a66",
+    "archive_sha256": "001401318acba056fc9cdccdadf328082bac8d174e4caad9a0936029e6342e83",
+    "original_bytes": 1347414,
+    "archive_bytes": 41703
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/07-kernel-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/07-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "15e5ffc2faeedb0c8e2b64df6d3a7b2602318eaa957c6fbaa0568e968065c7dd",
+    "archive_sha256": "6d55b6af511a3147ebf485e76baab62cba9f8290452046b81662b9ddf20a1d61",
+    "original_bytes": 11671,
+    "archive_bytes": 1706
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/07-kernel-udp/native-serial.log",
+    "archive": "increment-k/evidence/07-kernel-udp/native-serial.log.gz",
+    "original_sha256": "18b7bdc860bc460aa6a983901fbb6c88f4a80c15b9e6f2a15bd14ead09dcfdb0",
+    "archive_sha256": "0630e188169e4c082b260bb74cf482b04a0d449e385f6d820f9e336048fcf9b2",
+    "original_bytes": 1960487,
+    "archive_bytes": 344666
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/07-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/07-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "3e551309ee9398daa7cbca971817c442682aab115924a806bdd1c8a5d3956c47",
+    "archive_sha256": "45fa4faad6add1d06fbc63ab5d88922d899345af8c89c51491a34d94790164f3",
+    "original_bytes": 1244748,
+    "archive_bytes": 40471
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/09-kernel-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/09-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "4cfc8c6e199b80e9e223d2ade97f629b50a765244af9ee68d016aed4585d8315",
+    "archive_sha256": "263bc1d10f6369ad7c2ec8947d834d902157aad6ba4c86265baf31ebc6cb3fb0",
+    "original_bytes": 9352,
+    "archive_bytes": 1411
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/09-kernel-udp/native-serial.log",
+    "archive": "increment-k/evidence/09-kernel-udp/native-serial.log.gz",
+    "original_sha256": "956b32bc92bca2417f97d3b96ea638615455a93eb9174ac2d6a98190b55fa189",
+    "archive_sha256": "0952b61b57b881d39cc208537a9cf78e6aa8dc14fa0b350d813323810a5dffbb",
+    "original_bytes": 858989,
+    "archive_bytes": 129606
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/09-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/09-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "26b5927ee922a416cce227ae6a11c9373476d998a68e267655b10af55554922e",
+    "archive_sha256": "33804a92393aeee20527453f9fe1ac51e73f2ae300857e2d77e57845dfe8de4f",
+    "original_bytes": 804055,
+    "archive_bytes": 26559
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/03-kernel-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/03-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "910a0918af48c204c44910ac1935ba8b5ad43bf97bb6b25ddaf3da53faa6bdf7",
+    "archive_sha256": "4197334d7c02162fc655782ec433b91b43604728ea5fcd7c590c72f98dd7127d",
+    "original_bytes": 11665,
+    "archive_bytes": 1709
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/03-kernel-udp/native-serial.log",
+    "archive": "increment-k/evidence/03-kernel-udp/native-serial.log.gz",
+    "original_sha256": "26c504a847718b49a786465b07d116daabb517443861270ea29d5c88f436a31f",
+    "archive_sha256": "8c2458543cd72bddc1e6486d923c197995afc2d26b7e74777bc8bec671e5b6d9",
+    "original_bytes": 2023347,
+    "archive_bytes": 345087
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/03-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/03-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "8eae1e08bc79ae1d9fcd70b96c4794f4c1147ce4990424aacc68d221f5412b30",
+    "archive_sha256": "8b7cd9214ee9c9aecca6bc744a3ab0be938d06610b53f7595d27fbec782eccae",
+    "original_bytes": 1262035,
+    "archive_bytes": 40179
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/04-aya-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/04-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "cc9b0befcc7f7ff05c436c9517e6acd4be5a4937b11742a95c6d45d8be6fa649",
+    "archive_sha256": "0d896c6a5f43c7a947bf8684ff8d12f2d703a9402831b3b5369e0f4b13d7cb35",
+    "original_bytes": 11489,
+    "archive_bytes": 1711
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/04-aya-udp/native-serial.log",
+    "archive": "increment-k/evidence/04-aya-udp/native-serial.log.gz",
+    "original_sha256": "97fa8e5e86cc1f827b46b81809fa75431c53d6e7482de58582eb4cfc48096073",
+    "archive_sha256": "a08183afe58927d97f3025976713609904ffe63ccf0930a2568aabb91396ebe8",
+    "original_bytes": 2325557,
+    "archive_bytes": 306154
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/04-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/04-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "733fe075866728c829759efc40d140e371a50cf1791b83646a859006301fe243",
+    "archive_sha256": "fe4128233ddbe46aad5fe1da329d253393a9e3a474a18729376b694ae6cab954",
+    "original_bytes": 1354600,
+    "archive_bytes": 41824
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/02-aya-tcp/event-observer.jsonl",
+    "archive": "increment-k/evidence/02-aya-tcp/event-observer.jsonl.gz",
+    "original_sha256": "5d01951fc0569dfd8a6ea211fda194491c3ca7607d7ae0ea162a8df9503fb17b",
+    "archive_sha256": "85dd31f3143a9c20ada233ed8b58cd4254cf8fc21260a3ffb21bebba16d00c50",
+    "original_bytes": 5289,
+    "archive_bytes": 967
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/02-aya-tcp/native-serial.log",
+    "archive": "increment-k/evidence/02-aya-tcp/native-serial.log.gz",
+    "original_sha256": "93ae9d5f752fd7d314a2a0f4ec32c33de6824c6ae502652f5c872fc12c6fdafd",
+    "archive_sha256": "db07827d12ec05336ca74715021eb33d51e018f42e1f153d86f2f2b2ae45d7b7",
+    "original_bytes": 1423809,
+    "archive_bytes": 182972
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/02-aya-tcp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/02-aya-tcp/qemu-resources.jsonl.gz",
+    "original_sha256": "3b6dc1ec67e0f33ada7e026d9fd1813b3be31af9c5da17f1497d35dcfbee9d1d",
+    "archive_sha256": "1ef8e2a8a51372cf754237ba9853f1c73e0d4d925ac0e8f317ebb23e5b719356",
+    "original_bytes": 5817777,
+    "archive_bytes": 166182
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/05-aya-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/05-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "ad81954a94a774642ee5cad548b252083b33ae1738e09c3e2889f168150c881f",
+    "archive_sha256": "fa8f44fbd684bfc77e4cd2f7c4729875afeec35011425b1545a5e266e671c51c",
+    "original_bytes": 11500,
+    "archive_bytes": 1721
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/05-aya-udp/native-serial.log",
+    "archive": "increment-k/evidence/05-aya-udp/native-serial.log.gz",
+    "original_sha256": "9ed46e631145143da3db1139b914eaa5e59f150fa281bb72fe691208442df006",
+    "archive_sha256": "d4e09aaa4cce106314542a74ee219051564fa73fac4d9da411d0092c81a1a0a2",
+    "original_bytes": 2307690,
+    "archive_bytes": 311283
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/05-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/05-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "7295c1c26e0f701971cac354a80a264df7fe62ed13e5afef946ad0dada9a2d66",
+    "archive_sha256": "812c02dcc7bfd386e112e9b4d7de97798844aca67bca2f88a10722bd5f042961",
+    "original_bytes": 1355430,
+    "archive_bytes": 41938
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/06-kernel-udp/event-observer.jsonl",
+    "archive": "increment-k/evidence/06-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "15ce3b99a61f5085d945082edc8b567c9dd8548f67ac3b0e795453635248d904",
+    "archive_sha256": "64deadd4f70d3cda2332b9be52023d2d5dfd2290f1820a37867ff3a33ad41c7b",
+    "original_bytes": 11675,
+    "archive_bytes": 1726
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/06-kernel-udp/native-serial.log",
+    "archive": "increment-k/evidence/06-kernel-udp/native-serial.log.gz",
+    "original_sha256": "18cd8883290a1c47eda0e1a728b54f44d8af0c84ab0cba87076d39ab0231f48c",
+    "archive_sha256": "0271940db4572d50d13de5f1ec20c26da8ea94779db97664d08f52f178e5fea1",
+    "original_bytes": 1936115,
+    "archive_bytes": 347411
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-k/evidence/06-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-k/evidence/06-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "8a729d96c1a3619c7228dcc84acb36f3f3151a2802c3b2f17753a4d98bc530d1",
+    "archive_sha256": "17c80a0f643665d92640ad0c75c1bee743fb80d535c4876d284fdaba6dd2c310",
+    "original_bytes": 1236155,
+    "archive_bytes": 40205
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-l/evidence/00-aya-udp/event-observer.jsonl",
+    "archive": "increment-l/evidence/00-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "7d8195b981c5960d750b15a9a68fc1b8c65958b8ca91534eb3e2061b0310d31d",
+    "archive_sha256": "a46e3e22c1bdf7a8b464931fc5377a379be2dae68c80d9e9c7ae3c66170e0f65",
+    "original_bytes": 695,
+    "archive_bytes": 277
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-l/evidence/00-aya-udp/native-serial.log",
+    "archive": "increment-l/evidence/00-aya-udp/native-serial.log.gz",
+    "original_sha256": "3c941063a2b144e15ed4806935edb4bb10cdd912161c20a5f9a3a7b06f7ed003",
+    "archive_sha256": "87fdf98ff8bb0e391e3118bd9380b143d5de80e48049b0ef334a4d029671758b",
+    "original_bytes": 111201,
+    "archive_bytes": 27423
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-l/evidence/00-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-l/evidence/00-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "b963182094442a001bc565fb3511ff4e7c86797902407db0f48883aa9314cddd",
+    "archive_sha256": "bf41578cb8949b2a27406317f16dc76bc9ddc82bf9817ae66922cee9e782e9d7",
+    "original_bytes": 59226,
+    "archive_bytes": 4108
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-n/evidence/00-aya-udp/event-observer.jsonl",
+    "archive": "increment-n/evidence/00-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "a4b43c554bd929c406bc6f8c92b39c5f257a4ddce0387a2b39efc4f3673435d6",
+    "archive_sha256": "bcf20c9effc8a3628c74e4c8e77a5791d0b2ab2b1c399209b318fb79ef8c1230",
+    "original_bytes": 20499,
+    "archive_bytes": 2751
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-n/evidence/00-aya-udp/native-serial.log",
+    "archive": "increment-n/evidence/00-aya-udp/native-serial.log.gz",
+    "original_sha256": "68afb7e4561e87615da59829c375f29162966f31a6670a5b8c94eaaedee3afbc",
+    "archive_sha256": "a297c0ef643cf0a6dbb646e83f40acc3cd002cdd38663edb79d662ba73f17d79",
+    "original_bytes": 4427953,
+    "archive_bytes": 1061386
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-n/evidence/00-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-n/evidence/00-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "f22c205c4b731181efffb320fc645e4d1f94d13d64d9599d781318293c4da75e",
+    "archive_sha256": "5b42483727acabd7fd21a16ad406d43fe92e7d1a711682a18bb8dee905ee5a7e",
+    "original_bytes": 2507338,
+    "archive_bytes": 77830
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-o/evidence/00-kernel-udp/event-observer.jsonl",
+    "archive": "increment-o/evidence/00-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "2fb5d15321f2c55ac8ca4fdf16aedc094f1caa4b3d277d3f3c8a34bb98e3229b",
+    "archive_sha256": "164131313bdf5680e6076bb9f6b8bf2514681ed57379709ef8171e1c27a0a66f",
+    "original_bytes": 34477,
+    "archive_bytes": 4370
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-o/evidence/00-kernel-udp/native-serial.log",
+    "archive": "increment-o/evidence/00-kernel-udp/native-serial.log.gz",
+    "original_sha256": "de048abe8fd2cbe21d27a313d87583e78e7d94d93b4efdd6fac0082e8a0a2033",
+    "archive_sha256": "a81e4e8586aba9b2df85ddd4d08e5242f92cb06af2316654368ae63accf89d79",
+    "original_bytes": 7246303,
+    "archive_bytes": 1919513
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-o/evidence/00-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-o/evidence/00-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "e782ce23a1d19b8db9698ba12706584052b0aa84bb5bb55ede35d682d4fcef78",
+    "archive_sha256": "470307498b077e612692dadb6b9b797c332f7fc7b9eecbf0ae3e08effd14435e",
+    "original_bytes": 11224572,
+    "archive_bytes": 347360
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-o/evidence/01-aya-udp/event-observer.jsonl",
+    "archive": "increment-o/evidence/01-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "7250d5b6262adfcf443caf66cf9052ecadcfe203fa1ada7446ab2df6ede373a2",
+    "archive_sha256": "0d8bb1b2d8991e71f6b739577005a52bc3508359dea24c9b1893a8b205e28b98",
+    "original_bytes": 8437,
+    "archive_bytes": 1318
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-o/evidence/01-aya-udp/native-serial.log",
+    "archive": "increment-o/evidence/01-aya-udp/native-serial.log.gz",
+    "original_sha256": "c85cfc1fd1c7b728cf7c099bbff48b3d354a3a9ad1af705594d9264d2f72929b",
+    "archive_sha256": "6416b6503f3148408243f4da85dfe14e03f59911d2bb62b63c7679c3a95a2be7",
+    "original_bytes": 1047431,
+    "archive_bytes": 281947
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-o/evidence/01-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-o/evidence/01-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "a29a981af7abe35a1770c60808758bf3b10d15613ad117e3d2f0a305fbf0ec70",
+    "archive_sha256": "eb06801bd69595c59b23067ec8d22eca2e177f34cf897843e0726c6ee8d659b9",
+    "original_bytes": 957275,
+    "archive_bytes": 31071
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-p/evidence/00-aya-udp/event-observer.jsonl",
+    "archive": "increment-p/evidence/00-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "f8eb8a2fda26c0c51b2e1f0d0d0327e77d93cc6c4c414f236cae2bdba723c8ca",
+    "archive_sha256": "473c14006be99d05ba9373301ea6d6e087a1f62d81ee705eca205e3173f6b479",
+    "original_bytes": 8560,
+    "archive_bytes": 1295
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-p/evidence/00-aya-udp/native-serial.log",
+    "archive": "increment-p/evidence/00-aya-udp/native-serial.log.gz",
+    "original_sha256": "d7852f3f94329f874dac2e10b3d12c053869861b9e9dcb7974dc0b646b188176",
+    "archive_sha256": "d1d16ad06aca5c3cf73c81d7452e676a97bed86cee33583bc4337641f426b2c0",
+    "original_bytes": 1270705,
+    "archive_bytes": 278758
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-p/evidence/00-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-p/evidence/00-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "a562f292615cd880e5e474ff47dee31a0102ca19e182ad5e619092438ec27ed3",
+    "archive_sha256": "2396a2af6adc4d85a95df155f904bacfa7974a04fe19b569f2e13878f9dc4ecc",
+    "original_bytes": 1143396,
+    "archive_bytes": 36993
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-q/evidence/00-aya-udp/event-observer.jsonl",
+    "archive": "increment-q/evidence/00-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "ee4911a183128ced684bf23e3eb44d86f931d8d71c756aa4e877b0bac9650a62",
+    "archive_sha256": "3e99c2994857b86f6a9902da67ae5587b012fee0b1514f503ab66607be81f11f",
+    "original_bytes": 9501,
+    "archive_bytes": 1483
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-q/evidence/00-aya-udp/native-serial.log",
+    "archive": "increment-q/evidence/00-aya-udp/native-serial.log.gz",
+    "original_sha256": "a537711cb5cd1aea4f1083abd62c992843e766f305e0f2b824c11c1a8242cffa",
+    "archive_sha256": "992ee82949abc388b01a95b861787a030ce4e3f33a27d0c35e87aae653a7ff55",
+    "original_bytes": 1246669,
+    "archive_bytes": 316456
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-q/evidence/00-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-q/evidence/00-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "faebb575de2c6fa984c090a041e2278dc21647551e84143623ad345e02adb949",
+    "archive_sha256": "adc77ee4ce2ca3b502da94f62d9fd7a5fe2c904bc1d034ea49ed831f0187be6c",
+    "original_bytes": 1354319,
+    "archive_bytes": 41831
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/00-kernel-udp/event-observer.jsonl",
+    "archive": "increment-r/evidence/00-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "9ba3c89c6d9e1a77d7e68c07e2297bb3091ab3bc4c38313aac5c2e57b0d197da",
+    "archive_sha256": "0ff58a785ed349481135d6f08859695c91a182982159dcaa620f0913b712bcbd",
+    "original_bytes": 36695,
+    "archive_bytes": 4686
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/00-kernel-udp/native-serial.log",
+    "archive": "increment-r/evidence/00-kernel-udp/native-serial.log.gz",
+    "original_sha256": "d8da5d7fe87734df9399c49c1d0df93d58cde143fd624b84980e6ffda57a0e09",
+    "archive_sha256": "be2d57ef0f5ef2542ad0230039a968fe3756e496daa068d2537ce7f4048d8576",
+    "original_bytes": 7399103,
+    "archive_bytes": 1951963
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/00-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-r/evidence/00-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "cc2f3b78bc040b9e82d0792b94060b5daea72a6bbd49f3633ea61035e6c2c3e5",
+    "archive_sha256": "6ddbe12b91b6ae6e7e62a9173bdfae4282761e31e0c5dc2ac473749c1ed9f89d",
+    "original_bytes": 10665028,
+    "archive_bytes": 331439
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/01-aya-udp/event-observer.jsonl",
+    "archive": "increment-r/evidence/01-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "80ae208c9305be9b5a6fbe167bd2147d955ac4d3ff76991e4f62df1a5012660f",
+    "archive_sha256": "780af522f1213a8bc63f3fbb90de48422c655751ee05ac7f819c9f04dc42247b",
+    "original_bytes": 36373,
+    "archive_bytes": 4753
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/01-aya-udp/native-serial.log",
+    "archive": "increment-r/evidence/01-aya-udp/native-serial.log.gz",
+    "original_sha256": "0307791d92a7cc24a039390115d72ae5b224b5227cc9c809ca932b6b2c78b7de",
+    "archive_sha256": "dd17a992275db0d1178e7f7cccb42f9aa79b68e199240de4654fe44d2f79f108",
+    "original_bytes": 11282385,
+    "archive_bytes": 3294193
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/01-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-r/evidence/01-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "31238c3d5de439afca05f2c0964e6048a1c42dc7b794aeea2f21d04530367e6f",
+    "archive_sha256": "071458e692800e381397817abc74a7888b3af079b39e80f0fbd572e0b7108c3f",
+    "original_bytes": 12849136,
+    "archive_bytes": 375973
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/02-aya-udp/event-observer.jsonl",
+    "archive": "increment-r/evidence/02-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "6c1ed12375d95d786d1fe7f50aaa09fb6613ea50c51bbf9472d3e6056261d0a4",
+    "archive_sha256": "ce92229a34f124769816ce4781c08903c83c5aacc8c46b34e973488730ae2165",
+    "original_bytes": 36377,
+    "archive_bytes": 4782
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/02-aya-udp/native-serial.log",
+    "archive": "increment-r/evidence/02-aya-udp/native-serial.log.gz",
+    "original_sha256": "828927a057939bcb9fe4dd936d0aa145b18f5defd006dc32df9bdf07bcb17aef",
+    "archive_sha256": "e9b56ca65e4426134a0751b246fdfc17446bd42f68e5124a566e13c3c2d4a2e6",
+    "original_bytes": 11318130,
+    "archive_bytes": 3309278
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/02-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-r/evidence/02-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "d1a874d52b99e74e26b358f0513907de6215357cadd5118af22ba778764e6a1c",
+    "archive_sha256": "400752ba3760a2f713d66b81c65eeebc5197d4ef1a5b3934957c28d119e40122",
+    "original_bytes": 12811906,
+    "archive_bytes": 375407
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/04-kernel-udp/event-observer.jsonl",
+    "archive": "increment-r/evidence/04-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "ee9c2405009fc473fc05ba56e3abe55860e75c326f5b9ec3485fe3d64fd53d12",
+    "archive_sha256": "e674a3b91731cab2e20e1e6dcda1968f20035dba3065e8979e823da58a34e049",
+    "original_bytes": 36691,
+    "archive_bytes": 4673
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/04-kernel-udp/native-serial.log",
+    "archive": "increment-r/evidence/04-kernel-udp/native-serial.log.gz",
+    "original_sha256": "a25a6b515b9fd77898c37adcdb55e77f6e5ec04f6102f333cea22fed0717d93d",
+    "archive_sha256": "3a92376cc0848adad99db98ac0421c98dfcc9f0175bcfed6824fde2832596f52",
+    "original_bytes": 7477447,
+    "archive_bytes": 1980652
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/04-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-r/evidence/04-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "23bd6beeaf8f61917a1a50c7d07659363167b0992c21a53cc84d1459e1c0806f",
+    "archive_sha256": "e2d8ad4f610c5384d33004d68ae9a250366e381a35c29865f89b530b36084bc0",
+    "original_bytes": 10720173,
+    "archive_bytes": 342096
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/03-kernel-udp/event-observer.jsonl",
+    "archive": "increment-r/evidence/03-kernel-udp/event-observer.jsonl.gz",
+    "original_sha256": "8dafcfe946cc8c810877eb24e3cc1557aecc5ce5c748eccc43c4cb98de7f919a",
+    "archive_sha256": "70033ef7ed577b314f1e755b3eb9d8b28289501fa594dfa440f3ed1bd684e2b9",
+    "original_bytes": 36678,
+    "archive_bytes": 4674
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/03-kernel-udp/native-serial.log",
+    "archive": "increment-r/evidence/03-kernel-udp/native-serial.log.gz",
+    "original_sha256": "0889ee72ad293f0ad738f79dff7ccce94690114f2f35050591b03222a19028ea",
+    "archive_sha256": "737284a8878b52e1a099853d3bb3872b28bcd6ad58472e55e728bee5c6364f11",
+    "original_bytes": 7433978,
+    "archive_bytes": 1969839
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/03-kernel-udp/qemu-resources.jsonl",
+    "archive": "increment-r/evidence/03-kernel-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "17daf4ecceeec09a49c9eb630367c7010d3fdafde996d2948e1e6da46a38808b",
+    "archive_sha256": "41170f2cc920b598cfa330757c71cdd9390b26891fa04c8d457c20d59005a904",
+    "original_bytes": 10709472,
+    "archive_bytes": 332837
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/05-aya-udp/event-observer.jsonl",
+    "archive": "increment-r/evidence/05-aya-udp/event-observer.jsonl.gz",
+    "original_sha256": "abd61f0e24813b1ebbb4556ec0f460df4433be5dd9e9e04254d58b784669993b",
+    "archive_sha256": "dac9d233eb3b51936ba3a8a82ee8e0ae94798875b39a2439d671b0a2b2828475",
+    "original_bytes": 36392,
+    "archive_bytes": 4789
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/05-aya-udp/native-serial.log",
+    "archive": "increment-r/evidence/05-aya-udp/native-serial.log.gz",
+    "original_sha256": "01c179a8de61f76af8a410ce3dec7373d9ba9585c59678c9a55c3018d577f3ef",
+    "archive_sha256": "b744fbc1e496109bc218b22b98de679ef053517149fa0201932ebbddb5e04f56",
+    "original_bytes": 11180978,
+    "archive_bytes": 3246033
+  },
+  {
+    "scope": "completed native phase",
+    "original": "increment-r/evidence/05-aya-udp/qemu-resources.jsonl",
+    "archive": "increment-r/evidence/05-aya-udp/qemu-resources.jsonl.gz",
+    "original_sha256": "53f73522dfda17dfdfad9bfef4d635f4d2a3b88cba6f0fa59dd3606941c75375",
+    "archive_sha256": "f97450984f122e5d798c48839b48809b00bd5f29699dd830a49c567323fbb2bb",
+    "original_bytes": 12881672,
+    "archive_bytes": 376969
+  }
+]

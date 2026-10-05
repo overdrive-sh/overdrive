@@ -1,0 +1,62 @@
+[
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 541,
+    "duration_s": 0.492538635,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 542,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.45452232,
+    "usage": 0
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 539,
+    "duration_s": 0.487790481,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 540,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.417420637,
+    "usage": 0
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 564,
+    "duration_s": 0.486536875,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 565,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.467650392,
+    "usage": 0
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 565,
+    "duration_s": 0.466825969,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 566,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.442273941,
+    "usage": 0
+  }
+]

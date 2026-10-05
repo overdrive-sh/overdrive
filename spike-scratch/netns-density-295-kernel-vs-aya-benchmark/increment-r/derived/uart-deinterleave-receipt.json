@@ -1,0 +1,45 @@
+{
+  "original_bytes_changed": false,
+  "recovered_events": [
+    {
+      "run": "00-kernel-udp",
+      "first_line": 1235,
+      "last_line": 1236,
+      "event": "owned_retirement",
+      "id": null,
+      "removed_known_printk": [
+        "[  628.650491] shmproxy: drained accepted=16386 closed=16386\n"
+      ],
+      "raw_span_sha256": "20c6795153525565f97acec4489c6689f92ff9d0a360f17fc73cae6fe1fb2e50",
+      "recovered_event_sha256": "1f49aed30221b7f37b488a1209d657711d18800fabaea6b3981e2bfac3c6aaad",
+      "recovery": "remove exact matched printk console insertion including inserted newline; retain every JSON character and strict-parse; no numeric value edits"
+    },
+    {
+      "run": "03-kernel-udp",
+      "first_line": 1235,
+      "last_line": 1236,
+      "event": "owned_retirement",
+      "id": null,
+      "removed_known_printk": [
+        "[  630.387016] shmproxy: drained accepted=16386 closed=16386\n"
+      ],
+      "raw_span_sha256": "d326297280a00a4c68dc09fe187927b8043eac6da84bae2d34865cc05ef02183",
+      "recovered_event_sha256": "02dbbafe76408b4f9da098362a2b4ed290d46898aac6405d78ea9e7049a9e468",
+      "recovery": "remove exact matched printk console insertion including inserted newline; retain every JSON character and strict-parse; no numeric value edits"
+    },
+    {
+      "run": "04-kernel-udp",
+      "first_line": 1234,
+      "last_line": 1235,
+      "event": "owned_retirement",
+      "id": null,
+      "removed_known_printk": [
+        "[  631.268139] shmproxy: drained accepted=16386 closed=16386\n"
+      ],
+      "raw_span_sha256": "420904bab3a4da55fe880fc9e769738ea668901935eeff8a8dac0f597b677989",
+      "recovered_event_sha256": "a43fd673cf2a2724795257d8f3be2bcef4ce1aef6325b0a4f4f4b405f6909ec0",
+      "recovery": "remove exact matched printk console insertion including inserted newline; retain every JSON character and strict-parse; no numeric value edits"
+    }
+  ],
+  "excluded_unrecoverable_events": []
+}

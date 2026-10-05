@@ -1,0 +1,27 @@
+[
+  {
+    "run": "00-aya-udp",
+    "serial_line": 948,
+    "event": "correctness_gate_passed",
+    "tcp_halfclose_backpressure": false,
+    "udp_actual_zero_64_1431_59000_two_peers": true
+  },
+  {
+    "run": "00-aya-udp",
+    "serial_line": 949,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.003314157,
+    "event": "setup",
+    "new_owners": 1,
+    "population": 1
+  },
+  {
+    "run": "00-aya-udp",
+    "serial_line": 974,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.036737114,
+    "event": "setup",
+    "new_owners": 63,
+    "population": 64
+  }
+]

@@ -1,0 +1,3 @@
+source_increment,run,candidate,variant,protocol,population,tag,slab_kib,sunreclaim_kib,kernel_stack_kib,kernel_stack_delta_loaded_kib,page_tables_kib,page_tables_delta_loaded_kib,vmallocused_kib,slab_delta_loaded_kib,sunreclaim_delta_loaded_kib,memavailable_delta_loaded_kib,rss_kib,pss_kib,pss_delta_loaded_kib,fds,self_tasks,all_tasks
+increment-q,00-aya-udp,aya-duplex-stream-seqpacket-v1,aya,udp,1,interval-start,39848,34684,2304,32,396,-36,18472,620,604,804,6560,6554,88,27,2,80
+increment-q,00-aya-udp,aya-duplex-stream-seqpacket-v1,aya,udp,1,interval-end,42544,37352,2352,80,440,8,18568,3316,3272,-23984,10408,10402,3936,27,2,83

@@ -1,0 +1,7 @@
+{
+  "timestamp_utc": "2026-10-05T08:27:34Z",
+  "original_archive_sha256": "c7b128324fa76a8adbc4212b42b7f30d4b9f7fd0470c1586e9c8eabff42b1876",
+  "partial_evidence_retrieved_before_next_sync": true,
+  "native_complete_result_present": false,
+  "scope": "environment-interrupted j, partial first cohort only; no live-reference-zero proof"
+}

@@ -1,0 +1,35 @@
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+ip link set lo up
+uname -a
+cat /proc/sys/kernel/pid_max /proc/sys/kernel/threads-max
+cat /sys/devices/system/cpu/online /sys/devices/system/cpu/possible
+insmod /vsock.ko || poweroff -f
+insmod /vhost_iotlb.ko || poweroff -f
+insmod /vhost.ko || poweroff -f
+insmod /vmw_vsock_virtio_transport_common.ko || poweroff -f
+insmod /vhost_vsock.ko || poweroff -f
+echo BENCH_PRE_VARIANT_MEMINFO
+cat /proc/meminfo
+echo BENCH_PRE_VARIANT_SLABINFO
+cat /proc/slabinfo
+echo BENCH_PRE_VARIANT_END
+insmod /shmproxy.ko || poweroff -f
+echo BENCH_PERF_PMU_PROBE
+/perf stat -a -e cycles,instructions -- sleep 0.1 2>&1
+echo BENCH_PERF_SOFTWARE_PROBE
+/perf stat -a -e cpu-clock,task-clock,context-switches,cpu-migrations -- sleep 0.1 2>&1
+BENCH_OPEN_ONLY=1 BENCH_REPEAT=1 /probe kernel udp 16384
+rc=$?
+echo BENCH_HARNESS_EXIT=$rc
+cat /proc/modules
+if [ -e /proc/shmproxy ]; then rmmod shmproxy; fi
+echo BENCH_MODULE_UNLOAD_EXIT=$?
+echo BENCH_LIVE_MODULES_AFTER_UNLOAD
+cat /proc/modules
+cat /sys/class/net/lo/ifindex
+dmesg
+echo BENCH_COMPLETE_EXIT=$rc
+poweroff -f

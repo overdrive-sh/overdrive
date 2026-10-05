@@ -1,0 +1,7 @@
+candidate,source_increment,run,serial_line,variant,protocol,population,repeat,duration_s,vm_busy_cpu_s,vm_mean_busy_cores,vm_steal_s,inventory_outside_interval
+aya-udp-original,increment-n,00-aya-udp,958,aya,udp,1,0,2.000141279,0.0,0.0,0.0,True
+aya-udp-original,increment-n,00-aya-udp,959,aya,udp,1,1,2.000156803,0.0,0.0,0.0,True
+aya-udp-original,increment-n,00-aya-udp,960,aya,udp,1,2,2.000165145,0.0,0.0,0.0,True
+aya-udp-original,increment-n,00-aya-udp,977,aya,udp,64,0,2.000186286,0.0,0.0,0.0,True
+aya-udp-original,increment-n,00-aya-udp,978,aya,udp,64,1,2.000157013,0.0,0.0,0.0,True
+aya-udp-original,increment-n,00-aya-udp,979,aya,udp,64,2,2.000192546,0.0,0.0,0.0,True

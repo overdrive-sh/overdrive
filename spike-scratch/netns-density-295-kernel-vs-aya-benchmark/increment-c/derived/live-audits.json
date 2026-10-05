@@ -1,0 +1,132 @@
+[
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 949,
+    "population": 1,
+    "tag": "interval-start",
+    "independent_memory_contexts": 1,
+    "cid_first": 300000,
+    "cid_last": 300000,
+    "backend": {
+      "module_stats": "accepted=3 closed=2 to_net=395520 to_peer=395536 zero_udp=0 truncated=0 rejected=0 send_waits=157\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1045,
+    "population": 1,
+    "tag": "interval-end",
+    "independent_memory_contexts": 1,
+    "cid_first": 300000,
+    "cid_last": 300000,
+    "backend": {
+      "module_stats": "accepted=3 closed=2 to_net=32871680 to_peer=32871696 zero_udp=0 truncated=0 rejected=0 send_waits=386\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1047,
+    "population": 64,
+    "tag": "interval-start",
+    "independent_memory_contexts": 64,
+    "cid_first": 300000,
+    "cid_last": 300063,
+    "backend": {
+      "module_stats": "accepted=66 closed=2 to_net=32879808 to_peer=32879824 zero_udp=0 truncated=0 rejected=0 send_waits=386\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1145,
+    "population": 64,
+    "tag": "interval-end",
+    "independent_memory_contexts": 64,
+    "cid_first": 300000,
+    "cid_last": 300063,
+    "backend": {
+      "module_stats": "accepted=66 closed=2 to_net=504250304 to_peer=504250320 zero_udp=0 truncated=0 rejected=0 send_waits=6336\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1147,
+    "population": 1024,
+    "tag": "interval-start",
+    "independent_memory_contexts": 1024,
+    "cid_first": 300000,
+    "cid_last": 301023,
+    "backend": {
+      "module_stats": "accepted=1026 closed=2 to_net=504377280 to_peer=504377296 zero_udp=0 truncated=0 rejected=0 send_waits=6336\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1330,
+    "population": 1024,
+    "tag": "interval-end",
+    "independent_memory_contexts": 1024,
+    "cid_first": 300000,
+    "cid_last": 301023,
+    "backend": {
+      "module_stats": "accepted=1026 closed=2 to_net=1588769984 to_peer=1588770000 zero_udp=0 truncated=0 rejected=0 send_waits=21008\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1332,
+    "population": 4096,
+    "tag": "interval-start",
+    "independent_memory_contexts": 4096,
+    "cid_first": 300000,
+    "cid_last": 304095,
+    "backend": {
+      "module_stats": "accepted=4098 closed=2 to_net=1589228736 to_peer=1589228752 zero_udp=0 truncated=0 rejected=0 send_waits=21008\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1515,
+    "population": 4096,
+    "tag": "interval-end",
+    "independent_memory_contexts": 4096,
+    "cid_first": 300000,
+    "cid_last": 304095,
+    "backend": {
+      "module_stats": "accepted=4098 closed=2 to_net=2658322432 to_peer=2658322448 zero_udp=0 truncated=0 rejected=0 send_waits=35546\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1517,
+    "population": 16384,
+    "tag": "interval-start",
+    "independent_memory_contexts": 16384,
+    "cid_first": 300000,
+    "cid_last": 316383,
+    "backend": {
+      "module_stats": "accepted=16386 closed=2 to_net=2660157440 to_peer=2660157456 zero_udp=0 truncated=0 rejected=0 send_waits=35546\n"
+    },
+    "udp_bindings": null
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1700,
+    "population": 16384,
+    "tag": "interval-end",
+    "independent_memory_contexts": 16384,
+    "cid_first": 300000,
+    "cid_last": 316383,
+    "backend": {
+      "module_stats": "accepted=16386 closed=2 to_net=3688911296 to_peer=3688911312 zero_udp=0 truncated=0 rejected=0 send_waits=50217\n"
+    },
+    "udp_bindings": null
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "retrieved_completed_phase": "02-kernel-udp",
+  "original_archive_sha256": "41721278d4d5c6fcc92c08714028c1dc113b38b7337a40e56993bef8f39f33fe",
+  "timestamp_utc": "2026-10-04T22:07:10Z",
+  "native_result": {
+    "qemu_exit": 0,
+    "passed": true,
+    "elapsed_s": 154.2444161977619,
+    "qemu_pid_absent": true,
+    "variant": "kernel",
+    "protocol": "udp",
+    "max_population": 1,
+    "private_kernel_only": true
+  }
+}

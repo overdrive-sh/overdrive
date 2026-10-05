@@ -1,0 +1,74 @@
+[
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 466,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.011679182,
+    "event": "setup",
+    "new_owners": 1,
+    "population": 1
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 505,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.191859189,
+    "event": "setup",
+    "new_owners": 63,
+    "population": 64
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 464,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.006305608,
+    "event": "setup",
+    "new_owners": 1,
+    "population": 1
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 503,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.044240633,
+    "event": "setup",
+    "new_owners": 63,
+    "population": 64
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 464,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.072663778,
+    "event": "setup",
+    "new_owners": 1,
+    "population": 1
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 517,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.029797462,
+    "event": "setup",
+    "new_owners": 63,
+    "population": 64
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 466,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.002956038,
+    "event": "setup",
+    "new_owners": 1,
+    "population": 1
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 519,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.157534724,
+    "event": "setup",
+    "new_owners": 63,
+    "population": 64
+  }
+]

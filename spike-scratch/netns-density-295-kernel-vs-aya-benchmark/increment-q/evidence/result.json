@@ -1,0 +1,6 @@
+{
+  "all_pass": true,
+  "order": "kernel-udp,aya-udp",
+  "maximum": 64,
+  "physical_modules_links_preserved": true
+}

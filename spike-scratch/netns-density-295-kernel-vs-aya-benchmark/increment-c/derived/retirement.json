@@ -1,0 +1,17 @@
+[
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1701,
+    "duration_s": 258.490599799,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1702,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 259.467113175,
+    "usage": 0
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 949,
+    "population": 1,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.0,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 1045,
+    "population": 64,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.0,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 1146,
+    "population": 1024,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.0100000000000193,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 1331,
+    "population": 4096,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.0600000000000023,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 1516,
+    "population": 16384,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.170000000000016,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "02-kernel-udp",
+    "serial_line": 961,
+    "population": 1,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.0,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  }
+]

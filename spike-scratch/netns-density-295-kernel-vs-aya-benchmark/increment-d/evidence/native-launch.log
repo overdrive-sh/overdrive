@@ -1,0 +1,79 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-d/run.py --matrix run-matrix.json`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=a728e3c31541f5241a40d0dd pid=883291
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <redacted canonical metal target>:/home/ubuntu/overdrive
+
+sent 689,833 bytes  received 10,754 bytes  73,746.00 bytes/sec
+total size is 874,532,413  speedup is 1,248.29
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+7.0.0-29-generic
+
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling crc32fast v1.5.2
+   Compiling equivalent v1.0.2
+   Compiling version_check v0.9.5
+   Compiling allocator-api2 v0.2.21
+   Compiling hashbrown v0.17.1
+   Compiling cfg-if v1.0.5
+   Compiling memchr v2.8.3
+   Compiling foldhash v0.1.5
+   Compiling object v0.36.7
+   Compiling thiserror v1.0.69
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling libc v0.2.190
+   Compiling bytes v1.12.1
+   Compiling log v0.4.34
+   Compiling serde_json v1.0.151
+   Compiling bitflags v2.13.2
+   Compiling itoa v1.0.18
+   Compiling once_cell v1.21.4
+   Compiling assert_matches v1.5.0
+   Compiling core-error v0.0.0
+   Compiling hashbrown v0.15.5
+   Compiling indexmap v2.14.2
+   Compiling syn v2.0.119
+   Compiling thiserror-impl v1.0.69
+   Compiling aya-obj v0.2.1
+   Compiling aya v0.13.1
+   Compiling aya-vsock-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-d)
+error: recursion limit reached while expanding `$crate::json_internal!`
+   --> src/open_udp.rs:145:9
+    |
+145 | ...   json!({"event":"udp_open_window","id":id...rs":actors,"corrupt":0,"boundary_violations":0}),
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider increasing the recursion limit by adding a `#![recursion_limit = "256"]` attribute to your crate (`aya_vsock_probe`)
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: could not compile `aya-vsock-probe` (bin "aya-vsock-probe") due to 1 previous error
+
+Traceback (most recent call last):
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-d/run.py", line 19, in <module>
+    capture(['cargo','build','--release','--locked','--manifest-path',str(INC/'Cargo.toml')],env=env)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-d/run.py", line 12, in capture
+    if p.returncode:raise RuntimeError(f'{cmd} exited {p.returncode}')
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: ['cargo', 'build', '--release', '--locked', '--manifest-path', '/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-d/Cargo.toml'] exited 101
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1300[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 58.390997915994376}

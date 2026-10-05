@@ -1,0 +1,5 @@
+{
+  "previous_increment": "increment-j",
+  "reason": "environment-interrupted turn and native chain; read-only audit found no owned process or canonical lease; original partial evidence retrieved before sync",
+  "reuse": "same frozen source, fresh immutable execution identity; completed c/e TCP and h/i evidence retained"
+}

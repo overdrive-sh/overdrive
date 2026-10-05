@@ -1,0 +1,92 @@
+[
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1235,
+    "duration_s": 256.4649694,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1238,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 257.502410537,
+    "usage": 0
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1238,
+    "duration_s": 333.509679508,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1239,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 334.455951533,
+    "usage": 0
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 1234,
+    "duration_s": 334.343576556,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 1235,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 335.332130728,
+    "usage": 0
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 1235,
+    "duration_s": 256.38632307,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 1238,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 257.430477407,
+    "usage": 0
+  },
+  {
+    "run": "04-kernel-udp",
+    "serial_line": 1234,
+    "duration_s": 257.539881484,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "04-kernel-udp",
+    "serial_line": 1237,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 258.585872555,
+    "usage": 0
+  },
+  {
+    "run": "05-aya-udp",
+    "serial_line": 1235,
+    "duration_s": 341.016339592,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "05-aya-udp",
+    "serial_line": 1236,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 342.059104889,
+    "usage": 0
+  }
+]

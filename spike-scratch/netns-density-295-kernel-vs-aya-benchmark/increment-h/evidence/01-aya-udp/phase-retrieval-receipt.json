@@ -1,0 +1,15 @@
+{
+  "retrieved_completed_phase": "01-aya-udp",
+  "original_archive_sha256": "3b8cfc5d9439fad05f27873fb1165e096c88f2dd5b4a535fca32bc8acb94d9c5",
+  "timestamp_utc": "2026-10-04T22:56:54Z",
+  "native_result": {
+    "qemu_exit": 0,
+    "passed": false,
+    "elapsed_s": 129.239996814169,
+    "qemu_pid_absent": true,
+    "variant": "aya",
+    "protocol": "udp",
+    "max_population": 16384,
+    "private_kernel_only": true
+  }
+}

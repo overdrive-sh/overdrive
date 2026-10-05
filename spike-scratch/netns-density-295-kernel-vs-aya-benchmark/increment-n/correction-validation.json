@@ -1,0 +1,22 @@
+{
+  "corrected_candidate": "aya-duplex-stream-seqpacket-v1",
+  "open_windows": 36,
+  "sizes": [
+    0,
+    64,
+    1431,
+    59000
+  ],
+  "rates": [
+    0,
+    1000,
+    10000
+  ],
+  "total_sent": 726277,
+  "total_guest_delivered": 726277,
+  "total_app_delivered": 726277,
+  "total_host_guest_loss": 0,
+  "total_guest_host_loss": 0,
+  "live_vhost_zero": true,
+  "bpf_sha_matches_original_k": true
+}

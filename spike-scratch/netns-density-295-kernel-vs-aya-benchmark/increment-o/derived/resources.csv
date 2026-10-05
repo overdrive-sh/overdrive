@@ -1,0 +1,12 @@
+source_increment,run,candidate,variant,protocol,population,tag,slab_kib,sunreclaim_kib,kernel_stack_kib,kernel_stack_delta_loaded_kib,page_tables_kib,page_tables_delta_loaded_kib,vmallocused_kib,slab_delta_loaded_kib,sunreclaim_delta_loaded_kib,memavailable_delta_loaded_kib,rss_kib,pss_kib,pss_delta_loaded_kib,fds,self_tasks,all_tasks
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,1,interval-start,39520,34348,2352,64,368,-8,7864,880,848,-10232,3368,3362,204,10,2,83
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,1,interval-end,43084,37560,2352,64,724,348,7944,4444,4060,18944,5524,5518,2360,10,2,83
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,64,interval-start,64628,58264,5280,2992,552,176,10824,25988,24764,34124,7036,7030,3872,388,65,272
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,64,interval-end,68156,59552,5360,3072,456,80,10920,29516,26052,68232,16480,16474,13316,388,65,272
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,1024,interval-start,410340,386588,51440,49152,1112,736,56888,371700,353088,453260,39988,39982,36824,6148,1025,3152
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,1024,interval-end,411556,387300,51440,49152,1120,744,57000,372916,353800,458356,43664,43658,40500,6148,1025,3152
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,4096,interval-start,1512372,1437176,198896,196608,3236,2860,204344,1473732,1403676,1755424,117592,117586,114428,24580,4097,12368
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,4096,interval-end,1514360,1438356,198896,196608,3248,2872,204456,1475720,1404856,1770724,125124,125118,121960,24580,4097,12368
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,16384,interval-start,5922816,5641040,788736,786448,11724,11348,794184,5884176,5607540,6921376,424180,424174,421016,98308,16385,49233
+increment-o,00-kernel-udp,original-kernel-module,kernel,udp,16384,interval-end,5924380,5641760,788720,786432,13576,13200,794296,5885740,5608260,10224484,2813516,2813510,2810352,98308,16385,49232
+increment-o,01-aya-udp,aya-duplex-stream-seqpacket-v1,aya,udp,1,interval-start,39636,34440,2320,48,392,24,18488,640,612,-2852,6484,6478,24,27,2,82

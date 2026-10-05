@@ -1,0 +1,10 @@
+{
+  "increment": "increment-r",
+  "source": "original evidence/*/native-serial.log and qemu-resources.jsonl",
+  "measured_rows": 414,
+  "groups": 138,
+  "repeat_filter": "repeat < 3, excludes warmups/profile",
+  "cpu_primary": "whole-VM non-idle user+nice+system+irq+softirq ticks / CLK_TCK",
+  "qemu_scope": "interpolated 0.5-second physical-process CPU samples between lightweight window markers; approximate",
+  "latency": "actual endpoint request/reply nanoseconds; zero open-loop is count-only"
+}

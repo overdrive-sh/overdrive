@@ -1,0 +1,6 @@
+{
+  "helper_sha256": "5b050c5864b36e45c83cfd34639b0ec7c586886a2201aff924c9b6bd59f43ba5",
+  "exit": 0,
+  "stdout": "{\"timestamp_utc\": \"2026-10-04T22:19:42Z\", \"target_scope\": \"only verified-owned failed private QEMU/KVM host-role VM\", \"pid\": 888122, \"process_start_ticks\": \"443667913\", \"argv\": [\"qemu-system-x86_64\", \"-machine\", \"q35\", \"-cpu\", \"host\", \"-accel\", \"kvm\", \"-m\", \"16384\", \"-smp\", \"4,maxcpus=64\", \"-nodefaults\", \"-nographic\", \"-monitor\", \"none\", \"-serial\", \"stdio\", \"-no-reboot\", \"-kernel\", \"/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/out/increment-e/Image\", \"-initrd\", \"/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/out/increment-e/03-aya-udp/initramfs\", \"-append\", \"console=ttyS0 rdinit=/init panic=-1\"], \"signal\": \"SIGTERM\", \"reason\": \"Aya UDP benchmark actor panicked on a late previous-window nonce; controller finish barrier cannot return\", \"authorization\": \"explicit orchestrator instruction, equivalent to predeclared fixture timeout; benchmark agent/objective continue\", \"no_physical_module_or_network_mutation\": true, \"live_private_kernel_reference_zero_proven\": false, \"qemu_pid_absent\": true}\n",
+  "stderr": ""
+}

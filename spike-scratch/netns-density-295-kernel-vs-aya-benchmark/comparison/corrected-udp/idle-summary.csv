@@ -1,0 +1,11 @@
+candidate,variant,population,intervals,cohorts,busy_cores_median,busy_cores_min,busy_cores_max
+aya-duplex-stream-seqpacket-v1,aya,1,9,3,0.0,0.0,0.0
+aya-duplex-stream-seqpacket-v1,aya,1024,9,3,0.0,0.0,0.004999569872005201
+aya-duplex-stream-seqpacket-v1,aya,16384,9,3,0.0,0.0,0.004999394920733047
+aya-duplex-stream-seqpacket-v1,aya,4096,9,3,0.0,0.0,0.004999527292194759
+aya-duplex-stream-seqpacket-v1,aya,64,9,3,0.0,0.0,0.0
+original-kernel-module,kernel,1,9,3,0.0,0.0,0.004999624670676535
+original-kernel-module,kernel,1024,9,3,0.004999598662216989,0.0,0.019998227527096932
+original-kernel-module,kernel,16384,9,3,0.3849818908368369,0.31498656188580354,0.4099822381345062
+original-kernel-module,kernel,4096,9,3,0.06499720914983352,0.04499800366356747,0.07499681061063516
+original-kernel-module,kernel,64,9,3,0.0,0.0,0.004999663800107594

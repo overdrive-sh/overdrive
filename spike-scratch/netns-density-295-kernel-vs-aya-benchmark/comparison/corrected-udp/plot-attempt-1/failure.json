@@ -1,0 +1,8 @@
+{
+  "operation": "local standalone corrected comparison plotting",
+  "error": "ValueError: Data cannot be log-scaled because all values are <=0",
+  "cause": "zero-message open-loop latency is intentionally absent; empty axis needs an explicit population domain",
+  "native_data_changed": false,
+  "source_capture": "current pre-fix source snapshot; local plotting execution start source was not independently pinned",
+  "current_pre_fix_source_sha256": "19fa2954d213c8968d67b2310825b5a9a7aa3cf24b211513f10fc0b5cc70c3be"
+}

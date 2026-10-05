@@ -1,0 +1,15 @@
+{
+  "retrieved_completed_phase": "01-aya-tcp",
+  "original_archive_sha256": "caea811439b502f92427b9d2ac968afffa6032cb345ff047516a4860e68c77a4",
+  "timestamp_utc": "2026-10-04T22:07:31Z",
+  "native_result": {
+    "qemu_exit": 0,
+    "passed": true,
+    "elapsed_s": 849.3956153495237,
+    "qemu_pid_absent": true,
+    "variant": "aya",
+    "protocol": "tcp",
+    "max_population": 16384,
+    "private_kernel_only": true
+  }
+}

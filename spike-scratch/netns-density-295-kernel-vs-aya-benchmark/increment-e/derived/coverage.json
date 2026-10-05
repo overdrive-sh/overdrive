@@ -1,0 +1,77 @@
+[
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 945,
+    "event": "correctness_gate_passed",
+    "tcp_halfclose_backpressure": true,
+    "udp_actual_zero_64_1431_59000_two_peers": false
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 943,
+    "event": "correctness_gate_passed",
+    "tcp_halfclose_backpressure": true,
+    "udp_actual_zero_64_1431_59000_two_peers": false
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 944,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.000842919,
+    "event": "setup",
+    "new_owners": 1,
+    "population": 1
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 1042,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.038309219,
+    "event": "setup",
+    "new_owners": 63,
+    "population": 64
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 1144,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.37920823,
+    "event": "setup",
+    "new_owners": 960,
+    "population": 1024
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 1329,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 1.204490186,
+    "event": "setup",
+    "new_owners": 3072,
+    "population": 4096
+  },
+  {
+    "run": "01-aya-tcp",
+    "serial_line": 1514,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 35.231007964,
+    "event": "setup",
+    "new_owners": 12288,
+    "population": 16384
+  },
+  {
+    "run": "02-kernel-udp",
+    "serial_line": 951,
+    "event": "correctness_gate_passed",
+    "tcp_halfclose_backpressure": false,
+    "udp_actual_zero_64_1431_59000_two_peers": true
+  },
+  {
+    "run": "02-kernel-udp",
+    "serial_line": 952,
+    "completion_boundary": "device started, proxy registered, tagged two-direction application message completed",
+    "duration_s": 0.0042342,
+    "event": "setup",
+    "new_owners": 1,
+    "population": 1
+  }
+]

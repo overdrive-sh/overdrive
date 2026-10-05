@@ -1,0 +1,22 @@
+{
+  "status": "COMPLETED_BOUNDED_COMPARISON",
+  "requested_outcome": "correct original Aya UDP pressure failure and rerun affected benchmark",
+  "corrected_candidate": "aya-duplex-stream-seqpacket-v1",
+  "mechanism": "host-to-guest STREAM + guest-to-host SEQPACKET, two actual connections per actual CID/device; original8-byte codec and Rust BPF retained",
+  "kernel_patches": false,
+  "module_assistance_in_aya": false,
+  "userspace_application_payload_relay": false,
+  "native_cohorts": 6,
+  "valid_udp_open_windows": 384,
+  "actual_maximum_transport_population": 16384,
+  "paired_order": "AB/BA/AB",
+  "all_normal_live_kernel_stock_references_zero": true,
+  "owned_native_processes_remaining": false,
+  "canonical_lease_owner_remaining": false,
+  "physical_module_link_inventory_preserved": true,
+  "original_candidate_failures_retained": true,
+  "unmeasured": "Intermediate0/59000 open traffic; full65507/IPv6/ordinary guest stack/incomingTCP/TLS/offloads; exact loader/global BPF teardown latency",
+  "original_matching_tcp": "c/e retained,3 windows per condition in one VM cohort per candidate",
+  "production_design_des_commits": false,
+  "independent_review": "pending parent review"
+}

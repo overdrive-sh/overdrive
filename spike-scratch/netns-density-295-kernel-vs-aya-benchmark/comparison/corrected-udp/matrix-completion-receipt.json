@@ -1,0 +1,57 @@
+{
+  "source": "original run-matrix.executed.json, each begin/native-result and original retrieval receipt",
+  "actual_matrix": [
+    {
+      "variant": "kernel",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 0
+    },
+    {
+      "variant": "aya",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 0
+    },
+    {
+      "variant": "aya",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 1
+    },
+    {
+      "variant": "kernel",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 1
+    },
+    {
+      "variant": "kernel",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 2
+    },
+    {
+      "variant": "aya",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 2
+    }
+  ],
+  "actual_completed_cohorts": 6,
+  "actual_maximum_population_each": 16384,
+  "all_native_passed": true,
+  "raw_result_default_metadata_note": "result.json maximum64/order fields reflect CLI defaults when --matrix is used; they are not executed matrix metadata. Originals unchanged.",
+  "original_retrieval": {
+    "retrieved": true,
+    "private_raw_archive_sha256": "67a79287abf7579e01b9eaf520981f3718a888f9df5c5514c2d3715412d538ac",
+    "launcher_rc": 0,
+    "wall_s": 4336.293770666001
+  }
+}

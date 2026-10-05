@@ -1,0 +1,52 @@
+{
+  "scope": "Matched UDP only: increment-r module original versus separately pinned Aya directional STREAM/SEQPACKET candidate",
+  "original_candidate": "Original increment-h/k data and failures retained in comparison/ and original raw evidence; not merged into corrected rows",
+  "matrix": [
+    {
+      "variant": "kernel",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 0
+    },
+    {
+      "variant": "aya",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 0
+    },
+    {
+      "variant": "aya",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 1
+    },
+    {
+      "variant": "kernel",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 1
+    },
+    {
+      "variant": "kernel",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 2
+    },
+    {
+      "variant": "aya",
+      "protocol": "udp",
+      "maximum_population": 16384,
+      "open_only": true,
+      "repeat": 2
+    }
+  ],
+  "timer_scope": "Whole-private-VM busy CPU/stat boundaries around common ready/start/finish. perf leading30ms includes broader software task-clock scope. Physical QEMU CPU interpolation approximate0.5s sample; separate from private kernel scope.",
+  "activity": "Eligible-all large populations include one request per peer before global endpoint-service barrier. Maximum pending peers proves actual simultaneous application requests awaiting reply, not all kernel queues being simultaneously full.",
+  "offered_rate_scope": "Raw offering_duration_s is the declared pacing interval. All-peer burst guarantees one request per actual peer and may extend it under generator saturation; actual offered/s over complete measured traffic+delivery duration is separately derived and used for load plots.",
+  "generator": "Common epoll_wait0 busy polling consumes CPU at paced loads; efficiency includes generators and control. Unrestricted rates are measured complete-pipeline results, not isolated technology peak."
+}

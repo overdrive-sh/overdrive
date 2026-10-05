@@ -1,0 +1,160 @@
+[
+  {
+    "run": "00-aya-udp",
+    "serial_line": 993,
+    "duration_s": 230.329030214,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "00-aya-udp",
+    "serial_line": 994,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 231.324187711,
+    "usage": 0
+  },
+  {
+    "run": "01-kernel-tcp",
+    "serial_line": 987,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 272.35080406,
+    "usage": 0
+  },
+  {
+    "run": "02-aya-tcp",
+    "serial_line": 982,
+    "duration_s": 241.9118435,
+    "event": "owned_retirement",
+    "owners": 16384
+  },
+  {
+    "run": "02-aya-tcp",
+    "serial_line": 983,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 242.84810902,
+    "usage": 0
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 1036,
+    "duration_s": 0.537890702,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 1039,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.532186182,
+    "usage": 0
+  },
+  {
+    "run": "04-aya-udp",
+    "serial_line": 1031,
+    "duration_s": 0.50754959,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "04-aya-udp",
+    "serial_line": 1032,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.490542265,
+    "usage": 0
+  },
+  {
+    "run": "05-aya-udp",
+    "serial_line": 1032,
+    "duration_s": 0.536280569,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "05-aya-udp",
+    "serial_line": 1033,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.501270957,
+    "usage": 0
+  },
+  {
+    "run": "06-kernel-udp",
+    "serial_line": 1032,
+    "duration_s": 0.541464208,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "06-kernel-udp",
+    "serial_line": 1035,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.541358271,
+    "usage": 0
+  },
+  {
+    "run": "07-kernel-udp",
+    "serial_line": 1034,
+    "duration_s": 0.494514889,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "07-kernel-udp",
+    "serial_line": 1037,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.506381366,
+    "usage": 0
+  },
+  {
+    "run": "08-aya-udp",
+    "serial_line": 1031,
+    "duration_s": 0.515536618,
+    "event": "owned_retirement",
+    "owners": 64
+  },
+  {
+    "run": "08-aya-udp",
+    "serial_line": 1032,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.50551364,
+    "usage": 0
+  },
+  {
+    "run": "09-kernel-udp",
+    "serial_line": 1012,
+    "duration_s": 0.013702577,
+    "event": "owned_retirement",
+    "owners": 1
+  },
+  {
+    "run": "09-kernel-udp",
+    "serial_line": 1015,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 0.965481668,
+    "usage": 0
+  },
+  {
+    "run": "10-aya-udp",
+    "serial_line": 1007,
+    "duration_s": 0.064853798,
+    "event": "owned_retirement",
+    "owners": 1
+  },
+  {
+    "run": "10-aya-udp",
+    "serial_line": 1008,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 1.00792016,
+    "usage": 0
+  }
+]

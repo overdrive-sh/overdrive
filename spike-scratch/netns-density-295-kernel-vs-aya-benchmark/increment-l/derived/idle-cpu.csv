@@ -1,0 +1,16 @@
+source_increment,run,serial_line,variant,protocol,population,repeat,duration_s,vm_busy_cpu_s,vm_mean_busy_cores,vm_steal_s,inventory_outside_interval
+increment-k,00-aya-udp,959,aya,udp,1,0,2.000156042,0.0,0.0,0.0,True
+increment-k,00-aya-udp,960,aya,udp,1,1,2.00016813,0.0,0.0,0.0,True
+increment-k,00-aya-udp,961,aya,udp,1,2,2.000170803,0.0,0.0,0.0,True
+increment-k,00-aya-udp,967,aya,udp,64,0,2.000123663,0.0,0.0,0.0,True
+increment-k,00-aya-udp,968,aya,udp,64,1,2.00013552,0.0,0.0,0.0,True
+increment-k,00-aya-udp,969,aya,udp,64,2,2.000173187,0.0,0.0,0.0,True
+increment-k,00-aya-udp,974,aya,udp,1024,0,2.000184383,0.0,0.0,0.0,True
+increment-k,00-aya-udp,975,aya,udp,1024,1,2.000230493,0.0,0.0,0.0,True
+increment-k,00-aya-udp,976,aya,udp,1024,2,2.000186518,0.0,0.0,0.0,True
+increment-k,00-aya-udp,981,aya,udp,4096,0,2.00018851,0.0,0.0,0.0,True
+increment-k,00-aya-udp,982,aya,udp,4096,1,2.000178275,0.0,0.0,0.0,True
+increment-k,00-aya-udp,983,aya,udp,4096,2,2.000178384,0.0,0.0,0.0,True
+increment-k,00-aya-udp,988,aya,udp,16384,0,2.000154389,0.0,0.0,0.0,True
+increment-k,00-aya-udp,989,aya,udp,16384,1,2.000158986,0.0,0.0,0.0,True
+increment-k,00-aya-udp,990,aya,udp,16384,2,2.000125094,0.0,0.0,0.0,True

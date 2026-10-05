@@ -1,0 +1,5 @@
+source_increment,run,candidate,variant,protocol,population,tag,slab_kib,sunreclaim_kib,kernel_stack_kib,kernel_stack_delta_loaded_kib,page_tables_kib,page_tables_delta_loaded_kib,vmallocused_kib,slab_delta_loaded_kib,sunreclaim_delta_loaded_kib,memavailable_delta_loaded_kib,rss_kib,pss_kib,pss_delta_loaded_kib,fds,self_tasks,all_tasks
+increment-n,00-aya-udp,aya-udp-original,aya,udp,1,interval-start,39128,33948,2304,16,400,32,18472,396,364,-3780,6644,6638,24,27,2,81
+increment-n,00-aya-udp,aya-udp-original,aya,udp,1,interval-end,39512,34320,2304,16,436,68,18520,780,736,-21616,7200,7194,580,27,2,81
+increment-n,00-aya-udp,aya-udp-original,aya,udp,64,interval-start,50548,44956,3240,952,436,68,19480,11816,11372,-10264,8712,8706,2092,594,65,144
+increment-n,00-aya-udp,aya-udp-original,aya,udp,64,interval-end,59664,52396,3360,1072,940,572,19560,20932,18812,53584,24872,24866,18252,594,65,146

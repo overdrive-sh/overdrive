@@ -1,0 +1,13 @@
+[package]
+name="aya-vsock-probe"
+version="0.0.0"
+edition="2021"
+[workspace]
+[dependencies]
+aya="=0.13.1"
+libc="0.2"
+serde_json="1"
+
+[[bin]]
+name="direct-vsock-credit-probe"
+path="src/direct_seq.rs"

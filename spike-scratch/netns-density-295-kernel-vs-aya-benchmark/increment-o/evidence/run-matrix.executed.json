@@ -1,0 +1,44 @@
+[
+  {
+    "variant": "kernel",
+    "protocol": "udp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "repeat": 0
+  },
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "repeat": 0
+  },
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "repeat": 1
+  },
+  {
+    "variant": "kernel",
+    "protocol": "udp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "repeat": 1
+  },
+  {
+    "variant": "kernel",
+    "protocol": "udp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "repeat": 2
+  },
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "repeat": 2
+  }
+]

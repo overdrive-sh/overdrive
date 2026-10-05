@@ -1,0 +1,13 @@
+{
+  "status": "complete bounded native benchmark, pending independent review",
+  "corrected_native_cohorts": 6,
+  "corrected_valid_open_windows": 384,
+  "all_comparison_groups_three_independent_cohorts": true,
+  "all_compressed_originals_verified": 107,
+  "no_owned_qemu_or_lease": true,
+  "physical_modules_links_unchanged": true,
+  "preserved_tcp_selection": "increment-c module / increment-e Aya byte-identical TCP window path",
+  "corrected_udp_selection": "increment-r only, candidate labelled aya-duplex-stream-seqpacket-v1",
+  "actual_data_and_limitations_reported": true,
+  "production_design_des_edits_or_commits_by_benchmark": false
+}

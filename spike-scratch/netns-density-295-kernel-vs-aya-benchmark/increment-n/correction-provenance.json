@@ -1,0 +1,15 @@
+{
+  "candidate": "aya-duplex-stream-seqpacket-v1",
+  "parent": "increment-m",
+  "original_candidate_retained": true,
+  "cause_receipts": [
+    "increment-i",
+    "increment-l"
+  ],
+  "change": "One actual CID/device and two actual directional vsock sockets: host-to-guest STREAM explicit length framing, guest-to-host SEQPACKET original prefix+TCX decoding; no userspace proxy payload operations; no kernel patches",
+  "upstream_sources": "unchanged copied upstream pins",
+  "bpf_source_unchanged_from_k": true,
+  "new_socket_map_keys_per_peer": 3,
+  "cpu_accounting_and_open_window_methodology": "unchanged except owning guest endpoint parses STREAM explicit frame length",
+  "fallout": "Shorten mutable flow borrow to preserve exclusive queue ownership; m compile failure retained"
+}

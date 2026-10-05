@@ -1,0 +1,9 @@
+[
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 1,
+    "open_only": true,
+    "repeat": 0
+  }
+]

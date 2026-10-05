@@ -1,0 +1,447 @@
+[
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 953,
+    "population": 1,
+    "tag": "interval-start",
+    "independent_memory_contexts": 1,
+    "cid_first": 300000,
+    "cid_last": 300000,
+    "backend": {
+      "module_stats": "accepted=3 closed=2 to_net=121118 to_peer=121118 zero_udp=8 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 2,
+      "owned_app_bindings": 1,
+      "owned_proxy_bindings": 1,
+      "total_kernel_ipv4_udp_bindings": 2
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 976,
+    "population": 1,
+    "tag": "interval-end",
+    "independent_memory_contexts": 1,
+    "cid_first": 300000,
+    "cid_last": 300000,
+    "backend": {
+      "module_stats": "accepted=3 closed=2 to_net=181677 to_peer=181677 zero_udp=18362 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 2,
+      "owned_app_bindings": 1,
+      "owned_proxy_bindings": 1,
+      "total_kernel_ipv4_udp_bindings": 2
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 978,
+    "population": 64,
+    "tag": "interval-start",
+    "independent_memory_contexts": 64,
+    "cid_first": 300000,
+    "cid_last": 300063,
+    "backend": {
+      "module_stats": "accepted=66 closed=2 to_net=189805 to_peer=189805 zero_udp=18362 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 128,
+      "owned_app_bindings": 64,
+      "owned_proxy_bindings": 64,
+      "total_kernel_ipv4_udp_bindings": 128
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 998,
+    "population": 64,
+    "tag": "interval-end",
+    "independent_memory_contexts": 64,
+    "cid_first": 300000,
+    "cid_last": 300063,
+    "backend": {
+      "module_stats": "accepted=66 closed=2 to_net=2523437 to_peer=2523437 zero_udp=97961 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 128,
+      "owned_app_bindings": 64,
+      "owned_proxy_bindings": 64,
+      "total_kernel_ipv4_udp_bindings": 128
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1000,
+    "population": 1024,
+    "tag": "interval-start",
+    "independent_memory_contexts": 1024,
+    "cid_first": 300000,
+    "cid_last": 301023,
+    "backend": {
+      "module_stats": "accepted=1026 closed=2 to_net=2650413 to_peer=2650413 zero_udp=97961 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 2048,
+      "owned_app_bindings": 1024,
+      "owned_proxy_bindings": 1024,
+      "total_kernel_ipv4_udp_bindings": 2048
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1087,
+    "population": 1024,
+    "tag": "interval-end",
+    "independent_memory_contexts": 1024,
+    "cid_first": 300000,
+    "cid_last": 301023,
+    "backend": {
+      "module_stats": "accepted=1026 closed=2 to_net=529792552 to_peer=529792552 zero_udp=157966 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 2048,
+      "owned_app_bindings": 1024,
+      "owned_proxy_bindings": 1024,
+      "total_kernel_ipv4_udp_bindings": 2048
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1089,
+    "population": 4096,
+    "tag": "interval-start",
+    "independent_memory_contexts": 4096,
+    "cid_first": 300000,
+    "cid_last": 304095,
+    "backend": {
+      "module_stats": "accepted=4098 closed=2 to_net=530251304 to_peer=530251304 zero_udp=157966 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 8192,
+      "owned_app_bindings": 4096,
+      "owned_proxy_bindings": 4096,
+      "total_kernel_ipv4_udp_bindings": 8192
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1176,
+    "population": 4096,
+    "tag": "interval-end",
+    "independent_memory_contexts": 4096,
+    "cid_first": 300000,
+    "cid_last": 304095,
+    "backend": {
+      "module_stats": "accepted=4098 closed=2 to_net=1043989558 to_peer=1043989558 zero_udp=217356 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 8192,
+      "owned_app_bindings": 4096,
+      "owned_proxy_bindings": 4096,
+      "total_kernel_ipv4_udp_bindings": 8192
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1178,
+    "population": 16384,
+    "tag": "interval-start",
+    "independent_memory_contexts": 16384,
+    "cid_first": 300000,
+    "cid_last": 316383,
+    "backend": {
+      "module_stats": "accepted=16386 closed=2 to_net=1045824566 to_peer=1045824566 zero_udp=217356 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 32768,
+      "owned_app_bindings": 16384,
+      "owned_proxy_bindings": 16384,
+      "total_kernel_ipv4_udp_bindings": 32768
+    }
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1193,
+    "population": 16384,
+    "tag": "interval-end",
+    "independent_memory_contexts": 16384,
+    "cid_first": 300000,
+    "cid_last": 316383,
+    "backend": {
+      "module_stats": "accepted=16386 closed=2 to_net=1046873142 to_peer=1046873142 zero_udp=268895 truncated=0 rejected=0 send_waits=0\n"
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 32768,
+      "owned_app_bindings": 16384,
+      "owned_proxy_bindings": 16384,
+      "total_kernel_ipv4_udp_bindings": 32768
+    }
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 950,
+    "population": 1,
+    "tag": "interval-start",
+    "independent_memory_contexts": 1,
+    "cid_first": 300000,
+    "cid_last": 300000,
+    "backend": {
+      "counters_0_31": [
+        16,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        16,
+        16,
+        8,
+        8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "occupied_sockhash": 2,
+      "route_keys": 2
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 2,
+      "owned_app_bindings": 1,
+      "owned_proxy_bindings": 1,
+      "total_kernel_ipv4_udp_bindings": 2
+    }
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 972,
+    "population": 1,
+    "tag": "interval-end",
+    "independent_memory_contexts": 1,
+    "cid_first": 300000,
+    "cid_last": 300000,
+    "backend": {
+      "counters_0_31": [
+        20227,
+        20227,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        20227,
+        20227,
+        20215,
+        20215,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "occupied_sockhash": 2,
+      "route_keys": 2
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 2,
+      "owned_app_bindings": 1,
+      "owned_proxy_bindings": 1,
+      "total_kernel_ipv4_udp_bindings": 2
+    }
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 974,
+    "population": 64,
+    "tag": "interval-start",
+    "independent_memory_contexts": 64,
+    "cid_first": 300000,
+    "cid_last": 300063,
+    "backend": {
+      "counters_0_31": [
+        20354,
+        20354,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        20354,
+        20354,
+        20215,
+        20215,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "occupied_sockhash": 128,
+      "route_keys": 128
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 128,
+      "owned_app_bindings": 64,
+      "owned_proxy_bindings": 64,
+      "total_kernel_ipv4_udp_bindings": 128
+    }
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 994,
+    "population": 64,
+    "tag": "interval-end",
+    "independent_memory_contexts": 64,
+    "cid_first": 300000,
+    "cid_last": 300063,
+    "backend": {
+      "counters_0_31": [
+        174125,
+        174125,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        174125,
+        174125,
+        89910,
+        89910,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "occupied_sockhash": 128,
+      "route_keys": 128
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 128,
+      "owned_app_bindings": 64,
+      "owned_proxy_bindings": 64,
+      "total_kernel_ipv4_udp_bindings": 128
+    }
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 996,
+    "population": 1024,
+    "tag": "interval-start",
+    "independent_memory_contexts": 1024,
+    "cid_first": 300000,
+    "cid_last": 301023,
+    "backend": {
+      "counters_0_31": [
+        176109,
+        176109,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        176109,
+        176109,
+        89910,
+        89910,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "occupied_sockhash": 2048,
+      "route_keys": 2048
+    },
+    "udp_bindings": {
+      "independently_observed_owned_ip_port_tuples": 2048,
+      "owned_app_bindings": 1024,
+      "owned_proxy_bindings": 1024,
+      "total_kernel_ipv4_udp_bindings": 2048
+    }
+  }
+]

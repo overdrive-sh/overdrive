@@ -1,0 +1,2 @@
+source_increment,run,candidate,variant,scope,cohort_elapsed_s,vm_busy_cpu_s,vm_mean_busy_cores,vm_steal_s,live_zero
+increment-q,00-aya-udp,aya-duplex-stream-seqpacket-v1,aya,whole private harness cohort including loading/control/actors/kernel/idle/retirement/serialization; module initialization before baseline excluded,75.89,29.71,0.3914876795361708,0.0,True

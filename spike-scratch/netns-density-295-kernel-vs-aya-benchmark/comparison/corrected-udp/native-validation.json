@@ -1,0 +1,391 @@
+{
+  "completed_cohorts": 6,
+  "expected_cohorts": 6,
+  "valid_open_windows": 384,
+  "expected_open_windows": 384,
+  "checks_failed": [],
+  "source": {
+    "udp_bpf_identical_to_original_k": true,
+    "tcp_bpf_identical_to_original_k": true,
+    "corrected_route_pins": {
+      "candidate": "aya-duplex-stream-seqpacket-v1",
+      "parent": "increment-q",
+      "original_candidate_retained": true,
+      "cause_receipts": [
+        "increment-i",
+        "increment-l"
+      ],
+      "change": "One actual CID/device and two actual directional vsock sockets: host-to-guest STREAM explicit length framing, guest-to-host SEQPACKET original prefix+TCX decoding; no userspace proxy payload operations; no kernel patches",
+      "upstream_sources": "unchanged copied upstream pins",
+      "bpf_source_unchanged_from_k": true,
+      "new_socket_map_keys_per_peer": 3,
+      "cpu_accounting_and_open_window_methodology": "unchanged except owning guest endpoint parses STREAM explicit frame length",
+      "fallout": "Shorten mutable flow borrow to preserve exclusive queue ownership; m compile failure retained",
+      "measurement_changes": "Identical kernel/Aya CPU/readiness intervals retained. One independently provisioned cohort per repeat, AB/BA/AB. Large eligible-all activity offers one datagram per actual peer before a shared service barrier, then independent paced/unrestricted scheduling; pending peer count and sent/delivered/loss prove activity. Lower populations use identical original generator. No source-sync until n originals retrieved.",
+      "additional_observed_failure": "Original o Aya1/59000/10000 left5805 unresolved requests after common2s drain; next single UDP fence timed out5s. No byte/boundary failure, normal live-zero cleanup.",
+      "fixture_fix": "Reuse bounded owning-endpoint settlement before profiling/audits/population transitions; report late-message counts and wholeVM settling CPU separately; steady traffic and2s delivery cutoff unchanged.",
+      "observed_fixture_failure": "p longer outside-window fence succeeded in10.532693384s with5843 intact old messages; final audit consumed remaining last-window59000 request instead of new64-byte tag. This is missing last-window settling, not stream framing corruption.",
+      "scope": "Final matched corrected UDP cohort, three independent pairs AB/BA/AB; q executable sources copied unchanged; code freeze before execution"
+    },
+    "upstream_pins": {
+      "module/shmproxy.c": {
+        "commit": "99e1b28e1822bb37e55c5fa2143f6c7c8f7c9bdb",
+        "source": "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-i/module/shmproxy.c",
+        "sha256": "bfbf5bc795bbe333cb08b2fa9897784a40babf4fa8b8eee2fb0c62ee5139f4c1"
+      },
+      "module/Makefile": {
+        "commit": "99e1b28e1822bb37e55c5fa2143f6c7c8f7c9bdb",
+        "source": "spike-scratch/netns-density-295-shm-vsock-kernel-proxy/increment-i/module/Makefile",
+        "sha256": "1f47a2e0fd53d5ba73074f4826592e8d39efeefe627ca5c649ad3b83c9e7219c"
+      },
+      "src/peer.rs": {
+        "commit": "3ee2a6efa2b394942bf0a48cade1bc8cc543a74c",
+        "source": "spike-scratch/netns-density-295-aya-zero-udp/increment-f/src/main.rs",
+        "sha256": "e7b61c2147b4aa4c64cc4a5db61f2cfb7e2b50199193b3f298fbb92fe913055d"
+      },
+      "Cargo.toml": {
+        "commit": "3ee2a6efa2b394942bf0a48cade1bc8cc543a74c",
+        "source": "spike-scratch/netns-density-295-aya-zero-udp/increment-f/Cargo.toml",
+        "sha256": "ae72e428b443551291349c37bcc3f06c9713d22260f48156e3883f8e5e48f856"
+      },
+      "Cargo.lock": {
+        "commit": "3ee2a6efa2b394942bf0a48cade1bc8cc543a74c",
+        "source": "spike-scratch/netns-density-295-aya-zero-udp/increment-f/Cargo.lock",
+        "sha256": "dec7d2ff20878a26e4771a0288d528b9d915c8af8f42987cbf0b9fbf53866dbc"
+      },
+      "udp-bpf/src/main.rs": {
+        "commit": "3ee2a6efa2b394942bf0a48cade1bc8cc543a74c",
+        "source": "spike-scratch/netns-density-295-aya-zero-udp/increment-f/bpf/src/main.rs",
+        "sha256": "698f667b4b47d4a6711728fac21620a8a61124903d3599f17f9a9204f295e499"
+      },
+      "udp-bpf/Cargo.toml": {
+        "commit": "3ee2a6efa2b394942bf0a48cade1bc8cc543a74c",
+        "source": "spike-scratch/netns-density-295-aya-zero-udp/increment-f/bpf/Cargo.toml",
+        "sha256": "2e08d3a5341ee03af6ce061858cd5dbbc63f2e04029d42823b2b13e347ee232f"
+      },
+      "udp-bpf/Cargo.lock": {
+        "commit": "3ee2a6efa2b394942bf0a48cade1bc8cc543a74c",
+        "source": "spike-scratch/netns-density-295-aya-zero-udp/increment-f/bpf/Cargo.lock",
+        "sha256": "b171f9848171a424269871240cb16c993ca0a548af94744cb8349ff1513abe1e"
+      },
+      "tcp-bpf/src/main.rs": {
+        "commit": "42f5d3689e7f038019b2d41c2d8c092898294bec",
+        "source": "spike-scratch/netns-density-295-aya-vsock-proxy/increment-h/bpf/src/main.rs",
+        "sha256": "9ea3894dacf5d42d225a0ebb225a5523dcb52086149fc35758afef976f737d0d"
+      },
+      "tcp-bpf/Cargo.toml": {
+        "commit": "42f5d3689e7f038019b2d41c2d8c092898294bec",
+        "source": "spike-scratch/netns-density-295-aya-vsock-proxy/increment-h/bpf/Cargo.toml",
+        "sha256": "2e08d3a5341ee03af6ce061858cd5dbbc63f2e04029d42823b2b13e347ee232f"
+      },
+      "tcp-bpf/Cargo.lock": {
+        "commit": "42f5d3689e7f038019b2d41c2d8c092898294bec",
+        "source": "spike-scratch/netns-density-295-aya-vsock-proxy/increment-h/bpf/Cargo.lock",
+        "sha256": "b171f9848171a424269871240cb16c993ca0a548af94744cb8349ff1513abe1e"
+      }
+    },
+    "steady_window_sha256": "f2df60ef3b88bf132fd36205a788200b98e48457439fe8fc19050afec52b38d0"
+  },
+  "cohorts": [
+    {
+      "run": "00-kernel-udp",
+      "variant": "kernel",
+      "candidate": "original-kernel-module",
+      "checks": {
+        "native_passed": true,
+        "whole_vm_budget": true,
+        "all_populations_start_end_audited": true,
+        "independent_contexts": true,
+        "actual_cid_range": true,
+        "expected_sockhash_keys": true,
+        "expected_source_cookie_routes": true,
+        "real_udp_bindings": true,
+        "all_64_open_conditions": true,
+        "no_invalid_timing_or_actor_failure": true,
+        "steady_counters_valid": true,
+        "all_population_pending_activity": true,
+        "correctness_gate": true,
+        "credit_pressure_gate": true,
+        "all_posttraffic_settled": true,
+        "live_stock_zero": true,
+        "no_unrecoverable_uart_events": true
+      },
+      "result": {
+        "qemu_exit": 0,
+        "passed": true,
+        "elapsed_s": 631.008103213273,
+        "qemu_pid_absent": true,
+        "variant": "kernel",
+        "protocol": "udp",
+        "max_population": 16384,
+        "private_kernel_only": true
+      },
+      "uart_repairs": [
+        {
+          "first_line": 1235,
+          "last_line": 1236,
+          "event": "owned_retirement",
+          "id": null,
+          "removed_known_printk": [
+            "[  628.650491] shmproxy: drained accepted=16386 closed=16386\n"
+          ],
+          "raw_span_sha256": "20c6795153525565f97acec4489c6689f92ff9d0a360f17fc73cae6fe1fb2e50",
+          "recovered_event_sha256": "1f49aed30221b7f37b488a1209d657711d18800fabaea6b3981e2bfac3c6aaad",
+          "recovery": "remove exact matched printk console insertion including inserted newline; retain every JSON character and strict-parse; no numeric value edits"
+        }
+      ],
+      "source_metadata": "executed-source-manifest.json and executed-artifact-pins.json",
+      "offered": 1552376,
+      "sent": 1552376,
+      "guest_delivered_by_cutoff": 1501744,
+      "app_delivered_by_cutoff": 1501744,
+      "deadline_loss_host_guest": 50632,
+      "deadline_loss_guest_host": 0,
+      "posttraffic_late_validated": 0
+    },
+    {
+      "run": "01-aya-udp",
+      "variant": "aya",
+      "candidate": "aya-duplex-stream-seqpacket-v1",
+      "checks": {
+        "native_passed": true,
+        "whole_vm_budget": true,
+        "all_populations_start_end_audited": true,
+        "independent_contexts": true,
+        "actual_cid_range": true,
+        "expected_sockhash_keys": true,
+        "expected_source_cookie_routes": true,
+        "real_udp_bindings": true,
+        "all_64_open_conditions": true,
+        "no_invalid_timing_or_actor_failure": true,
+        "steady_counters_valid": true,
+        "all_population_pending_activity": true,
+        "correctness_gate": true,
+        "credit_pressure_gate": true,
+        "all_posttraffic_settled": true,
+        "live_stock_zero": true,
+        "no_unrecoverable_uart_events": true
+      },
+      "result": {
+        "qemu_exit": 0,
+        "passed": true,
+        "elapsed_s": 759.424193771556,
+        "qemu_pid_absent": true,
+        "variant": "aya",
+        "protocol": "udp",
+        "max_population": 16384,
+        "private_kernel_only": true
+      },
+      "uart_repairs": [],
+      "source_metadata": "executed-source-manifest.json and executed-artifact-pins.json",
+      "offered": 2238131,
+      "sent": 2238131,
+      "guest_delivered_by_cutoff": 2203469,
+      "app_delivered_by_cutoff": 2203467,
+      "deadline_loss_host_guest": 34662,
+      "deadline_loss_guest_host": 2,
+      "posttraffic_late_validated": 7229
+    },
+    {
+      "run": "02-aya-udp",
+      "variant": "aya",
+      "candidate": "aya-duplex-stream-seqpacket-v1",
+      "checks": {
+        "native_passed": true,
+        "whole_vm_budget": true,
+        "all_populations_start_end_audited": true,
+        "independent_contexts": true,
+        "actual_cid_range": true,
+        "expected_sockhash_keys": true,
+        "expected_source_cookie_routes": true,
+        "real_udp_bindings": true,
+        "all_64_open_conditions": true,
+        "no_invalid_timing_or_actor_failure": true,
+        "steady_counters_valid": true,
+        "all_population_pending_activity": true,
+        "correctness_gate": true,
+        "credit_pressure_gate": true,
+        "all_posttraffic_settled": true,
+        "live_stock_zero": true,
+        "no_unrecoverable_uart_events": true
+      },
+      "result": {
+        "qemu_exit": 0,
+        "passed": true,
+        "elapsed_s": 757.114700390026,
+        "qemu_pid_absent": true,
+        "variant": "aya",
+        "protocol": "udp",
+        "max_population": 16384,
+        "private_kernel_only": true
+      },
+      "uart_repairs": [],
+      "source_metadata": "executed-source-manifest.json and executed-artifact-pins.json",
+      "offered": 2256718,
+      "sent": 2256718,
+      "guest_delivered_by_cutoff": 2229180,
+      "app_delivered_by_cutoff": 2229176,
+      "deadline_loss_host_guest": 27538,
+      "deadline_loss_guest_host": 4,
+      "posttraffic_late_validated": 6035
+    },
+    {
+      "run": "03-kernel-udp",
+      "variant": "kernel",
+      "candidate": "original-kernel-module",
+      "checks": {
+        "native_passed": true,
+        "whole_vm_budget": true,
+        "all_populations_start_end_audited": true,
+        "independent_contexts": true,
+        "actual_cid_range": true,
+        "expected_sockhash_keys": true,
+        "expected_source_cookie_routes": true,
+        "real_udp_bindings": true,
+        "all_64_open_conditions": true,
+        "no_invalid_timing_or_actor_failure": true,
+        "steady_counters_valid": true,
+        "all_population_pending_activity": true,
+        "correctness_gate": true,
+        "credit_pressure_gate": true,
+        "all_posttraffic_settled": true,
+        "live_stock_zero": true,
+        "no_unrecoverable_uart_events": true
+      },
+      "result": {
+        "qemu_exit": 0,
+        "passed": true,
+        "elapsed_s": 632.7505890876055,
+        "qemu_pid_absent": true,
+        "variant": "kernel",
+        "protocol": "udp",
+        "max_population": 16384,
+        "private_kernel_only": true
+      },
+      "uart_repairs": [
+        {
+          "first_line": 1235,
+          "last_line": 1236,
+          "event": "owned_retirement",
+          "id": null,
+          "removed_known_printk": [
+            "[  630.387016] shmproxy: drained accepted=16386 closed=16386\n"
+          ],
+          "raw_span_sha256": "d326297280a00a4c68dc09fe187927b8043eac6da84bae2d34865cc05ef02183",
+          "recovered_event_sha256": "02dbbafe76408b4f9da098362a2b4ed290d46898aac6405d78ea9e7049a9e468",
+          "recovery": "remove exact matched printk console insertion including inserted newline; retain every JSON character and strict-parse; no numeric value edits"
+        }
+      ],
+      "source_metadata": "executed-source-manifest.json and executed-artifact-pins.json",
+      "offered": 1558595,
+      "sent": 1558595,
+      "guest_delivered_by_cutoff": 1504592,
+      "app_delivered_by_cutoff": 1504592,
+      "deadline_loss_host_guest": 54003,
+      "deadline_loss_guest_host": 0,
+      "posttraffic_late_validated": 0
+    },
+    {
+      "run": "04-kernel-udp",
+      "variant": "kernel",
+      "candidate": "original-kernel-module",
+      "checks": {
+        "native_passed": true,
+        "whole_vm_budget": true,
+        "all_populations_start_end_audited": true,
+        "independent_contexts": true,
+        "actual_cid_range": true,
+        "expected_sockhash_keys": true,
+        "expected_source_cookie_routes": true,
+        "real_udp_bindings": true,
+        "all_64_open_conditions": true,
+        "no_invalid_timing_or_actor_failure": true,
+        "steady_counters_valid": true,
+        "all_population_pending_activity": true,
+        "correctness_gate": true,
+        "credit_pressure_gate": true,
+        "all_posttraffic_settled": true,
+        "live_stock_zero": true,
+        "no_unrecoverable_uart_events": true
+      },
+      "result": {
+        "qemu_exit": 0,
+        "passed": true,
+        "elapsed_s": 633.5024646846578,
+        "qemu_pid_absent": true,
+        "variant": "kernel",
+        "protocol": "udp",
+        "max_population": 16384,
+        "private_kernel_only": true
+      },
+      "uart_repairs": [
+        {
+          "first_line": 1234,
+          "last_line": 1235,
+          "event": "owned_retirement",
+          "id": null,
+          "removed_known_printk": [
+            "[  631.268139] shmproxy: drained accepted=16386 closed=16386\n"
+          ],
+          "raw_span_sha256": "420904bab3a4da55fe880fc9e769738ea668901935eeff8a8dac0f597b677989",
+          "recovered_event_sha256": "a43fd673cf2a2724795257d8f3be2bcef4ce1aef6325b0a4f4f4b405f6909ec0",
+          "recovery": "remove exact matched printk console insertion including inserted newline; retain every JSON character and strict-parse; no numeric value edits"
+        }
+      ],
+      "source_metadata": "executed-source-manifest.json and executed-artifact-pins.json",
+      "offered": 1564040,
+      "sent": 1564040,
+      "guest_delivered_by_cutoff": 1508003,
+      "app_delivered_by_cutoff": 1508003,
+      "deadline_loss_host_guest": 56037,
+      "deadline_loss_guest_host": 0,
+      "posttraffic_late_validated": 0
+    },
+    {
+      "run": "05-aya-udp",
+      "variant": "aya",
+      "candidate": "aya-duplex-stream-seqpacket-v1",
+      "checks": {
+        "native_passed": true,
+        "whole_vm_budget": true,
+        "all_populations_start_end_audited": true,
+        "independent_contexts": true,
+        "actual_cid_range": true,
+        "expected_sockhash_keys": true,
+        "expected_source_cookie_routes": true,
+        "real_udp_bindings": true,
+        "all_64_open_conditions": true,
+        "no_invalid_timing_or_actor_failure": true,
+        "steady_counters_valid": true,
+        "all_population_pending_activity": true,
+        "correctness_gate": true,
+        "credit_pressure_gate": true,
+        "all_posttraffic_settled": true,
+        "live_stock_zero": true,
+        "no_unrecoverable_uart_events": true
+      },
+      "result": {
+        "qemu_exit": 0,
+        "passed": true,
+        "elapsed_s": 761.1029934268445,
+        "qemu_pid_absent": true,
+        "variant": "aya",
+        "protocol": "udp",
+        "max_population": 16384,
+        "private_kernel_only": true
+      },
+      "uart_repairs": [],
+      "source_metadata": "executed-source-manifest.json and executed-artifact-pins.json",
+      "offered": 2205225,
+      "sent": 2205225,
+      "guest_delivered_by_cutoff": 2179732,
+      "app_delivered_by_cutoff": 2179731,
+      "deadline_loss_host_guest": 25493,
+      "deadline_loss_guest_host": 1,
+      "posttraffic_late_validated": 6063
+    }
+  ],
+  "unsupported_traffic_cells": "1024/4096 payload0/59000 open-loop cells not run; full IPv6/65507/ordinary-guest composition not validated; exact module/BPF loader latency not independently timed",
+  "activity_meaning": "maximum_inflight_peers counts actually sent application requests awaiting reply; all-peer burst holds endpoint receive service until each peer has been offered one message. It is not a kernel queue occupancy count.",
+  "deadline_loss_meaning": "not delivered by original offering interval plus common bounded drain; queued late messages retained and validated outside steady timing, with separate CPU receipts"
+}

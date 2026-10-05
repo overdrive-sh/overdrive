@@ -1,0 +1,25 @@
+{
+  "reference": "upstream Linux v7.0; not the executed Ubuntu binary",
+  "sources": {
+    "net/core/skmsg.c": {
+      "url": "https://raw.githubusercontent.com/torvalds/linux/v7.0/net/core/skmsg.c",
+      "sha256": "c198072cf1dc8d98222023b647279748fcc39cacf1de0db569c5a6648c04fa2a"
+    },
+    "net/core/skbuff.c": {
+      "url": "https://raw.githubusercontent.com/torvalds/linux/v7.0/net/core/skbuff.c",
+      "sha256": "72d537179d7fc4ef17bbeaed35a66381f7b6d1974868c296d9b788e6f5a4ce42"
+    },
+    "net/core/sock_map.c": {
+      "url": "https://raw.githubusercontent.com/torvalds/linux/v7.0/net/core/sock_map.c",
+      "sha256": "5bbb02efb52031c3f6bfbac145649142d9de025f2ebf960138af0ec488e618f5"
+    },
+    "net/vmw_vsock/af_vsock.c": {
+      "url": "https://raw.githubusercontent.com/torvalds/linux/v7.0/net/vmw_vsock/af_vsock.c",
+      "sha256": "cdd0764b591f6565c5348573fe1d407e2050f840a8978277865aa2ab1b27bac0"
+    },
+    "net/strparser/strparser.c": {
+      "url": "https://raw.githubusercontent.com/torvalds/linux/v7.0/net/strparser/strparser.c",
+      "sha256": "6f4d117bc2f9df43af62dcfc1b9cb65ca1a621b79979f507b44063efa4e79d8a"
+    }
+  }
+}

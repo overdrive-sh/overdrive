@@ -1,0 +1,142 @@
+[
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 950,
+    "text": "[    4.526902] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1686709651 wd_nsec: 1686709104"
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1219,
+    "text": "[  340.315322] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 3802140092 wd_nsec: 3802138594"
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1707,
+    "text": "[    4.526902] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1686709651 wd_nsec: 1686709104"
+  },
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1708,
+    "text": "[  340.315322] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 3802140092 wd_nsec: 3802138594"
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 967,
+    "text": "[   14.001237] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1166938853 wd_nsec: 1166938506"
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1024,
+    "text": "[   94.439681] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 2509443678 wd_nsec: 2509442685"
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1043,
+    "text": "[  109.083580] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 5135344570 wd_nsec: 5135342590"
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1069,
+    "text": "[  138.525104] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 10834868160 wd_nsec: 10834863954"
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1707,
+    "text": "[   14.001237] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1166938853 wd_nsec: 1166938506"
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1708,
+    "text": "[   94.439681] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 2509443678 wd_nsec: 2509442685"
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1709,
+    "text": "[  109.083580] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 5135344570 wd_nsec: 5135342590"
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1710,
+    "text": "[  138.525104] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 10834868160 wd_nsec: 10834863954"
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 986,
+    "text": "[   33.004081] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 2168514010 wd_nsec: 2168513179"
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 1122,
+    "text": "[  221.802606] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 6513049759 wd_nsec: 6513047112"
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 1701,
+    "text": "[   33.004081] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 2168514010 wd_nsec: 2168513179"
+  },
+  {
+    "run": "02-aya-udp",
+    "serial_line": 1702,
+    "text": "[  221.802606] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 6513049759 wd_nsec: 6513047112"
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 936,
+    "text": "[    4.304700] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1468315084 wd_nsec: 1468314552"
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 1066,
+    "text": "[   97.684851] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 3639539433 wd_nsec: 3639537968"
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 1707,
+    "text": "[    4.304700] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1468315084 wd_nsec: 1468314552"
+  },
+  {
+    "run": "03-kernel-udp",
+    "serial_line": 1708,
+    "text": "[   97.684851] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 3639539433 wd_nsec: 3639537968"
+  },
+  {
+    "run": "04-kernel-udp",
+    "serial_line": 935,
+    "text": "[    4.410264] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1576723455 wd_nsec: 1576722761"
+  },
+  {
+    "run": "04-kernel-udp",
+    "serial_line": 1065,
+    "text": "[   95.683647] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 3571115978 wd_nsec: 3571114429"
+  },
+  {
+    "run": "04-kernel-udp",
+    "serial_line": 1707,
+    "text": "[    4.410264] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1576723455 wd_nsec: 1576722761"
+  },
+  {
+    "run": "04-kernel-udp",
+    "serial_line": 1708,
+    "text": "[   95.683647] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 3571115978 wd_nsec: 3571114429"
+  },
+  {
+    "run": "05-aya-udp",
+    "serial_line": 987,
+    "text": "[   32.659369] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1819913908 wd_nsec: 1819913351"
+  },
+  {
+    "run": "05-aya-udp",
+    "serial_line": 1041,
+    "text": "[  104.475638] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 4310198683 wd_nsec: 4310197120"
+  },
+  {
+    "run": "05-aya-udp",
+    "serial_line": 1703,
+    "text": "[   32.659369] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 1819913908 wd_nsec: 1819913351"
+  },
+  {
+    "run": "05-aya-udp",
+    "serial_line": 1704,
+    "text": "[  104.475638] clocksource: Long readout interval, skipping watchdog check: cs_nsec: 4310198683 wd_nsec: 4310197120"
+  }
+]

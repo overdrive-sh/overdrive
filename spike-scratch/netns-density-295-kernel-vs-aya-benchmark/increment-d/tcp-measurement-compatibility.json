@@ -1,0 +1,11 @@
+{
+  "c_and_d_window_function_byte_identical": true,
+  "window_sha256": "f099c14827328c859311fe9c94d09bbd197c81efe87176c3a7db092d34e6ffad",
+  "changes_outside_tcp_timed_path": [
+    "negative correctness owner selection",
+    "UDP-only open-loop timing implementation",
+    "UDP-only checksum configuration",
+    "private module unload timer after all timed work"
+  ],
+  "module_c_tcp_rows_reused": true
+}

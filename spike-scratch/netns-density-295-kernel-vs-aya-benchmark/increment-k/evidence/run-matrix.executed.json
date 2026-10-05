@@ -1,0 +1,71 @@
+[
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "idle_only": true
+  },
+  {
+    "variant": "kernel",
+    "protocol": "tcp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "idle_only": true
+  },
+  {
+    "variant": "aya",
+    "protocol": "tcp",
+    "maximum_population": 16384,
+    "open_only": true,
+    "idle_only": true
+  },
+  {
+    "variant": "kernel",
+    "protocol": "udp",
+    "maximum_population": 64,
+    "open_only": true
+  },
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 64,
+    "open_only": true
+  },
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 64,
+    "open_only": true
+  },
+  {
+    "variant": "kernel",
+    "protocol": "udp",
+    "maximum_population": 64,
+    "open_only": true
+  },
+  {
+    "variant": "kernel",
+    "protocol": "udp",
+    "maximum_population": 64,
+    "open_only": true
+  },
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 64,
+    "open_only": true
+  },
+  {
+    "variant": "kernel",
+    "protocol": "udp",
+    "maximum_population": 1,
+    "open_only": true
+  },
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 1,
+    "open_only": true
+  }
+]

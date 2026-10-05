@@ -1,0 +1,15 @@
+{
+  "retrieved_completed_phase": "00-kernel-tcp",
+  "original_archive_sha256": "e7ca92b173cd87b466051bc256c61e959304c4552df75bca8c0f8841df49fb90",
+  "timestamp_utc": "2026-10-04T21:16:25Z",
+  "native_result": {
+    "qemu_exit": 0,
+    "passed": true,
+    "elapsed_s": 768.0027080420405,
+    "qemu_pid_absent": true,
+    "variant": "kernel",
+    "protocol": "tcp",
+    "max_population": 16384,
+    "private_kernel_only": true
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "tcp_module": "increment-c completed 00-kernel-tcp, validated afterward by e corrected preflight; byte-identical window path",
+  "tcp_aya": "increment-e completed 01-aya-tcp",
+  "udp_comparison": "compatible increment-h/increment-k common corrected path; failed pressure windows excluded",
+  "idle_cpu": "increment-h/increment-k exact stat/sleep/stat intervals only",
+  "excluded": "a pilot; b sync failure; c failed Aya gate/planned UDP; all c/e original idle CPU; d/g compile failures; e UDP paths with failed epoch accounting; f prepared but not executed",
+  "physical_vs_private_cpu": "private busy-CPU primary; QEMU/physical/cgroup observations secondary, separate scopes"
+}

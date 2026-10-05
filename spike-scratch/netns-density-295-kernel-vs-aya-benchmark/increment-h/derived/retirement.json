@@ -1,0 +1,25 @@
+[
+  {
+    "run": "00-kernel-udp",
+    "serial_line": 1197,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 256.868661188,
+    "usage": 0
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1041,
+    "duration_s": 6.970866759,
+    "event": "owned_retirement",
+    "owners": 1024
+  },
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1042,
+    "confirmed_zero": true,
+    "event": "transport_drain_live_kernel",
+    "retirement_total_s": 7.961963156,
+    "usage": 0
+  }
+]

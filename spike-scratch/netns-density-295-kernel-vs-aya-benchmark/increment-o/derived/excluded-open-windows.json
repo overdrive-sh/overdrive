@@ -1,0 +1,15 @@
+[
+  {
+    "run": "01-aya-udp",
+    "serial_line": 1006,
+    "id": "aya-udp-open-1-1-59000-0-0",
+    "reason": "native actor assertion failure: outcome/correctness violation; timing excluded",
+    "failures": [
+      "guest endpoint epoch fence timeout"
+    ],
+    "offered": 0,
+    "sent": 0,
+    "guest_delivered": 0,
+    "app_delivered": 0
+  }
+]

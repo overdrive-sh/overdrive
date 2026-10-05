@@ -1,0 +1,10 @@
+{
+  "qemu_exit": 0,
+  "passed": true,
+  "elapsed_s": 148.54966018442065,
+  "qemu_pid_absent": true,
+  "variant": "aya",
+  "protocol": "udp",
+  "max_population": 64,
+  "private_kernel_only": true
+}

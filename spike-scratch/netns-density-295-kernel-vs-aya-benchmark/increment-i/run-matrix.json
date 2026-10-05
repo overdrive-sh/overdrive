@@ -1,0 +1,10 @@
+[
+  {
+    "variant": "aya",
+    "protocol": "udp",
+    "maximum_population": 1024,
+    "open_only": true,
+    "idle_only": false,
+    "intermediate": true
+  }
+]

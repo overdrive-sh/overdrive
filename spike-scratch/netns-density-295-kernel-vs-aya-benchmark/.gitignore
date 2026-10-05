@@ -1,0 +1,9 @@
+out/
+**/target/
+**/__pycache__/
+*.perf.data
+
+# Byte-identical gzip archives are committed; uncompressed local views remain.
+**/native-serial.log
+**/qemu-resources.jsonl
+**/event-observer.jsonl

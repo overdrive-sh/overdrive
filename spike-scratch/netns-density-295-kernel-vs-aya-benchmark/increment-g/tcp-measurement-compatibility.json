@@ -1,0 +1,5 @@
+{
+  "c_e_f_window_function_byte_identical": true,
+  "window_sha256": "f099c14827328c859311fe9c94d09bbd197c81efe87176c3a7db092d34e6ffad",
+  "f_scope": "exact quiescent idle CPU all populations; UDP zero-message request/reply latency; matched UDP 64/1431-byte windows at 1024/4096; no TCP timed traffic repeated"
+}

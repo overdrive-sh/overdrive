@@ -1,0 +1,4 @@
+candidate,source_increment,run,serial_line,variant,protocol,population,repeat,duration_s,vm_busy_cpu_s,vm_mean_busy_cores,vm_steal_s,inventory_outside_interval
+aya-duplex-stream-seqpacket-v1,increment-q,00-aya-udp,963,aya,udp,1,0,2.00015495,0.0,0.0,0.0,True
+aya-duplex-stream-seqpacket-v1,increment-q,00-aya-udp,964,aya,udp,1,1,2.000174689,0.0,0.0,0.0,True
+aya-duplex-stream-seqpacket-v1,increment-q,00-aya-udp,965,aya,udp,1,2,2.000196412,0.0,0.0,0.0,True

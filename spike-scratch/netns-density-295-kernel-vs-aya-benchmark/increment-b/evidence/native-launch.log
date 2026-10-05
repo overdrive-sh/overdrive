@@ -1,0 +1,58 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-b/run.py --max 16384`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <redacted canonical metal target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=ec645437891213ff7d83aed5 pid=878930
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <redacted canonical metal target>:/home/ubuntu/overdrive
+rsync: [generator] failed to set times on "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/00-kernel-tcp": Operation not permitted (1)
+rsync: [generator] failed to set times on "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/01-aya-tcp": Operation not permitted (1)
+rsync: [generator] failed to set times on "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/02-aya-udp": Operation not permitted (1)
+rsync: [generator] failed to set times on "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/03-kernel-udp": Operation not permitted (1)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/00-kernel-tcp/.host-admission-budget.json.iu68Ep" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/00-kernel-tcp/.init.executed.Sz42g0" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/00-kernel-tcp/.initramfs.sha256.rkhf3T" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/00-kernel-tcp/.native-result.json.9MjJGL" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/00-kernel-tcp/.native-serial.log.87V6W9" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/00-kernel-tcp/.qemu-command.json.BaZgU5" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/00-kernel-tcp/.qemu-resources.jsonl.24Zm3H" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/01-aya-tcp/.host-admission-budget.json.Xb0s0y" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/01-aya-tcp/.init.executed.XSRES9" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/01-aya-tcp/.initramfs.sha256.vqXdAq" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/01-aya-tcp/.native-result.json.fj58L1" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/01-aya-tcp/.native-serial.log.80e0WW" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/01-aya-tcp/.qemu-command.json.t2yC6F" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/01-aya-tcp/.qemu-resources.jsonl.EaWslv" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/02-aya-udp/.host-admission-budget.json.lT28tO" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/02-aya-udp/.init.executed.7HIqCT" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/02-aya-udp/.initramfs.sha256.deoTzF" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/02-aya-udp/.native-result.json.xLzTMO" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/02-aya-udp/.native-serial.log.IBhWsu" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/02-aya-udp/.qemu-command.json.pd4Rga" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/02-aya-udp/.qemu-resources.jsonl.vKe37M" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/03-kernel-udp/.host-admission-budget.json.OyWPx0" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/03-kernel-udp/.init.executed.G2M734" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/03-kernel-udp/.initramfs.sha256.A7sOgg" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/03-kernel-udp/.native-result.json.U6AaFy" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/03-kernel-udp/.native-serial.log.bvho8w" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/03-kernel-udp/.qemu-command.json.1YJfU7" failed: Permission denied (13)
+rsync: [receiver] mkstemp "/home/ubuntu/overdrive/spike-scratch/netns-density-295-kernel-vs-aya-benchmark/increment-a/evidence/03-kernel-udp/.qemu-resources.jsonl.imxW1p" failed: Permission denied (13)
+
+sent 618,229 bytes  received 96,622 bytes  84,100.12 bytes/sec
+total size is 899,219,644  speedup is 1,257.91
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1356) [sender=3.4.4]
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 23[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1300[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 35.0671978329774}

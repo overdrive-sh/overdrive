@@ -1,0 +1,42 @@
+[
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 953,
+    "population": 1,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.01,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1048,
+    "population": 64,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.0,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1148,
+    "population": 1024,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.069999999999993,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1333,
+    "population": 4096,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.170000000000016,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  },
+  {
+    "run": "00-kernel-tcp",
+    "serial_line": 1518,
+    "population": 16384,
+    "declared_sleep_s": 2,
+    "actual_snapshot_span_s": 2.6499999999999773,
+    "reason": "ending inventory scan inside CPU snapshot interval; retain memory/audit evidence only"
+  }
+]

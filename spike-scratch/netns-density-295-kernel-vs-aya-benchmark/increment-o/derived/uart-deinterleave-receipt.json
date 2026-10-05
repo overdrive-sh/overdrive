@@ -1,0 +1,19 @@
+{
+  "original_bytes_changed": false,
+  "recovered_events": [
+    {
+      "run": "00-kernel-udp",
+      "first_line": 1214,
+      "last_line": 1215,
+      "event": "owned_retirement",
+      "id": null,
+      "removed_known_printk": [
+        "[  661.191891] shmproxy: drained accepted=16386 closed=16386\n"
+      ],
+      "raw_span_sha256": "23a5f1c504708703611f6178a8b2fbc38b29feacb5204764b6149de822bee94b",
+      "recovered_event_sha256": "ea9d5b3fcacc41f9c7c023e0508618782e49acafb192b15e00e7e3327379aec6",
+      "recovery": "remove exact matched printk console insertion including inserted newline; retain every JSON character and strict-parse; no numeric value edits"
+    }
+  ],
+  "excluded_unrecoverable_events": []
+}
