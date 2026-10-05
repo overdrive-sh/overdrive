@@ -1,0 +1,3 @@
+cloud-hypervisor:   0.000041s: <main> INFO:cloud-hypervisor/src/main.rs:631 -- v53.0.0 starting
+cloud-hypervisor:   0.000141s: <main> INFO:event_monitor/src/lib.rs:113 -- Event: source = vmm event = starting 
+cloud-hypervisor:   0.000547s: <main> ERROR:cloud-hypervisor/src/lib.rs:24 -- Fatal error: StartVmmThread(CreateApiServerSocket(Error { kind: InvalidInput, message: "path must be shorter than SUN_LEN" }))

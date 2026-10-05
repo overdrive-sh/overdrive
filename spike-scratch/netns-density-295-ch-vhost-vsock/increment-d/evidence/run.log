@@ -1,0 +1,76 @@
+[15:06:24] === preflight
+[15:06:24] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; free -m  (rc=0)
+[15:06:24]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[15:06:24]     none
+[15:06:24]     model name	: AMD EPYC 8024P 8-Core Processor
+[15:06:24]     16
+[15:06:24]                    total        used        free      shared  buff/cache   available
+[15:06:24]     Mem:           63868        1937       14064         166       48742       61931
+[15:06:24]     Swap:              0           0           0
+[15:06:24] $ cat /sys/module/kvm_amd/parameters/nested 2>/dev/null; ls -l /dev/kvm /dev/vhost-vsock  (rc=0)
+[15:06:24]     1
+[15:06:24]     crw-rw---- 1 root kvm 10, 232 Oct  5 15:06 /dev/kvm
+[15:06:24]     crw-rw---- 1 root kvm 10, 241 Oct  5 15:03 /dev/vhost-vsock
+[15:06:24] $ /usr/local/bin/cloud-hypervisor --version; sha256sum /usr/local/bin/cloud-hypervisor /srv/vm/overdrive-testing/kernel  (rc=0)
+[15:06:24]     cloud-hypervisor v53.0
+[15:06:24]     Migration Protocol Versions: 0
+[15:06:24]     448af3d4e59b22c2987f7df94c213ad40fb53a10d437e42b5ee6c4fce7c29ecc  /usr/local/bin/cloud-hypervisor
+[15:06:24]     b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682  /srv/vm/overdrive-testing/kernel
+[15:06:24] $ pgrep -af cloud-hypervisor | grep -v pgrep || true  (rc=0)
+[15:06:24] === build
+[15:06:24] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor --bin ch-remote  (rc=0)
+[15:06:24]         Finished `release` profile [optimized] target(s) in 0.12s
+[15:06:24] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/probe/Cargo.toml  (rc=0)
+[15:06:24]         Finished `release` profile [optimized] target(s) in 0.01s
+[15:06:24] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor; /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --version  (rc=0)
+[15:06:24]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=3d3c30447af014ddd124a5ec42bcb86a97703caf, not stripped
+[15:06:24]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor:                           ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=0487da64b59ba8984f22230151902ef119ca1216, stripped
+[15:06:24]     cloud-hypervisor v53.0.0
+[15:06:24]     Migration Protocol Versions: 0
+[15:06:24] $ file /usr/bin/busybox  (rc=0)
+[15:06:24]     /usr/bin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+[15:06:24] $ modprobe --show-depends vmw_vsock_virtio_transport  (rc=0)
+[15:06:24]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[15:06:24]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst 
+[15:06:24]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+[15:06:25] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-d/initramfs-root && find . | cpio -o -H newc --quiet | gzip -9 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-d/initramfs.cpio.gz  (rc=0)
+[15:06:25] ========== P10
+[15:06:25] launch p10: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-d/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-d/vm-p10-1791212785715/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-d/vm-p10-1791212785715/ch.log -v --vsock cid=44,backend=vhost-kernel --api-socket path=/tmp/chvv-943899-0.sock
+[15:06:26] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe client vsock:44:5000 stream 1048576 before-pause  (rc=0)
+[15:06:26]     RESULT OK stream label=before-pause sent=1048576 received=1048576 half_close=1 local=vsock:4294967295:1365186147 server_saw_peer=vsock:2:1365186147 server=cid-44 elapsed_ms=7
+[15:06:26] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/ch-remote --api-socket /tmp/chvv-943899-0.sock pause  (rc=0)
+[15:06:28] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/ch-remote --api-socket /tmp/chvv-943899-0.sock snapshot file:///home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-d/p10-snapshot  (rc=1)
+[15:06:28]     [2026-10-05T15:06:28Z ERROR cloud_hypervisor] Fatal error: HttpApiClient(ServerResponse(InternalServerError, Some("[\"Error from API\",\"The VM could not be snapshotted\",\"Cannot snapshot VM\",\"Failed to snapshot migratable component\",\"vsock device _vsock0 uses the vhost-kernel backend, which does not support snapshot\"]")))
+[15:06:28]     Error: ch-remote exited with the following chain of errors:
+[15:06:28]       0: http client error
+[15:06:28]       1: Server responded with InternalServerError
+[15:06:28]       2: Error from API
+[15:06:28]       3: The VM could not be snapshotted
+[15:06:28]       4: Cannot snapshot VM
+[15:06:28]       5: Failed to snapshot migratable component
+[15:06:28]       6: vsock device _vsock0 uses the vhost-kernel backend, which does not support snapshot
+[15:06:28] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/ch-remote --api-socket /tmp/chvv-943899-0.sock resume  (rc=0)
+[15:06:28] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe client vsock:44:5000 stream 1048576 after-resume  (rc=0)
+[15:06:28]     RESULT OK stream label=after-resume sent=1048576 received=1048576 half_close=1 local=vsock:4294967295:1365186150 server_saw_peer=vsock:2:1365186150 server=cid-44 elapsed_ms=9
+[15:06:28] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe client vsock:44:5001 seqpacket 0 after-resume-seq  (rc=0)
+[15:06:28]     RESULT OK seqpacket label=after-resume-seq records=6 sizes=1,7,1500,4096,65536,200000 boundaries_exact=1 local=vsock:4294967295:1365186151 server_saw_peer=vsock:2:1365186151 server=cid-44 elapsed_ms=5
+[15:06:28] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:44:4000 poweroff  (rc=0)
+[15:06:28]     OK going down
+[15:06:28] ========== GATES
+[15:07:09] GATE lint_x86_64_default_features rc=0
+[15:07:20] GATE lint_x86_64_kvm_only rc=0
+[15:08:04] GATE unit_tests_x86_64_vsock rc=0
+[15:08:05] GATE unit_tests_x86_64_config rc=0
+[15:08:05] === restore physical module set
+[15:08:05] host vsock state [end]:
+0
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+
+[15:08:06] $ rmmod vsock_diag  (rc=0)
+[15:08:06] $ rmmod vhost_vsock  (rc=0)
+[15:08:06] $ rmmod vmw_vsock_virtio_transport_common  (rc=0)
+[15:08:06] $ rmmod vsock  (rc=0)
+[15:08:06] $ rmmod vhost  (rc=0)
+[15:08:06] $ rmmod vhost_iotlb  (rc=0)
+[15:08:06] $ pgrep -af cloud-hypervisor | grep -v pgrep || true  (rc=0)
+[15:08:06] === done

@@ -1,0 +1,373 @@
+   Compiling cfg-if v1.0.4
+   Compiling bitflags v1.3.2
+   Compiling libc v0.2.186
+   Compiling bitflags v2.13.0
+   Compiling log v0.4.33
+   Compiling memchr v2.8.2
+   Compiling serde_core v1.0.228
+   Compiling rand_core v0.10.1
+   Compiling itoa v1.0.18
+   Compiling strsim v0.11.1
+   Compiling zmij v1.0.21
+   Compiling cpufeatures v0.3.0
+   Compiling arc-swap v1.9.2
+   Compiling byteorder v1.5.0
+   Compiling anyhow v1.0.103
+   Compiling thiserror v2.0.18
+   Compiling zerocopy v0.8.53
+   Compiling regex-syntax v0.8.11
+   Compiling iommufd-bindings v0.1.0
+   Compiling scopeguard v1.2.0
+   Compiling chacha20 v0.10.1
+   Compiling once_cell v1.21.4
+   Compiling lock_api v0.4.14
+   Compiling open-enum v0.5.2
+   Compiling virtio-bindings v0.2.7
+   Compiling zeroize v1.9.0
+   Compiling darling_core v0.23.0
+   Compiling untrusted v0.9.0
+   Compiling fastrand v2.4.1
+   Compiling rustls-pki-types v1.15.0
+   Compiling linux-raw-sys v0.12.1
+   Compiling smallvec v1.15.2
+   Compiling either v1.16.0
+   Compiling subtle v2.6.1
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling spin v0.9.8
+   Compiling aho-corasick v1.1.4
+   Compiling anstyle v1.0.14
+   Compiling adler2 v2.0.1
+   Compiling itertools v0.15.0
+   Compiling anstyle-query v1.1.5
+   Compiling colorchoice v1.0.5
+   Compiling futures-sink v0.3.32
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling futures-core v0.3.32
+   Compiling simd-adler32 v0.3.9
+   Compiling anstream v1.0.0
+   Compiling rustix v1.1.4
+   Compiling crc32fast v1.5.0
+   Compiling flume v0.12.0
+   Compiling base64 v0.22.1
+   Compiling debug-helper v0.3.14
+   Compiling miniz_oxide v0.8.9
+   Compiling net_util v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/net_util)
+   Compiling crc-any v3.0.0
+   Compiling typenum v1.20.1
+   Compiling no-std-net v0.6.0
+   Compiling clap_lex v1.1.0
+   Compiling jobserver v0.1.35
+   Compiling vm-memory v0.17.1
+   Compiling getrandom v0.4.3
+   Compiling getrandom v0.2.17
+   Compiling epoll v4.4.0
+   Compiling rand v0.10.2
+   Compiling io-uring v0.7.13
+   Compiling cc v1.2.66
+   Compiling getrandom v0.3.4
+   Compiling flate2 v1.1.9
+   Compiling wait-timeout v0.2.1
+   Compiling pnet_base v0.35.0
+   Compiling vm-allocator v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-allocator)
+   Compiling linux-loader v0.13.2
+   Compiling virtio-devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/virtio-devices)
+   Compiling num_enum v0.7.6
+   Compiling rand_core v0.9.5
+   Compiling parking_lot_core v0.9.12
+   Compiling uuid v1.23.4
+   Compiling hybrid-array v0.4.13
+   Compiling regex-automata v0.4.14
+   Compiling seccompiler v0.5.0
+   Compiling openssl-src v300.6.1+3.6.3
+   Compiling errno v0.3.14
+   Compiling option_parser v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/option_parser)
+   Compiling jiff v0.2.31
+   Compiling serde v1.0.228
+   Compiling serde_json v1.0.150
+   Compiling block-buffer v0.12.1
+   Compiling crypto-common v0.2.2
+   Compiling serial_buffer v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/serial_buffer)
+   Compiling option-ext v0.2.0
+   Compiling const-oid v0.10.2
+   Compiling dirs-sys v0.5.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling terminal_size v0.4.4
+   Compiling vmm-sys-util v0.15.0
+   Compiling clap_builder v4.6.0
+   Compiling ring v0.17.14
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+   Compiling openssl-sys v0.9.117
+   Compiling libz-sys v1.1.29
+   Compiling darling_macro v0.23.0
+   Compiling vfio-bindings v0.6.2
+   Compiling iommufd-ioctls v0.2.0
+   Compiling virtio-queue v0.17.0
+   Compiling rate_limiter v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/rate_limiter)
+   Compiling vhost v0.16.0
+   Compiling darling v0.23.0
+   Compiling serde_with_macros v3.21.0
+   Compiling event_monitor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/event_monitor)
+   Compiling vfio_user v0.1.3
+   Compiling vm-virtio v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-virtio)
+   Compiling libssh2-sys v0.3.2
+   Compiling tpm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tpm)
+   Compiling digest v0.11.3
+   Compiling kvm-bindings v0.14.1
+   Compiling regex v1.12.4
+   Compiling acpi_tables v0.2.1
+   Compiling serde_with v3.21.0
+   Compiling tempfile v3.27.0
+   Compiling env_filter v2.0.0
+   Compiling enumflags2 v0.7.12
+   Compiling parking_lot v0.12.5
+   Compiling pnet_macros_support v0.35.0
+   Compiling pnet_sys v0.35.0
+   Compiling vmm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vmm)
+   Compiling landlock v0.4.5
+   Compiling micro_http v0.1.0 (https://github.com/firecracker-microvm/micro-http?branch=main#5c2254d6)
+   Compiling clap v4.6.1
+   Compiling signal-hook v0.4.4
+   Compiling sha2 v0.11.0
+   Compiling ppv-lite86 v0.2.21
+   Compiling tracer v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tracer)
+   Compiling ipnetwork v0.20.0
+   Compiling dirs v6.0.0
+   Compiling pnet_macros v0.35.0
+   Compiling env_logger v0.11.11
+   Compiling bit-vec v0.8.0
+   Compiling quick-error v1.2.3
+   Compiling fnv v1.0.7
+   Compiling rand_chacha v0.9.0
+   Compiling pnet_datalink v0.35.0
+   Compiling num-traits v0.2.19
+   Compiling rusty-fork v0.3.1
+   Compiling bit-set v0.8.0
+   Compiling vhost-user-backend v0.22.0
+   Compiling rand v0.9.4
+   Compiling rand_xorshift v0.4.0
+   Compiling cloud-hypervisor v53.0.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/cloud-hypervisor)
+   Compiling unarray v0.1.4
+   Compiling api_client v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/api_client)
+   Compiling pnet_packet v0.35.0
+   Compiling kvm-ioctls v0.25.0
+   Compiling proptest v1.11.0
+   Compiling vfio-ioctls v0.7.0
+   Compiling hypervisor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/hypervisor)
+   Compiling vhost_user_net v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vhost_user_net)
+   Compiling rustls v0.23.41
+   Compiling vm-device v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-device)
+   Compiling arch v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/arch)
+   Compiling rustls-webpki v0.103.13
+   Compiling pnet_transport v0.35.0
+   Compiling pnet v0.35.0
+   Compiling zstd-safe v7.2.4
+   Compiling zstd v0.13.3
+   Compiling block v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/block)
+   Compiling vm-migration v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-migration)
+   Compiling pci v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/pci)
+   Compiling vhost_user_block v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vhost_user_block)
+   Compiling devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/devices)
+   Compiling ssh2 v0.9.6
+   Compiling test_infra v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/test_infra)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 42.06s
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/api_client-18c6c6f6386168c9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/arch-8799b7c2157c4b88)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/block-431a8ff1ceb875c7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 235 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/cloud_hypervisor-f721846b7f675507)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/devices-cadfc41d310ae0d8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/event_monitor-67899aaeca2dc82e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/hypervisor-8a75279a3410b9e0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/net_util-0cd633ebfdcdd78f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/option_parser-1ac93debd282d32e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/pci-3b6c43eee3232bda)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/rate_limiter-656a5a02bb884707)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/serial_buffer-228e67915f3e0c77)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/test_infra-4ea3bfdf082cdb57)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/tpm-ad0bf76b7cf9d558)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/tracer-95b95e6d4d1d99d2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vhost_user_block-f87a88ca20613d8a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vhost_user_net-c26ef482955cc448)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/virtio_devices-7a004d66fa26d4ad)
+
+running 59 tests
+test vsock::csm::connection::unit_tests::test_credit_request_from_peer ... ok
+test vsock::csm::connection::unit_tests::test_local_half_close_then_hup_sends_full_shutdown ... ok
+test vsock::csm::connection::unit_tests::test_local_read_eof_preserves_guest_to_host_writes ... ok
+test vsock::csm::connection::unit_tests::test_credit_request_to_peer ... ok
+test vsock::csm::connection::unit_tests::test_local_read_error ... ok
+test vsock::csm::connection::unit_tests::test_local_close ... ok
+test vsock::csm::connection::unit_tests::test_local_closed_peer_send_shutdown_drains_then_terminates ... ok
+test vsock::csm::connection::unit_tests::test_local_read_eof_polls_for_hup ... ok
+test vsock::csm::txbuf::unit_tests::test_incomplete_flush ... ok
+test vsock::csm::connection::unit_tests::test_tx_buffering ... ok
+test vsock::csm::connection::unit_tests::test_peer_credit_misbehavior ... ok
+test vsock::csm::connection::unit_tests::test_peer_send_shutdown_defers_host_write_until_drained ... ok
+test vsock::csm::connection::unit_tests::test_peer_request ... ok
+test vsock::csm::txbuf::unit_tests::test_push_from_wrap ... ok
+test vsock::csm::connection::unit_tests::test_local_request ... ok
+test vsock::csm::connection::unit_tests::test_stream_write_error ... ok
+test vsock::csm::connection::unit_tests::test_peer_send_shutdown_then_local_read_eof_terminates ... ok
+test vsock::csm::connection::unit_tests::test_credit_update_to_peer ... ok
+test vsock::csm::connection::unit_tests::test_rx_data ... ok
+test vsock::csm::connection::unit_tests::test_local_read_eof_then_peer_send_shutdown_terminates ... ok
+test vsock::csm::txbuf::unit_tests::test_push_error ... ok
+test vsock::csm::connection::unit_tests::test_local_read_eof_sends_half_shutdown ... ok
+test vsock::csm::connection::unit_tests::test_local_half_close_then_hup_terminates_with_zero_credit ... ok
+test vsock::csm::txbuf::unit_tests::test_flush_error ... ok
+test vsock::csm::txbuf::unit_tests::test_push_nowrap ... ok
+test vsock::csm::txbuf::unit_tests::test_push_wrap ... ok
+test vsock::device::unit_tests::test_evq_event ... ok
+test vsock::device::unit_tests::test_irq ... ok
+test vsock::device::unit_tests::test_unknown_event ... ok
+test vsock::csm::connection::unit_tests::test_peer_close ... ok
+test vsock::packet::unit_tests::test_packet_hdr_accessors ... ok
+test vsock::packet::unit_tests::test_tx_packet_assembly_multi_desc ... ok
+test vsock::device::unit_tests::test_backend_event ... ok
+test vsock::packet::unit_tests::test_tx_packet_data_uses_guest_memory ... ok
+test vsock::packet::unit_tests::test_packet_buf ... ok
+test vsock::packet::unit_tests::test_commit_hdr_allows_zero_length_packet ... ok
+test vsock::packet::unit_tests::test_commit_hdr_rejects_len_above_buf_capacity ... ok
+test vsock::packet::unit_tests::test_rx_packet_read_volatile_writes_to_guest ... ok
+test vsock::unix::muxer::unit_tests::test_parse_command ... ok
+test vsock::device::unit_tests::test_virtio_device ... ok
+test vsock::unix::muxer::unit_tests::test_muxer_epoll_listener ... ok
+test vsock::unix::muxer::unit_tests::test_bad_peer_pkt ... ok
+test vsock::unix::muxer::unit_tests::test_local_close ... ok
+test vsock::unix::muxer::unit_tests::test_local_connection ... ok
+test vsock::packet::unit_tests::test_rx_packet_assembly ... ok
+test vsock::vhost_kernel::unit_tests::supported_features_include_seqpacket_and_exclude_vmm_only_features ... ok
+test vsock::unix::muxer::unit_tests::test_local_send_half_close ... ok
+test vsock::device::unit_tests::test_rxq_event ... ok
+test vsock::unix::muxer::unit_tests::test_peer_connection ... ok
+test vsock::device::unit_tests::test_txq_event ... ok
+test vsock::unix::muxer::unit_tests::test_peer_send_half_close ... ok
+test vsock::packet::unit_tests::test_tx_packet_assembly ... ok
+test vsock::vhost_kernel::unit_tests::creation_refuses_restore_and_access_platform_before_opening_the_device ... ok
+test vsock::unix::muxer::unit_tests::test_regression_handshake ... ok
+test vsock::unix::muxer::unit_tests::test_regression_rxq_pop ... ok
+test vsock::unix::muxer::unit_tests::test_peer_close ... ok
+test vsock::unix::muxer::unit_tests::test_muxer_rxq ... ok
+test vsock::csm::connection::unit_tests::test_local_request_timeout ... ok
+test vsock::unix::muxer::unit_tests::test_muxer_killq ... ok
+
+test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 2.05s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vm_allocator-5d11f1f5cb3e5292)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vm_device-e89014b5ea287d58)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vm_migration-768f894ddf1d0b67)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vm_virtio-19a3a8e99e92bc42)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vmm-70356144e67a967d)
+
+running 3 tests
+test config::unit_tests::test_vsock_config_serde ... ok
+test config::unit_tests::test_vsock_parsing ... ok
+test unit_tests::test_vmm_vm_cold_add_vsock ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 86 filtered out; finished in 0.00s
+

@@ -1,0 +1,3 @@
+[submodule "vendors/cloud-hypervisor"]
+	path = vendors/cloud-hypervisor
+	url = https://github.com/overdrive-sh/cloud-hypervisor.git

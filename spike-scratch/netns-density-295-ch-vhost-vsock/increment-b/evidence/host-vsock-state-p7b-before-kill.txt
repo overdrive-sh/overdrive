@@ -1,0 +1,5 @@
+2
+Netid State Recv-Q Send-Q Local Address:Port       Peer Address:PortProcess                             
+v_str ESTAB 0      0                  *:1365185879           42:5000 users:(("python3",pid=941391,fd=7))
+941563 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p7a-relaunch-1791212240122/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p7a-relaunch-1791212240122/ch.log -v --vsock cid=42,backend=vhost-kernel
+ 941563  941567 vhost-941564

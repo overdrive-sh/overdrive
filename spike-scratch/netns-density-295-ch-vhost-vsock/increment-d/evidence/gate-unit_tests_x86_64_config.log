@@ -1,0 +1,176 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/api_client-18c6c6f6386168c9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/arch-8799b7c2157c4b88)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/block-431a8ff1ceb875c7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 235 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/cloud_hypervisor-f721846b7f675507)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/devices-cadfc41d310ae0d8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/event_monitor-67899aaeca2dc82e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/hypervisor-8a75279a3410b9e0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/net_util-0cd633ebfdcdd78f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/option_parser-1ac93debd282d32e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/pci-3b6c43eee3232bda)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/rate_limiter-656a5a02bb884707)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/serial_buffer-228e67915f3e0c77)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/test_infra-4ea3bfdf082cdb57)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/tpm-ad0bf76b7cf9d558)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/tracer-95b95e6d4d1d99d2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vhost_user_block-f87a88ca20613d8a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vhost_user_net-c26ef482955cc448)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/virtio_devices-7a004d66fa26d4ad)
+
+running 7 tests
+test transport::pci_common_config::unit_tests::consume_config_change_bumps_when_flag_set ... ok
+test transport::pci_common_config::unit_tests::consume_config_change_is_noop_when_flag_clear ... ok
+test transport::pci_common_config::unit_tests::consume_config_change_coalesces_multiple_sets ... ok
+test transport::pci_common_config::unit_tests::consume_config_change_wraps_at_u8_max ... ok
+test transport::pci_common_config::unit_tests::write_base_regs ... ok
+test transport::pci_common_config::unit_tests::oob_queue_select_does_not_panic ... ok
+test transport::pci_common_config::unit_tests::reset_returns_initial_state ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 97 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vm_allocator-5d11f1f5cb3e5292)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vm_device-e89014b5ea287d58)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vm_migration-768f894ddf1d0b67)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vm_virtio-19a3a8e99e92bc42)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-gates-target/debug/deps/vmm-70356144e67a967d)
+
+running 30 tests
+test config::unit_tests::test_numa_config_invalid_both_device_cpus ... ok
+test config::unit_tests::test_numa_config_invalid_both_device_memory ... ok
+test config::unit_tests::test_numa_config_invalid_device_id ... ok
+test config::unit_tests::test_mem_parsing ... ok
+test config::unit_tests::test_numa_config_standard_valid ... ok
+test config::unit_tests::test_landlock_parsing ... ok
+test config::unit_tests::test_parse_balloon ... ok
+test config::unit_tests::test_parse_fs ... ok
+test config::unit_tests::test_numa_config_parsing ... ok
+test config::unit_tests::test_numa_config_generic_initiator_valid ... ok
+test config::unit_tests::test_cpu_parsing ... ok
+test config::unit_tests::test_config_validation ... ok
+test config::unit_tests::test_console_parsing ... ok
+test config::unit_tests::test_net_parsing ... ok
+test config::unit_tests::test_parse_rng ... ok
+test config::unit_tests::test_pci_segment_parsing ... ok
+test config::unit_tests::test_rate_limit_group_parsing ... ok
+test config::unit_tests::test_mem_zone_parsing ... ok
+test config::unit_tests::test_device_parsing ... ok
+test config::unit_tests::test_restore_config_serde ... ok
+test config::unit_tests::test_pmem_parsing ... ok
+test config::unit_tests::test_platform_iommufd_fd_parsing ... ok
+test config::unit_tests::test_restore_config_validation ... ok
+test config::unit_tests::test_tpm_parsing ... ok
+test config::unit_tests::test_parse_vhost_user ... ok
+test config::unit_tests::test_restore_parsing ... ok
+test config::unit_tests::test_vsock_config_serde ... ok
+test config::unit_tests::test_vdpa_parsing ... ok
+test config::unit_tests::test_vsock_parsing ... ok
+test config::unit_tests::test_disk_parsing ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 59 filtered out; finished in 0.00s
+

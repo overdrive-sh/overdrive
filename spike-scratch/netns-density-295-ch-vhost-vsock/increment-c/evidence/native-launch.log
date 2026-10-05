@@ -1,0 +1,175 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-ch-vhost-vsock/increment-c/run.py P7d P9`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=8b08745fdf2fd02e6e3ba8e8 pid=942366
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <metal-target>:/home/ubuntu/overdrive
+
+sent 522,021 bytes  received 5,902 bytes  42,233.84 bytes/sec
+total size is 852,043,489  speedup is 1,613.95
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[15:03:01] === preflight
+[15:03:01] $ rmmod vsock_loopback  (rc=0)
+[15:03:01] $ rmmod vmw_vsock_vmci_transport  (rc=0)
+[15:03:01] $ rmmod vmw_vmci  (rc=0)
+[15:03:01] $ rmmod vmw_vsock_virtio_transport_common  (rc=0)
+[15:03:01] $ rmmod vsock  (rc=0)
+[15:03:01] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; free -m  (rc=0)
+[15:03:01]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[15:03:01]     none
+[15:03:01]     model name	: AMD EPYC 8024P 8-Core Processor
+[15:03:01]     16
+[15:03:01]                    total        used        free      shared  buff/cache   available
+[15:03:01]     Mem:           63868        1941       14067         166       48734       61927
+[15:03:01]     Swap:              0           0           0
+[15:03:01] $ cat /sys/module/kvm_amd/parameters/nested 2>/dev/null; ls -l /dev/kvm /dev/vhost-vsock  (rc=0)
+[15:03:01]     1
+[15:03:01]     crw-rw---- 1 root kvm 10, 232 Oct  5 15:02 /dev/kvm
+[15:03:01]     crw-rw---- 1 root kvm 10, 241 Oct  5 14:57 /dev/vhost-vsock
+[15:03:01] $ /usr/local/bin/cloud-hypervisor --version; sha256sum /usr/local/bin/cloud-hypervisor /srv/vm/overdrive-testing/kernel  (rc=0)
+[15:03:01]     cloud-hypervisor v53.0
+[15:03:01]     Migration Protocol Versions: 0
+[15:03:01]     448af3d4e59b22c2987f7df94c213ad40fb53a10d437e42b5ee6c4fce7c29ecc  /usr/local/bin/cloud-hypervisor
+[15:03:01]     b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682  /srv/vm/overdrive-testing/kernel
+[15:03:01] $ pgrep -af cloud-hypervisor | grep -v pgrep || true  (rc=0)
+[15:03:01] === build
+[15:03:02] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor --bin ch-remote  (rc=0)
+[15:03:02]         Finished `release` profile [optimized] target(s) in 0.12s
+[15:03:02] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/probe/Cargo.toml  (rc=0)
+[15:03:02]         Finished `release` profile [optimized] target(s) in 0.01s
+[15:03:02] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor; /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --version  (rc=0)
+[15:03:02]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=3d3c30447af014ddd124a5ec42bcb86a97703caf, not stripped
+[15:03:02]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor:                           ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=0487da64b59ba8984f22230151902ef119ca1216, stripped
+[15:03:02]     cloud-hypervisor v53.0.0
+[15:03:02]     Migration Protocol Versions: 0
+[15:03:02] $ file /usr/bin/busybox  (rc=0)
+[15:03:02]     /usr/bin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+[15:03:02] $ modprobe --show-depends vmw_vsock_virtio_transport  (rc=0)
+[15:03:02]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[15:03:02]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst 
+[15:03:02]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+[15:03:02] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs-root && find . | cpio -o -H newc --quiet | gzip -9 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz  (rc=0)
+[15:03:03] ========== P7d
+[15:03:03] launch p7d-0: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-0-1791212583008/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-0-1791212583008/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:03] launch p7d-1: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-1-1791212583863/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-1-1791212583863/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:04] P7d cycle {'i': 1, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:04] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:04]     OK going down
+[15:03:04] launch p7d-2: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-2-1791212584722/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-2-1791212584722/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:05] P7d cycle {'i': 2, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:05] launch p7d-3: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-3-1791212585578/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-3-1791212585578/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:06] P7d cycle {'i': 3, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:06] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:06]     OK going down
+[15:03:06] launch p7d-4: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-4-1791212586436/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-4-1791212586436/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:07] P7d cycle {'i': 4, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:07] launch p7d-5: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-5-1791212587292/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-5-1791212587292/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:08] P7d cycle {'i': 5, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:08] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:08]     OK going down
+[15:03:08] launch p7d-6: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-6-1791212588185/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-6-1791212588185/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:08] P7d cycle {'i': 6, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:09] launch p7d-7: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-7-1791212589040/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-7-1791212589040/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:09] P7d cycle {'i': 7, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:09] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:09]     OK going down
+[15:03:09] launch p7d-8: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-8-1791212589899/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-8-1791212589899/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:10] P7d cycle {'i': 8, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:10] launch p7d-9: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-9-1791212590756/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-9-1791212590756/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:11] P7d cycle {'i': 9, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:11] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:11]     OK going down
+[15:03:11] launch p7d-10: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-10-1791212591615/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-10-1791212591615/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:12] P7d cycle {'i': 10, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:12] launch p7d-11: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-11-1791212592471/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-11-1791212592471/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:13] P7d cycle {'i': 11, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:13] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:13]     OK going down
+[15:03:13] launch p7d-12: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-12-1791212593330/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-12-1791212593330/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:14] P7d cycle {'i': 12, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:14] launch p7d-13: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-13-1791212594186/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-13-1791212594186/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:14] P7d cycle {'i': 13, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:14] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:14]     OK going down
+[15:03:15] launch p7d-14: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-14-1791212595078/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-14-1791212595078/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:15] P7d cycle {'i': 14, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:15] launch p7d-15: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-15-1791212595934/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-15-1791212595934/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:16] P7d cycle {'i': 15, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:16] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:16]     OK going down
+[15:03:16] launch p7d-16: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-16-1791212596793/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-16-1791212596793/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:17] P7d cycle {'i': 16, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:17] launch p7d-17: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-17-1791212597650/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-17-1791212597650/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:18] P7d cycle {'i': 17, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:18] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:18]     OK going down
+[15:03:18] launch p7d-18: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-18-1791212598509/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-18-1791212598509/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:19] P7d cycle {'i': 18, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:19] launch p7d-19: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-19-1791212599366/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-19-1791212599366/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:20] P7d cycle {'i': 19, 'mode': 'sigkill', 'prev_exit': -9, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:20] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:20]     OK going down
+[15:03:20] launch p7d-20: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-20-1791212600259/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p7d-20-1791212600259/ch.log -v --vsock cid=42,backend=vhost-kernel
+[15:03:21] P7d cycle {'i': 20, 'mode': 'poweroff', 'prev_exit': 0, 'refcnt_at_prev_exit': 0, 'vhost_tasks_at_prev_exit': '0', 'relaunch_ready': True, 'relaunch_exit': None, 'relaunch_err': ''}
+[15:03:21] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl vsock:42:4000 poweroff  (rc=0)
+[15:03:21]     OK going down
+[15:03:21] host vsock state [p7d-final]:
+0
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+
+[15:03:21] ========== P9
+[15:03:21] launch p9: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock
+[15:03:23] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/ch-remote --api-socket /tmp/chvv-942719-0.sock add-vsock cid=43,backend=vhost-kernel  (rc=0)
+[15:03:23]     {"id":"_vsock0","bdf":"0000:00:02.0"}
+[15:03:24] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe client vsock:43:5000 stream 1048576 hotplug-1  (rc=0)
+[15:03:24]     RESULT OK stream label=hotplug-1 sent=1048576 received=1048576 half_close=1 local=vsock:4294967295:1365186144 server_saw_peer=vsock:2:1365186144 server=cid-43 elapsed_ms=10
+[15:03:24] host vsock state [p9-r1-after-add]:
+1
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+943073 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock
+ 943073  943081 vhost-943074
+
+[15:03:24] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/ch-remote --api-socket /tmp/chvv-942719-0.sock remove-device _vsock0  (rc=0)
+[15:03:27] host vsock state [p9-r1-after-remove]:
+0
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+943073 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock
+
+[15:03:27] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/ch-remote --api-socket /tmp/chvv-942719-0.sock add-vsock cid=43,backend=vhost-kernel  (rc=0)
+[15:03:27]     {"id":"_vsock1","bdf":"0000:00:02.0"}
+[15:03:27] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe client vsock:43:5000 stream 1048576 hotplug-2  (rc=0)
+[15:03:27]     RESULT OK stream label=hotplug-2 sent=1048576 received=1048576 half_close=1 local=vsock:4294967295:1365186146 server_saw_peer=vsock:2:1365186146 server=cid-43 elapsed_ms=9
+[15:03:27] host vsock state [p9-r2-after-add]:
+1
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+943073 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock
+ 943073  943102 vhost-943074
+
+[15:03:27] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/ch-remote --api-socket /tmp/chvv-942719-0.sock remove-device _vsock1  (rc=0)
+[15:03:30] host vsock state [p9-r2-after-remove]:
+0
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+943073 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock
+
+[15:03:30] === restore physical module set
+[15:03:30] host vsock state [end]:
+0
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+
+[15:03:31] $ rmmod vsock_diag  (rc=0)
+[15:03:31] $ rmmod vhost_vsock  (rc=0)
+[15:03:31] $ rmmod vmw_vsock_virtio_transport_common  (rc=0)
+[15:03:31] $ rmmod vsock  (rc=0)
+[15:03:31] $ rmmod vhost  (rc=0)
+[15:03:31] $ rmmod vhost_iotlb  (rc=0)
+[15:03:31] $ pgrep -af cloud-hypervisor | grep -v pgrep || true  (rc=0)
+[15:03:31] === done
+{"launcher_rc": 0, "wall_s": 95.8}

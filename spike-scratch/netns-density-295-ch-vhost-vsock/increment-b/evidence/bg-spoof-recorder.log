@@ -1,0 +1,4 @@
+LISTENING recorder vsock:4294967295:7000
+RECORDED peer=vsock:42:1092204131 claim=[case=bind-any claimed_cid=4294967295 local=vsock:4294967295:1092204131]
+RECORDED peer=vsock:42:1092204132 claim=[case=bind-own claimed_cid=42 local=vsock:42:1092204132]
+RECORDED peer=vsock:42:1092204133 claim=[case=unbound claimed_cid=unbound local=vsock:4294967295:1092204133]

@@ -123,3 +123,40 @@
   DISTILL/DELIVER. The probe and its evidence in
   `spike-scratch/increment-aa-netns-density-295-tap-ioctl-seccomp-20260924T120003Z/`
   are retained, not deleted.
+
+## Increment-ch-vhost-vsock — kernel vhost-vsock backend in the Cloud Hypervisor fork (2026-10-05)
+
+### Assumption Tested
+
+- Cloud Hypervisor v53.0 can gain a kernel vhost-vsock device mode (host
+  `/dev/vhost-vsock`, guest CID assigned through the kernel, data virtqueues
+  owned by the kernel vhost worker) so that guest vsock traffic terminates in
+  the host kernel's AF_VSOCK stack instead of CH's userspace Unix-socket
+  muxer, and a real booted Linux guest works over it. Stock v53.0 ships only
+  the userspace muxer, so the selected vsock + Aya kernel-forwarding transport
+  had no production VMM backend.
+
+### Probe Verdict
+
+- **WORKS (bounded).** On the native metal host (AMD EPYC 8024P, host and
+  guest kernel 7.0.0-29-generic, no nesting, seccomp on), an unmodified guest
+  booted with `--vsock cid=N,backend=vhost-kernel`. STREAM and SEQPACKET
+  carried byte-exact traffic in both directions with zero payload bytes
+  through CH syscalls, against 8,413,773 bytes through CH for the same
+  transfer on the unix backend. CIDs stayed isolated across two VMs, a
+  duplicate CID was refused with `EADDRINUSE`, forged guest binds were
+  rejected, and CIDs were released and reusable after shutdown, `kill -9` and
+  reboot. Not proven: Aya forwarding on this backend, composition through
+  `overdrive serve`, the pinned 6.18 kernel, density. See
+  `ch-vhost-vsock-findings.md`.
+
+### Promotion Decision
+
+- **PROMOTE.** Approved by the user on 2026-10-05. The fork
+  `overdrive-sh/cloud-hypervisor` branch `overdrive/vhost-kernel-vsock`
+  (`9b68dbb57`, `41a619d19` on v53.0), vendored as the submodule
+  `vendors/cloud-hypervisor`, becomes the production VMM path, which also
+  rules D13 as option (a). How the fork is built, pinned and provisioned
+  replaces the upstream release download, and lands through DESIGN
+  (ADR-0146) and DISTILL/DELIVER. The probe and its evidence in
+  `spike-scratch/netns-density-295-ch-vhost-vsock/` are retained.

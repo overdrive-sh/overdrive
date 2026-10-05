@@ -1,0 +1,2 @@
+LISTENING stream unix
+RESULT SERVED stream label=g2h-cid-3 bytes=1048576 half_close_seen=1 peer=unix local=unix

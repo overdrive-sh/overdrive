@@ -1,0 +1,284 @@
+{
+  "P7d": {
+    "completed": true,
+    "cycles": [
+      {
+        "i": 1,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 2,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 3,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 4,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 5,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 6,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 7,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 8,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 9,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 10,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 11,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 12,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 13,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 14,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 15,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 16,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 17,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 18,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 19,
+        "mode": "sigkill",
+        "prev_exit": -9,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      },
+      {
+        "i": 20,
+        "mode": "poweroff",
+        "prev_exit": 0,
+        "refcnt_at_prev_exit": 0,
+        "relaunch_err": "",
+        "relaunch_exit": null,
+        "relaunch_ready": true,
+        "vhost_tasks_at_prev_exit": "0"
+      }
+    ],
+    "final_host_state": "0\nNetid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\n",
+    "final_release_timeline": {
+      "first": [
+        0.0002,
+        0
+      ],
+      "last": [
+        0.0002,
+        0
+      ],
+      "n": 1
+    },
+    "relaunch_failures": 0
+  },
+  "P9": {
+    "completed": true,
+    "round1_add_vsock": "{\"id\":\"_vsock0\",\"bdf\":\"0000:00:02.0\"}",
+    "round1_ch_vhost_fds_after_remove": [
+      "1->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.stdout",
+      "2->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.stdout",
+      "3->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log",
+      "25->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log",
+      "71->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz"
+    ],
+    "round1_h2g": "RESULT OK stream label=hotplug-1 sent=1048576 received=1048576 half_close=1 local=vsock:4294967295:1365186144 server_saw_peer=vsock:2:1365186144 server=cid-43 elapsed_ms=10",
+    "round1_host_state_after_add": "1\nNetid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\n943073 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock\n 943073  943081 vhost-943074\n",
+    "round1_host_state_after_remove": "0\nNetid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\n943073 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock\n",
+    "round1_ident": "IDENT local_cid=43 uname=7.0.0-29-generic uptime_s=2.60",
+    "round1_remove_device": "",
+    "round1_vm_info_vsock": "\"vsock\":{\"id\":\"_vsock0\"",
+    "round2_add_vsock": "{\"id\":\"_vsock1\",\"bdf\":\"0000:00:02.0\"}",
+    "round2_ch_vhost_fds_after_remove": [
+      "1->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.stdout",
+      "2->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.stdout",
+      "3->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log",
+      "25->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log",
+      "71->/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz"
+    ],
+    "round2_h2g": "RESULT OK stream label=hotplug-2 sent=1048576 received=1048576 half_close=1 local=vsock:4294967295:1365186146 server_saw_peer=vsock:2:1365186146 server=cid-43 elapsed_ms=9",
+    "round2_host_state_after_add": "1\nNetid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\n943073 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock\n 943073  943102 vhost-943074\n",
+    "round2_host_state_after_remove": "0\nNetid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\n943073 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-c/vm-p9-1791212601167/ch.log -v --api-socket path=/tmp/chvv-942719-0.sock\n",
+    "round2_ident": "IDENT local_cid=43 uname=7.0.0-29-generic uptime_s=5.75",
+    "round2_remove_device": "",
+    "round2_vm_info_vsock": "\"vsock\":{\"id\":\"_vsock1\"",
+    "serial_before_add": "GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29\nGUEST_VIRTIO virtio0 device=0x0004 driver= features=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\ncrw-------    1 0        0          10, 262 Oct  5 15:03 /dev/vsock\nLOCAL_CID=4294967295\nAGENT_READY local_cid=Ok(4294967295)\n",
+    "serial_tail": "GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29\nGUEST_VIRTIO virtio0 device=0x0004 driver= features=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\ncrw-------    1 0        0          10, 262 Oct  5 15:03 /dev/vsock\nLOCAL_CID=4294967295\nAGENT_READY local_cid=Ok(4294967295)\nAGENT_CMD ident from=vsock:2:1365186143\nAGENT_REPLY IDENT local_cid=43 uname=7.0.0-29-generic uptime_s=2.60\nAGENT SERVED stream label=hotplug-1 bytes=1048576 half_close_seen=1 peer=vsock:2:1365186144 local=vsock:43:5000\nAGENT_CMD ident from=vsock:2:1365186145\nAGENT_REPLY IDENT local_cid=43 uname=7.0.0-29-generic uptime_s=5.75\nAGENT SERVED stream label=hotplug-2 bytes=1048576 half_close_seen=1 peer=vsock:2:1365186146 local=vsock:43:5000\n"
+  },
+  "cleanup": {
+    "ch_processes_at_end": "",
+    "modules_added_by_run": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vsock_virtio_transport_common",
+      "vsock",
+      "vsock_diag"
+    ],
+    "modules_removed_vs_before": [],
+    "modules_still_added": [],
+    "vsock_stack_left_end": [],
+    "vsock_stack_left_start": [],
+    "vsock_stack_present_at_start": [
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ],
+    "vsock_stack_vs_pristine_increment_a": {
+      "now": [],
+      "pristine": []
+    }
+  },
+  "preflight": {
+    "host_uname": "7.0.0-29-generic",
+    "other_ch_processes_at_start": "",
+    "vsock_modules_loaded_before": []
+  }
+}

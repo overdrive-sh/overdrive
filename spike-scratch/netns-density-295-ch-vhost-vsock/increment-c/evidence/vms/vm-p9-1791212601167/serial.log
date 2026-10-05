@@ -1,0 +1,11 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29
+GUEST_VIRTIO virtio0 device=0x0004 driver= features=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+crw-------    1 0        0          10, 262 Oct  5 15:03 /dev/vsock
+LOCAL_CID=4294967295
+AGENT_READY local_cid=Ok(4294967295)
+AGENT_CMD ident from=vsock:2:1365186143
+AGENT_REPLY IDENT local_cid=43 uname=7.0.0-29-generic uptime_s=2.60
+AGENT SERVED stream label=hotplug-1 bytes=1048576 half_close_seen=1 peer=vsock:2:1365186144 local=vsock:43:5000
+AGENT_CMD ident from=vsock:2:1365186145
+AGENT_REPLY IDENT local_cid=43 uname=7.0.0-29-generic uptime_s=5.75
+AGENT SERVED stream label=hotplug-2 bytes=1048576 half_close_seen=1 peer=vsock:2:1365186146 local=vsock:43:5000

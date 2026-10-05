@@ -1,0 +1,16 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29
+GUEST_VIRTIO virtio0 device=0x0004 driver= features=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+GUEST_VIRTIO virtio1 device=0x0013 driver=vmw_vsock_virtio_transport features=01000000000000000000000000001100100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+crw-------    1 0        0          10, 262 Oct  5 14:57 /dev/vsock
+LOCAL_CID=101
+AGENT_READY local_cid=Ok(101)
+AGENT SERVED stream label=multi-a bytes=1048576 half_close_seen=1 peer=vsock:2:1365185883 local=vsock:101:5000
+AGENT_CMD client 2 6100 0 65536 from=vsock:2:1365185885
+AGENT_REPLY OK stream label=g2h-cid-101 sent=65536 received=65536 half_close=1 local=vsock:4294967295:1960468448 server_saw_peer=vsock:101:1960468448 server=cid-2 elapsed_ms=0 || SKIP seqpacket
+AGENT_CMD peer 102 5000 from=vsock:2:1365185887
+AGENT_REPLY PEER cid=102 connect=failed err=[connect: Connection timed out (os error 110)] elapsed_ms=5006
+AGENT_CMD ident from=vsock:2:1365185888
+AGENT_REPLY IDENT local_cid=101 uname=7.0.0-29-generic uptime_s=5.71
+AGENT SERVED stream label=after-dup bytes=65536 half_close_seen=1 peer=vsock:2:1365185889 local=vsock:101:5000
+AGENT_CMD poweroff from=vsock:2:1365185890
+[    5.729610] reboot: Power down

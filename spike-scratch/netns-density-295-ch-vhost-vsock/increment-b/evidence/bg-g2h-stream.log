@@ -1,0 +1,2 @@
+LISTENING stream vsock:4294967295:6000
+RESULT SERVED stream label=g2h-cid-42 bytes=4194304 half_close_seen=1 peer=vsock:42:1092204129 local=vsock:2:6000

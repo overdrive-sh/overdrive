@@ -1,0 +1,17 @@
+{
+  "calls": 4483,
+  "bytes_total": 8413773,
+  "by_syscall_fd": {
+    "write fd=88<UNIX-STREAM:[57932613->": 4194391,
+    "read fd=88<UNIX-STREAM:[57932613->": 4194340,
+    "write fd=71<{eventfd-count=0, eventfd-id=61, eventfd-semaphore=0}>": 9528,
+    "write fd=72<{eventfd-count=0, eventfd-id=62, eventfd-semaphore=0}>": 9456,
+    "read fd=76<{eventfd-count=0x2, eventfd-id=58, eventfd-semaphore=0}>": 4784,
+    "write fd=33<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>": 872,
+    "read fd=76<{eventfd-count=0x1, eventfd-id=58, eventfd-semaphore=0}>": 112,
+    "write fd=18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-P1-1791212218875/serial.log>": 109,
+    "read fd=76<{eventfd-count=0x3, eventfd-id=58, eventfd-semaphore=0}>": 96,
+    "read fd=8<{eventfd-count=0x1, eventfd-id=57, eventfd-semaphore=0}>": 72,
+    "recvfrom fd=88<UNIX-STREAM:[57932613->": 13
+  }
+}

@@ -1,0 +1,867 @@
+941491 recvfrom(15<UNIX-STREAM:[57925632->57942017]> <unfinished ...>
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8
+941496 write(18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>, ""..., 1) = 1
+941496 write(34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>, ""..., 8) = 8

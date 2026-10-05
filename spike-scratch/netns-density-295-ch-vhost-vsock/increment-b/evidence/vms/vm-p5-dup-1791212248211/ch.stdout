@@ -1,0 +1,7 @@
+Error: Cloud Hypervisor exited with the following chain of errors:
+  0: Error booting VM
+  1: The VM could not boot
+  2: Error from device manager
+  3: Cannot create vhost-kernel virtio-vsock device
+  4: Failed to assign guest CID 101 to vhost-vsock
+  5: failure in vhost ioctl: Address already in use (os error 98)

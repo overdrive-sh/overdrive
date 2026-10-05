@@ -1,0 +1,3 @@
+LISTENING stream vsock:4294967295:6100
+RESULT SERVED stream label=g2h-cid-101 bytes=65536 half_close_seen=1 peer=vsock:101:1960468448 local=vsock:2:6100
+RESULT SERVED stream label=g2h-cid-102 bytes=65536 half_close_seen=1 peer=vsock:102:1336510947 local=vsock:2:6100

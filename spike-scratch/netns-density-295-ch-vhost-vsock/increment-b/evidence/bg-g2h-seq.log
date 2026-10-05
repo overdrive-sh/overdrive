@@ -1,0 +1,2 @@
+LISTENING seqpacket vsock:4294967295:6001
+RESULT SERVED seqpacket label=g2h-cid-42 records=6 peer=vsock:42:1092204130 local=vsock:2:6001

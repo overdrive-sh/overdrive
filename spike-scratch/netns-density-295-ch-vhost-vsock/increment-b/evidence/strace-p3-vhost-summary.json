@@ -1,0 +1,8 @@
+{
+  "calls": 228,
+  "bytes_total": 1026,
+  "by_syscall_fd": {
+    "write fd=34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>": 912,
+    "write fd=18</home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log>": 114
+  }
+}

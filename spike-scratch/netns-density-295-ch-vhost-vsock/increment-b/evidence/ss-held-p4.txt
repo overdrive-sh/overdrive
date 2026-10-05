@@ -1,0 +1,3 @@
+Netid State  Recv-Q Send-Q Local Address:Port       Peer Address:PortProcess                                    
+v_str ESTAB  0      0                  *:1365185865           42:5000 users:(("python3",pid=941391,fd=6))       
+v_str LISTEN 0      0                  *:7000                  *:*    users:(("ch-vsock-probe",pid=941488,fd=3))

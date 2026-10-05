@@ -1,0 +1,138 @@
+[14:54:07] === preflight
+[14:54:07] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; free -m  (rc=0)
+[14:54:07]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[14:54:07]     none
+[14:54:07]     model name	: AMD EPYC 8024P 8-Core Processor
+[14:54:07]     16
+[14:54:07]                    total        used        free      shared  buff/cache   available
+[14:54:07]     Mem:           63868        1924       14723         166       48095       61944
+[14:54:07]     Swap:              0           0           0
+[14:54:07] $ cat /sys/module/kvm_amd/parameters/nested 2>/dev/null; ls -l /dev/kvm /dev/vhost-vsock  (rc=0)
+[14:54:07]     1
+[14:54:07]     crw-rw---- 1 root kvm 10, 232 Oct  5 14:54 /dev/kvm
+[14:54:07]     crw-rw---- 1 root kvm 10, 241 Oct  2 06:19 /dev/vhost-vsock
+[14:54:07] $ /usr/local/bin/cloud-hypervisor --version; sha256sum /usr/local/bin/cloud-hypervisor /srv/vm/overdrive-testing/kernel  (rc=0)
+[14:54:07]     cloud-hypervisor v53.0
+[14:54:07]     Migration Protocol Versions: 0
+[14:54:07]     448af3d4e59b22c2987f7df94c213ad40fb53a10d437e42b5ee6c4fce7c29ecc  /usr/local/bin/cloud-hypervisor
+[14:54:07]     b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682  /srv/vm/overdrive-testing/kernel
+[14:54:07] $ pgrep -a cloud-hypervisor || true  (rc=0)
+[14:54:07]     pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+[14:54:07]     Try `pgrep -f' option to match against the complete command line.
+[14:54:07] === build
+[14:55:25] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor --bin ch-remote  (rc=0)
+[14:55:25]        Compiling cloud-hypervisor v53.0.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/cloud-hypervisor)
+[14:55:25]        Compiling proc-macro-crate v3.5.0
+[14:55:25]        Compiling jiff v0.2.31
+[14:55:25]        Compiling regex-automata v0.4.14
+[14:55:25]        Compiling ring v0.17.14
+[14:55:25]        Compiling zstd-sys v2.0.16+zstd.1.5.7
+[14:55:25]        Compiling digest v0.11.3
+[14:55:25]        Compiling sha2 v0.11.0
+[14:55:25]        Compiling darling_core v0.23.0
+[14:55:25]        Compiling serde_derive v1.0.228
+[14:55:25]        Compiling thiserror-impl v2.0.18
+[14:55:25]        Compiling zerocopy-derive v0.8.53
+[14:55:25]        Compiling open-enum-derive v0.5.2
+[14:55:25]        Compiling bitfield-struct v0.13.0
+[14:55:25]        Compiling open-enum v0.5.2
+[14:55:25]        Compiling concat-idents v1.1.5
+[14:55:25]        Compiling num_enum_derive v0.7.6
+[14:55:25]        Compiling enumflags2_derive v0.7.12
+[14:55:25]        Compiling remain v0.2.15
+[14:55:25]        Compiling vm-memory v0.17.1
+[14:55:25]        Compiling enumflags2 v0.7.12
+[14:55:25]        Compiling num_enum v0.7.6
+[14:55:25]        Compiling regex v1.12.4
+[14:55:25]        Compiling clap_derive v4.6.1
+[14:55:25]        Compiling landlock v0.4.5
+[14:55:25]        Compiling darling_macro v0.23.0
+[14:55:25]        Compiling vm-allocator v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-allocator)
+[14:55:25]        Compiling linux-loader v0.13.2
+[14:55:25]        Compiling env_filter v2.0.0
+[14:55:25]        Compiling darling v0.23.0
+[14:55:25]        Compiling serde_with_macros v3.21.0
+[14:55:25]        Compiling option_parser v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/option_parser)
+[14:55:25]        Compiling env_logger v0.11.11
+[14:55:25]        Compiling serde_with v3.21.0
+[14:55:25]        Compiling clap v4.6.1
+[14:55:25]        Compiling vmm-sys-util v0.15.0
+[14:55:25]        Compiling event_monitor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/event_monitor)
+[14:55:25]        Compiling tracer v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tracer)
+[14:55:25]        Compiling vfio-bindings v0.6.2
+[14:55:25]        Compiling iommufd-ioctls v0.2.0
+[14:55:25]        Compiling virtio-queue v0.17.0
+[14:55:25]        Compiling rate_limiter v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/rate_limiter)
+[14:55:25]        Compiling vhost v0.16.0
+[14:55:25]        Compiling tpm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tpm)
+[14:55:25]        Compiling api_client v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/api_client)
+[14:55:25]        Compiling vfio_user v0.1.3
+[14:55:25]        Compiling vm-virtio v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-virtio)
+[14:55:25]        Compiling rustls-webpki v0.103.13
+[14:55:25]        Compiling kvm-bindings v0.14.1
+[14:55:25]        Compiling acpi_tables v0.2.1
+[14:55:25]        Compiling zstd v0.13.3
+[14:55:25]        Compiling block v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/block)
+[14:55:25]        Compiling vfio-ioctls v0.7.0
+[14:55:25]        Compiling hypervisor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/hypervisor)
+[14:55:25]        Compiling vm-migration v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-migration)
+[14:55:25]        Compiling vm-device v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-device)
+[14:55:25]        Compiling arch v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/arch)
+[14:55:25]        Compiling pci v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/pci)
+[14:55:25]        Compiling devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/devices)
+[14:55:25]         Finished `release` profile [optimized] target(s) in 1m 18s
+[14:55:27] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/probe/Cargo.toml  (rc=0)
+[14:55:27]      Downloading crates ...
+[14:55:27]       Downloaded libc v0.2.190
+[14:55:27]        Compiling libc v0.2.190
+[14:55:27]        Compiling ch-vsock-probe v0.1.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/probe)
+[14:55:27]         Finished `release` profile [optimized] target(s) in 1.99s
+[14:55:27] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor; /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --version  (rc=0)
+[14:55:27]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=3d3c30447af014ddd124a5ec42bcb86a97703caf, not stripped
+[14:55:27]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor:                           ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=0487da64b59ba8984f22230151902ef119ca1216, stripped
+[14:55:27]     cloud-hypervisor v53.0.0
+[14:55:27]     Migration Protocol Versions: 0
+[14:55:27] $ file /usr/bin/busybox  (rc=0)
+[14:55:27]     /usr/bin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+[14:55:27] $ modprobe --show-depends vmw_vsock_virtio_transport  (rc=0)
+[14:55:27]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[14:55:27]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst 
+[14:55:27]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+[14:55:28] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/initramfs-root && find . | cpio -o -H newc --quiet | gzip -9 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/initramfs.cpio.gz  (rc=0)
+[14:55:28] ========== P1
+[14:55:28] launch P1: /usr/local/bin/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/vm-P1-1791212128944/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/vm-P1-1791212128944/ch.log -v --vsock cid=3,socket=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/P1.vsock
+[14:55:29] $ ss -x -a -p | grep -F '/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/P1.vsock' || true  (rc=0)
+[14:55:29]     u_str LISTEN 0      64     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/P1.vsock_6000 57932289            * 0        users:(("ch-vsock-probe",pid=940619,fd=3))                                                                                                                                                           
+[14:55:29]     u_str LISTEN 0      4096        /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/P1.vsock 57922220            * 0        users:(("cloud-hyperviso",pid=940620,fd=61))
+[14:55:29] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl unix:/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/P1.vsock:4000 ident  (rc=0)
+[14:55:29]     IDENT local_cid=3 uname=7.0.0-29-generic uptime_s=0.60
+[14:55:29]     END
+[14:55:31] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe client unix:/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/P1.vsock:5000 stream 4194304 h2g-P1  (rc=0)
+[14:55:31]     RESULT OK stream label=h2g-P1 sent=4194304 received=4194304 half_close=1 local=unix server_saw_peer=vsock:2:1073741825 server=cid-3 elapsed_ms=420
+[14:55:31] strace[P1] calls=4488 bytes_total=8413813 top=[('write fd=88<UNIX-STREAM:[57918279->', 4194391), ('read fd=88<UNIX-STREAM:[57918279->', 4194340), ('write fd=72<{eventfd-count=0, eventfd-id=61, eventfd-semaphore=0}>', 9528), ('write fd=73<{eventfd-count=0, eventfd-id=62, eventfd-semaphore=0}>', 9488), ('read fd=76<{eventfd-count=0x2, eventfd-id=58, eventfd-semaphore=0}>', 4552), ('write fd=34<{eventfd-count=0, eventfd-id=34, eventfd-semaphore=0}>', 872)]
+[14:55:31] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl unix:/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/P1.vsock:4000 unix-client 6000 1048576  (rc=0)
+[14:55:31]     OK stream label=g2h-cid-3 sent=1048576 received=1048576 half_close=1 local=vsock:4294967295:67243205 server_saw_peer=unix server=cid-host elapsed_ms=10
+[14:55:31]     END
+[14:55:31] --- bg-P1-g2h-unix.log:
+LISTENING stream unix
+RESULT SERVED stream label=g2h-cid-3 bytes=1048576 half_close_seen=1 peer=unix local=unix
+
+[14:55:31] host vsock state [P1-running]:
+not-loaded
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.
+
+[14:55:31] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/probe-target/x86_64-unknown-linux-gnu/release/ch-vsock-probe ctl unix:/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-a/P1.vsock:4000 poweroff  (rc=0)
+[14:55:31]     OK going down
+[14:55:31] === restore physical module set
+[14:55:31] host vsock state [end]:
+not-loaded
+Netid State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.
+
+[14:55:32] $ pgrep -a cloud-hypervisor || true  (rc=0)
+[14:55:32]     pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+[14:55:32]     Try `pgrep -f' option to match against the complete command line.
+[14:55:32] === done

@@ -1,0 +1,4 @@
+Error: Cloud Hypervisor exited with the following chain of errors:
+  0: Failed to start the VMM thread
+  1: Error creation API server's socket
+  2: path must be shorter than SUN_LEN

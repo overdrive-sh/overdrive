@@ -1,0 +1,8 @@
+    Checking vm-allocator v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-allocator)
+   Compiling vmm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vmm)
+   Compiling cloud-hypervisor v53.0.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/cloud-hypervisor)
+    Checking pci v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/pci)
+    Checking devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/devices)
+    Checking virtio-devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/virtio-devices)
+    Checking offload_daemon v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/offload_daemon)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.35s

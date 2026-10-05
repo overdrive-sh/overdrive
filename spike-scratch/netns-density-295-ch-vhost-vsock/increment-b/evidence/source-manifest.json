@@ -1,0 +1,19 @@
+{
+  "ch_commits_since_v53": "41a619d19 vmm: Add backend=vhost-kernel to --vsock\n9b68dbb57 virtio-devices: vsock: Add vhost-kernel backed vsock device",
+  "ch_submodule_branch": "overdrive/vhost-kernel-vsock",
+  "ch_submodule_dirty": "",
+  "ch_submodule_head": "41a619d191f6472f79a3f22bcb9576c2a516906c",
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-ch-vhost-vsock/increment-b/run.py ",
+  "spike_sources": {
+    "spike-scratch/netns-density-295-ch-vhost-vsock/guest-init.sh": "8ea6dd190fcd47f8082d2ef640fe20222614fab1f553a1713c2a63486958ead1",
+    "spike-scratch/netns-density-295-ch-vhost-vsock/increment-a/run.py": "9c7c71a19fa2e90d8f367d19013dcd0a825ef431d7eafb898fc0773ab3e6571f",
+    "spike-scratch/netns-density-295-ch-vhost-vsock/increment-b/run.py": "b9019c7475543eb246ecf935d99727cad4c869a20e1cfc61ca0c57ea6425bff7",
+    "spike-scratch/netns-density-295-ch-vhost-vsock/launch.py": "ab63a5c3bcebb94d3d5ceb3eaf3e31204d3441cc27cab9ce29cbfa0a5de7a314",
+    "spike-scratch/netns-density-295-ch-vhost-vsock/lima-ch.sh": "8e58c4df22ed499d70f38c787f3964bc2be3e4b0bf52ef9df468a5a98f2f6dee",
+    "spike-scratch/netns-density-295-ch-vhost-vsock/probe/Cargo.lock": "60471adcb7b4167de3a79cd0f4b3975e534f0f27b634486e176c4c2240de512a",
+    "spike-scratch/netns-density-295-ch-vhost-vsock/probe/Cargo.toml": "199b7250264c616af6eaa5df5c57ff3352ade4605d789d31f156f9d94ce7909f",
+    "spike-scratch/netns-density-295-ch-vhost-vsock/probe/src/main.rs": "306d0110ac8c67fcf9577f4cd0c1811d7197e198ae529db4f687cc64a5b25b41",
+    "spike-scratch/netns-density-295-ch-vhost-vsock/rsync-owned-filter.sh": "f9845adbd6acc96027dd2de994e2f7fb7819b7b78de742bc4942078bfac19ec8"
+  },
+  "superproject_head": "b63b1507dcfaea35153ba9f64dd321bdc930e761"
+}

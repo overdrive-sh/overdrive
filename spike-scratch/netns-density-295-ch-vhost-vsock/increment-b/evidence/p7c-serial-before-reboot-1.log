@@ -1,0 +1,17 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29
+GUEST_VIRTIO virtio0 device=0x0004 driver= features=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+GUEST_VIRTIO virtio1 device=0x0013 driver=vmw_vsock_virtio_transport features=01000000000000000000000000001100100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+crw-------    1 0        0          10, 262 Oct  5 14:57 /dev/vsock
+LOCAL_CID=42
+AGENT_READY local_cid=Ok(42)
+AGENT_CMD ident from=vsock:2:1365185861
+AGENT_REPLY IDENT local_cid=42 uname=7.0.0-29-generic uptime_s=0.58
+AGENT SERVED stream label=h2g-stream bytes=4194304 half_close_seen=1 peer=vsock:2:1365185862 local=vsock:42:5000
+AGENT SERVED seqpacket label=h2g-seq records=6 peer=vsock:2:1365185863 local=vsock:42:5001
+AGENT_CMD client 2 6000 6001 4194304 from=vsock:2:1365185864
+AGENT_REPLY OK stream label=g2h-cid-42 sent=4194304 received=4194304 half_close=1 local=vsock:4294967295:1092204129 server_saw_peer=vsock:42:1092204129 server=cid-2 elapsed_ms=19 || OK seqpacket label=g2h-cid-42 records=6 sizes=1,7,1500,4096,65536,200000 boundaries_exact=1 local=vsock:4294967295:1092204130 server_saw_peer=vsock:42:1092204130 server=cid-2 elapsed_ms=1
+AGENT SERVED stream label=held bytes=0 half_close_seen=1 peer=vsock:2:1365185865 local=vsock:42:5000
+AGENT_CMD spoof 2 7000 from=vsock:2:1365185866
+AGENT_REPLY SPOOF case=forged-cid-own+100 connect=refused err=[bind: Cannot assign requested address (os error 99)] || SPOOF case=forged-cid-host-2 connect=refused err=[bind: Cannot assign requested address (os error 99)] || SPOOF case=forged-cid-1-local connect=refused err=[bind: Cannot assign requested address (os error 99)] || SPOOF case=bind-any connect=ok local=vsock:4294967295:1092204131 host_says=[SEEN peer=vsock:42:1092204131] || SPOOF case=bind-own connect=ok local=vsock:42:1092204132 host_says=[SEEN peer=vsock:42:1092204132] || SPOOF case=unbound connect=ok local=vsock:4294967295:1092204133 host_says=[SEEN peer=vsock:42:1092204133]
+AGENT_CMD ident from=vsock:2:1365185867
+AGENT_REPLY IDENT local_cid=42 uname=7.0.0-29-generic uptime_s=13.45

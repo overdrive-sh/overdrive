@@ -1,0 +1,12 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29
+GUEST_VIRTIO virtio0 device=0x0004 driver= features=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+GUEST_VIRTIO virtio1 device=0x0013 driver=vmw_vsock_virtio_transport features=01000000000000000000000000001100100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+crw-------    1 0        0          10, 262 Oct  5 14:57 /dev/vsock
+LOCAL_CID=42
+AGENT_READY local_cid=Ok(42)
+AGENT_CMD ident from=vsock:2:1365185869
+AGENT_REPLY IDENT local_cid=42 uname=7.0.0-29-generic uptime_s=1.75
+AGENT SERVED stream label=post-reboot-1 bytes=65536 half_close_seen=1 peer=vsock:2:1365185870 local=vsock:42:5000
+AGENT SERVED seqpacket label=post-reboot-seq-1 records=6 peer=vsock:2:1365185871 local=vsock:42:5001
+AGENT_CMD ident from=vsock:2:1365185872
+AGENT_REPLY IDENT local_cid=42 uname=7.0.0-29-generic uptime_s=1.78

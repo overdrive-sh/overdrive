@@ -1,0 +1,13 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29
+GUEST_VIRTIO virtio0 device=0x0004 driver= features=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+GUEST_VIRTIO virtio1 device=0x0013 driver=vmw_vsock_virtio_transport features=00000000000000000000000000000000100100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+crw-------    1 0        0          10, 262 Oct  5 14:57 /dev/vsock
+LOCAL_CID=3
+AGENT_READY local_cid=Ok(3)
+AGENT_CMD ident from=vsock:2:1073741824
+AGENT_REPLY IDENT local_cid=3 uname=7.0.0-29-generic uptime_s=0.60
+AGENT SERVED stream label=h2g-P8 bytes=4194304 half_close_seen=1 peer=vsock:2:1073741825 local=vsock:3:5000
+AGENT_CMD unix-client 6000 1048576 from=vsock:2:1073741826
+AGENT_REPLY OK stream label=g2h-cid-3 sent=1048576 received=1048576 half_close=1 local=vsock:4294967295:3590717676 server_saw_peer=unix server=cid-2 elapsed_ms=7
+AGENT_CMD poweroff from=vsock:2:1073741827
+[    2.071419] reboot: Power down

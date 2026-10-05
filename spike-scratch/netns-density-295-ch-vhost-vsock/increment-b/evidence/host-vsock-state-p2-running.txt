@@ -1,0 +1,7 @@
+1
+Netid State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess                                    
+v_str LISTEN 0      0                  *:7000            *:*    users:(("ch-vsock-probe",pid=941488,fd=3))
+v_str LISTEN 0      0                  *:6000            *:*    users:(("ch-vsock-probe",pid=941481,fd=3))
+???   LISTEN 0      0                  *:6001            *:*    users:(("ch-vsock-probe",pid=941487,fd=3))
+941489 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/increment-b/vm-p2-1791212222241/ch.log -v --vsock cid=42,backend=vhost-kernel
+ 941489  941495 vhost-941490
