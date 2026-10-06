@@ -10,6 +10,7 @@
 #                          cargo-nextest, cargo-deny
 #   Networking             tcpdump, iproute2, bridge-utils
 #   Debugging              pwru (Cilium — packet trace through kernel hooks)
+#   Formal methods         quint (pinned), Temurin JDK 21, pre-fetched Apalache
 #
 # Yocto / bitbake are deliberately NOT installed — Image Factory builds are
 # 60–90 minutes cold and 100 GB+ of sstate cache; belongs on dedicated CI.
@@ -116,6 +117,18 @@ param:
   # not the number.
   WASMTIME_VERSION:         "v46.0.2"
   PWRU_VERSION:             "v1.0.11"
+  # Quint formal-methods toolchain (specs/quint/**, `cargo xtask quint`).
+  # Mirrors the pins in infra/provision/install-quint.sh (the CI installer);
+  # keep the two aligned. Held at v0.32.0 below latest (v0.33.0, 2026-09-28):
+  # it is the version the quint-connect 0.1.2 conformance precedent was
+  # validated against. Clears once v0.33.0 runs the specs/quint/** checks
+  # and quint-connect green.
+  QUINT_VERSION:            "v0.32.0"
+  # Apalache version Quint v0.32.0 downloads by default; the provisioning
+  # step pre-fetches it into QUINT_HOME and fails if this dir is absent.
+  QUINT_APALACHE_VERSION:   "0.56.1"
+  # Temurin JDK 21 — Apalache and TLC run on the JVM.
+  TEMURIN_JDK21_RELEASE:    "jdk-21.0.12.1+1"
 
 # ────────────────────────────────────────────────────────────────────────────
 # Provisioning.
@@ -259,6 +272,85 @@ provision:
       pwru --version
 
   # -------------------------------------------------------------------------
+  # Quint formal-methods toolchain — Quint binary, Temurin JDK 21, and a
+  # pre-populated QUINT_HOME (/opt/quint-toolchain/quint-home: the Apalache
+  # distribution and the Rust evaluator Quint otherwise downloads lazily).
+  # /usr/local/bin/quint is a wrapper that defaults QUINT_HOME and JAVA_HOME,
+  # so `quint` works for the lima user AND under `cargo xtask lima run`'s
+  # `sudo env PATH=…` (which drops every other variable). Same logic as
+  # infra/provision/install-quint.sh — keep aligned.
+  # -------------------------------------------------------------------------
+  - mode: system
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+      QUINT_VERSION="{{ .Param.QUINT_VERSION }}"
+      APALACHE_VERSION="{{ .Param.QUINT_APALACHE_VERSION }}"
+      JDK_RELEASE="{{ .Param.TEMURIN_JDK21_RELEASE }}"
+      JDK_FILE_VERSION="$(echo "${JDK_RELEASE#jdk-}" | tr '+' '_')"
+      PREFIX=/opt/quint-toolchain
+      BIN_DIR=/usr/local/bin
+      case "$(uname -m)" in
+        x86_64)  QARCH=amd64; JARCH=x64 ;;
+        aarch64) QARCH=arm64; JARCH=aarch64 ;;
+        *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+      esac
+      QUINT_DIR="${PREFIX}/quint/${QUINT_VERSION}"
+      JDK_DIR="${PREFIX}/jdk"
+      QUINT_HOME_DIR="${PREFIX}/quint-home"
+      WORK="$(mktemp -d)"
+      trap 'rm -rf "${WORK}"' EXIT
+      mkdir -p "${QUINT_DIR}" "${QUINT_HOME_DIR}"
+
+      if [ ! -x "${QUINT_DIR}/quint" ]; then
+        curl -fsSL -o "${WORK}/quint" \
+          "https://github.com/quint-co/quint/releases/download/${QUINT_VERSION}/quint-linux-${QARCH}"
+        install -m 0755 "${WORK}/quint" "${QUINT_DIR}/quint"
+      fi
+
+      if [ ! -x "${JDK_DIR}/bin/java" ]; then
+        curl -fsSL -o "${WORK}/jdk.tar.gz" \
+          "https://github.com/adoptium/temurin21-binaries/releases/download/${JDK_RELEASE/+/%2B}/OpenJDK21U-jdk_${JARCH}_linux_hotspot_${JDK_FILE_VERSION}.tar.gz"
+        rm -rf "${JDK_DIR}"; mkdir -p "${JDK_DIR}"
+        tar -xzf "${WORK}/jdk.tar.gz" -C "${JDK_DIR}" --strip-components=1 --exclude='*/legal'
+      fi
+
+      cat > "${BIN_DIR}/quint" <<EOF
+      #!/bin/sh
+      export QUINT_HOME="\${QUINT_HOME:-${QUINT_HOME_DIR}}"
+      export JAVA_HOME="\${JAVA_HOME:-${JDK_DIR}}"
+      export PATH="\${JAVA_HOME}/bin:\${PATH}"
+      exec "${QUINT_DIR}/quint" "\$@"
+      EOF
+      chmod 0755 "${BIN_DIR}/quint"
+      ln -sf "${JDK_DIR}/bin/java" "${BIN_DIR}/java"
+
+      # Pre-fetch Apalache + the Rust evaluator (dedicated server port so a
+      # concurrently-running Apalache server on Quint's default port is not
+      # reused).
+      if [ ! -x "${QUINT_HOME_DIR}/apalache-dist-${APALACHE_VERSION}/apalache/bin/apalache-mc" ] \
+         || ! ls -d "${QUINT_HOME_DIR}"/rust-evaluator-* >/dev/null 2>&1; then
+        cat > "${WORK}/prefetch.qnt" <<'EOF'
+      module prefetch {
+        var x: int
+        action init = x' = 0
+        action step = all { x < 2, x' = x + 1 }
+        val ok = x >= 0
+      }
+      EOF
+        (
+          cd "${WORK}"; export TMPDIR="${WORK}"
+          "${BIN_DIR}/quint" run prefetch.qnt --invariant=ok --max-samples=1 --max-steps=2 </dev/null
+          "${BIN_DIR}/quint" verify prefetch.qnt --invariant=ok --max-steps=2 \
+            --server-endpoint=localhost:18821 </dev/null
+        )
+      fi
+      test -x "${QUINT_HOME_DIR}/apalache-dist-${APALACHE_VERSION}/apalache/bin/apalache-mc"
+      chmod -R a+rX "${PREFIX}"
+      quint --version
+      java -version
+
+  # -------------------------------------------------------------------------
   # kraft (Unikraft build CLI) — direct .deb from the kraftkit GitHub
   # release. The official `get.kraftkit.sh` installer prompts for the sudo
   # password on a TTY (which cloud-init doesn't have); `deb.pkg.kraftkit.sh`
@@ -400,6 +492,16 @@ probes:
       pwru --version
     hint: "pwru binary missing — check provisioning log."
 
+  - description: "quint toolchain installed (quint + JDK 21 + pre-fetched Apalache)"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      timeout 300 bash -c 'until [ -x /usr/local/bin/quint ] \
+        && [ -x /opt/quint-toolchain/quint-home/apalache-dist-{{ .Param.QUINT_APALACHE_VERSION }}/apalache/bin/apalache-mc ]; do sleep 2; done'
+      quint --version
+      java -version
+    hint: "Quint toolchain missing — check the Quint provisioning step in /var/log/cloud-init-output.log."
+
   - description: "kraft (Unikraft) installed"
     script: |
       #!/usr/bin/env bash
@@ -434,6 +536,7 @@ message: |
     cloud-hypervisor   $(cloud-hypervisor --version 2>/dev/null || echo missing)
     wasmtime           $(wasmtime --version 2>/dev/null || echo missing)
     pwru               $(pwru --version 2>/dev/null || echo missing)
+    quint              $(quint --version 2>/dev/null || echo missing)
     kraft              $(kraft version 2>/dev/null | head -n1 || echo missing)
     rustup             $(rustup --version 2>/dev/null | head -n1)
     qemu               $(qemu-system-$(uname -m) --version | head -n1)

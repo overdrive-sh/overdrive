@@ -47,6 +47,16 @@ color-eyre.workspace = true
 clap.workspace       = true
 serde.workspace      = true
 serde_json.workspace = true
+thiserror.workspace  = true
+toml.workspace       = true
+# `cargo xtask quint check`: kill a check's process group and catch
+# SIGINT/SIGTERM/SIGHUP so no Quint / JVM child outlives the run.
+libc.workspace       = true
+# `cargo xtask quint check --record` / `verify-evidence`: content hashes of
+# the specs a recorded run checked, and its RFC 3339 timestamps.
+sha2.workspace       = true
+hex.workspace        = true
+time                 = { workspace = true, features = ["formatting"] }
 tempfile.workspace    = true
 dotenvy.workspace    = true
 syn.workspace        = true

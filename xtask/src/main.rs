@@ -148,6 +148,17 @@ enum Task {
     /// tools" as a repo artifact. This subcommand IS that artifact.
     DevSetup,
 
+    /// Quint formal models under `specs/quint/<subsystem>/` — typecheck
+    /// every spec, or model-check the entries of each subsystem's
+    /// `checks.toml` (Apalache / TLC via `quint verify`). Logs and ITF
+    /// traces land under `target/quint/`; `check --record` alone writes a
+    /// subsystem's `evidence/`, and `verify-evidence` checks it against the
+    /// specs. See `xtask/src/quint.rs`.
+    Quint {
+        #[command(subcommand)]
+        action: QuintAction,
+    },
+
     /// Manage MCP server configuration for this project (`.mcp.json`).
     ///
     /// Claude Code does not expand environment variables inside `.mcp.json`,
@@ -241,6 +252,51 @@ enum McpAction {
         /// Overwrite an existing `.mcp.json` without prompting.
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum QuintAction {
+    /// `quint typecheck` every `specs/quint/**/*.qnt`.
+    Typecheck,
+    /// Run the `[[check]]` entries of `specs/quint/<subsystem>/checks.toml`;
+    /// fails unless every outcome matches its `expect`.
+    Check {
+        /// Only checks marked `ci = true`.
+        #[arg(long)]
+        ci: bool,
+        /// Only this subsystem: a directory name under `specs/quint/`, or a
+        /// path (containing `/`) to a subsystem directory elsewhere.
+        #[arg(long, value_name = "DIR")]
+        subsystem: Option<String>,
+        /// Only the check with this name.
+        #[arg(long, value_name = "CHECK")]
+        name: Option<String>,
+        /// Run up to N checks concurrently (each with its own server port,
+        /// bounded Apalache heap and on-disk TMPDIR). Default: min(CPUs/2, 4),
+        /// further capped by memory.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(1..))]
+        jobs: Option<u16>,
+        /// Per-attempt timeout in seconds, overriding every check's
+        /// `timeout_secs` (default 900). The check's whole process group is
+        /// killed on expiry and the outcome is `timed-out`.
+        #[arg(long, value_name = "SECS", value_parser = clap::value_parser!(u64).range(1..))]
+        timeout: Option<u64>,
+        /// Replace `<subsystem>/evidence/` with this run's evidence
+        /// (summary.json / summary.md, counterexample traces, logs of failed
+        /// checks), whatever the verdicts. Only for a full run of one
+        /// subsystem: requires `--subsystem`, refuses `--name` and `--ci`.
+        #[arg(long)]
+        record: bool,
+    },
+    /// Fail unless `<subsystem>/evidence/summary.json` was recorded against
+    /// the current `.qnt` files and `checks.toml` and every recorded outcome
+    /// matched its `expect`. Default: every subsystem under `specs/quint/`.
+    VerifyEvidence {
+        /// Only this subsystem: a directory name under `specs/quint/`, or a
+        /// path (containing `/`) to a subsystem directory elsewhere.
+        #[arg(long, value_name = "DIR")]
+        subsystem: Option<String>,
     },
 }
 
@@ -353,6 +409,22 @@ fn run() -> Result<()> {
         Task::Lima { action } => lima(action),
         Task::Metal { action } => metal(action),
         Task::Hooks { action } => hooks(action),
+        Task::Quint { action } => match action {
+            QuintAction::Typecheck => xtask::quint::typecheck(),
+            QuintAction::Check { ci, subsystem, name, jobs, timeout, record } => {
+                xtask::quint::check(
+                    &xtask::quint::CheckFilter { ci, subsystem, name },
+                    xtask::quint::CheckOptions {
+                        jobs: jobs.map(usize::from),
+                        timeout_secs: timeout,
+                        record,
+                    },
+                )
+            }
+            QuintAction::VerifyEvidence { subsystem } => {
+                xtask::quint::verify_evidence(subsystem.as_deref())
+            }
+        },
         Task::Mcp { action } => mcp(action),
         Task::DevSetup => dev_setup(),
     }

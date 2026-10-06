@@ -220,6 +220,11 @@ serial_test     = "3"
 # the pin is relaxed when the compiler output changes and the expected
 # `.stderr` fixtures are regenerated with `TRYBUILD=overwrite`.
 trybuild        = "=1.0.101"
+# Model-based conformance against the Quint specs in `specs/quint/**`
+# (DISTILL oracle): replays `quint run` ITF traces through the Rust
+# implementation. Dev-dependency use only. Pinned exactly to the version
+# the conformance precedent was validated against with Quint v0.32.0.
+quint-connect   = "=0.1.2"
 
 # --- Async streams --------------------------------------------------------
 tokio-stream    = { version = "0.1", features = ["sync"] }

@@ -10,6 +10,7 @@ pub mod cloexec_lint;
 pub mod dev_setup;
 pub mod dst_lint;
 pub mod mutants;
+pub mod quint;
 pub mod yaml_free_cli;
 
 /// The dated `rustup` nightly channel used for every kernel-side build.

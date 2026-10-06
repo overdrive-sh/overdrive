@@ -733,6 +733,72 @@ jobs:
       - name: cargo xtask yaml-free-cli
         run: cargo xtask yaml-free-cli
 
+  # -------------------------------------------------------------------
+  # Quint formal models — `specs/quint/<subsystem>/`.
+  #
+  # Typechecks every `specs/quint/**/*.qnt` and runs the `ci = true`
+  # entries of each subsystem's `checks.toml` (Apalache / TLC via
+  # `quint verify`); a check passes only when its outcome matches its
+  # `expect` ("holds" | "violation"), and a tool error always fails;
+  # then verifies each subsystem's recorded `evidence/` against its specs.
+  # Runs on every PR (the workflow has no path filtering); with no
+  # `ci = true` checks the step is a no-op.
+  #
+  # Toolchain pins (Quint, Temurin JDK 21, Apalache pre-fetched into
+  # QUINT_HOME) live in infra/provision/install-quint.sh — the same pins
+  # the Lima template provisions. The installed tree is cached on the
+  # installer's content hash, so a pin bump re-installs.
+  # -------------------------------------------------------------------
+  quint:
+    name: cargo xtask quint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "quint"
+
+      - name: Cache Quint toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/quint-toolchain
+          key: quint-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/provision/install-quint.sh') }}
+
+      - name: Install Quint toolchain
+        run: |
+          bash infra/provision/install-quint.sh "$HOME/.cache/quint-toolchain"
+          echo "$HOME/.cache/quint-toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: cargo xtask quint typecheck
+        run: cargo xtask quint typecheck
+
+      - name: cargo xtask quint check --ci
+        run: cargo xtask quint check --ci
+
+      # Each subsystem's evidence/ must be the recorded run of the specs as
+      # committed (`cargo xtask quint check --subsystem <dir> --record`):
+      # fails on a stale summary.json or a recorded outcome that missed its
+      # `expect`. Reads files only.
+      - name: cargo xtask quint verify-evidence
+        run: cargo xtask quint verify-evidence
+
+      - name: Upload Quint logs and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quint-results
+          path: target/quint/
+          if-no-files-found: ignore
+
 #   # -------------------------------------------------------------------
 #   # Mutation testing — diff-scoped per PR.
 #   #
