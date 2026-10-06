@@ -11,6 +11,12 @@ spikes and measurements.
 | **RSS — Resident Set Size** | Memory mapped by a process that is currently resident in RAM. Shared pages count in each process's RSS, so adding multiple processes' RSS can count them repeatedly. |
 | **Guest RAM** | Memory configured for a VM. This is a different measurement from the VMM process's PSS or RSS. |
 | **MemAvailable** | The kernel's estimate of RAM available for new applications without swapping, including memory it expects to reclaim. |
+| **Slab** | Memory used for kernel object allocations and caches. `/proc/meminfo` divides it into `SReclaimable` and `SUnreclaim`. It is not the kernel's entire memory footprint. |
+| **SReclaimable** | Slab memory that Linux may reclaim under memory pressure, such as some caches. The whole amount is not necessarily available immediately. |
+| **SUnreclaim** | Slab memory that Linux cannot automatically reclaim under memory pressure. Its allocations can still be freed when their owning resources are released; this field alone does not prove a leak. |
+| **Memory pressure** | A shortage of available RAM that causes the operating system to try to recover memory for other work. |
+| **KernelStack** | Memory used by tasks' kernel stacks. Reported separately from slab memory and process PSS. |
+| **Socket memory** | Kernel memory used for socket state and queued network data. Subsystem counters such as `/proc/net/sockstat` provide additional accounting; overlapping counters must not be blindly added. |
 | **Shared memory** | Memory accessible to more than one participant. Virtio uses shared buffers between a device and its driver; this does not make all their memory shared. |
 | **KiB / MiB / GiB** | Binary units: 1 KiB = 1,024 bytes; 1 MiB = 1,024 KiB; 1 GiB = 1,024 MiB. MB and GB normally denote decimal units. |
 
@@ -71,6 +77,14 @@ For the measured Cloud Hypervisor objects, see the
 | **FD — File descriptor** | A process-local handle for a resource, such as a file, socket, event counter or epoll instance. FD count is not limited to ordinary files. |
 | **epoll** | Linux's facility for waiting for events on many file descriptors. |
 | **eventfd** | A Linux file descriptor backed by a counter, used for event notifications between components. |
+| **Netlink** | A Linux socket interface for structured communication between userspace and kernel subsystems. It supports requests, replies, object listings and event notifications. |
+| **Generic Netlink** | Netlink's framework for dynamically registered subsystem families, each with its own commands and message attributes. A kernel module can expose a control interface through it. |
+| **rtnetlink / `NETLINK_ROUTE`** | The Netlink protocol used to inspect and configure network interfaces, addresses, routes and related networking state. |
+| **`ioctl` — Input/output control** | A system call that submits a resource-specific command through a file descriptor. The command defines its arguments and result; examples include device configuration and KVM operations. |
+| **Userspace / kernel space** | The execution environments for application code / operating-system kernel code. A userspace process can configure kernel networking without forwarding application bytes itself. |
+| **Control plane** | The logic that decides and installs configuration and manages lifecycle, such as creating sockets, updating forwarding maps and starting VMs. |
+| **Data plane** | The machinery that processes and forwards traffic according to the installed configuration. Its location is separate from the control plane's location. |
+| **Userspace application proxy** | An application process that receives application traffic and forwards it through another connection. Socket setup or forwarding-map updates alone do not make a process an application proxy. |
 | **TAP** | A virtual network interface that exchanges Ethernet frames with a userspace process through an open device handle. |
 | **veth** | A pair of linked virtual Ethernet interfaces. Frames transmitted through one arrive at the other. |
 | **Bridge / bridge port** | A virtual Ethernet switch / an interface attached to that switch. Bridge-port capacity is separate from the machine's RAM or CPU capacity. |
@@ -82,14 +96,20 @@ For the measured Cloud Hypervisor objects, see the
 | **kTLS — Kernel TLS** | Kernel processing of TLS records on a socket. The handshake can remain in userspace. |
 | **TPROXY — Transparent proxying** | Redirecting traffic to a proxy while preserving addressing information needed for transparent handling. |
 | **TCX** | Linux's newer attachment interface for BPF programs at traffic-control ingress and egress hooks. |
+| **eBPF** | Linux's facility for loading verified programs at supported kernel hooks, including networking hooks. What a program can do depends on its hook, helpers and kernel support. |
+| **Sockmap / Sockhash** | BPF maps holding socket references, indexed by integer / hash key. Supported BPF programs can redirect data between mapped sockets; these maps do not create a VM or its sockets. |
+| **Backpressure** | A mechanism that slows a sender when the receiver or forwarding path cannot keep up, rather than accumulating unlimited queued data. |
 
 Sources: [epoll](https://man7.org/linux/man-pages/man7/epoll.7.html),
 [eventfd](https://man7.org/linux/man-pages/man2/eventfd.2.html),
+[Netlink](https://docs.kernel.org/userspace-api/netlink/intro.html),
+[ioctl interfaces](https://docs.kernel.org/driver-api/ioctl.html),
 [TUN/TAP](https://docs.kernel.org/networking/tuntap.html),
 [Linux error names](https://man7.org/linux/man-pages/man3/errno.3.html),
 [kernel TLS](https://docs.kernel.org/networking/tls.html),
 [transparent proxying](https://docs.kernel.org/networking/tproxy.html),
-[BPF attachment types](https://docs.kernel.org/bpf/libbpf/program_types.html).
+[BPF attachment types](https://docs.kernel.org/bpf/libbpf/program_types.html),
+[socket maps and redirection](https://docs.kernel.org/bpf/map_sockmap.html).
 
 ## Reading experiment results
 
@@ -100,3 +120,11 @@ Sources: [epoll](https://man7.org/linux/man-pages/man7/epoll.7.html),
 | **Synthetic driver** | A harness component supplying device requests in place of an OS driver. The report must distinguish synthetic requests from the real device implementation being exercised. |
 | **PSS of a device harness** | The harness process's measured memory footprint. It does not include hypothetical full guests that the experiment did not boot. |
 | **Capacity** | The actual population held and exercised by an experiment, under its stated resource limits and conditions. A smaller successful run does not establish a larger capacity. |
+| **Goodput** | Useful application bytes delivered per unit of time. Protocol headers, framing overhead and retransmitted bytes are not useful delivered payload. |
+| **p95 / p99 latency** | The latency at or below which 95% / 99% of measured observations fall. These describe the slower end of the measurements, not their average. |
+| **Open-loop load** | A workload whose request schedule does not wait for earlier replies. Report actual sends separately from the intended offered rate. |
+| **Closed-loop load** | A workload that waits for replies before issuing more requests, usually with a bounded number outstanding. Slow replies therefore reduce its request rate. |
+| **Held population / in-flight concurrency** | The number of real resource owners kept allocated / the number of operations outstanding at once. Holding 16,384 attachments does not imply 16,384 simultaneous requests. |
+| **Resource retirement** | Releasing an object's resources and waiting for the required cleanup to complete. Stopping a workload is not proof that its kernel resources have drained. |
+| **Scale to zero** | Stopping all running instances of a workload when idle and activating an instance when needed. Wake detection, routing metadata and any bounded pending-traffic queues may still consume host resources. |
+| **Cold-start latency** | The delay associated with activating a stopped workload. A measurement should state its endpoints, such as first incoming request to first successful response. |

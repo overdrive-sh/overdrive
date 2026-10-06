@@ -72,6 +72,48 @@ user, and both cost a rework cycle. The cost of surfacing a gap is one
 message; the cost of inventing past it is a wrong contract that
 propagates until someone notices.
 
+## Typed error contract gate
+
+When an accepted design requires a typed error, it must identify the semantic
+error set and pin its representation at the relevant interface: the variants,
+payloads, and mappings callers rely on. Naming a generic return type such as
+`NetlinkError` or `io::Error` does not resolve an unspecified semantic error
+contract. An existing error envelope is not evidence that every representation
+inside it is approved.
+
+If the required semantic distinctions or their interface representation are
+missing, report `SPECIFICATION_AMBIGUITY` and pause implementation of the
+affected error path. Return the gap to DESIGN to pin the exact contract before
+resuming. Do not silently encode the missing distinctions in string messages,
+choose an arbitrary generic variant, or invent public variants or payloads.
+Diagnostic strings may add context to an approved typed cause; they must not
+replace semantic distinctions the design requires to be typed.
+
+This gate applies at each handoff:
+
+- **DESIGN**: declare the typed error set and its exact interface
+  representation, including mappings from the designed failure conditions.
+- **DISTILL**: check that contract before authoring error scenarios. A missing
+  set or representation is an upstream specification ambiguity, not a test
+  fixture decision. Exercise each declared error and verify that errors outside
+  the declared set do not escape.
+- **Crafters**: check the error contract before RED/GREEN implementation. An
+  underspecified typed error must be surfaced, even when an existing generic
+  carrier with a string message would compile and make tests pass.
+- **Reviewers**: include an explicit mapping from each designed semantic
+  failure to its approved and implemented typed representation. An unresolved
+  contract gap blocks approval; a typed outer envelope and green tests do not
+  establish compliance.
+- **Orchestrators**: include this gate in crafter and reviewer handoffs. Route
+  genuine error-contract gaps to DESIGN; do not authorize a generic carrier or
+  string message as a shortcut around pinning the contract.
+
+The interface ownership rule requires consistency with the approved contract,
+not avoidance of new public API. These workspace interfaces may change when
+DESIGN pins the required change and its bounded caller fallout. Private error
+types and internal implementation remain the crafter's responsibility when the
+approved interface and semantic error contract are already complete.
+
 ## Correctness and invariant precedence
 
 When constraints conflict, apply this order:
@@ -362,94 +404,92 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/wellington-v2] recent context, 2026-09-23 5:00pm GMT+2
+# [helios/wellington-v2] recent context, 2026-10-05 1:11am GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (28,936t read) | 1,093,506t work | 97% savings
+Stats: 50 obs (35,995t read) | 1,675,997t work | 98% savings
 
-### May 16, 2026
-S6519 Create GitHub issue for IPIP DSR implementation based on completed research (May 16 at 2:14 PM)
-S6520 Complete IPIP DSR research and create tracking issue for implementation (May 16 at 2:17 PM)
-S6521 IPIP DSR research completion and GitHub issue creation for Phase 3 implementation (May 16 at 2:17 PM)
-S6920 Update GitHub issue #133 body to correct the framing from RPITIT dyn-compatibility to associated type erasure (May 16 at 2:18 PM)
-### May 24, 2026
-S6919 Research RPITIT dyn-compatibility status in Rust to determine viability of issue #133 Option 3 (May 24 at 10:28 AM)
-S6921 Update GitHub issue #133 body to correct the framing from RPITIT blocker to associated type erasure blocker (May 24 at 10:32 AM)
-S8700 Mapping blue/green deployment scenario with intelligent VM provisioning onto Overdrive architecture (May 24 at 10:41 AM)
-### Jun 17, 2026
-S8704 Create GitHub issue for machine-provisioner primitive gap (Jun 17 at 10:11 AM)
-S8705 Create GitHub issue for machine-provisioner primitive gap in Overdrive (Jun 17 at 10:11 AM)
-S8706 Create GitHub issue documenting machine-provisioner primitive gap for elastic cloud VM provisioning (Jun 17 at 10:44 AM)
-### Jul 29, 2026
-57747 5:25p 🔵 Antithesis Found Bugs in Every Raft Implementation Tested: Formal Spec Verified But Implementations Broken
-57748 " 🔵 CCF Smart Casual Verification: 6 Bugs Found via TLA+ Model Checking + Trace Validation in CI Pipeline
-57749 " 🔵 TraceLink and ModelFuzz: Trace Validation Found 9 Compiler Bugs, Model-Guided Fuzzing Found 13 Bugs (4 Unique)
-57750 " 🔵 TLC Symmetry Reduction Concrete Numbers: 218× Reduction (42,228→193 States) But Factorial Startup Cost
-57751 " 🔵 Jack Vanlightly Kafka TLA+ Spec: Symmetry+View Reduces 322,596→1,839 States (175×), Liveness "Only Possible Using Simulation Mode"
-57752 " 🔵 AWS Systems Correctness Practices (CACM May 2025): TLA+ Success But "Steep Learning Curve" Barrier, Semi-Formal Methods Underadopted
-57754 5:29p 🔵 Aurora DSQL Uses BOTH TLA+/P Formal Methods AND Deterministic Simulation Testing: Marc Brooker's Hybrid Approach
-57755 " 🔵 FoundationDB Deterministic Simulation Known Limitations: Cannot Test Third-Party Libraries, Performance Bugs, Code Outside Flow
-57756 " 🔵 TigerBeetle VOPR Fuzzer Blind Spot: Jepsen Found Bug Four Fuzzers Missed Due to Structured Workload Hiding Intersection Probe Codepath
-57757 5:32p 🔵 TigerBeetle VOPR Fuzzing Fleet: 1,024 Cores Running 24/7 at 700× Real-Time Speed, 2 Millennia Simulated Per Day
-57758 " 🔵 Will Wilson (Antithesis/FoundationDB Founder) on DST Limitations: Cannot Test Exotic Hardware, Third-Party Dependencies, Simple Programs; 77 of 100 MongoDB Bugs Found Only by Antithesis
-57759 " 🔵 FoundationDB Testing Investment: "Trillions of Real World Hours" Total, 5-10M Simulation Hours Per Night, Only 1-2 Customer-Reported Bugs in Company History
-57760 " 🔵 Antithesis Test Composer: Dynamic Branching Explores "Multiverse" of Random Choices vs Naive Seed Replay, Coverage-Guided Machine Learning Under Development
-57761 5:38p 🔵 Wayback Machine Rate Limit Persists Beyond 5-Minute Backoff
-57762 " 🔵 CORS Proxy Services Fail to Access Wayback Machine Content
-57763 " 🔵 AWS Systems Correctness Practices Research Findings via Alternative Sources
-57764 5:39p 🔵 Archive Services Implement Coordinated Rate Limiting
-57765 " 🔵 AWS Systems Correctness Paper Publication Details Located
-57766 5:40p 🔵 Common Crawl Index Successfully Accessed for Web Archive Alternative
-57767 " 🔵 Marc Brooker Publications Page Provides Direct Paper References
-57768 " 🔵 Common Crawl Index Located Two Complete Captures of AWS Correctness Paper
-57769 5:41p 🔵 Successfully Extracted Full AWS Correctness Paper from Common Crawl WARC Archive
-57770 5:42p 🔵 Complete AWS Systems Correctness Paper Text Successfully Extracted
-57771 " 🔵 Complete References and Metadata Extracted from AWS Correctness Paper
-57772 " 🔵 Key Technical Concepts and Statistics Verified in AWS Correctness Paper
-57773 " 🔵 Complete AWS Systems Correctness Paper Retrieved and Analyzed via Subagent
-57775 5:43p 🔵 Woodcock-Larsen Critical Evaluation Paper Confirmed Open Access But No PDF Access Available
-57774 5:45p 🔵 Related Critical Evaluation Paper on AWS Formal Methods Discovered as Open Access
-57776 5:49p 🔵 Aarhus University OAI-PMH Endpoint Accessible While York Protected
-57777 5:50p 🔵 Aarhus University OAI-PMH Repository Successfully Harvested for Publication Window
-57778 5:51p 🔵 OAI-PMH Date Filtering Confirmed but Record Format Shows Person Names Not Paper Titles
-57779 " 🔵 Aarhus Pure OAI Repository Sets Enable Publication-Specific Harvesting
-57780 5:52p 🔵 All Alternative Access Methods for Woodcock-Larsen Paper Exhausted With Zero Success
-57781 5:53p 🔵 Aarhus Pure Web Interface Returns HTTP 403 Cloudflare Protection for Woodcock Publication Listings
-57782 5:54p 🔵 CrossRef Metadata Confirms Paper Existence But Lists Null License and Similarity-Checking PDF Only
-57783 " 🔵 White Rose Repository Search by Author Name Accessible But Results Content Not Captured
-57784 " 🔵 White Rose Repository Contains 7 Woodcock Publications from 2025-2026 But Target Paper Absent
-57785 " 🔵 Browser Automation Infrastructure Available But Python Libraries Not Installed
-57786 5:55p 🔵 Headless Chrome Blocked by Cloudflare Bot Detection on ACM DOI Page
-57787 " 🔵 Python Virtual Environment Created With websocket-client for CDP Automation
-57788 5:57p 🔵 Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333
-57789 " 🔵 Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335
-57790 " 🔵 Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag
-57791 " 🔵 CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving
-### Sep 7, 2026
-**73345** 2:24a ⚖️ **Schema Evolution Coverage Excluded from Scope**
-The project explicitly excludes schema evolution and migration coverage. Since this is a greenfield project with no existing users, there are no prior stored values that would require migration support. This simplifies the initial implementation by removing the need to handle backward compatibility for data formats.
-~165t ⚖️ 28,144
+### Sep 30, 2026
+S13940 User provided decisions on netns-density-295 open items: proceed with kill-time bounds option a, treat thread-spawn panic as recoverable error reinforcing no-panic principle, delegate B3c/H3 firewall test rewrites to agent not primary session (Sep 30 at 8:29 PM)
+S13937 User expressed frustration about netns-density-295 complexity asking why simple tap replacement became convoluted and noting safety classifier blocks (Sep 30 at 8:29 PM)
+S13941 User decided netns-density-295 open items and primary session investigated netlink runtime panic location violating no-panic architectural principle (Sep 30 at 9:54 PM)
+S13939 User frustrated about netns-density-295 complexity asking why simple TAP replacement became convoluted, primary session explained root causes and retrieved original issue scope showing density motivation (Sep 30 at 9:55 PM)
+S13969 Commit netns-density-295 DESIGN finalization work including R19 withdrawal decision and roadmap approval (Sep 30 at 9:56 PM)
+### Oct 3, 2026
+78112 12:19p 🔵 Native evidence testing reveals R18 reproduction and R19 falsification with E14(e) blocker
+78117 12:20p 🔵 Platform Blocked TIME_WAIT Experiment for Cybersecurity Risk
+78118 " ✅ Workflow Pattern Documented: Delegate Reading to Agents
+78119 " ⚖️ Metal Host Environment Diagnosis Selected for E14(e) Blocker
+78120 12:21p 🔵 Metal Host Contains Stale nftables Configuration from Previous Run
+78121 12:22p ✅ Metal Residue Inspection Results Documented
+78127 12:42p 🔵 User Requests Problem and Solution Clarification After E14(e) Test Success
+78128 12:45p 🔵 Primary Session Stuck in Decision Loop Despite E14(e) Evidence Being Complete
+78137 1:00p ✅ ADR-0140 Updated to Record R19 Withdrawal and E14(e) Named-Service Test Completion
+78138 1:05p ⚖️ ADR-0140 Withdrawn — TPROXY-Before-Mark Reorder Not Required
+78139 1:16p ⚖️ R19 Conditional Withdrawal Finalized with Native E14(e) Evidence
+78140 1:22p 🔵 Communication breakdown on decision ownership in primary session
+78142 1:46p ⚖️ R19 TPROXY-before-mark Rule Reordering Withdrawn Under Native Condition
+78143 " 🔵 NETNS-Density-295 Delivery Blocked on R19 Falsification Contradiction
+78141 1:49p ✅ R19 TPROXY rule reordering withdrawn - existing order provides fail-closed behavior
+78144 1:52p 🔵 D-295-R19 Rule Reorder Withdrawn on Native Evidence; Documentary Reconciliation Required Before Roadmap Gate
+78145 2:01p ✅ Roadmap Step 08-01 Updated to Reflect R19 Withdrawal and R18 Confirmation
+78146 2:03p ✅ Roadmap step 08-01 reconciled after D-295-R19 rule-order withdrawal
+78147 2:11p 🔵 Roadmap validation status audit across 77 feature deliverables
+78150 2:13p ✅ netns-density-295 roadmap approved after DESIGN faithfulness verification
+S13970 Complete netns-density-295 DESIGN handoff including R19 withdrawal decision, E14 evidence collection, roadmap approval, and prepare commit of finalized artifacts (Oct 3 at 2:13 PM)
+S13972 Query remaining roadmap steps after completing netns-density-295 DESIGN finalization and commit (Oct 3 at 2:16 PM)
+S13971 Commit netns-density-295 DESIGN finalization work including R19 withdrawal, E14(e) evidence resolution, and roadmap approval (Oct 3 at 4:20 PM)
+S13997 Vsock replacement design for netns-density-295 feature after Linux bridge port limit falsified original design (Oct 3 at 4:24 PM)
+### Oct 4, 2026
+78281 2:11p 🔵 Pasted Text Attachment Analysis Required
+78285 " 🔵 Linux Bridge Port Limit Falsified Shared-Bridge Networking Design
+78286 " 🟣 Vsock Transport Capacity Proven at 16,384 Activated Devices
+78287 " ⚖️ Vsock Selected as Replacement Transport for VM Networking Attachment
+78288 " ✅ Replacement Design Workflow Status Set to Pending Approval
+78289 " ✅ Guest Networking and mTLS Intercept Components Modified for Vsock Integration
+78291 " 🔵 Feature Delta Documents 16,550 Lines of Replacement Design with Falsification Records
+78293 2:14p 🔵 Driver Type Hierarchy with Unikernel and VM Variants
+78294 " 🔵 DNS and Guest Network Boot Sequence with DDN-2 Single-Owner Pattern
+78295 " 🔵 Network Namespace Density Benchmark with 16,384 Population Target
+78297 2:22p 🔵 DNS Responder Wildcard Binding Strategy with IP_PKTINFO Source Pinning
+78298 " 🔵 Overdrive-Init In-Guest PID 1 Agent with Vsock Beacon and Network Bootstrap
+78299 " 🔵 Vsock Usage Scope Limited to Host-Guest Beacon, Not Network Transport
+78300 " 🔵 Shared Bridge Production Architecture with TAP Attachment EXFULL Surface
+78301 " 🔵 Feature-Delta Document Structure Inventory for Vsock Architecture Replacement Design
+78303 2:25p 🔵 Native E18 Bridge Capacity Falsification at 1024-Port Linux Kernel Limit
+78304 " 🔵 Vsock Replacement Transport Selection with 16,384-Device Native Capacity Validation
+78305 " 🔵 R19 Conditional Withdrawal Approval for Ordinary Flow with Pending E14(e) Gate
+78306 " 🔵 Netns-Density-295 Delivery Roadmap with 84-Scenario Test Matrix and 10-Phase Structure
+78307 2:26p 🔵 Comprehensive Roadmap Inventory with Bridge-Transport Dependency Classification
+78309 2:27p 🔵 In-guest kernel mTLS architecture validated for VM workloads
+78310 " 🔵 Linux bridge port ceiling blocks 16K guest density target
+78311 " 🔵 VMM evaluation compares Cloud Hypervisor against Firecracker for microVM platform
+78312 2:33p 🔵 E18 benchmark hits Linux bridge port ceiling blocking 16K guest density target
+78313 " ⚖️ Vsock packet uplink proposed to replace bridge-based microVM network attachment
+**78314** 2:38p 🟣 **Vsock attachment replacement design completed with activation, classification, and measurement ADRs**
+On October 4, 2026, the primary session completed the vsock attachment replacement design by proposing three additional Architecture Decision Records addressing activation/quiescence mechanisms, traffic classification, and measurement strategy. ADR-0148 defines a forwarder per-allocation gate mechanism replacing the TAP-based activation and quiescence of ADR-0131 and ADR-0124, with the gate having three states (Closed for registered with no uplink, Open, and Quiesced) and activation being a serialized operation owned by the shared guest-network owner that connects the uplink per ADR-0147, completes the preamble, inserts the active endpoint entry, and opens the gate after the exact mtls.intercept.install.success event and before EXEC. Quiescence sets the owner's latch then closes every Open gate, with a gate not Open meaning nothing crosses the forwarder for that allocation in either direction, and a gate the forwarder cannot confirm closed within the quiescence bound being reported unconfirmed with the VM killed. The quiescence mechanism is an in-process latch rather than up to 16,384 netlink link-down calls so the quiescence bound is expected to stay at its 1s floor though this expectation must be measured not assumed. Loss of an uplink is terminal for the allocation with the allocation becoming condemned and killed and the owner never reconnecting an uplink. ADR-0149 defines one aya-rs TCX ingress classifier attached first in order to the ovd-gtun0 shared TUN device, with the classifier reading a node-global endpoint map keyed by guest IPv4 source carrying an active flag value with a maximum of 65,536 entries, and per-packet behavior parsing from the IPv4 header with no Ethernet or ARP layer marking TCP 0x295a, marking non-TCP to the gateway 0x295b, dropping map misses with a counter, dropping malformed packets, and dropping non-TCP direct to any other address. The IP-family guard table ip overdrive-guest-guard owns a prerouting chain at filter priority -300 on iifname ovd-gtun0 with exactly three rules: accept and preserve packets marked 0x295a, clear the mark and accept packets marked 0x295b, and count and drop everything else. The single-loss outcome is preserved with TCX link loss causing the guard to drop unmarked datagrams, endpoint entry loss causing TCX to drop on map miss, guard loss causing TCX to mark and the intercept program to capture, IP program loss causing the R18 guard to drop marked TCP, and forwarder or TUN loss causing nothing to enter the host. ADR-0150 defines the E18 and T1 receipt measurement strategy on 16,384 activated vsock uplink attachments terminated at the muxer boundary, with the measurement running the production owner, forwarder, shared TUN, TCX classifier, guards, and intercept owner all composed as in run_server and each of 16,384 attachments being assigned, provisioned, given its intercept elements, and activated. Uplink peers are benchmark-owned peer processes that bind the exact per-allocation muxer socket path, answer the stock Cloud Hypervisor line protocol, and run the guest side of the preamble and frame protocol, with every attachment required to show a completed activation, a datagram round trip through ovd-gtun0, and read-back. Device-layer cost is cited from the approved spike as a separate receipt and is never summed into the E18 result as if both were measured together. The measurement approach means no receipt measures a VMM process, a guest, or end-to-end VM density with D-295-R9 standing that no VM density claim is made. The complete vsock replacement design now spans seven decision records forming a coherent alternative to the failed bridge-based approach: V1 ADR-0145 vsock packet uplink removing virtio-net, V2 ADR-0146 shared TUN and in-serve forwarder, V3 ADR-0147 uplink identity via allocation muxer socket, V4 ADR-0149 shared TUN TCX classifier and IP-family guard, V5 ADR-0148 activation and quiescence gate mechanism, and V7 ADR-0150 E18 measurement on uplink attachments at muxer boundary. All seven ADRs carry PROPOSED status pending explicit user approval and independent DESIGN review with nothing implementable from any of these records until approved.
+~2006t 🛠️ 32,253
 
-**73347** " 🟣 **Timestamp Hardening Work Initiated**
-Work commenced on GitHub issue #281 to harden timestamp representations across the Overdrive repository. The issue identifies that raw u64 UNIX-epoch values (like *_unix_ms fields) lose unit and type safety across system boundaries. An agent named timestamp_inventory was spawned to conduct a comprehensive audit of all production timestamp representations. The migration will convert wall-clock instant fields to use the established UnixInstant semantic type end-to-end, while preserving duration/counter/opaque numeric fields that are not wall-clock instants. Since this is a greenfield project with no existing users, schema evolution and migration coverage for prior stored values is explicitly excluded from scope.
-~370t 🛠️ 30,449
+**78325** 2:45p 🔵 **User Questions Vsock Design Alignment with GH #303 and Userspace Forwarding Trade-off**
+User raised five critical questions about the proposed vsock replacement design for netns-density-295 feature. First question concerns whether V1's guest traffic mechanism (overdrive-init creates tun0 and pumps packets over vsock) aligns with the architecture described in GH #303 and PR #306, and why virtio-net is not being used instead. Second question challenges why V2's design requires a forwarder running inside the serve process to feed the shared TUN. Third and most significant concern addresses V8's performance trade-off introducing per-packet userspace forwarding, which appears to contradict the stated goal of GH #303 and PR #306 to eliminate the host L4 proxy (ADR-0069 being replaced). Fourth question expresses alarm that making serve the data path creates a single point of failure where serve death terminates all guest connectivity. These questions suggest potential fundamental misalignments between the proposed vsock design and the approved in-guest mTLS work, particularly around performance goals and failure modes. The user's tone indicates these are blocking concerns requiring resolution before design approval can proceed.
+~466t 🔍 86,508
 
-73350 " 🔵 Timestamp Inventory Agent Repeatedly Timing Out After Multiple Retry Attempts
-**73351** 2:26a 🔵 **Timestamp Inventory Agent Completed After Extended Timeout Retry Cycle**
-The timestamp inventory agent eventually completed successfully after an extended series of timeout failures. The agent was spawned multiple times with identical configuration, experiencing seven consecutive 60-second wait timeouts before the eighth wait operation returned successful completion. This pattern indicates the inventory task legitimately required more than 3 minutes to scan the Overdrive codebase for timestamp field usage patterns. The repeated timeouts followed by eventual success suggests either the agent was continuously running but reporting progress slowly, or there was severe resource contention that gradually cleared. The 60-second timeout windows were fundamentally mismatched to the actual execution time required for a repository-wide code inventory task.
-~373t 🔍 725
+**78326** 5:15p 🔵 **GitHub Issue #303 Reveals Fundamental Conflict with Vsock Replacement Design**
+User investigated GitHub issue #303 "In-guest kernel mTLS for VM workloads: Camblet-style socket hook with a host-held key" revealing fundamental architectural conflict with proposed vsock replacement design. Issue #303 describes moving transparent mTLS from host L4 proxy (ADR-0069 being superseded) into guest kernel using loadable kernel module that hooks connect/accept, relays handshake records to host agent over vsock, then installs kTLS on workload's own TCP socket so application data flows directly over kTLS without touching host. Key architectural principle in #303: vsock is used ONLY for handshake relay (RESOLVE/ACCEPT frames), application ciphertext travels over guest's own TCP socket with kernel kTLS carrying record layer. Host agent explicitly "leaves the data path after the handshake" as documented benefit, enabling in-flight connections to survive host-agent restart because session state lives in guest kernel. Nine spikes (B/B2/B3/C/D/E) proved this mechanism on Unikraft and Linux stock kernel as out-of-tree .ko module. In direct conflict, vsock replacement design decisions V1/V2/V8 propose using vsock for ALL packet traffic: V1 has overdrive-init create tun0 and pump IPv4 packets over one vsock stream per VM, V2 feeds shared host TUN ovd-gtun0 via forwarder running inside serve, V8 introduces per-packet userspace forwarding through Cloud Hypervisor muxer then serve forwarder. This architectural conflict explains user's alarm: vsock design puts serve in data path (if serve dies all guests lose connectivity, contradicting #303's restart-survival claim) and introduces per-packet userspace forwarding (contradicting #303's "no host proxy hop" and "host leaves data path" goals). The two proposals use vsock for opposite purposes: #303 for control-plane handshake coordination only, vsock design for data-plane packet forwarding. Issue notes host proxy ADR-0069 is being replaced so "leave unikernels on host proxy" is not a path, and at 16,384-guest target one flow per guest means about 65,536 pump threads which in-guest mechanism avoids.
+~815t 🔍 9,213
 
-**73348** " 🔵 **Timestamp Inventory Agent Exceeded 60-Second Wait Timeout**
-The timestamp_inventory agent was spawned to inventory raw epoch timestamp fields for migration to UnixInstant, but did not complete within a 60-second wait timeout. The agent was dispatched with GitHub issue #281 context and instructions to audit all production timestamp representations. The timeout suggests either the inventory task requires more than 60 seconds to scan the codebase, the agent is waiting for resources/queuing, or encountered a blocking issue during execution. This is a concrete operational finding about agent execution timing in the Conductor environment.
-~260t 🔍 30,894
+S13998 User challenged vsock design revealing fundamental architectural error requiring withdrawal and redesign (Oct 4 at 5:17 PM)
+**78327** 5:23p ⚖️ **Vsock Data-Path Replacement Design Rejected and Scheduled for Withdrawal**
+User rejected proposed vsock replacement design for netns-density-295 feature after discovering fundamental architectural conflict with GitHub issue #303 in-guest kernel mTLS proposal. Vsock design decisions V1/V2/V8 incorrectly framed vsock as data-plane transport carrying all application traffic via overdrive-init tun0 packet pump over vsock stream to serve-internal forwarder feeding shared host TUN. This introduced per-packet userspace forwarding through Cloud Hypervisor muxer then serve forwarder, putting serve process in data path so serve death terminates all guest connectivity. Architecture directly contradicts GH #303's approved principle that host agent leaves data path after handshake, with vsock used only for control-plane handshake relay and application ciphertext flowing over guest's own TCP socket with kTLS through virtio-net device. Design error originated from incorrect framing treating vsock as data transport rather than control channel. User directed immediate withdrawal of all uncommitted vsock design artifacts: six new ADRs (0145-0150), feature-delta V-0 through V-19 sections, and proposed-status notes added to ten existing ADRs (0114/0117/0124/0126/0127/0128/0130/0131/0142/0143). Rejection preserves approved research recommendation for routed TAP with virtio-net as first bounded replacement experiment keeping existing TPROXY/kTLS until #303 replaces it.
+~557t ⚖️ 2,701
 
-**73353** 2:27a 🔵 **UnixInstant Atomicity Investigation for Concurrent Timestamp Access**
-Investigation into whether UnixInstant can be made atomic for lock-free concurrent timestamp access across pump threads. The current UnixInstant implementation wraps a Duration which internally requires two fields (seconds as u64 + nanoseconds as u32), making it larger than a single machine word and incompatible with standard atomic primitives like AtomicU64. The existing mtls splice pump code works around this by storing wall-clock progress as raw AtomicU64 nanoseconds (last_progress_unix_nanos) rather than as a typed UnixInstant, then reconstructing UnixInstant values when needed via UnixInstant::from_unix_duration(Duration::from_nanos(...)). This investigation is exploring whether UnixInstant can be refactored to enable atomic read/write operations for concurrent timestamp coordination between pump threads without locks.
-~394t 🔍 11,246
+**78328** 5:24p ✅ **Vsock Data-Path Design Documentation Withdrawn and Reverted**
+Vsock data-path replacement design documentation completely withdrawn from repository. Bash command deleted six newly created ADR files (0145-microvm-network-attachment-over-vsock-packet-uplink, 0146-node-shared-tun-and-in-serve-uplink-forwarder, 0147-uplink-identity-is-the-allocation-muxer-socket, 0148-attachment-activation-and-quiescence-are-the-forwarder-gate, 0149-shared-tun-classifier-and-ip-family-guard, 0150-e18-attachment-population-is-activated-vsock-uplinks) and reverted eleven modified files back to their HEAD state using git show to restore original content. Reverted files include feature-delta.md (removing V-0 through V-19 vsock sections) and ten existing ADRs where proposed supersession or amendment status notes had been added (0114 node-local bridge, 0117 density target, 0124 recovery, 0126 bridge MAC, 0127 TAP queue descriptor, 0128 VMM adapter queue ownership, 0130 unprivileged owner grant, 0131 activation timing, 0142 egress MAC classifier, 0143 seccomp filter). Git status confirms working tree now contains only legitimate in-progress work: AGENTS.md modifications, crate source edits in overdrive-control-plane/overdrive-dataplane/overdrive-worker, execution-log.json, and bin/ directory. All vsock packet-forwarding design artifacts from current session eliminated leaving no trace in documentation tree. Repository state restored to pre-vsock-design baseline preserving bridge-based implementation and its pending validation status.
+~569t 🛠️ 4,224
 
 
-Access 1094k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 1676k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
