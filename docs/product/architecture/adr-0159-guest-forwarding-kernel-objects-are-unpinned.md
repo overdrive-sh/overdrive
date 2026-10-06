@@ -1,0 +1,60 @@
+# ADR-0159 — Forwarding programs, maps and attachments are unpinned links owned by their process; process exit fails closed and closes the flows
+
+## Status
+
+**Proposed — ruling D19 approved by user 2026-10-05; pending independent
+DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF]
+vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05*. Surviving a
+service restart with flows intact is deferred to **#312**.
+
+## Context
+
+ADR-0115 pinned the TAP classifier's maps and links in bpffs and adopted them
+at boot; ADR-0137 then had to converge the dynamic members back to empty.
+
+A SockHash entry holds a reference to its socket, and the socket's closing
+removes it. All host pair sockets belong to the owner process (ADR-0151) and
+all guest pair sockets to `overdrive-init` (ADR-0150), so neither can outlive
+its process. A pinned route or tuple map would outlive them.
+
+Program attachments differ by API: a BPF link detaches when its last fd
+closes, while a legacy `BPF_PROG_ATTACH` to a cgroup persists until explicitly
+detached.
+
+The guest-capture spike showed process loss on each side:
+
+- host owner killed mid-transfer: the in-flight application saw
+  `ECONNRESET`; new connects were reset; DNS failed; both owners recovered
+  after restart;
+- guest owner killed mid-transfer: cgroup hooks were gone; new TCP and UDP
+  failed with `ENETUNREACH`; host servers saw no new connection; the in-flight
+  application saw a clean EOF with 0 bytes (ADR-0160 addresses this).
+
+## Decision
+
+- Every forwarding program, map and attachment, on host and guest, is created
+  without bpffs pins and lives exactly as long as its owner process.
+- **Every attachment is a BPF link** held by the owner: TCX, `sock_ops`,
+  cgroup socket-address hooks, `sock_release`, SK_SKB on SockHash maps, and
+  `fexit`. No attachment uses an API that survives the process.
+- When the owner exits, forwarding stops and every flow the owner held closes.
+  No guest flow reaches any peer afterwards.
+- Boot never adopts forwarding state. A box reboot ends every VM; forwarding
+  is rebuilt as VMs relaunch.
+
+## Alternatives considered
+
+- **Pin the objects and adopt them at boot.** The pins would outlive the
+  sockets, adding a stale-state class that buys nothing until #312. Rejected.
+- **Pin only the programs.** Programs without their maps carry no state worth
+  keeping. Rejected.
+- **Legacy cgroup attach.** Would leave hooks running after the owner exits,
+  steering traffic to sockets that no longer exist. Rejected.
+
+## Consequences
+
+- Owner-process loss fails closed by construction (V-8 shows it in the
+  production composition).
+- `sweep_stale` reduces to verifying that no residue exists.
+- A control-plane restart closes every guest flow; VMs keep running and open
+  new flows once the owner returns.
