@@ -1,0 +1,1063 @@
+# Checks the `cargo xtask quint` runner executes for specs/quint/guest-flow-owner/.
+#
+# Each [[check]] names one property of one instance (`main`) of one spec file (`spec`, relative to
+# this directory). `invariant` = safety (state predicate); `temporal` = liveness (TLC only).
+# backend "apalache" = bounded symbolic search to `max_steps`; "tlc" = exhaustive explicit-state
+# search of the finite instance (no step bound).
+# expect "holds" = the design property; "violation" = a non-vacuity witness (the behaviour is
+# reachable), a hazard/teeth instance (one design rule switched off), or an environment fault /
+# documented limitation / accepted, bounded design behaviour. Expectations were written before the
+# recorded runs (round 2: docs/feature/netns-density-295/spike/quint-owner-findings-r2.md; round 3,
+# after the user decisions of 2026-10-06 on U-5/K-A4, D16-PREF and D8a-READMIT, and on the
+# accepted exposures D8a-PROBE / D8a-FLUSH: quint-owner-findings-r3.md).
+# ci = true only for checks measured under 2 minutes wall-clock on the Lima VM (`cargo xtask quint check`).
+
+
+# Module A: control sessions, flow admission, TcpAccept pairing (U-1, U-5). Invariants 1, 3, 4, CurrentGeneration, ClosedIsTerminal
+[[check]]
+name = "owner-flows-safety-tlc"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-safety-apalache"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 12
+expect = "holds"
+ci = false
+
+# U-5 + K-A4: a guest TcpAccept half (accepted, or still in the guest's accept queue) whose host side
+# closed is eventually torn down
+[[check]]
+name = "owner-flows-guest-half-ends"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+temporal = "GuestHalfEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Non-vacuity witnesses: each behaviour is reachable (expected violation)
+[[check]]
+name = "owner-flows-witness-paired"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoPaired"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-witness-reuse"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoReuse"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-witness-quiesce-abort"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoQuiesceAbort"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-witness-late-completion"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoLateCompletion"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-witness-accept-paired"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoAcceptPaired"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-witness-phantom-connect"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoPhantomConnect"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+# K-A4 removes a queued V_g whose host side closed before the guest accepted it (reachable)
+[[check]]
+name = "owner-flows-witness-queue-reset"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoQueueReset"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+
+# Teeth: each hazard switches one design rule off (expected violation)
+[[check]]
+name = "owner-flows-hazard-split-claim"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugSplitClaim"
+invariant = "OneLiveSession"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-install-early"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugInstallEarly"
+invariant = "NoInstallBeforeRead"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-admit-split"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugAdmitSplit"
+invariant = "NoAdmitWhenClosed"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-paired-no-recheck"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugPairedNoRecheck"
+invariant = "NoAdmitWhenClosed"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = false
+
+[[check]]
+name = "owner-flows-hazard-no-abort-on-loss"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugNoAbortOnLoss"
+invariant = "NoAdmitWhenClosed"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-teardown-skips-flows"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugTeardownSkipsFlows"
+invariant = "CurrentGeneration"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-late-paired-resurrects"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugLatePairedResurrects"
+invariant = "ClosedIsTerminal"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+
+# K-A2 dropped (V-22): a dead VM's queued connection is attributed to the next allocation
+[[check]]
+name = "owner-flows-env-stale-conn"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_envStaleConn"
+invariant = "CurrentGeneration"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+
+# K-A4 dropped (environment variant): U-5's discard rule then orphans a guest TcpAccept half
+[[check]]
+name = "owner-flows-env-guest-misses-host-close"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_envGuestMissesHostClose"
+temporal = "GuestHalfEnds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Prediction: a guest Abort tombstone does not remove the K-A4 dependence (session-loss path)
+[[check]]
+name = "owner-flows-alt-tombstone-misses-close"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_altTombstoneMissesClose"
+temporal = "GuestHalfEnds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Module B: guest UDP slots (D25, SLOT-ABORT, U-2). TLC exhaustive on the 1-destination instance
+[[check]]
+name = "udp-slots-safety-tlc"
+spec = "udp_slots.qnt"
+main = "slots_live"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-release-liveness"
+spec = "udp_slots.qnt"
+main = "slots_live"
+temporal = "ReleasedSlotBecomesFree"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-safety-apalache"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 8
+expect = "holds"
+ci = false
+
+[[check]]
+name = "udp-slots-witness-late-paired"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoLatePaired"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-witness-routed"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoRouted"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-witness-two-slots-one-socket"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoTwoSlotsOneSocket"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-witness-reassociation"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoReassociation"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-claim-split"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugClaimSplit"
+invariant = "SlotHeldOnce"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-keep-frames"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugKeepFrames"
+invariant = "ReleasedSlotCarriesNoData"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-late-paired-by-slot-route"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugLatePairedBySlot"
+invariant = "RouteCurrent"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-late-paired-by-slot-data"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugLatePairedBySlot"
+invariant = "ReleasedSlotCarriesNoData"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-ignore-late-paired"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugIgnoreLatePaired"
+invariant = "LatePairedAborted"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-keep-frames-on-end"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugKeepFramesOnEnd"
+invariant = "NoReassociationWithoutNewDatagram"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-no-audit-fairness"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_liveTeeth"
+temporal = "NoAuditFairness"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Module C: CID lease, next-fit, D16-EXCL with D16-PREF (prefer unexcluded offsets, fall back to an
+# excluded free offset, refuse only when no offset is free). Safety = CidUnique, NoExcludedWhileUnexcludedFree,
+# NoRefusalWhileFree. Apalache stalls on the next-fit fold; TLC is the evidence for holds
+[[check]]
+name = "cid-lease-safety-tlc"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-two-foreign-safety-tlc"
+spec = "cid_lease.qnt"
+main = "lease_twoForeign"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-single-safety-apalache"
+spec = "cid_lease.qnt"
+main = "lease_single"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 9
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-eventually-placed"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+temporal = "EventuallyPlaced"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Restart guarantee (2 workloads, so an unexcluded offset is always free at a retry): within one serve
+# process no offset fails twice; across a restart it may, once
+[[check]]
+name = "cid-lease-boot-no-reclash-within-boot"
+spec = "cid_lease.qnt"
+main = "lease_boot"
+invariant = "NoReclashWithinBoot"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-boot-cid-unique"
+spec = "cid_lease.qnt"
+main = "lease_boot"
+invariant = "CidUnique"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-boot-retry-same-foreign"
+spec = "cid_lease.qnt"
+main = "lease_single_boot"
+invariant = "RetryNeverSameForeignCid"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-boot-reclash-ever"
+spec = "cid_lease.qnt"
+main = "lease_boot"
+invariant = "NoReclashEver"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-transient-safety"
+spec = "cid_lease.qnt"
+main = "lease_transient"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Finding r2-1 (refused while usable offsets free) — expected gone under D16-PREF (r2: violation)
+[[check]]
+name = "cid-lease-transient-starved"
+spec = "cid_lease.qnt"
+main = "lease_transient"
+invariant = "NoStarvedOnUsableOffset"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-transient-eventually-placed"
+spec = "cid_lease.qnt"
+main = "lease_transient"
+temporal = "EventuallyPlaced"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-witness-fallback"
+spec = "cid_lease.qnt"
+main = "lease_transient"
+invariant = "WitnessNoFallback"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Two workloads with transient pre-READY exits: preference and fallback under concurrent placement
+[[check]]
+name = "cid-lease-transient-two-safety-tlc"
+spec = "cid_lease.qnt"
+main = "lease_transientTwo"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-transient-two-eventually-placed"
+spec = "cid_lease.qnt"
+main = "lease_transientTwo"
+temporal = "EventuallyPlaced"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Consequences of the fallback (documented, accepted with D16-PREF): when only excluded offsets are
+# free, the retry may return to an excluded (foreign) offset and fail there again within one process;
+# the fallback may even return the offset that just failed while other excluded offsets are free
+[[check]]
+name = "cid-lease-fallback-reclash"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "NoReclashWithinBoot"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-fallback-same-foreign"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "RetryNeverSameForeignCid"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-retry-different-unless-all-held"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "RetryDifferentUnlessAllHeld"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-transient-two-retry-different"
+spec = "cid_lease.qnt"
+main = "lease_transientTwo"
+invariant = "RetryDifferentUnlessAllHeld"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-witness-clash"
+spec = "cid_lease.qnt"
+main = "lease_single"
+invariant = "WitnessNoClash"
+backend = "apalache"
+max_steps = 9
+expect = "violation"
+ci = true
+
+
+# Teeth: the r1 finding-2 counterexamples come back without D16-EXCL
+[[check]]
+name = "cid-lease-hazard-no-exclusion"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugNoExclusion"
+invariant = "RetryDifferentUnlessAllHeld"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-no-exclusion-foreign"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugNoExclusion"
+invariant = "RetryNeverSameForeignCid"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-no-exclusion-reclash"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugNoExclusion"
+invariant = "NoReclashWithinBoot"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-no-exclusion-preference"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugNoExclusion"
+invariant = "NoExcludedWhileUnexcludedFree"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-first-fit-no-exclusion"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_single_bugFirstFitNoExclusion"
+invariant = "RetryNeverSameCid"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Teeth for D16-PREF: the r2 rule (refuse when every free offset is excluded) brings r2-1 back
+[[check]]
+name = "cid-lease-hazard-refuse-starved"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_transient_bugRefuse"
+invariant = "NoStarvedOnUsableOffset"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-refuse-while-free"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_transient_bugRefuse"
+invariant = "NoRefusalWhileFree"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-refuse-eventually-placed"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_transient_bugRefuse"
+temporal = "EventuallyPlaced"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Prediction: with D16-EXCL, next-fit is no longer needed for the retry guarantee
+[[check]]
+name = "cid-lease-first-fit-with-exclusion"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_firstFitWithExclusion"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Module D: boot route/rules (D8a, D8a-ROUTE, U-4), intake listeners (D23, D8a-REVOKE), activation (U-6)
+[[check]]
+name = "steering-safety-tlc"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-two-safety-tlc"
+spec = "steering.qnt"
+main = "steer_two"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-two-activation-completes"
+spec = "steering.qnt"
+main = "steer_two"
+temporal = "ActivationCompletes"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-two-quiesce-completes"
+spec = "steering.qnt"
+main = "steer_two"
+temporal = "QuiesceCompletes"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-two-witness-err-with-resetting"
+spec = "steering.qnt"
+main = "steer_two"
+invariant = "WitnessNoErrWithResetting"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-safety-apalache"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 16
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-quiesce-completes"
+spec = "steering.qnt"
+main = "steer_ok"
+temporal = "QuiesceCompletes"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-listener-follows-guest"
+spec = "steering.qnt"
+main = "steer_ok"
+temporal = "ListenerFollowsGuest"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-resetting-resolves"
+spec = "steering.qnt"
+main = "steer_ok"
+temporal = "ResettingResolves"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-activation-completes"
+spec = "steering.qnt"
+main = "steer_ok"
+temporal = "ActivationCompletes"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-boot-opens"
+spec = "steering.qnt"
+main = "steer_live"
+temporal = "BootOpens"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-witness-admitted"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoAdmitted"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-crash-after-route"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoCrashAfterRoute"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-quiesce-take-down"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoQuiesceWithListener"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-second-allocation"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoSecondAllocation"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+# Accepted, bounded design behaviour (D8a-PROBE, 2026-10-06): a resetting listener refuses marked probes while
+# its removal is retried — reachable, not a defect
+[[check]]
+name = "steering-witness-revoke-retry"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoRevokeRetry"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-activation-err"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoActivationErr"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+
+# Teeth for D8a-REVOKE: the r1 finding-1 counterexample comes back
+[[check]]
+name = "steering-hazard-revoke-fail-closes"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRevokeFailCloses"
+invariant = "NoHostServiceReached"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-revoke-fail-closes-names"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRevokeFailCloses"
+invariant = "ElementNamesListener"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-revoke-fail-closes-quiesce"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRevokeFailCloses"
+temporal = "QuiesceCompletes"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-release-with-element"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRevokeFailClosesNoElemGuard"
+invariant = "NoReleaseWithElement"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# K-D3 dropped (V-23): leaks occur only inside the flush window; the route is never kept or added without the rules
+[[check]]
+name = "steering-env-flush-safety"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlush"
+invariant = "SafetyUnderFlush"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+# Finding r2-2 (a resetting listener wanted again serves with no element after a flush) — expected gone
+# under D8a-READMIT (r2: violation)
+[[check]]
+name = "steering-env-flush-admitted-has-element"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlush"
+invariant = "AdmittedHasElement"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-hazard-rewant-keeps-element"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlushBugRewantKeeps"
+invariant = "AdmittedHasElement"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-repair-outside-quiesce"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlushBugRepairOutsideQuiesce"
+invariant = "AdmittedHasElement"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Accepted, bounded K-D3 exposure (D8a-FLUSH, 2026-10-06): a foreign flush exposes host services
+# (the two violations below are that documented exposure) and the exposure ends at the audit's repair
+# (serve up) or the next boot's start_shared_owner (ExposureEnds holds; teeth without audit fairness)
+[[check]]
+name = "steering-env-flush-exposure-ends"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlush"
+temporal = "ExposureEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-hazard-exposure-no-audit-fairness"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlushNoAuditFairness"
+temporal = "ExposureEndsNoAuditFairness"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-flush-route-implies-rules"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlush"
+invariant = "RouteImpliesRules"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-flush-host-service"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlush"
+invariant = "NoHostServiceReached"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-flush-witness-refusal"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlush"
+invariant = "WitnessNoBootRefusal"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-converge-ignores-rules"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFlushBugConverge"
+invariant = "ConvergeNeedsRules"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-route-first-boot-opens"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRouteFirst"
+temporal = "BootOpens"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Prediction: with D8a-ROUTE the reversed boot order fails to start rather than leaking
+[[check]]
+name = "steering-hazard-route-first-safety"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRouteFirst"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-hazard-route-first-no-check"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRouteFirstNoCheck"
+invariant = "RouteImpliesRules"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-route-first-no-check-host-service"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRouteFirstNoCheck"
+invariant = "NoHostServiceReached"
+backend = "apalache"
+max_steps = 18
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-admit-first"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugAdmitFirst"
+invariant = "NoHostServiceReached"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-close-first"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugCloseFirst"
+invariant = "NoHostServiceReached"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-quiesce-keeps"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugQuiesceKeeps"
+invariant = "NoListenerWhileQuiesced"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-act-err-early"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugActErrEarly"
+invariant = "ActivationAllOrNothing"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-act-ok-partial"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugActOkPartial"
+invariant = "ActivationAllOrNothing"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-no-owner-fairness"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_liveTeeth"
+temporal = "QuiesceCompletesNoFairness"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Deeper bounded runs (parity with the first model check's depths); not for CI
+[[check]]
+name = "owner-flows-safety-apalache-deep"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 14
+expect = "holds"
+ci = false
+
+[[check]]
+name = "steering-safety-apalache-deep"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 20
+expect = "holds"
+ci = false
+
+[[check]]
+name = "steering-two-safety-apalache"
+spec = "steering.qnt"
+main = "steer_two"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 16
+expect = "holds"
+ci = true
