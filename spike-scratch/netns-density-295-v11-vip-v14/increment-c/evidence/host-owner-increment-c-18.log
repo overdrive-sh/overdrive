@@ -1,0 +1,18 @@
+{"ack_oob":true,"arm":true,"declare":[7300,7301,7302],"egress_ifs":["v11h","eno12399np0"],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1081593,"programs":[{"id":42168,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":42169,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":42170,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":42171,"name":"lo_decode(tcx lo egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":42171,"name":"lo_decode(tcx v11h egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":42171,"name":"lo_decode(tcx eno12399np0 egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":42172,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":42173,"name":"sockops(/sys/fs/cgroup/gvc-spike-1081593)","tag":"d3503b23d0e6960e","verified_insns":260},{"id":42174,"name":"vip_connect4(/sys/fs/cgroup/gvc-spike-1081593)","tag":"d6ec622dab236cf1","verified_insns":38},{"vipmap":["10.251.0.10:7200/6=10.250.95.2:7200","10.251.0.10:7210/17=10.250.95.2:7210","10.251.0.11:7000/6=<metal-address>:7000","10.251.0.11:7010/17=<metal-address>:7010"]}],"role":"host","tuple_from_peer":false,"udp_park":true,"unframe":"tc"}
+{"ev":"park_pool","slots":256}
+{"cid":30348,"ev":"host_ready","intakes":["<metal-address>:2222=22","<metal-address>:2710=7100","<metal-address>:2711=7101","<metal-address>:2713=7303"]}
+{"cid":30348,"ev":"hello"}
+{"ev":"ctl_closed","t_us":4516820117934}
+{"cid":30348,"ev":"hello"}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":1,"local":"10.250.95.1:52446","peer":"10.250.95.2:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":0}
+{"ev":"host_dg_teardown","flow":1}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":3,"local":"10.250.95.1:58138","peer":"10.250.95.2:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":0}
+{"ev":"host_dg_teardown","flow":3}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":5,"local":"10.250.95.1:42059","peer":"10.250.95.2:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":0}
+{"ev":"host_dg_teardown","flow":5}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":7,"local":"10.250.95.1:35818","peer":"10.250.95.2:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":0}
+{"ev":"host_dg_teardown","flow":7}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":9,"local":"10.250.95.1:59843","peer":"10.250.95.2:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":0}
+{"ev":"host_dg_teardown","flow":9}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":11,"local":"10.250.95.1:59188","peer":"10.250.95.2:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":0}
+{"ev":"host_dg_teardown","flow":11}

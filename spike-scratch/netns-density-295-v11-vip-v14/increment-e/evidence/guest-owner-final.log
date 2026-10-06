@@ -1,0 +1,15 @@
+{"ack_oob":true,"arm":true,"declare":[7300,7301,7302],"egress_ifs":[],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":18339,"programs":[{"id":268,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":269,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":270,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":271,"name":"lo_decode(tcx lo egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":272,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":273,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":274,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":275,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":276,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":277,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":278,"name":"sockops(root cgroup)","tag":"d3503b23d0e6960e","verified_insns":260},{"id":279,"name":"listen_start(fexit inet_csk_listen_start)","tag":"7f3eaacd9edf8aa0","verified_insns":76},{"id":280,"name":"listen_stop(fexit inet_csk_listen_stop)","tag":"0b1bb60807b6c4fb","verified_insns":54}],"role":"guest","tuple_from_peer":true,"udp_park":true,"unframe":"tc"}
+{"ev":"park_pool","slots":256}
+{"ev":"ctl_open","t_us":1628664626}
+{"enum_us":283,"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"port":7300,"reason":"session_open","seq":1,"t_us":1628664925}
+{"enum_us":372,"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"port":7301,"reason":"session_open","seq":2,"t_us":1628665014}
+{"enum_us":450,"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"port":7302,"reason":"session_open","seq":3,"t_us":1628665092}
+{"ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+{"cookie":43021,"ev":"listen_event","kind":"start","ktime_us":1630510274,"port":7300}
+{"ev":"ctl_closed","t_us":1635512622}
+{"err":"Connection reset by peer (os error 104)","ev":"ctl_connect_failed"}
+{"err":"Connection reset by peer (os error 104)","ev":"ctl_connect_failed"}
+{"ev":"ctl_open","t_us":1636263696}
+{"enum_us":296,"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"port":7300,"reason":"session_open","seq":4,"t_us":1636264022}
+{"enum_us":368,"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"port":7301,"reason":"session_open","seq":5,"t_us":1636264094}
+{"enum_us":440,"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"port":7302,"reason":"session_open","seq":6,"t_us":1636264166}

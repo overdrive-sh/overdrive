@@ -1,0 +1,13 @@
+{"ack_oob":true,"arm":true,"declare":[7300,7301,7302],"egress_ifs":["v11h","eno12399np0"],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1109607,"programs":[{"id":42431,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":42432,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":42433,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":42434,"name":"lo_decode(tcx lo egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":42435,"name":"eg_decode_frag(tcx v11h egress)","tag":"a9285dfbbf33b7ff","verified_insns":627},{"id":42435,"name":"eg_decode_frag(tcx eno12399np0 egress)","tag":"a9285dfbbf33b7ff","verified_insns":627},{"id":42436,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":42437,"name":"sockops(/sys/fs/cgroup/gvc-spike-1109607)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","tuple_from_peer":true,"udp_park":true,"unframe":"hybrid"}
+{"ev":"park_pool","slots":256}
+{"cid":37996,"ev":"host_ready","intakes":["<metal-address>:2222=22","<metal-address>:2710=7100","<metal-address>:2711=7101","<metal-address>:2713=7303"]}
+{"cid":37996,"ev":"hello"}
+{"ev":"ctl_closed","t_us":4518092767494}
+{"cid":37996,"ev":"hello"}
+{"client":"<metal-address>:39070","ev":"host_intake","flow":2,"gport":7303,"park":0}
+{"ev":"refused","flow":2}
+{"age_ms":0,"ev":"flow_closed","flow":2,"kind":2,"reset":true,"why":"refused"}
+{"ev":"ctl_closed","t_us":4519128280981}
+{"cid":37996,"ev":"hello"}
+{"ev":"ctl_closed","t_us":4519140295905}
+{"cid":37996,"ev":"hello"}

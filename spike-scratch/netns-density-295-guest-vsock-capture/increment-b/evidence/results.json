@@ -1,0 +1,141 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ],
+    "modules_diff": [],
+    "modules_restored": true,
+    "root_cgroup_bpf_unchanged": true
+  },
+  "d15": {
+    "guest_net": "7.0.0-29-generic\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \ndummy0           UNKNOWN        0a:f3:9f:39:2b:52 <BROADCAST,NOARP,UP,LOWER_UP> \n1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\n    inet 127.0.0.1/8 scope host lo\n       valid_lft forever preferred_lft forever\n2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000\n    inet 10.99.7.2/32 scope global dummy0\n       valid_lft forever preferred_lft forever\nOWNER_READY role=guest pid=109\n",
+    "sockname": "{\"connect\":\"ok\",\"getpeername\":\"<metal-address>:7000\",\"getsockname\":\"10.99.7.2:37508\"}\n{\"bind\":\"10.99.7.2:0\",\"bind_result\":\"ok\",\"connect\":\"Network is unreachable (os error 101)\",\"getpeername\":\"\",\"getsockname\":\"10.99.7.2:35385\"}\n"
+  },
+  "owner": {
+    "guest_log_head": "{\"ack_oob\":true,\"ev\":\"programs_loaded\",\"flush\":true,\"pid\":109,\"programs\":[{\"id\":8,\"name\":\"verdict\",\"tag\":\"354384a026e66a00\",\"verified_insns\":323},{\"id\":9,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":10,\"name\":\"strp_verdict\",\"tag\":\"4f81f3897a228eec\",\"verified_insns\":334},{\"id\":11,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"59011738e914c2f5\",\"verified_insns\":423},{\"id\":12,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":13,\"name\":\"connect4\",\"tag\":\"ad52658a44f6fc01\",\"verified_insns\":234},{\"id\":14,\"name\":\"sendmsg4\",\"tag\":\"25313d2a991262c4\",\"verified_insns\":204},{\"id\":15,\"name\":\"recvmsg4\",\"tag\":\"5924dfd9424078bf\",\"verified_insns\":82},{\"id\":16,\"name\":\"getpeername4\",\"tag\":\"90774192d60dfced\",\"verified_insns\":127},{\"id\":17,\"name\":\"sock_release\",\"tag\":\"e4511879b8661ea8\",\"verified_insns\":69},{\"id\":18,\"name\":\"sockops\",\"tag\":\"39b281aa4f25ccfe\",\"verified_insns\":34}],\"role\":\"guest\",\"udp_park\":true}\n{\"ev\":\"guest_ready\",\"slots\":64,\"w\":\"10.99.7.2\"}\n{\"counters\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"flows_open\":0,\"t_ms\":1791221978997.5667}",
+    "host_stats": {
+      "counters": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ctl_bytes_read": 8,
+      "flows_open": 0,
+      "t_ms": 1791221979000.314
+    }
+  },
+  "preflight": {
+    "blob_sha256": "abce2f435fcfe792b5a0b072503f344f0b79b82310157e2f032e7c241eb1343c",
+    "cid": 53506,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": []
+  },
+  "v2": {
+    "curl_host": "curl: (7) Failed to connect to <metal-address> port 8080 after 0 ms: Could not connect to server\n000 0 :-1 :-1\nsha256sum: can't open '/tmp/blob': No such file or directory\n",
+    "rst_once": {
+      "dst": "<metal-address>:7002",
+      "err": "connect: Network is unreachable (os error 101)",
+      "ok": false,
+      "size": 100
+    },
+    "tcp_1mib": {
+      "dst": "<metal-address>:7000",
+      "err": "connect: Network is unreachable (os error 101)",
+      "ok": false,
+      "size": 1048576
+    }
+  },
+  "v3": {
+    "banner_once": {
+      "dst": "<metal-address>:7001",
+      "err": "connect: Network is unreachable (os error 101)",
+      "ok": false,
+      "size": 4096
+    }
+  },
+  "v4": {
+    "inbound_banner_once": "{\"dst\":\"<metal-address>:2711\",\"err\":\"banner read: Connection reset by peer (os error 104)\",\"local\":\"<metal-address>:41810\",\"ok\":false,\"peer\":\"<metal-address>:2711\",\"size\":4096,\"stage\":\"banner\"}\n",
+    "inbound_plain_once": "{\"dst\":\"<metal-address>:2710\",\"err\":\"read: Connection reset by peer (os error 104)\",\"got\":0,\"local\":\"<metal-address>:54032\",\"ok\":false,\"os_error\":104,\"peer\":\"<metal-address>:2710\",\"read_err_kind\":\"ConnectionReset\",\"size\":65536}\n",
+    "ssh_once": "Connection reset by <metal-address> port 2222\n"
+  },
+  "v5": {
+    "getent": "rc=2\n",
+    "udp_unconnected": {
+      "connected": false,
+      "dst": "<metal-address>:7010",
+      "ev": "udp_client",
+      "local": "0.0.0.0:49898",
+      "ok": false,
+      "peer": "",
+      "results": [
+        {
+          "err": "send Network is unreachable (os error 101)",
+          "ok": false,
+          "size": 0
+        },
+        {
+          "err": "send Network is unreachable (os error 101)",
+          "ok": false,
+          "size": 1
+        },
+        {
+          "err": "send Network is unreachable (os error 101)",
+          "ok": false,
+          "size": 1431
+        },
+        {
+          "err": "send Network is unreachable (os error 101)",
+          "ok": false,
+          "size": 59000
+        }
+      ]
+    }
+  }
+}

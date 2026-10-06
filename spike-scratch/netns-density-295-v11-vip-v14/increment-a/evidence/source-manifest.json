@@ -1,0 +1,24 @@
+{
+  "ch_commits_since_v53": "41a619d19 vmm: Add backend=vhost-kernel to --vsock\n9b68dbb57 virtio-devices: vsock: Add vhost-kernel backed vsock device",
+  "ch_submodule_branch": "overdrive/vhost-kernel-vsock",
+  "ch_submodule_dirty": "",
+  "ch_submodule_head": "41a619d191f6472f79a3f22bcb9576c2a516906c",
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-v11-vip-v14/increment-a/run.py ",
+  "spike_sources": {
+    "spike-scratch/netns-density-295-v11-vip-v14/.gitignore": "55e10cc7aab71b9402d5498f0c7b282cd93c7d9c1bfdee26e2bf8ced0c89fda8",
+    "spike-scratch/netns-density-295-v11-vip-v14/bpf/Cargo.lock": "1d62c6d8caba3aa706844f516569a09c420ee0e93dc9ece7e35aa2484b06719c",
+    "spike-scratch/netns-density-295-v11-vip-v14/bpf/Cargo.toml": "0aeadc7fff51d1039533287209aa75cee3c37008d526e38958edeb4a264ba8e8",
+    "spike-scratch/netns-density-295-v11-vip-v14/bpf/src/main.rs": "730ed3a96c360d57da0d7a067a56d0b7e5768797c14bfb3f7103130c95c4463d",
+    "spike-scratch/netns-density-295-v11-vip-v14/guest/init.sh": "f0b6efe9c923fddd630b235181724f1fed98eb0ab676ed1b2878db382fef864e",
+    "spike-scratch/netns-density-295-v11-vip-v14/harness.py": "11b2b3cfd06378ca9ef69f1d0c31c1428bbb12ea578788f9b3c6523e0fce46a9",
+    "spike-scratch/netns-density-295-v11-vip-v14/increment-a/run.py": "9955ed5a499660e8e1d983dec88808949bc35ddfe559ffcebef924b6e5a70f93",
+    "spike-scratch/netns-density-295-v11-vip-v14/launch.py": "37ed6b293de9959ef6da05abc408284e448018a852a7b33e20302437566801de",
+    "spike-scratch/netns-density-295-v11-vip-v14/rsync-owned-filter.sh": "1d092370a1ef0f5cda7053f125b50817b482c1223196952566daa096dfb5038a",
+    "spike-scratch/netns-density-295-v11-vip-v14/vfwd/Cargo.lock": "aa516b72ba5a108e37eed901f50d0c476bc7e2eefdc76d4037367cbc4067ce50",
+    "spike-scratch/netns-density-295-v11-vip-v14/vfwd/Cargo.toml": "55158317b10e4fc186273a8d066a5d6edfb1582994a7c2c80a429b8087a54caf",
+    "spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/main.rs": "54a7174361fae89cd2f79e18e168ad7134e753f989f5e77b7ddf65631216ada4",
+    "spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/owner.rs": "413659a99320df01edca4c364d86fd4089dddf57a9d34aeff76908f9c39d29ab",
+    "spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/sys.rs": "e76f1ebbc807764ef1f9c1b42622bdeb2bae8c297a55b5d47af9c161a9e99921"
+  },
+  "superproject_head": "68545fdd0be96565a1a2d5586f26024963eaee1d"
+}

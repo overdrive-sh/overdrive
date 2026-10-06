@@ -1,0 +1,11 @@
+tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+20:22:33.523935 IP (tos 0x0, ttl 64, id 37191, offset 0, flags [+], proto UDP (17), length 1492)
+    10.250.95.1.41148 > 10.250.95.2.9: UDP, length 4096
+20:22:33.523959 IP (tos 0x0, ttl 64, id 37191, offset 1472, flags [+], proto UDP (17), length 1500)
+    10.250.95.1 > 10.250.95.2: ip-proto-17
+20:22:33.523966 IP (tos 0x0, ttl 64, id 37191, offset 2952, flags [none], proto UDP (17), length 1172)
+    10.250.95.1 > 10.250.95.2: ip-proto-17
+
+3 packets captured
+3 packets received by filter
+0 packets dropped by kernel

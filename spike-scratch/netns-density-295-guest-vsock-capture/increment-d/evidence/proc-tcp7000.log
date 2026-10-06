@@ -1,0 +1,141 @@
+{"banner":false,"bind":"<metal-address>:7000","ev":"tcp_server_ready","rst":false}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:38572"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:38578"}
+{"bytes":1048576,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38584"}
+{"bytes":4194304,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38600"}
+{"bytes":3565,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45988"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:45994"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:38736"}
+{"bytes":2186,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51670"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:38740"}
+{"bytes":3263,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:34094"}
+{"bytes":2536,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:34108"}
+{"bytes":2677,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:34114"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:51686"}
+{"bytes":3570,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45450"}
+{"bytes":2187,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45466"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:34126"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:45476"}
+{"bytes":4092,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44922"}
+{"bytes":3205,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44934"}
+{"bytes":3230,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44946"}
+{"bytes":581,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44956"}
+{"bytes":737,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44964"}
+{"bytes":3142,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44972"}
+{"bytes":1438,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44974"}
+{"bytes":1879,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44986"}
+{"bytes":4025,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:44996"}
+{"bytes":8,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45004"}
+{"bytes":4040,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45018"}
+{"bytes":377,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45030"}
+{"bytes":2427,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45032"}
+{"bytes":1929,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45036"}
+{"bytes":2888,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45048"}
+{"bytes":2418,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45056"}
+{"bytes":2340,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45068"}
+{"bytes":2546,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45082"}
+{"bytes":2403,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45096"}
+{"bytes":1521,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45104"}
+{"bytes":2588,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:45112"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:56682"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:45116"}
+{"bytes":1202,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:57072"}
+{"bytes":2489,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:57086"}
+{"bytes":1804,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:57096"}
+{"bytes":3942,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:57104"}
+{"bytes":1180,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:57116"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:45126"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:57120"}
+{"bytes":1919,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38402"}
+{"bytes":2001,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38418"}
+{"bytes":1632,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38432"}
+{"bytes":2292,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38438"}
+{"bytes":2627,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38444"}
+{"bytes":3383,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38450"}
+{"bytes":4077,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38458"}
+{"bytes":3092,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:38470"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:55938"}
+{"bytes":3028,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33726"}
+{"bytes":197,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33728"}
+{"bytes":3878,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33742"}
+{"bytes":3068,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33758"}
+{"bytes":1133,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33772"}
+{"bytes":3141,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33788"}
+{"bytes":2973,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33802"}
+{"bytes":2188,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33808"}
+{"bytes":763,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33822"}
+{"bytes":608,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33830"}
+{"bytes":3132,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33836"}
+{"bytes":932,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33844"}
+{"bytes":197,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33860"}
+{"bytes":3014,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33872"}
+{"bytes":1203,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33874"}
+{"bytes":3164,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33890"}
+{"bytes":1828,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:33904"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:38474"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:33914"}
+{"bytes":933,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:56484"}
+{"bytes":100,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:56500"}
+{"bytes":3332,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:56510"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:33924"}
+{"bytes":1483,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:47030"}
+{"bytes":2690,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:47044"}
+{"bytes":3509,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:47046"}
+{"bytes":3152,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:47056"}
+{"bytes":3160,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:47062"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:56522"}
+{"bytes":3656,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58698"}
+{"bytes":3932,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58712"}
+{"bytes":934,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58724"}
+{"bytes":1763,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58726"}
+{"bytes":3760,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58734"}
+{"bytes":1747,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58748"}
+{"bytes":512,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58754"}
+{"bytes":2749,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58760"}
+{"bytes":2122,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58764"}
+{"bytes":3066,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58776"}
+{"bytes":1615,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58786"}
+{"bytes":1027,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58788"}
+{"bytes":3403,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58804"}
+{"bytes":2993,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58820"}
+{"bytes":3880,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58832"}
+{"bytes":2234,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58836"}
+{"bytes":1897,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58850"}
+{"bytes":3175,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58854"}
+{"bytes":991,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58870"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:47072"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:58878"}
+{"bytes":2213,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58062"}
+{"bytes":1206,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58068"}
+{"bytes":3773,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58070"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:55624"}
+{"bytes":848,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58094"}
+{"bytes":2794,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:58100"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:58078"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:58106"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:51466"}
+{"bytes":3610,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:46776"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:57072"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:46780"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:51498"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:51512"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:47496"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:56474"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:45198"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:46144"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:51640"}
+{"bytes":979,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51656"}
+{"bytes":3254,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51628"}
+{"bytes":2317,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:41570"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:50866"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:60646"}
+{"bytes":2751,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:60648"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:52374"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:51998"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:36374"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:51928"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:37388"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:37402"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:49100"}
+{"err":"hdr Connection reset by peer (os error 104)","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:37260"}
+{"err":"hdr Connection reset by peer (os error 104)","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:45608"}

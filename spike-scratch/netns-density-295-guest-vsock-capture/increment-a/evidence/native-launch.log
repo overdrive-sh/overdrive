@@ -1,0 +1,172 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.36s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-guest-vsock-capture/increment-a/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=960d314732ff21ce994524cc pid=977439
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <metal-target>:/home/ubuntu/overdrive
+
+sent 191,086,355 bytes  received 207,925 bytes  541,143.65 bytes/sec
+total size is 1,481,125,428  speedup is 7.74
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[17:10:34] === preflight
+[17:10:34] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[17:10:34]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[17:10:34]     none
+[17:10:34]     model name	: AMD EPYC 8024P 8-Core Processor
+[17:10:34]     16
+[17:10:34]     crw-rw---- 1 root kvm 10, 232 Oct  5 17:10 /dev/kvm
+[17:10:34] === build
+[17:11:54] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[17:11:54]        Compiling vm-device v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-device)
+[17:11:54]        Compiling arch v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/arch)
+[17:11:54]        Compiling pci v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/pci)
+[17:11:54]        Compiling devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/devices)
+[17:11:54]         Finished `release` profile [optimized] target(s) in 1m 19s
+[17:12:06] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/bpf/Cargo.toml  (rc=0)
+[17:12:06]        Compiling aya-build v0.1.3
+[17:12:06]        Compiling aya-ebpf-cty v0.2.3
+[17:12:06]        Compiling aya-ebpf-bindings v0.1.2
+[17:12:06]        Compiling vfwd-bpf v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/bpf)
+[17:12:06]         Finished `release` profile [optimized] target(s) in 12.22s
+[17:12:19] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/vfwd/Cargo.toml  (rc=0)
+[17:12:19]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[17:12:19]         |            ^^^^^^
+[17:12:19]     
+[17:12:19]     warning: `vfwd` (bin "vfwd") generated 3 warnings
+[17:12:19]         Finished `release` profile [optimized + debuginfo] target(s) in 13.17s
+[17:12:19] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[17:12:19]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=8af74ed48804f1e4314b7dfb09fdf861345565b9, with debug_info, not stripped
+[17:12:19]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor:                ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[17:12:19]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[17:12:19]     cloud-hypervisor v53.0.0
+[17:12:19]     Migration Protocol Versions: 0
+[17:12:19]     bpf-linker 0.0.0
+[17:12:19]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[17:12:19]     rustc 1.95.0 (59807616e 2026-04-14)
+[17:12:19] === guest image
+[17:12:19] $ ssh-keygen -q -t ed25519 -N '' -f /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -C spike-client  (rc=0)
+[17:12:19] $ ssh-keygen -q -t ed25519 -N '' -f /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/hostkey -C spike-guest  (rc=0)
+[17:12:20] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs.cpio.gz  (rc=0)
+[17:12:22] $ cat /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/proc-increment-a-host-owner.log; cat /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/host-owner-increment-a.log | head -5  (rc=0)
+[17:12:22]     
+[17:12:22]     thread 'main' (982585) panicked at src/owner.rs:629:65:
+[17:12:22]     called `Result::unwrap()` on an `Err` value: Os { code: 99, kind: AddrNotAvailable, message: "Cannot assign requested address" }
+[17:12:22]     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[17:12:22]     {"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":982585,"programs":[{"id":41784,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":41785,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":41786,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":41787,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":41788,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41}],"role":"host","udp_park":true}
+[17:12:22] launch VM: /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--flush,yes,--udp,park --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vm-increment-a-1791220342/serial.log --console off --vsock cid=52401,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vm-increment-a-1791220342/ch.log -v
+[17:12:24] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.58
+ip: RTNETLINK answers: File exists
+net.ipv4.tcp_fwmark_accept = 1
+GUEST_NET_BEGIN
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1000
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue qlen 1000
+    inet 10.99.7.2/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local 
+32765:	from all fwmark 0x295 lookup 295 
+32766:	from all lookup main 
+32767:	from all lookup default 
+GUEST_NET_END
+dummy0  lo
+
+thread 'main' (109) panicked at src/owner.rs:587:61:
+ctl connect: Os { code: 104, kind: ConnectionReset, message: "Connection reset by peer" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+GUEST_READY
+
+[17:12:25] guest$ uname -r; ip -br link; ip -4 addr; cat /tmp/owner.out; head -c 3000 /tmp/owner.log  (rc=0, 0.0s)
+[17:12:25]     7.0.0-29-generic
+[17:12:25]     BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+[17:12:25]     
+[17:12:25]     Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+[17:12:25]     
+[17:12:25]     OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+[17:12:25]     
+[17:12:25]     ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+[17:12:25]     ip route list|flush|add|del|change|append|replace|test ROUTE
+[17:12:25]     ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+[17:12:25]     	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+[17:12:25]     	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+[17:12:25]     ip tunnel add|change|del|show [NAME]
+[17:12:25]     	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+[17:12:25]     ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+[17:12:25]     ip rule [list] | add|del SELECTOR ACTION
+[17:12:25]     1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1000
+[17:12:25]         inet 127.0.0.1/8 scope host lo
+[17:12:25]            valid_lft forever preferred_lft forever
+[17:12:25]     2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue qlen 1000
+[17:12:25]         inet 10.99.7.2/32 scope global dummy0
+[17:12:25]            valid_lft forever preferred_lft forever
+[17:12:25]     
+[17:12:25]     thread 'main' (109) panicked at src/owner.rs:587:61:
+[17:12:25]     ctl connect: Os { code: 104, kind: ConnectionReset, message: "Connection reset by peer" }
+[17:12:25]     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[17:12:25]     {"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":109,"programs":[{"id":8,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":9,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":10,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":11,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":12,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":13,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":14,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":15,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":16,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":17,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":18,"name":"sockops","tag":"39b281aa4f25ccfe","verified_insns":34}],"role":"guest","udp_park":true}
+[17:12:25] guest$ /vfwd sockname --dst <metal-address>:7000; /vfwd sockname --bind 10.99.7.2:0 --dst <metal-address>:7000  (rc=0, 0.0s)
+[17:12:25]     {"connect":"Network is unreachable (os error 101)","getpeername":"","getsockname":"0.0.0.0:0"}
+[17:12:25]     {"bind":"10.99.7.2:0","bind_result":"ok","connect":"Network is unreachable (os error 101)","getpeername":"","getsockname":"10.99.7.2:39273"}
+[17:12:25] guest$ /vfwd tcp-client --dst <metal-address>:7000 --size 1048576  (rc=1, 0.0s)
+[17:12:25]     {"dst":"<metal-address>:7000","err":"connect: Network is unreachable (os error 101)","ok":false,"size":1048576}
+[17:12:25] guest$ /vfwd tcp-client --dst <metal-address>:7001 --size 4096 --banner  (rc=1, 0.0s)
+[17:12:25]     {"dst":"<metal-address>:7001","err":"connect: Network is unreachable (os error 101)","ok":false,"size":4096}
+[17:12:25] guest$ /vfwd tcp-client --dst <metal-address>:7002 --size 100 --expect-rst  (rc=1, 0.0s)
+[17:12:25]     {"dst":"<metal-address>:7002","err":"connect: Network is unreachable (os error 101)","ok":false,"size":100}
+[17:12:25] guest$ curl -sS -o /tmp/blob -w '%{http_code} %{size_download} %{local_ip}:%{local_port} %{remote_ip}:%{remote_port}\n' http://<metal-address>:8080/blob.bin; sha256sum /tmp/blob  (rc=1, 0.0s)
+[17:12:25]     curl: (7) Failed to connect to <metal-address> port 8080 after 0 ms: Could not connect to server
+[17:12:25]     000 0 :-1 :-1
+[17:12:25]     sha256sum: can't open '/tmp/blob': No such file or directory
+[17:12:25] guest$ getent hosts example.com; echo rc=$?  (rc=0, 0.0s)
+[17:12:25]     rc=2
+[17:12:25] guest$ /vfwd udp-client --dst <metal-address>:7010 --sizes 0,1,1431,59000  (rc=1, 0.0s)
+[17:12:25]     {"connected":false,"dst":"<metal-address>:7010","ev":"udp_client","local":"0.0.0.0:42333","ok":false,"peer":"","results":[{"err":"send Network is unreachable (os error 101)","ok":false,"size":0},{"err":"send Network is unreachable (os error 101)","ok":false,"size":1},{"err":"send Network is unreachable (os error 101)","ok":false,"size":1431},{"err":"send Network is unreachable (os error 101)","ok":false,"size":59000}]}
+[17:12:25] guest$ head -c 6000 /tmp/owner.log; cat /tmp/owner-stats.json  (rc=1, 0.0s)
+[17:12:25]     {"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":109,"programs":[{"id":8,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":9,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":10,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":11,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":12,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":13,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":14,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":15,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":16,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":17,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":18,"name":"sockops","tag":"39b281aa4f25ccfe","verified_insns":34}],"role":"guest","udp_park":true}
+[17:12:25]     cat: can't open '/tmp/owner-stats.json': No such file or directory
+[17:12:25] $ cat /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/host-stats.json; head -c 4000 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/host-owner-increment-a.log  (rc=0)
+[17:12:25]     cat: /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/host-stats.json: No such file or directory
+[17:12:25]     {"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":982585,"programs":[{"id":41784,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":41785,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":41786,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":41787,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":41788,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41}],"role":"host","udp_park":true}
+[17:12:25] $ timeout 20 ssh -i /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@<metal-address> 'echo SSH_CONNECTION=$SSH_CONNECTION; uname -r'  (rc=255)
+[17:12:25]     ssh: connect to host <metal-address> port 2222: Connection refused
+[17:12:25] $ timeout 20 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-client --dst <metal-address>:2711 --size 4096 --banner  (rc=1)
+[17:12:25]     {"dst":"<metal-address>:2711","err":"connect: Connection refused (os error 111)","ok":false,"size":4096}
+[17:12:25] guest$ cat /tmp/owner.log | tail -c 20000; cat /tmp/sshd.log | tail -40; cat /tmp/srv7101.log | tail  (rc=0, 0.0s)
+[17:12:25]     {"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":109,"programs":[{"id":8,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":9,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":10,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":11,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":12,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":13,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":14,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":15,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":16,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":17,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":18,"name":"sockops","tag":"39b281aa4f25ccfe","verified_insns":34}],"role":"guest","udp_park":true}
+[17:12:25]     Server listening on 0.0.0.0 port 22.
+[17:12:25]     {"banner":true,"bind":"0.0.0.0:7101","ev":"tcp_server_ready","rst":false}
+[17:12:26] $ rmmod vhost_vsock  (rc=1)
+[17:12:26]     rmmod: ERROR: Module vhost_vsock is in use
+[17:12:26] $ rmmod vmw_vsock_virtio_transport_common  (rc=1)
+[17:12:26]     rmmod: ERROR: Module vmw_vsock_virtio_transport_common is in use by: vhost_vsock vsock_loopback
+[17:12:26] $ rmmod vsock  (rc=1)
+[17:12:26]     rmmod: ERROR: Module vsock is in use by: vmw_vsock_virtio_transport_common vhost_vsock vsock_loopback vmw_vsock_vmci_transport
+[17:12:26] $ rmmod vhost  (rc=1)
+[17:12:26]     rmmod: ERROR: Module vhost is in use by: vhost_vsock
+[17:12:26] $ rmmod vhost_iotlb  (rc=1)
+[17:12:26]     rmmod: ERROR: Module vhost_iotlb is in use by: vhost
+[17:12:26] === done
+{"launcher_rc": 0, "wall_s": 514.8}

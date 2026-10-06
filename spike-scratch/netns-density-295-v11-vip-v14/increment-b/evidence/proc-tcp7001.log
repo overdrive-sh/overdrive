@@ -1,0 +1,6 @@
+{"banner":true,"bind":"<metal-address>:7001","ev":"tcp_server_ready","rst":false}
+{"err":"bad magic","ev":"conn","local":"<metal-address>:7001","ok":false,"peer":"160.191.244.5:61000"}
+{"err":"hdr Connection reset by peer (os error 104)","ev":"conn","local":"<metal-address>:7001","ok":false,"peer":"176.65.144.71:43484"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7001","ok":false,"peer":"176.65.144.71:9548"}
+{"err":"bad magic","ev":"conn","local":"<metal-address>:7001","ok":false,"peer":"176.65.144.71:9550"}
+{"err":"bad magic","ev":"conn","local":"<metal-address>:7001","ok":false,"peer":"176.65.144.71:9556"}

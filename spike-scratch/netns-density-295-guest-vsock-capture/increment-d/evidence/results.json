@@ -1,0 +1,199 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ],
+    "modules_diff": [],
+    "modules_restored": true,
+    "root_cgroup_bpf_unchanged": true,
+    "spike_cgroups_left": []
+  },
+  "d15": {
+    "sockname": "{\"connect\":\"ok\",\"getpeername\":\"<metal-address>:7000\",\"getsockname\":\"10.99.7.2:59496\"}\n{\"bind\":\"10.99.7.2:0\",\"bind_result\":\"ok\",\"connect\":\"ok\",\"getpeername\":\"<metal-address>:7000\",\"getsockname\":\"10.99.7.2:41071\"}\n"
+  },
+  "owner": {
+    "after_first_tcp": "OWNER_READY role=guest pid=109\n{\"ack_oob\":true,\"arm\":true,\"ev\":\"programs_loaded\",\"flush\":true,\"intake_park\":true,\"pid\":109,\"programs\":[{\"id\":8,\"name\":\"verdict\",\"tag\":\"29dea242dbfa0f6b\",\"verified_insns\":453},{\"id\":9,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":10,\"name\":\"strp_verdict\",\"tag\":\"0c76fd5cdccd1622\",\"verified_insns\":464},{\"id\":11,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"59011738e914c2f5\",\"verified_insns\":423},{\"id\":12,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":13,\"name\":\"connect4\",\"tag\":\"ad52658a44f6fc01\",\"verified_insns\":234},{\"id\":14,\"name\":\"sendmsg4\",\"tag\":\"25313d2a991262c4\",\"verified_insns\":204},{\"id\":15,\"name\":\"recvmsg4\",\"tag\":\"5924dfd9424078bf\",\"verified_insns\":82},{\"id\":16,\"name\":\"getpeername4\",\"tag\":\"90774192d60dfced\",\"verified_insns\":127},{\"id\":17,\"name\":\"sock_release\",\"tag\":\"e4511879b8661ea8\",\"verified_insns\":69},{\"id\":18,\"name\":\"sockops(root cgroup)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"guest\",\"udp_park\":true}\n{\"ev\":\"park_pool\",\"slots\":256}\n{\"ev\":\"guest_ready\",\"slots\":64,\"w\":\"10.99.7.2\"}\n{\"app\":\"10.99.7.2:59496\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":1,\"park\":0}\n{\"app\":\"10.99.7.2:41071\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":3,\"park\":1}\n{\"age_ms\":3,\"ev\":\"flow_closed\",\"flow\":1,\"kind\":1,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":3,\"kind\":1,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"app\":\"10.99.7.2:59510\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":5,\"park\":2}\n{\"age_ms\":53,\"ev\":\"flow_closed\",\"flow\":5,\"kind\":1,\"reset\":false,\"why\":\"both_directions_done\"}\n",
+    "guest_stats": "{\"abort_received\":1,\"counters\":[310,5,0,309,4,310,0,0,0,0,16,0,5,4,1,1,4853,5,2,0,0,2,4851,297,310,0,46,0,0,0,0,0],\"ctl_bytes_read\":2504,\"ctl_bytes_written\":568,\"flows_aborted\":26,\"flows_active_total\":356,\"flows_closed\":326,\"flows_open\":4,\"k2_drain_timeouts\":64,\"k2_drained_shutdowns\":614,\"leg_errors\":25,\"paired_received\":312,\"park_flush\":312,\"requests_written\":314,\"t_ms\":1791223229608.4163,\"tcp_accept_flows\":46,\"tcp_connect_flows\":310,\"udp_associations\":2,\"udp_slot_released\":2,\"udp_teardowns\":2}_accept\",\"flow\":14,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":14,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49868\",\"ev\":\"tcp_accept\",\"flow\":16,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":16,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49872\",\"ev\":\"tcp_accept\",\"flow\":18,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":18,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49886\",\"ev\":\"tcp_accept\",\"flow\":20,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":20,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49902\",\"ev\":\"tcp_accept\",\"flow\":22,\"gport\":7101}\n{\"age_ms\":3,\"ev\":\"flow_closed\",\"flow\":22,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49910\",\"ev\":\"tcp_accept\",\"flow\":24,\"gport\":7101}\n{\"age_ms\":1,\"ev\":\"flow_closed\",\"flow\":24,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49916\",\"ev\":\"tcp_accept\",\"flow\":26,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":26,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49918\",\"ev\":\"tcp_accept\",\"flow\":28,\"gport\":7101}\n{\"age_ms\":1,\"ev\":\"flow_closed\",\"flow\":28,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49926\",\"ev\":\"tcp_accept\",\"flow\":30,\"gport\":7101}\n{\"age_ms\":3,\"ev\":\"flow_closed\",\"flow\":30,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49942\",\"ev\":\"tcp_accept\",\"flow\":32,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":32,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49950\",\"ev\":\"tcp_accept\",\"flow\":34,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":34,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49952\",\"ev\":\"tcp_accept\",\"flow\":36,\"gport\":7101}\n{\"age_ms\":1,\"ev\":\"flow_closed\",\"flow\":36,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49964\",\"ev\":\"tcp_accept\",\"flow\":38,\"gport\":7101}\n{\"age_ms\":3,\"ev\":\"flow_closed\",\"flow\":38,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49978\",\"ev\":\"tcp_accept\",\"flow\":40,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":40,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:49992\",\"ev\":\"tcp_accept\",\"flow\":42,\"gport\":7101}\n{\"age_ms\":3,\"ev\":\"flow_closed\",\"flow\":42,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:50004\",\"ev\":\"tcp_accept\",\"flow\":44,\"gport\":7101}\n{\"age_ms\":0,\"ev\":\"flow_closed\",\"flow\":44,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:50018\",\"ev\":\"tcp_accept\",\"flow\":46,\"gport\":7101}\n{\"age_ms\":1,\"ev\":\"flow_closed\",\"flow\":46,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n{\"client\":\"<metal-address>:50024\",\"ev\":\"tcp_accept\",\"flow\":48,\"gport\":7101}\n{\"age_ms\":2,\"ev\":\"flow_closed\",\"flow\":48,\"kind\":2,\"reset\":false,\"why\":\"both_directions_done\"}\n",
+    "host_stats": {
+      "abort_received": 25,
+      "counters": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+        5,
+        1,
+        1,
+        4156,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4162,
+        489,
+        186,
+        0,
+        310,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ctl_bytes_read": 1680,
+      "ctl_bytes_written": 2504,
+      "flows_aborted": 13,
+      "flows_active_total": 494,
+      "flows_closed": 476,
+      "flows_open": 5,
+      "intake_foreign_rejected": 2,
+      "k2_drained_shutdowns": 965,
+      "leg_errors": 1,
+      "paired_received": 184,
+      "park_flush": 184,
+      "request_bytes_read": 5024,
+      "requests_written": 184,
+      "t_ms": 1791223230063.9692,
+      "tcp_accept_flows": 184,
+      "tcp_connect_flows": 310,
+      "udp_associations": 2,
+      "udp_teardowns": 2
+    }
+  },
+  "preflight": {
+    "blob_sha256": "abce2f435fcfe792b5a0b072503f344f0b79b82310157e2f032e7c241eb1343c",
+    "cid": 53221,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": []
+  },
+  "v2": {
+    "curl_host": "200 2097152 10.99.7.2:59570 <metal-address>:8080\nabce2f435fcfe792b5a0b072503f344f0b79b82310157e2f032e7c241eb1343c  /tmp/blob\n",
+    "k2_client_withholds_rx_300ms": {
+      "connect_ms": 0.152109,
+      "dst": "<metal-address>:7000",
+      "local": "10.99.7.2:59556",
+      "ms": 329.355679,
+      "ok": true,
+      "peer": "<metal-address>:7000",
+      "server_saw_peer": "<metal-address>:38600",
+      "size": 4194304
+    },
+    "k2_server_withholds_rx_300ms": {
+      "connect_ms": 0.163466,
+      "dst": "<metal-address>:7003",
+      "local": "10.99.7.2:59540",
+      "ms": 383.53461599999997,
+      "ok": true,
+      "peer": "<metal-address>:7003",
+      "server_saw_peer": "<metal-address>:53146",
+      "size": 4194304
+    },
+    "rst_once": {
+      "dst": "<metal-address>:7002",
+      "err": "read: Connection reset by peer (os error 104)",
+      "got": 0,
+      "local": "10.99.7.2:59536",
+      "ok": true,
+      "os_error": 104,
+      "peer": "<metal-address>:7002",
+      "read_err_kind": "ConnectionReset",
+      "reset_observed": true,
+      "size": 100
+    },
+    "tcp_1mib": {
+      "connect_ms": 0.11317,
+      "dst": "<metal-address>:7000",
+      "local": "10.99.7.2:59510",
+      "ms": 55.704554,
+      "ok": true,
+      "peer": "<metal-address>:7000",
+      "server_saw_peer": "<metal-address>:38584",
+      "size": 1048576
+    }
+  },
+  "v3": {
+    "banner_once": {
+      "banner": "BANNER peer=<metal-address>:44556 local=<metal-address>:7001",
+      "connect_ms": 0.13584400000000002,
+      "dst": "<metal-address>:7001",
+      "local": "10.99.7.2:59520",
+      "ms": 2.972233,
+      "ok": true,
+      "peer": "<metal-address>:7001",
+      "server_saw_peer": "<metal-address>:44556",
+      "size": 4096
+    },
+    "stress200_egress": null,
+    "stress200_egress_banner": null
+  },
+  "v4": {
+    "inbound_banner_once": "{\"banner\":\"BANNER peer=<metal-address>:49838 local=10.99.7.2:7101\",\"connect_ms\":0.09855900000000001,\"dst\":\"<metal-address>:2711\",\"local\":\"<metal-address>:49838\",\"ms\":1.753239,\"ok\":true,\"peer\":\"<metal-address>:2711\",\"server_saw_peer\":\"<metal-address>:49838\",\"size\":4096}\n",
+    "inbound_plain_once": "{\"connect_ms\":0.09625500000000001,\"dst\":\"<metal-address>:2710\",\"local\":\"<metal-address>:44630\",\"ms\":4.327193,\"ok\":true,\"peer\":\"<metal-address>:2710\",\"server_saw_peer\":\"<metal-address>:44630\",\"size\":65536}\n",
+    "inbound_stress200_banner": "{\"banner\":true,\"dst\":\"<metal-address>:2711\",\"ev\":\"tcp_stress\",\"failed\":0,\"first_failures\":[],\"iterations\":200,\"ok\":200,\"parallel\":1,\"s\":0.591043449}\n",
+    "ssh_once": "Warning: Permanently added '[<metal-address>]:2222' (ED25519) to the list of known hosts.\nSSH_CONNECTION=<metal-address> 51344 10.99.7.2 22\n7.0.0-29-generic\n"
+  },
+  "v5": {
+    "getent": "2606:4700:10::ac42:93f3 example.com\n2606:4700:10::6814:179a example.com\nrc=0\n",
+    "udp_unconnected": {
+      "connected": false,
+      "dst": "<metal-address>:7010",
+      "ev": "udp_client",
+      "local": "0.0.0.0:58875",
+      "ok": false,
+      "peer": "",
+      "results": [
+        {
+          "from": "<metal-address>:7010",
+          "got": 0,
+          "ok": true,
+          "size": 0
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 1,
+          "ok": true,
+          "size": 1
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 1431,
+          "ok": true,
+          "size": 1431
+        },
+        {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "ok": false,
+          "size": 59000
+        }
+      ]
+    }
+  }
+}

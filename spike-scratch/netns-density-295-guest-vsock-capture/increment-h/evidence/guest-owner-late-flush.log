@@ -1,0 +1,251 @@
+{"ack_oob":true,"arm":false,"ev":"programs_loaded","flush":true,"intake_park":false,"pid":20442,"programs":[{"id":44,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":45,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":46,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":47,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":48,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":49,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":50,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":51,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":52,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":53,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":54,"name":"sockops(root cgroup)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"guest","udp_park":true}
+{"ev":"park_pool","slots":256}
+{"ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+{"app":"10.99.7.2:57170","dst":"<metal-address>:7004","ev":"tcp_connect","flow":1,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":1,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57174","dst":"<metal-address>:7004","ev":"tcp_connect","flow":3,"park":null}
+{"age_ms":0,"ev":"flow_closed","flow":3,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57186","dst":"<metal-address>:7004","ev":"tcp_connect","flow":5,"park":null}
+{"age_ms":2,"ev":"flow_closed","flow":5,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57196","dst":"<metal-address>:7004","ev":"tcp_connect","flow":7,"park":null}
+{"age_ms":0,"ev":"flow_closed","flow":7,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57212","dst":"<metal-address>:7004","ev":"tcp_connect","flow":9,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":9,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57216","dst":"<metal-address>:7004","ev":"tcp_connect","flow":11,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":11,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57224","dst":"<metal-address>:7004","ev":"tcp_connect","flow":13,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":13,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57240","dst":"<metal-address>:7004","ev":"tcp_connect","flow":15,"park":null}
+{"age_ms":2,"ev":"flow_closed","flow":15,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57244","dst":"<metal-address>:7004","ev":"tcp_connect","flow":17,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":17,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57252","dst":"<metal-address>:7004","ev":"tcp_connect","flow":19,"park":null}
+{"age_ms":0,"ev":"flow_closed","flow":19,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57254","dst":"<metal-address>:7004","ev":"tcp_connect","flow":21,"park":null}
+{"age_ms":2,"ev":"flow_closed","flow":21,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57268","dst":"<metal-address>:7004","ev":"tcp_connect","flow":23,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":23,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57270","dst":"<metal-address>:7004","ev":"tcp_connect","flow":25,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":25,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57276","dst":"<metal-address>:7004","ev":"tcp_connect","flow":27,"park":null}
+{"age_ms":0,"ev":"flow_closed","flow":27,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57286","dst":"<metal-address>:7004","ev":"tcp_connect","flow":29,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":29,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57302","dst":"<metal-address>:7004","ev":"tcp_connect","flow":31,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":31,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57304","dst":"<metal-address>:7004","ev":"tcp_connect","flow":33,"park":null}
+{"age_ms":0,"ev":"flow_closed","flow":33,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57316","dst":"<metal-address>:7004","ev":"tcp_connect","flow":35,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":35,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57332","dst":"<metal-address>:7004","ev":"tcp_connect","flow":37,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":37,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57338","dst":"<metal-address>:7004","ev":"tcp_connect","flow":39,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":39,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57342","dst":"<metal-address>:7004","ev":"tcp_connect","flow":41,"park":null}
+{"age_ms":0,"ev":"flow_closed","flow":41,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57346","dst":"<metal-address>:7004","ev":"tcp_connect","flow":43,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":43,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57356","dst":"<metal-address>:7004","ev":"tcp_connect","flow":45,"park":null}
+{"age_ms":0,"ev":"flow_closed","flow":45,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57364","dst":"<metal-address>:7004","ev":"tcp_connect","flow":47,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":47,"kind":1,"reset":false,"why":"both_directions_done"}
+{"app":"10.99.7.2:57366","dst":"<metal-address>:7004","ev":"tcp_connect","flow":49,"park":null}
+{"age_ms":1,"ev":"flow_closed","flow":49,"kind":1,"reset":false,"why":"both_directions_done"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":567,"map":"VERD","sock":"10.99.7.2:15001"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":889,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2003,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":889,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2005,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":889,"map":"VERD","sock":"10.99.7.2:15001"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2009,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2011,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2013,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2015,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2017,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2019,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2021,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2023,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2025,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2027,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2029,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2031,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2033,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2035,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2037,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2039,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2041,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2043,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2045,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2047,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2049,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2051,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2053,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2055,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2057,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2059,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2061,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2063,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2065,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2067,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2069,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2071,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2073,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2075,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2077,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2079,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2081,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2083,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2085,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2087,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2089,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2091,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2093,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2095,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2097,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2099,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2101,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2103,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2105,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2107,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2109,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2111,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2113,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2115,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2117,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2119,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2121,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2123,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2125,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2127,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2129,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2131,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2133,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2135,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2137,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2139,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2141,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2143,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2145,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2147,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2149,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2151,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2153,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2155,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2157,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2159,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2161,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2163,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2165,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2167,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2169,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2171,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2173,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2175,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2177,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2179,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2181,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2183,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2185,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2187,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2189,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2191,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2193,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2195,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2197,"kind":1,"reset":true,"why":"intake_not_installable"}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":891,"map":"SOCKS","sock":"10.99.7.2:15001"}
+{"age_ms":0,"ev":"flow_closed","flow":2199,"kind":1,"reset":true,"why":"intake_not_installable"}

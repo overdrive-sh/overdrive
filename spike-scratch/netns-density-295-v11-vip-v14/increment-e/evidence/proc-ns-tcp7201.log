@@ -1,0 +1,2 @@
+{"banner":true,"bind":"10.250.95.2:7201","ev":"tcp_server_ready","rst":false}
+{"bytes":1000,"ev":"conn","local":"10.250.95.2:7201","ok":true,"peer":"10.250.95.1:50574"}

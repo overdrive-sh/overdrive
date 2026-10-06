@@ -1,0 +1,17 @@
+tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+20:22:31.650930 IP (tos 0x0, ttl 64, id 4382, offset 0, flags [+], proto UDP (17), length 1492)
+    <metal-address>.47093 > 192.0.2.77.9: UDP, length 4096
+20:22:31.650944 IP (tos 0x0, ttl 64, id 4382, offset 1472, flags [+], proto UDP (17), length 1500)
+    <metal-address> > 192.0.2.77: ip-proto-17
+20:22:31.650949 IP (tos 0x0, ttl 64, id 4382, offset 2952, flags [none], proto UDP (17), length 1172)
+    <metal-address> > 192.0.2.77: ip-proto-17
+20:22:31.650965 IP (tos 0x0, ttl 64, id 4383, offset 0, flags [+], proto UDP (17), length 1492)
+    <metal-address>.47093 > 192.0.2.77.9: UDP, length 4096
+20:22:31.650969 IP (tos 0x0, ttl 64, id 4383, offset 1472, flags [+], proto UDP (17), length 1500)
+    <metal-address> > 192.0.2.77: ip-proto-17
+20:22:31.650973 IP (tos 0x0, ttl 64, id 4383, offset 2952, flags [none], proto UDP (17), length 1172)
+    <metal-address> > 192.0.2.77: ip-proto-17
+
+6 packets captured
+6 packets received by filter
+0 packets dropped by kernel

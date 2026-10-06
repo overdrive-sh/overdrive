@@ -1,0 +1,152 @@
+[19:35:15] === preflight
+[19:35:15] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[19:35:15]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[19:35:15]     none
+[19:35:15]     model name	: AMD EPYC 8024P 8-Core Processor
+[19:35:15]     16
+[19:35:15]     crw-rw---- 1 root kvm 10, 232 Oct  5 19:35 /dev/kvm
+[19:35:15] === build
+[19:35:15] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[19:35:15]         Finished `release` profile [optimized] target(s) in 0.12s
+[19:35:25] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/bpf/Cargo.toml  (rc=0)
+[19:35:25]        Compiling aya-build v0.1.3
+[19:35:25]        Compiling aya-ebpf-cty v0.2.3
+[19:35:25]        Compiling aya-ebpf-bindings v0.1.2
+[19:35:25]        Compiling vfwd-bpf v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/bpf)
+[19:35:25]         Finished `release` profile [optimized] target(s) in 9.63s
+[19:35:36] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/Cargo.toml  (rc=0)
+[19:35:36]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[19:35:36]         |            ^^^^^^
+[19:35:36]     
+[19:35:36]     warning: `vfwd` (bin "vfwd") generated 3 warnings
+[19:35:36]         Finished `release` profile [optimized + debuginfo] target(s) in 11.70s
+[19:35:36] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[19:35:36]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=7202466a6f388a16f0b95570f4c40227aa826338, with debug_info, not stripped
+[19:35:36]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor:        ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[19:35:36]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[19:35:36]     cloud-hypervisor v53.0.0
+[19:35:36]     Migration Protocol Versions: 0
+[19:35:36]     bpf-linker 0.0.0
+[19:35:36]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[19:35:36]     rustc 1.95.0 (59807616e 2026-04-14)
+[19:35:36] === guest image
+[19:35:37] $ ssh-keygen -q -t ed25519 -N '' -f /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/keys/client -C spike-client  (rc=0)
+[19:35:37] $ ssh-keygen -q -t ed25519 -N '' -f /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/keys/hostkey -C spike-guest  (rc=0)
+[19:35:38] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/initramfs.cpio.gz  (rc=0)
+[19:35:39] launch VM: /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park,--declare,7300,7301,7302 --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vm-increment-b-1791228939/serial.log --console off --vsock cid=37881,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vm-increment-b-1791228939/ch.log -v
+[19:35:41] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.57
+net.ipv4.tcp_fwmark_accept = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33m36:35:3e:18:91:4e [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+
+thread 'main' (109) panicked at src/owner.rs:190:18:
+unknown arg 7301
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+   2: vfwd::owner::parse_cfg
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/owner.rs:190:18
+   3: vfwd::owner::run
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/owner.rs:640:13
+   4: vfwd::main
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/main.rs:34:29
+   5: core::ops::function::FnOnce::call_once
+             at ./home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+GUEST_READY
+
+[19:35:42] $ ip netns add v11p  (rc=0)
+[19:35:42] $ ip link add v11h type veth peer name v11p0  (rc=0)
+[19:35:42] $ ip link set v11p0 netns v11p  (rc=0)
+[19:35:42] $ ip addr add 10.250.95.1/24 dev v11h  (rc=0)
+[19:35:42] $ ip link set v11h mtu 1500 up  (rc=0)
+[19:35:42] $ ip -n v11p addr add 10.250.95.2/24 dev v11p0  (rc=0)
+[19:35:42] $ ip -n v11p link set v11p0 mtu 1500 up  (rc=0)
+[19:35:42] $ ip -n v11p link set lo up  (rc=0)
+[19:35:42] $ ip -n v11p route add default via 10.250.95.1  (rc=0)
+[19:35:42] $ ip -d link show v11h; ip -n v11p -br addr; ip -n v11p route; ethtool -k v11h | grep -E 'udp|frag|segment'; ip netns exec v11p ss -lunt  (rc=0)
+[19:35:42]     62998: v11h@if62997: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+[19:35:42]         link/ether 16:30:a7:22:df:96 brd ff:ff:ff:ff:ff:ff link-netns v11p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 
+[19:35:42]         veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+[19:35:42]     lo               UNKNOWN        127.0.0.1/8 ::1/128 
+[19:35:42]     v11p0@if62998    UP             10.250.95.2/24 fe80::1ced:4bff:fe4c:2f18/64 
+[19:35:42]     default via 10.250.95.1 dev v11p0 
+[19:35:42]     10.250.95.0/24 dev v11p0 proto kernel scope link src 10.250.95.2 
+[19:35:42]     	tx-scatter-gather-fraglist: on
+[19:35:42]     tcp-segmentation-offload: on
+[19:35:42]     	tx-tcp-segmentation: on
+[19:35:42]     	tx-tcp-ecn-segmentation: on
+[19:35:42]     	tx-tcp-mangleid-segmentation: on
+[19:35:42]     	tx-tcp6-segmentation: on
+[19:35:42]     	tx-tcp-accecn-segmentation: on
+[19:35:42]     generic-segmentation-offload: on
+[19:35:42]     tx-fcoe-segmentation: off [fixed]
+[19:35:42]     tx-gre-segmentation: on
+[19:35:42]     tx-gre-csum-segmentation: on
+[19:35:42]     tx-ipxip4-segmentation: on
+[19:35:42]     tx-ipxip6-segmentation: on
+[19:35:42]     tx-udp_tnl-segmentation: on
+[19:35:42]     tx-udp_tnl-csum-segmentation: on
+[19:35:42]     tx-tunnel-remcsum-segmentation: off [fixed]
+[19:35:42]     tx-sctp-segmentation: on
+[19:35:42]     tx-esp-segmentation: off [fixed]
+[19:35:42]     tx-udp-segmentation: on
+[19:35:42]     rx-udp_tunnel-port-offload: off [fixed]
+[19:35:42]     rx-udp-gro-forwarding: off
+[19:35:42]     Netid State  Recv-Q Send-Q Local Address:Port Peer Address:Port
+[19:35:42]     udp   UNCONN 0      0        10.250.95.2:7210      0.0.0.0:*   
+[19:35:42]     tcp   LISTEN 0      128      10.250.95.2:7200      0.0.0.0:*   
+[19:35:42]     tcp   LISTEN 0      128      10.250.95.2:7201      0.0.0.0:*
+[19:35:45] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[19:35:45]     OWNER_READY role=guest pid=120
+[19:36:12] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 500 --size 64 --timeout-ms 1500  (rc=0, 0.6s)
+[19:36:12]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":0,"first_failures":[],"iterations":500,"ok":500,"s":0.60683784}
+[19:36:13] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 200 --size 0 --timeout-ms 1000  (rc=0, 0.2s)
+[19:36:13]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":0,"first_failures":[],"iterations":200,"ok":200,"s":0.203115582}
+[19:36:16] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[19:36:16]     OWNER_READY role=guest pid=174
+[19:36:24] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 500 --size 64 --timeout-ms 1500  (rc=0, 0.6s)
+[19:36:24]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":0,"first_failures":[],"iterations":500,"ok":500,"s":0.574901458}
+[19:36:24] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 200 --size 0 --timeout-ms 1000  (rc=0, 0.2s)
+[19:36:24]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":0,"first_failures":[],"iterations":200,"ok":200,"s":0.20104115}
+[19:36:28] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[19:36:28]     OWNER_READY role=guest pid=224
+[19:36:42] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 500 --size 64 --timeout-ms 1500  (rc=0, 0.5s)
+[19:36:42]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":0,"first_failures":[],"iterations":500,"ok":500,"s":0.520321125}
+[19:40:07] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 200 --size 0 --timeout-ms 1000  (rc=0, 204.8s)
+[19:40:07]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":200,"first_failures":[{"i":0,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":1,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":2,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":3,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":4,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":5,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":6,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":7,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":8,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":9,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":10,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":11,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":12,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":13,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":14,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":15,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":16,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":17,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":18,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":19,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}}],"iterations":200,"ok":0,"s":204.807898452}
+[19:40:10] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[19:40:10]     OWNER_READY role=guest pid=276
+[19:40:35] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 500 --size 64 --timeout-ms 1500  (rc=0, 0.8s)
+[19:40:35]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":0,"first_failures":[],"iterations":500,"ok":500,"s":0.794828611}
+[19:44:00] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 200 --size 0 --timeout-ms 1000  (rc=0, 204.8s)
+[19:44:00]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":200,"first_failures":[{"i":0,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":1,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":2,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":3,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":4,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":5,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":6,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":7,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":8,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":9,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":10,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":11,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":12,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":13,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":14,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":15,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":16,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":17,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":18,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}},{"i":19,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":0}}],"iterations":200,"ok":0,"s":204.790299667}
+[19:44:03] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[19:44:03]     OWNER_READY role=guest pid=329
+[19:57:33] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 500 --size 64 --timeout-ms 1500  (rc=0, 768.0s)
+[19:57:33]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":500,"first_failures":[{"i":0,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":1,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":2,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":3,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":4,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":5,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":6,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":7,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":8,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":9,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":10,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":11,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":12,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":13,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":14,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":15,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":16,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":17,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":18,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}},{"i":19,"r":{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":64}}],"iterations":500,"ok":0,"s":768.023168758}
+[19:57:33] guest$ /vfwd udp-stress --dst 10.250.95.2:7210 --iterations 200 --size 0 --timeout-ms 1000  (rc=0, 0.2s)
+[19:57:33]     {"connected":false,"dst":"10.250.95.2:7210","ev":"udp_stress","failed":0,"first_failures":[],"iterations":200,"ok":200,"s":0.206838144}
+[19:57:36] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[19:57:36]     OWNER_READY role=guest pid=386
+[19:57:36] guest$ /vfwd tcp-client --dst 10.251.0.10:7200 --size 100000  (rc=0, 0.0s)
+[19:57:36]     {"connect_ms":0.171749,"dst":"10.251.0.10:7200","local":"10.99.7.2:55198","ms":6.587845,"ok":true,"peer":"10.251.0.10:7200","server_saw_peer":"10.250.95.1:49324","size":100000}
+[19:57:36] guest$ /vfwd tcp-client --dst 10.251.0.11:7000 --size 1000  (rc=0, 0.0s)
+[19:57:36]     {"connect_ms":0.143936,"dst":"10.251.0.11:7000","local":"10.99.7.2:55214","ms":2.189845,"ok":true,"peer":"10.251.0.11:7000","server_saw_peer":"<metal-address>:38196","size":1000}
+[19:57:36] guest$ /vfwd sockname --dst 10.251.0.10:7200  (rc=0, 0.0s)
+[19:57:36]     {"connect":"ok","getpeername":"10.251.0.10:7200","getsockname":"10.99.7.2:55218"}

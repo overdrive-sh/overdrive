@@ -1,0 +1,1762 @@
+{
+  "V11": {
+    "hybrid": {
+      "counters": {
+        "22": 746,
+        "encoded": 111,
+        "encoded_empty": 111,
+        "hybrid_empty_framed": 113,
+        "redirect_ok": 746,
+        "tc_decoded": 113,
+        "tc_decoded_empty": 113,
+        "tc_err": 522,
+        "vstrip": 522
+      },
+      "dig_1111": ";; communications error to 1.1.1.1#53: timed out\n\n; <<>> DiG 9.20.24-1ubuntu0.3-Ubuntu <<>> @1.1.1.1 example.com +notcp +tries=1 +time=3 +short\n; (1 server found)\n;; global options: +cmd\n;; no servers could be reached\nrc=9\n",
+      "matrix_netns": {
+        "conn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "10.99.7.2:53875",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:48379",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:60077",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:42376",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:53691",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:50526",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "0.0.0.0:52738",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:53995",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:40227",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:39518",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:40320",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:56864",
+          "ok": false,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:42814",
+        "ok": false,
+        "peer": "",
+        "results": [
+          {
+            "from": "10.250.95.2:7210",
+            "got": 0,
+            "ok": true,
+            "size": 0
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 1
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 1431
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4096
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4097
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 59000
+          }
+        ]
+      },
+      "stress_empty_200": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 200,
+        "ok": 200,
+        "s": 0.206838144
+      },
+      "stress_unconn_500": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 500,
+        "first_failures": [
+          {
+            "i": 0,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 1,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 2,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 3,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 4,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 5,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 6,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 7,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 8,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 9,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 10,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 11,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 12,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 13,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 14,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 15,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 16,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 17,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 18,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 19,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          }
+        ],
+        "iterations": 500,
+        "ok": 0,
+        "s": 768.023168758
+      },
+      "tcx_stats_phys": [
+        {
+          "id": 42048,
+          "jited_prog_len": null,
+          "name": "lo_decode",
+          "run_cnt": 3521,
+          "run_time_ns": 3340483,
+          "xlated_prog_len": null
+        }
+      ],
+      "tcx_stats_veth": [
+        {
+          "id": 42048,
+          "jited_prog_len": null,
+          "name": "lo_decode",
+          "run_cnt": 3521,
+          "run_time_ns": 3340483,
+          "xlated_prog_len": null
+        }
+      ],
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_phys": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:44:38.576900 IP (tos 0x0, ttl 64, id 35055, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.53801 > 192.0.2.77.9: UDP, length 0\n19:44:38.595821 IP (tos 0x0, ttl 64, id 35056, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.53801 > 192.0.2.77.9: UDP, length 0\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    },
+    "tc": {
+      "counters": {
+        "22": 521,
+        "encoded": 252,
+        "encoded_empty": 3,
+        "redirect_ok": 521,
+        "tc_decoded": 256,
+        "tc_decoded_empty": 5,
+        "tc_err": 13
+      },
+      "dig_1111": "104.20.23.154\n172.66.147.243\nrc=0\n",
+      "matrix_netns": {
+        "conn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "10.99.7.2:44081",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:55698",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:56523",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:33259",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:59544",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:42125",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "0.0.0.0:36550",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:59583",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:57381",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:42637",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:56645",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:58478",
+          "ok": false,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:52663",
+        "ok": false,
+        "peer": "",
+        "results": [
+          {
+            "from": "10.250.95.2:7210",
+            "got": 0,
+            "ok": true,
+            "size": 0
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1,
+            "ok": true,
+            "size": 1
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1431,
+            "ok": true,
+            "size": 1431
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4096
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4097
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 59000
+          }
+        ]
+      },
+      "stress_empty_200": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 200,
+        "ok": 200,
+        "s": 0.203115582
+      },
+      "stress_unconn_500": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 500,
+        "ok": 500,
+        "s": 0.60683784
+      },
+      "tcx_stats_phys": [
+        {
+          "id": 41995,
+          "jited_prog_len": null,
+          "name": "lo_decode",
+          "run_cnt": 1608,
+          "run_time_ns": 1272794,
+          "xlated_prog_len": null
+        }
+      ],
+      "tcx_stats_veth": [
+        {
+          "id": 41995,
+          "jited_prog_len": null,
+          "name": "lo_decode",
+          "run_cnt": 1608,
+          "run_time_ns": 1272794,
+          "xlated_prog_len": null
+        }
+      ],
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_phys": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:05.761910 IP (tos 0x0, ttl 64, id 59685, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.34701 > 192.0.2.77.9: UDP, length 0\n19:36:05.781231 IP (tos 0x0, ttl 64, id 59686, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.34701 > 192.0.2.77.9: UDP, length 0\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:07.622953 IP (tos 0x0, ttl 64, id 57393, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.50224 > 192.0.2.77.9: UDP, length 1431\n19:36:07.641317 IP (tos 0x0, ttl 64, id 57394, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.50224 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n3 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    },
+    "tc-frag": {
+      "counters": {
+        "22": 1049,
+        "encoded": 521,
+        "encoded_empty": 5,
+        "frag_first": 12,
+        "frag_shift": 135,
+        "redirect_ok": 1050,
+        "tc_decoded": 528,
+        "tc_decoded_empty": 7
+      },
+      "dig_1111": "172.66.147.243\n104.20.23.154\nrc=0\n",
+      "matrix_netns": {
+        "conn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "10.99.7.2:54315",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:33091",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:50519",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "10.99.7.2:37785",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "10.99.7.2:49550",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "10.99.7.2:58891",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "0.0.0.0:54257",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:38264",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:48824",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "0.0.0.0:57267",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "0.0.0.0:50565",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "0.0.0.0:42013",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:55632",
+        "ok": true,
+        "peer": "",
+        "results": [
+          {
+            "from": "10.250.95.2:7210",
+            "got": 0,
+            "ok": true,
+            "size": 0
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1,
+            "ok": true,
+            "size": 1
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1431,
+            "ok": true,
+            "size": 1431
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4096,
+            "ok": true,
+            "size": 4096
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4097,
+            "ok": true,
+            "size": 4097
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 59000,
+            "ok": true,
+            "size": 59000
+          }
+        ]
+      },
+      "stress_empty_200": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 200,
+        "ok": 200,
+        "s": 0.20104115
+      },
+      "stress_unconn_500": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 500,
+        "ok": 500,
+        "s": 0.574901458
+      },
+      "tcx_stats_phys": [
+        {
+          "id": 42009,
+          "jited_prog_len": null,
+          "name": "eg_decode_frag",
+          "run_cnt": 940,
+          "run_time_ns": 1230031,
+          "xlated_prog_len": null
+        }
+      ],
+      "tcx_stats_veth": [
+        {
+          "id": 42009,
+          "jited_prog_len": null,
+          "name": "eg_decode_frag",
+          "run_cnt": 940,
+          "run_time_ns": 1230031,
+          "xlated_prog_len": null
+        }
+      ],
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_phys": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:17.684886 IP (tos 0x0, ttl 64, id 30790, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.53603 > 192.0.2.77.9: UDP, length 0\n19:36:17.704105 IP (tos 0x0, ttl 64, id 30791, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.53603 > 192.0.2.77.9: UDP, length 0\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:19.561884 IP (tos 0x0, ttl 64, id 18007, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.37512 > 192.0.2.77.9: UDP, length 1431\n19:36:19.580235 IP (tos 0x0, ttl 64, id 18008, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.37512 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:21.436879 IP (tos 0x0, ttl 64, id 65211, offset 0, flags [+], proto UDP (17), length 1492)\n    <metal-address>.43807 > 192.0.2.77.9: UDP, length 4096\n19:36:21.436893 IP (tos 0x0, ttl 64, id 65211, offset 1472, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:36:21.436898 IP (tos 0x0, ttl 64, id 65211, offset 2952, flags [none], proto UDP (17), length 1172)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:36:21.456390 IP (tos 0x0, ttl 64, id 65212, offset 0, flags [+], proto UDP (17), length 1492)\n    <metal-address>.43807 > 192.0.2.77.9: UDP, length 4096\n19:36:21.456400 IP (tos 0x0, ttl 64, id 65212, offset 1472, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:36:21.456405 IP (tos 0x0, ttl 64, id 65212, offset 2952, flags [none], proto UDP (17), length 1172)\n    <metal-address> > 192.0.2.77: ip-proto-17\n\n6 packets captured\n6 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:23.313966 IP (tos 0x0, ttl 64, id 54394, offset 0, flags [+], proto UDP (17), length 1492)\n    10.250.95.1.43349 > 10.250.95.2.9: UDP, length 4096\n19:36:23.314013 IP (tos 0x0, ttl 64, id 54394, offset 1472, flags [+], proto UDP (17), length 1500)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n19:36:23.314020 IP (tos 0x0, ttl 64, id 54394, offset 2952, flags [none], proto UDP (17), length 1172)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n\n3 packets captured\n3 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    },
+    "verdict": {
+      "counters": {
+        "22": 1037,
+        "encoded": 516,
+        "redirect_ok": 1038,
+        "vstrip": 522,
+        "vstrip_empty_drop": 205
+      },
+      "dig_1111": "172.66.147.243\n104.20.23.154\nrc=0\n",
+      "matrix_netns": {
+        "conn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:41477",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:40705",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:60572",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "10.99.7.2:55969",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "10.99.7.2:47066",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "10.99.7.2:33220",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:48435",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:58445",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:53256",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "0.0.0.0:33168",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "0.0.0.0:40897",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "0.0.0.0:38583",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:48978",
+        "ok": false,
+        "peer": "",
+        "results": [
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 0
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1,
+            "ok": true,
+            "size": 1
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1431,
+            "ok": true,
+            "size": 1431
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4096,
+            "ok": true,
+            "size": 4096
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4097,
+            "ok": true,
+            "size": 4097
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 59000,
+            "ok": true,
+            "size": 59000
+          }
+        ]
+      },
+      "stress_empty_200": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 200,
+        "first_failures": [
+          {
+            "i": 0,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 1,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 2,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 3,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 4,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 5,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 6,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 7,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 8,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 9,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 10,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 11,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 12,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 13,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 14,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 15,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 16,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 17,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 18,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 19,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          }
+        ],
+        "iterations": 200,
+        "ok": 0,
+        "s": 204.807898452
+      },
+      "stress_unconn_500": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 500,
+        "ok": 500,
+        "s": 0.520321125
+      },
+      "tcx_stats_phys": [],
+      "tcx_stats_veth": [],
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_phys": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:37.576937 IP (tos 0x0, ttl 64, id 37994, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.32924 > 192.0.2.77.9: UDP, length 1431\n19:36:37.596228 IP (tos 0x0, ttl 64, id 37995, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.32924 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:39.435920 IP (tos 0x0, ttl 64, id 2701, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.45962 > 192.0.2.77.9: UDP, length 4096\n19:36:39.435933 IP (tos 0x0, ttl 64, id 2701, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:36:39.435936 IP (tos 0x0, ttl 64, id 2701, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:36:39.455443 IP (tos 0x0, ttl 64, id 2702, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.45962 > 192.0.2.77.9: UDP, length 4096\n19:36:39.455447 IP (tos 0x0, ttl 64, id 2702, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:36:39.455450 IP (tos 0x0, ttl 64, id 2702, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n\n6 packets captured\n6 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:36:41.296941 IP (tos 0x0, ttl 64, id 63260, offset 0, flags [+], proto UDP (17), length 1500)\n    10.250.95.1.46214 > 10.250.95.2.9: UDP, length 4096\n19:36:41.296985 IP (tos 0x0, ttl 64, id 63260, offset 1480, flags [+], proto UDP (17), length 1500)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n19:36:41.296990 IP (tos 0x0, ttl 64, id 63260, offset 2960, flags [none], proto UDP (17), length 1164)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n\n3 packets captured\n3 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    },
+    "verdict-naive": {
+      "counters": {
+        "22": 1027,
+        "encoded": 511,
+        "redirect_ok": 1238,
+        "vstrip": 727,
+        "vstrip_empty_fwd": 205
+      },
+      "dig_1111": "172.66.147.243\n104.20.23.154\nrc=0\n",
+      "matrix_netns": {
+        "conn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:55018",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:44619",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:33156",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "10.99.7.2:46442",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "10.99.7.2:37356",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "10.99.7.2:33112",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:49117",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:36520",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:56257",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "0.0.0.0:47026",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "0.0.0.0:59807",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "0.0.0.0:35993",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:56893",
+        "ok": false,
+        "peer": "",
+        "results": [
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 0
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 1
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 1431
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4096
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4097
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 59000
+          }
+        ]
+      },
+      "stress_empty_200": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 200,
+        "first_failures": [
+          {
+            "i": 0,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 1,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 2,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 3,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 4,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 5,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 6,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 7,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 8,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 9,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 10,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 11,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 12,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 13,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 14,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 15,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 16,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 17,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 18,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 19,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          }
+        ],
+        "iterations": 200,
+        "ok": 0,
+        "s": 204.790299667
+      },
+      "stress_unconn_500": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 500,
+        "ok": 500,
+        "s": 0.794828611
+      },
+      "tcx_stats_phys": [],
+      "tcx_stats_veth": [],
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_phys": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:40:30.215961 IP (tos 0x0, ttl 64, id 41827, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.42678 > 192.0.2.77.9: UDP, length 1431\n19:40:30.233875 IP (tos 0x0, ttl 64, id 41828, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.42678 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:40:32.075958 IP (tos 0x0, ttl 64, id 45374, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.50662 > 192.0.2.77.9: UDP, length 4096\n19:40:32.075970 IP (tos 0x0, ttl 64, id 45374, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:40:32.075973 IP (tos 0x0, ttl 64, id 45374, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:40:32.093802 IP (tos 0x0, ttl 64, id 45375, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.50662 > 192.0.2.77.9: UDP, length 4096\n19:40:32.093811 IP (tos 0x0, ttl 64, id 45375, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n19:40:32.093814 IP (tos 0x0, ttl 64, id 45375, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n\n6 packets captured\n6 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n19:40:33.936015 IP (tos 0x0, ttl 64, id 53973, offset 0, flags [+], proto UDP (17), length 1500)\n    10.250.95.1.50462 > 10.250.95.2.9: UDP, length 4096\n19:40:33.936064 IP (tos 0x0, ttl 64, id 53973, offset 1480, flags [+], proto UDP (17), length 1500)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n19:40:33.936069 IP (tos 0x0, ttl 64, id 53973, offset 2960, flags [none], proto UDP (17), length 1164)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n\n3 packets captured\n3 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    }
+  },
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ],
+    "modules_diff": [],
+    "modules_restored": true,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": true
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=386\n"
+  },
+  "preflight": {
+    "blob_sha256": "02b09df9f29aa539f7e7a8ed95d8c6de6a194d22ef0e36ae6137d9de08f8b024",
+    "cid": 37881,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": []
+  },
+  "topo": {
+    "offhost": "62998: v11h@if62997: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 16:30:a7:22:df:96 brd ff:ff:ff:ff:ff:ff link-netns v11p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv11p0@if62998    UP             10.250.95.2/24 fe80::1ced:4bff:fe4c:2f18/64 \ndefault via 10.250.95.1 dev v11p0 \n10.250.95.0/24 dev v11p0 proto kernel scope link src 10.250.95.2 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nNetid State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nudp   UNCONN 0      0        10.250.95.2:7210      0.0.0.0:*   \ntcp   LISTEN 0      128      10.250.95.2:7200      0.0.0.0:*   \ntcp   LISTEN 0      128      10.250.95.2:7201      0.0.0.0:*   \n",
+    "phys": "eno12399np0"
+  }
+}

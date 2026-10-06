@@ -1,0 +1,3495 @@
+{
+  "V11": {
+    "hybrid": {
+      "counters": {
+        "encoded": 2069,
+        "encoded_empty": 303,
+        "hybrid_empty_framed": 305,
+        "hybrid_escaped": 4,
+        "redirect_ok": 4146,
+        "sent_calls": 4145,
+        "tc_decoded": 309,
+        "tc_decoded_empty": 305,
+        "tc_lenient_pass": 1767,
+        "vstrip": 1768
+      },
+      "dig_1111": "104.20.23.154\n172.66.147.243\nrc=0\n",
+      "first_4097_200": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 200,
+        "ok": 200,
+        "s": 19.477710847
+      },
+      "first_59000_50": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 50,
+        "ok": 50,
+        "s": 5.105334876
+      },
+      "first_64_conn_500": {
+        "connected": true,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 500,
+        "ok": 500,
+        "s": 48.22437081
+      },
+      "first_64_unconn_1000": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 4,
+        "first_failures": [
+          {
+            "i": 60,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 61,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 62,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 63,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          }
+        ],
+        "iterations": 1000,
+        "ok": 996,
+        "s": 102.19122294
+      },
+      "first_empty_300": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 300,
+        "ok": 300,
+        "s": 29.593450334
+      },
+      "framelike_P": {
+        "conn": {
+          "connected": true,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        },
+        "unconn": {
+          "connected": false,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        }
+      },
+      "matrix_P": {
+        "conn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "10.99.7.2:60845",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:55506",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:51781",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "10.99.7.2:36211",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "10.99.7.2:42742",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "10.99.7.2:48713",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "0.0.0.0:40407",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:38170",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:56773",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "0.0.0.0:59535",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "0.0.0.0:43328",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "0.0.0.0:48222",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn_P": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:45750",
+        "ok": true,
+        "peer": "",
+        "results": [
+          {
+            "from": "10.250.95.2:7210",
+            "got": 0,
+            "ok": true,
+            "size": 0
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1,
+            "ok": true,
+            "size": 1
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1431,
+            "ok": true,
+            "size": 1431
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4096,
+            "ok": true,
+            "size": 4096
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4097,
+            "ok": true,
+            "size": 4097
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 59000,
+            "ok": true,
+            "size": 59000
+          }
+        ]
+      },
+      "strace": {
+        "guest_socket_io_count": 6216,
+        "guest_socket_io_max_bytes": 16,
+        "guest_socket_io_sizes": [
+          8,
+          16
+        ],
+        "guest_syscall_bytes": {
+          "recvfrom:NETLINK": {
+            "bytes": 39928,
+            "calls": 434
+          },
+          "recvfrom:socket": {
+            "bytes": 16576,
+            "calls": 2072
+          },
+          "sendto:NETLINK": {
+            "bytes": 31248,
+            "calls": 434
+          },
+          "sendto:socket": {
+            "bytes": 66304,
+            "calls": 4144
+          },
+          "write:/tmp/owner-stats.json.tmp": {
+            "bytes": 161301,
+            "calls": 431
+          },
+          "write:/tmp/owner.log": {
+            "bytes": 476055,
+            "calls": 198824
+          }
+        },
+        "host_socket_io_count": 6216,
+        "host_socket_io_max_bytes": 16,
+        "host_socket_io_sizes": [
+          8,
+          16
+        ],
+        "host_syscall_bytes": {
+          "recvfrom:socket": {
+            "bytes": 66304,
+            "calls": 4144
+          },
+          "sendto:socket": {
+            "bytes": 16576,
+            "calls": 2072
+          },
+          "write:/home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/host-owner-increment-e-16.log": {
+            "bytes": 438074,
+            "calls": 157472
+          },
+          "write:/home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/host-stats.json.tmp": {
+            "bytes": 133177,
+            "calls": 407
+          }
+        }
+      },
+      "tc_cost_unregistered": {
+        "ns_per_run": 272.16109194540275,
+        "run_cnt_delta": 20001,
+        "run_time_ns_delta": 5443494,
+        "send_wall_s": 0.129,
+        "sent": 20000
+      },
+      "tcx_stats": [
+        {
+          "id": 42336,
+          "jited_prog_len": null,
+          "name": "eg_decode_frag",
+          "run_cnt": 25079,
+          "run_time_ns": 11093621,
+          "xlated_prog_len": null
+        }
+      ],
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_nic": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:27:16.384651 IP (tos 0x0, ttl 64, id 18987, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.59496 > 192.0.2.77.9: UDP, length 0\n20:27:16.384673 IP (tos 0x0, ttl 64, id 18988, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.59496 > 192.0.2.77.9: UDP, length 0\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:27:18.263067 IP (tos 0x0, ttl 64, id 25848, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.53179 > 192.0.2.77.9: UDP, length 1431\n20:27:18.263089 IP (tos 0x0, ttl 64, id 25849, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.53179 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:27:20.116677 IP (tos 0x0, ttl 64, id 9764, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.49004 > 192.0.2.77.9: UDP, length 4096\n20:27:20.116689 IP (tos 0x0, ttl 64, id 9764, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:27:20.116693 IP (tos 0x0, ttl 64, id 9764, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:27:20.116708 IP (tos 0x0, ttl 64, id 9765, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.49004 > 192.0.2.77.9: UDP, length 4096\n20:27:20.116713 IP (tos 0x0, ttl 64, id 9765, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:27:20.116716 IP (tos 0x0, ttl 64, id 9765, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n\n6 packets captured\n6 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:27:21.974082 IP (tos 0x0, ttl 64, id 45385, offset 0, flags [+], proto UDP (17), length 1500)\n    10.250.95.1.53433 > 10.250.95.2.9: UDP, length 4096\n20:27:21.974110 IP (tos 0x0, ttl 64, id 45385, offset 1480, flags [+], proto UDP (17), length 1500)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n20:27:21.974115 IP (tos 0x0, ttl 64, id 45385, offset 2960, flags [none], proto UDP (17), length 1164)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n\n3 packets captured\n3 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    },
+    "tc": {
+      "counters": {
+        "encoded": 1814,
+        "encoded_empty": 303,
+        "redirect_ok": 3645,
+        "sent_calls": 3645,
+        "tc_decoded": 1818,
+        "tc_decoded_empty": 305,
+        "tc_err": 13
+      },
+      "dig_1111": "104.20.23.154\n172.66.147.243\nrc=0\n",
+      "first_64_conn_500": {
+        "connected": true,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 500,
+        "ok": 500,
+        "s": 0.670202152
+      },
+      "first_64_unconn_1000": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 1000,
+        "ok": 1000,
+        "s": 1.649292129
+      },
+      "first_empty_300": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 300,
+        "ok": 300,
+        "s": 0.500260795
+      },
+      "framelike_P": {
+        "conn": {
+          "connected": true,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        },
+        "unconn": {
+          "connected": false,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        }
+      },
+      "matrix_P": {
+        "conn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "10.99.7.2:39955",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:59828",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:52716",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:38460",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:44231",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:56921",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "0.0.0.0:44622",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:58393",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:42176",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:59371",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:59117",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:36274",
+          "ok": false,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn_P": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:33088",
+        "ok": false,
+        "peer": "",
+        "results": [
+          {
+            "from": "10.250.95.2:7210",
+            "got": 0,
+            "ok": true,
+            "size": 0
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1,
+            "ok": true,
+            "size": 1
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1431,
+            "ok": true,
+            "size": 1431
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4096
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4097
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 59000
+          }
+        ]
+      },
+      "tc_cost_unregistered": {
+        "ns_per_run": 305.7370262973703,
+        "run_cnt_delta": 20002,
+        "run_time_ns_delta": 6115352,
+        "send_wall_s": 0.157,
+        "sent": 20000
+      },
+      "tcx_stats": [
+        {
+          "id": 42282,
+          "jited_prog_len": null,
+          "name": "lo_decode",
+          "run_cnt": 22675,
+          "run_time_ns": 9575142,
+          "xlated_prog_len": null
+        }
+      ],
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_nic": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:22:09.327044 IP (tos 0x0, ttl 64, id 62264, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.33472 > 192.0.2.77.9: UDP, length 0\n20:22:09.344757 IP (tos 0x0, ttl 64, id 62265, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.33472 > 192.0.2.77.9: UDP, length 0\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:22:11.186974 IP (tos 0x0, ttl 64, id 33414, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.56098 > 192.0.2.77.9: UDP, length 1431\n20:22:11.204770 IP (tos 0x0, ttl 64, id 33415, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.56098 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    },
+    "tc-frag": {
+      "counters": {
+        "encoded": 2069,
+        "encoded_empty": 303,
+        "frag_first": 262,
+        "frag_shift": 2485,
+        "redirect_ok": 4146,
+        "sent_calls": 4145,
+        "tc_decoded": 2076,
+        "tc_decoded_empty": 305
+      },
+      "dig_1111": "172.66.147.243\n104.20.23.154\nrc=0\n",
+      "first_4097_200": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 200,
+        "ok": 200,
+        "s": 19.672528551
+      },
+      "first_59000_50": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 50,
+        "ok": 50,
+        "s": 4.826666259
+      },
+      "first_64_conn_500": {
+        "connected": true,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 500,
+        "ok": 500,
+        "s": 48.812748438
+      },
+      "first_64_unconn_1000": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 4,
+        "first_failures": [
+          {
+            "i": 60,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 61,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 62,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          },
+          {
+            "i": 63,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 64
+            }
+          }
+        ],
+        "iterations": 1000,
+        "ok": 996,
+        "s": 104.5984332
+      },
+      "first_empty_300": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 300,
+        "ok": 300,
+        "s": 29.100683436
+      },
+      "framelike_P": {
+        "conn": {
+          "connected": true,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        },
+        "unconn": {
+          "connected": false,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        }
+      },
+      "matrix_P": {
+        "conn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "10.99.7.2:60737",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:36674",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:59133",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "10.99.7.2:46616",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "10.99.7.2:47558",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "10.99.7.2:39765",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 0,
+          "local": "0.0.0.0:38573",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:59309",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:59012",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "0.0.0.0:57720",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "0.0.0.0:46730",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "0.0.0.0:46124",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn_P": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:34907",
+        "ok": true,
+        "peer": "",
+        "results": [
+          {
+            "from": "10.250.95.2:7210",
+            "got": 0,
+            "ok": true,
+            "size": 0
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1,
+            "ok": true,
+            "size": 1
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1431,
+            "ok": true,
+            "size": 1431
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4096,
+            "ok": true,
+            "size": 4096
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4097,
+            "ok": true,
+            "size": 4097
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 59000,
+            "ok": true,
+            "size": 59000
+          }
+        ]
+      },
+      "strace": {
+        "guest_socket_io_count": 6216,
+        "guest_socket_io_max_bytes": 16,
+        "guest_socket_io_sizes": [
+          8,
+          16
+        ],
+        "guest_syscall_bytes": {
+          "recvfrom:NETLINK": {
+            "bytes": 40296,
+            "calls": 438
+          },
+          "recvfrom:socket": {
+            "bytes": 16576,
+            "calls": 2072
+          },
+          "sendto:NETLINK": {
+            "bytes": 31536,
+            "calls": 438
+          },
+          "sendto:socket": {
+            "bytes": 66304,
+            "calls": 4144
+          },
+          "write:/tmp/owner-stats.json.tmp": {
+            "bytes": 163232,
+            "calls": 436
+          },
+          "write:/tmp/owner.log": {
+            "bytes": 476055,
+            "calls": 198824
+          }
+        },
+        "host_socket_io_count": 6216,
+        "host_socket_io_max_bytes": 16,
+        "host_socket_io_sizes": [
+          8,
+          16
+        ],
+        "host_syscall_bytes": {
+          "recvfrom:socket": {
+            "bytes": 66304,
+            "calls": 4144
+          },
+          "sendto:socket": {
+            "bytes": 16576,
+            "calls": 2072
+          },
+          "write:/home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/host-owner-increment-e-13.log": {
+            "bytes": 438074,
+            "calls": 157472
+          },
+          "write:/home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/host-stats.json.tmp": {
+            "bytes": 135036,
+            "calls": 413
+          }
+        }
+      },
+      "tc_cost_unregistered": {
+        "ns_per_run": 270.55585,
+        "run_cnt_delta": 20000,
+        "run_time_ns_delta": 5411117,
+        "send_wall_s": 0.13,
+        "sent": 20000
+      },
+      "tcx_stats": [
+        {
+          "id": 42296,
+          "jited_prog_len": null,
+          "name": "eg_decode_frag",
+          "run_cnt": 25122,
+          "run_time_ns": 14615043,
+          "xlated_prog_len": null
+        }
+      ],
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_nic": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:22:27.941594 IP (tos 0x0, ttl 64, id 24313, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.53944 > 192.0.2.77.9: UDP, length 0\n20:22:27.941622 IP (tos 0x0, ttl 64, id 24314, offset 0, flags [DF], proto UDP (17), length 28)\n    <metal-address>.53944 > 192.0.2.77.9: UDP, length 0\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:22:29.811902 IP (tos 0x0, ttl 64, id 60427, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.56764 > 192.0.2.77.9: UDP, length 1431\n20:22:29.811923 IP (tos 0x0, ttl 64, id 60428, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.56764 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:22:31.650930 IP (tos 0x0, ttl 64, id 4382, offset 0, flags [+], proto UDP (17), length 1492)\n    <metal-address>.47093 > 192.0.2.77.9: UDP, length 4096\n20:22:31.650944 IP (tos 0x0, ttl 64, id 4382, offset 1472, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:22:31.650949 IP (tos 0x0, ttl 64, id 4382, offset 2952, flags [none], proto UDP (17), length 1172)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:22:31.650965 IP (tos 0x0, ttl 64, id 4383, offset 0, flags [+], proto UDP (17), length 1492)\n    <metal-address>.47093 > 192.0.2.77.9: UDP, length 4096\n20:22:31.650969 IP (tos 0x0, ttl 64, id 4383, offset 1472, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:22:31.650973 IP (tos 0x0, ttl 64, id 4383, offset 2952, flags [none], proto UDP (17), length 1172)\n    <metal-address> > 192.0.2.77: ip-proto-17\n\n6 packets captured\n6 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:22:33.523935 IP (tos 0x0, ttl 64, id 37191, offset 0, flags [+], proto UDP (17), length 1492)\n    10.250.95.1.41148 > 10.250.95.2.9: UDP, length 4096\n20:22:33.523959 IP (tos 0x0, ttl 64, id 37191, offset 1472, flags [+], proto UDP (17), length 1500)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n20:22:33.523966 IP (tos 0x0, ttl 64, id 37191, offset 2952, flags [none], proto UDP (17), length 1172)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n\n3 packets captured\n3 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    },
+    "verdict": {
+      "counters": {
+        "encoded": 1020,
+        "redirect_ok": 2046,
+        "sent_calls": 2045,
+        "vstrip": 1026,
+        "vstrip_empty_drop": 35
+      },
+      "dig_1111": "172.66.147.243\n104.20.23.154\nrc=0\n",
+      "first_64_unconn_1000": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 1000,
+        "ok": 1000,
+        "s": 1.095325167
+      },
+      "first_empty_30": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 30,
+        "first_failures": [
+          {
+            "i": 0,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 1,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 2,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 3,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 4,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 5,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 6,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 7,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 8,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 9,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 10,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 11,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 12,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 13,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 14,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 15,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 16,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 17,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 18,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 19,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          }
+        ],
+        "iterations": 30,
+        "ok": 0,
+        "s": 9.120020543
+      },
+      "framelike_P": {
+        "conn": {
+          "connected": true,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        },
+        "unconn": {
+          "connected": false,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        }
+      },
+      "matrix_P": {
+        "conn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:52284",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:35204",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:53124",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "10.99.7.2:59162",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "10.99.7.2:53630",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "10.99.7.2:33050",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:40532",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:36979",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:33759",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "0.0.0.0:51568",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "0.0.0.0:57893",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "0.0.0.0:49572",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn_P": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:48384",
+        "ok": false,
+        "peer": "",
+        "results": [
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 0
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1,
+            "ok": true,
+            "size": 1
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 1431,
+            "ok": true,
+            "size": 1431
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4096,
+            "ok": true,
+            "size": 4096
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 4097,
+            "ok": true,
+            "size": 4097
+          },
+          {
+            "from": "10.250.95.2:7210",
+            "got": 59000,
+            "ok": true,
+            "size": 59000
+          }
+        ]
+      },
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_nic": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:26:16.494958 IP (tos 0x0, ttl 64, id 60708, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.52749 > 192.0.2.77.9: UDP, length 1431\n20:26:16.513726 IP (tos 0x0, ttl 64, id 60709, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.52749 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:26:18.370890 IP (tos 0x0, ttl 64, id 17838, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.58398 > 192.0.2.77.9: UDP, length 4096\n20:26:18.370903 IP (tos 0x0, ttl 64, id 17838, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:26:18.370906 IP (tos 0x0, ttl 64, id 17838, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:26:18.389304 IP (tos 0x0, ttl 64, id 17839, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.58398 > 192.0.2.77.9: UDP, length 4096\n20:26:18.389313 IP (tos 0x0, ttl 64, id 17839, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:26:18.389316 IP (tos 0x0, ttl 64, id 17839, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n\n6 packets captured\n6 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:26:20.230953 IP (tos 0x0, ttl 64, id 33948, offset 0, flags [+], proto UDP (17), length 1500)\n    10.250.95.1.44736 > 10.250.95.2.9: UDP, length 4096\n20:26:20.230981 IP (tos 0x0, ttl 64, id 33948, offset 1480, flags [+], proto UDP (17), length 1500)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n20:26:20.230986 IP (tos 0x0, ttl 64, id 33948, offset 2960, flags [none], proto UDP (17), length 1164)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n\n3 packets captured\n3 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    },
+    "verdict-naive": {
+      "counters": {
+        "encoded": 1015,
+        "redirect_ok": 2076,
+        "sent_calls": 2035,
+        "vstrip": 1061,
+        "vstrip_empty_fwd": 35
+      },
+      "dig_1111": "104.20.23.154\n172.66.147.243\nrc=0\n",
+      "first_64_unconn_1000": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 1000,
+        "ok": 1000,
+        "s": 1.054153175
+      },
+      "first_empty_30": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_stress",
+        "failed": 30,
+        "first_failures": [
+          {
+            "i": 0,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 1,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 2,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 3,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 4,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 5,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 6,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 7,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 8,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 9,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 10,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 11,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 12,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 13,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 14,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 15,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 16,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 17,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 18,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          },
+          {
+            "i": 19,
+            "r": {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "ok": false,
+              "size": 0
+            }
+          }
+        ],
+        "iterations": 30,
+        "ok": 0,
+        "s": 9.122965976
+      },
+      "framelike_P": {
+        "conn": {
+          "connected": true,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        },
+        "unconn": {
+          "connected": false,
+          "dst": "10.250.95.2:7210",
+          "ev": "udp_framelike",
+          "ok": true,
+          "results": [
+            {
+              "from": "10.250.95.2:7210",
+              "got": 8,
+              "ok": true,
+              "sent": 8
+            },
+            {
+              "from": "10.250.95.2:7210",
+              "got": 13,
+              "ok": true,
+              "sent": 13
+            }
+          ]
+        }
+      },
+      "matrix_P": {
+        "conn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:42090",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:45956",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:60827",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "10.99.7.2:35044",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "10.99.7.2:46566",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "10.99.7.2:48556",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:38300",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:35905",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:33845",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4096,
+          "local": "0.0.0.0:38273",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 4097,
+          "local": "0.0.0.0:54208",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 59000,
+          "local": "0.0.0.0:51200",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "same_assoc_unconn_P": {
+        "connected": false,
+        "dst": "10.250.95.2:7210",
+        "ev": "udp_client",
+        "local": "0.0.0.0:59762",
+        "ok": false,
+        "peer": "",
+        "results": [
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 0
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 1
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 1431
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4096
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 4097
+          },
+          {
+            "err": "recv Resource temporarily unavailable (os error 11)",
+            "ok": false,
+            "size": 59000
+          }
+        ]
+      },
+      "unrelated_framelike": {
+        "from": "10.250.95.2:7210",
+        "got": 13,
+        "intact": true,
+        "sent": 13
+      },
+      "unrelated_plain": {
+        "from": "10.250.95.2:7210",
+        "got": 5,
+        "intact": true,
+        "sent": 5
+      },
+      "wire_nic": {
+        "0": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 0
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n\n0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "1431": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 1431
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:26:53.036991 IP (tos 0x0, ttl 64, id 44567, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.60123 > 192.0.2.77.9: UDP, length 1431\n20:26:53.055922 IP (tos 0x0, ttl 64, id 44568, offset 0, flags [DF], proto UDP (17), length 1459)\n    <metal-address>.60123 > 192.0.2.77.9: UDP, length 1431\n\n2 packets captured\n2 packets received by filter\n0 packets dropped by kernel\n"
+        },
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "192.0.2.77:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:26:54.912947 IP (tos 0x0, ttl 64, id 49388, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.48425 > 192.0.2.77.9: UDP, length 4096\n20:26:54.912960 IP (tos 0x0, ttl 64, id 49388, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:26:54.912964 IP (tos 0x0, ttl 64, id 49388, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:26:54.931981 IP (tos 0x0, ttl 64, id 49389, offset 0, flags [+], proto UDP (17), length 1500)\n    <metal-address>.48425 > 192.0.2.77.9: UDP, length 4096\n20:26:54.931990 IP (tos 0x0, ttl 64, id 49389, offset 1480, flags [+], proto UDP (17), length 1500)\n    <metal-address> > 192.0.2.77: ip-proto-17\n20:26:54.931994 IP (tos 0x0, ttl 64, id 49389, offset 2960, flags [none], proto UDP (17), length 1164)\n    <metal-address> > 192.0.2.77: ip-proto-17\n\n6 packets captured\n6 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      },
+      "wire_veth_4096": {
+        "4096": {
+          "send": {
+            "connected": false,
+            "count": 2,
+            "dst": "10.250.95.2:9",
+            "ev": "udp_send",
+            "sent_ok": 2,
+            "size": 4096
+          },
+          "tcpdump": "tcpdump: listening on v11h, link-type EN10MB (Ethernet), snapshot length 262144 bytes\n20:26:56.774002 IP (tos 0x0, ttl 64, id 26712, offset 0, flags [+], proto UDP (17), length 1500)\n    10.250.95.1.59334 > 10.250.95.2.9: UDP, length 4096\n20:26:56.774031 IP (tos 0x0, ttl 64, id 26712, offset 1480, flags [+], proto UDP (17), length 1500)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n20:26:56.774037 IP (tos 0x0, ttl 64, id 26712, offset 2960, flags [none], proto UDP (17), length 1164)\n    10.250.95.1 > 10.250.95.2: ip-proto-17\n\n3 packets captured\n3 packets received by filter\n0 packets dropped by kernel\n"
+        }
+      }
+    }
+  },
+  "V11-missing-tc": {
+    "hybrid": {
+      "matrix_P": {
+        "conn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 8,
+          "local": "10.99.7.2:35124",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:33605",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:41199",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 8,
+          "local": "0.0.0.0:37777",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:33788",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:35049",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "tcx_on_v11h": "xdp:\n\ntc:\n\nflow_dissector:\n\nnetfilter:\n\n"
+    },
+    "tc-frag": {
+      "matrix_P": {
+        "conn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 8,
+          "local": "10.99.7.2:48439",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 9,
+          "local": "10.99.7.2:53592",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1439,
+          "local": "10.99.7.2:44437",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 8,
+          "local": "0.0.0.0:56901",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 9,
+          "local": "0.0.0.0:47112",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1439,
+          "local": "0.0.0.0:40981",
+          "ok": false,
+          "peer": ""
+        }
+      },
+      "tcx_on_v11h": "xdp:\n\ntc:\n\nflow_dissector:\n\nnetfilter:\n\n"
+    },
+    "verdict": {
+      "matrix_P": {
+        "conn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:33498",
+          "ok": false,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "10.99.7.2:48947",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "10.99.7.2:36944",
+          "ok": true,
+          "peer": "10.250.95.2:7210"
+        },
+        "unconn_0": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:49829",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1,
+          "local": "0.0.0.0:53750",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.250.95.2:7210",
+          "got": 1431,
+          "local": "0.0.0.0:52799",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "tcx_on_v11h": "xdp:\n\ntc:\n\nflow_dissector:\n\nnetfilter:\n\n"
+    }
+  },
+  "V11-programs": {
+    "hybrid": "\"programs\":[{\"id\":42332,\"name\":\"verdict\",\"tag\":\"5f61753433e18fc2\",\"verified_insns\":884},{\"id\":42333,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":42334,\"name\":\"strp_verdict\",\"tag\":\"4c631b1fcdb0e5f6\",\"verified_insns\":895},{\"id\":42335,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"1be1d280222d9e90\",\"verified_insns\":465},{\"id\":42336,\"name\":\"eg_decode_frag(tcx v11h egress)\",\"tag\":\"a9285dfbbf33b7ff\",\"verified_insns\":627},{\"id\":42336,\"name\":\"eg_decode_frag(tcx eno12399np0 egress)\",\"tag\":\"a9285dfbbf33b7ff\",\"verified_insns\":627},{\"id\":42337,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":42338,\"name\":\"sockops(/sys/fs/cgroup/gvc-spike-1096805)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"hybrid\"}\n",
+    "tc": "\"programs\":[{\"id\":42279,\"name\":\"verdict\",\"tag\":\"5f61753433e18fc2\",\"verified_insns\":884},{\"id\":42280,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":42281,\"name\":\"strp_verdict\",\"tag\":\"4c631b1fcdb0e5f6\",\"verified_insns\":895},{\"id\":42282,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"1be1d280222d9e90\",\"verified_insns\":465},{\"id\":42282,\"name\":\"lo_decode(tcx v11h egress)\",\"tag\":\"1be1d280222d9e90\",\"verified_insns\":465},{\"id\":42282,\"name\":\"lo_decode(tcx eno12399np0 egress)\",\"tag\":\"1be1d280222d9e90\",\"verified_insns\":465},{\"id\":42283,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":42284,\"name\":\"sockops(/sys/fs/cgroup/gvc-spike-1084292)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"tc\"}\n",
+    "tc-frag": "\"programs\":[{\"id\":42292,\"name\":\"verdict\",\"tag\":\"5f61753433e18fc2\",\"verified_insns\":884},{\"id\":42293,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":42294,\"name\":\"strp_verdict\",\"tag\":\"4c631b1fcdb0e5f6\",\"verified_insns\":895},{\"id\":42295,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"1be1d280222d9e90\",\"verified_insns\":465},{\"id\":42296,\"name\":\"eg_decode_frag(tcx v11h egress)\",\"tag\":\"a9285dfbbf33b7ff\",\"verified_insns\":627},{\"id\":42296,\"name\":\"eg_decode_frag(tcx eno12399np0 egress)\",\"tag\":\"a9285dfbbf33b7ff\",\"verified_insns\":627},{\"id\":42297,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":42298,\"name\":\"sockops(/sys/fs/cgroup/gvc-spike-1084318)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"tc-frag\"}\n",
+    "verdict": "\"programs\":[{\"id\":42306,\"name\":\"verdict\",\"tag\":\"5f61753433e18fc2\",\"verified_insns\":884},{\"id\":42307,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":42308,\"name\":\"strp_verdict\",\"tag\":\"4c631b1fcdb0e5f6\",\"verified_insns\":895},{\"id\":42309,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"1be1d280222d9e90\",\"verified_insns\":465},{\"id\":42310,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":42311,\"name\":\"sockops(/sys/fs/cgroup/gvc-spike-1096781)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"verdict\"}\n",
+    "verdict-naive": "\"programs\":[{\"id\":42319,\"name\":\"verdict\",\"tag\":\"5f61753433e18fc2\",\"verified_insns\":884},{\"id\":42320,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":42321,\"name\":\"strp_verdict\",\"tag\":\"4c631b1fcdb0e5f6\",\"verified_insns\":895},{\"id\":42322,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"1be1d280222d9e90\",\"verified_insns\":465},{\"id\":42323,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":42324,\"name\":\"sockops(/sys/fs/cgroup/gvc-spike-1096789)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"verdict-naive\"}\n"
+  },
+  "V14": {
+    "result": {
+      "app_9_down": [
+        0.00014367606490850449,
+        1,
+        "refused"
+      ],
+      "app_9_e2e": {
+        "dst": "<metal-address>:2731",
+        "err": "connect: Connection refused (os error 111)",
+        "ok": false,
+        "size": 1000
+      },
+      "app_9_up": [
+        null,
+        4459,
+        "refused"
+      ],
+      "app_TERM_down": [
+        0.0001514982432126999,
+        1,
+        "refused"
+      ],
+      "app_TERM_e2e": {
+        "dst": "<metal-address>:2731",
+        "err": "connect: Connection refused (os error 111)",
+        "ok": false,
+        "size": 1000
+      },
+      "app_TERM_up": [
+        null,
+        4516,
+        "refused"
+      ],
+      "churn_closed_probe_after": "refused",
+      "churn_host_d23_events": "",
+      "churn_open_lines": [
+        "{\"bind_errors\":0,\"ev\":\"CHURN_DONE\",\"final_open\":true,\"iterations\":2000,\"ms\":35.64148,\"t_us\":1599929073}",
+        "PROBE",
+        ""
+      ],
+      "churn_open_probe_after": {
+        "connect": "refused"
+      },
+      "guest_listen_log": "{\"enum_us\":283,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7300,\"reason\":\"session_open\",\"seq\":1,\"t_us\":1628664925}\n{\"enum_us\":372,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7301,\"reason\":\"session_open\",\"seq\":2,\"t_us\":1628665014}\n{\"enum_us\":450,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7302,\"reason\":\"session_open\",\"seq\":3,\"t_us\":1628665092}\n{\"cookie\":43021,\"ev\":\"listen_event\",\"kind\":\"start\",\"ktime_us\":1630510274,\"port\":7300}\n{\"enum_us\":296,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7300,\"reason\":\"session_open\",\"seq\":4,\"t_us\":1636264022}\n{\"enum_us\":368,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7301,\"reason\":\"session_open\",\"seq\":5,\"t_us\":1636264094}\n{\"enum_us\":440,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7302,\"reason\":\"session_open\",\"seq\":6,\"t_us\":1636264166}\n",
+      "guest_owner_stats": "{\"aborted_on_ctl_loss\":0,\"counters\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,6,0,0,0,0],\"ctl_connect_failed\":2,\"ctl_sessions_opened\":2,\"flows_open\":0,\"listen_events\":6,\"listen_state_sent\":6,\"t_ms\":1791233352085.2756}{\"ev\":\"ctl_open\",\"t_us\":1628664626}\n{\"ev\":\"ctl_closed\",\"t_us\":1635512622}\n{\"err\":\"Connection reset by peer (os error 104)\",\"ev\":\"ctl_connect_failed\"}\n{\"err\":\"Connection reset by peer (os error 104)\",\"ev\":\"ctl_connect_failed\"}\n{\"ev\":\"ctl_open\",\"t_us\":1636263696}\n",
+      "kp_guest_socket_io_sizes": [],
+      "kp_guest_strace": {
+        "recvfrom:NETLINK": {
+          "bytes": 25944,
+          "calls": 282
+        },
+        "sendto:NETLINK": {
+          "bytes": 20304,
+          "calls": 282
+        },
+        "write:/tmp/owner-stats.json.tmp": {
+          "bytes": 48177,
+          "calls": 201
+        },
+        "write:/tmp/owner.log": {
+          "bytes": 3380,
+          "calls": 1440
+        }
+      },
+      "lag_ms": {
+        "down": {
+          "max": 0.08512753993272781,
+          "missing": 0,
+          "n": 200,
+          "p50": 0.06011035293340683,
+          "p90": 0.06730109453201294,
+          "p99": 0.08027162402868271
+        },
+        "up": {
+          "max": null,
+          "missing": 200,
+          "n": 200,
+          "p50": null,
+          "p90": null,
+          "p99": null
+        }
+      },
+      "lag_raw_ms": {
+        "down": [
+          0.07448159158229828,
+          0.06588082760572433,
+          0.030775554478168488,
+          0.04035979509353638,
+          0.06130151450634003,
+          0.031107105314731598,
+          0.03467220813035965,
+          0.03554392606019974,
+          0.03245938569307327,
+          0.0331588089466095,
+          0.059138983488082886,
+          0.032189302146434784,
+          0.03250874578952789,
+          0.03050547093153,
+          0.03154762089252472,
+          0.0614020973443985,
+          0.0325692817568779,
+          0.031297095119953156,
+          0.05277898162603378,
+          0.031227245926856995,
+          0.08512753993272781,
+          0.061442144215106964,
+          0.05882885307073593,
+          0.06344635039567947,
+          0.05955900996923447,
+          0.0758543610572815,
+          0.07216818630695343,
+          0.06070174276828766,
+          0.057056546211242676,
+          0.06157252937555313,
+          0.05817785859107971,
+          0.030416063964366913,
+          0.03544241189956665,
+          0.06100162863731384,
+          0.05889870226383209,
+          0.040531158447265625,
+          0.03102608025074005,
+          0.06807316094636917,
+          0.05857832729816437,
+          0.03310013562440872,
+          0.02996530383825302,
+          0.07213931530714035,
+          0.06234366446733475,
+          0.06927456706762314,
+          0.05941838026046753,
+          0.05917903035879135,
+          0.033449381589889526,
+          0.06730109453201294,
+          0.06203353404998779,
+          0.05920883268117905,
+          0.058346427977085114,
+          0.057656317949295044,
+          0.05676504224538803,
+          0.06633996963500977,
+          0.062123872339725494,
+          0.06029102951288223,
+          0.050094909965991974,
+          0.04792213439941406,
+          0.03213807940483093,
+          0.061172060668468475,
+          0.06067100912332535,
+          0.061913393437862396,
+          0.06359629333019257,
+          0.06135180592536926,
+          0.060871243476867676,
+          0.030687078833580017,
+          0.029684975743293762,
+          0.03023538738489151,
+          0.04380475729703903,
+          0.06362609565258026,
+          0.03171805292367935,
+          0.031606294214725494,
+          0.031686387956142426,
+          0.0318475067615509,
+          0.06695929914712906,
+          0.0611012801527977,
+          0.06301514804363251,
+          0.07967930287122726,
+          0.07383152842521667,
+          0.06123259663581848,
+          0.05959998816251755,
+          0.0616125762462616,
+          0.06048101931810379,
+          0.0599101185798645,
+          0.06261374801397324,
+          0.05964003503322601,
+          0.059548765420913696,
+          0.05820766091346741,
+          0.06995536386966705,
+          0.062214210629463196,
+          0.06041117012500763,
+          0.06191432476043701,
+          0.06348546594381332,
+          0.06161350756883621,
+          0.061602331697940826,
+          0.060129910707473755,
+          0.05723629146814346,
+          0.05869753658771515,
+          0.04962552338838577,
+          0.060521066188812256,
+          0.06363540887832642,
+          0.0589592382311821,
+          0.056774355471134186,
+          0.06035063415765762,
+          0.0636763870716095,
+          0.08027162402868271,
+          0.06303563714027405,
+          0.06073061376810074,
+          0.0605117529630661,
+          0.059439800679683685,
+          0.07059704512357712,
+          0.05887914448976517,
+          0.06531830877065659,
+          0.057806260883808136,
+          0.05967915058135986,
+          0.06676092743873596,
+          0.058377161622047424,
+          0.06194319576025009,
+          0.06556790322065353,
+          0.07553398609161377,
+          0.06499793380498886,
+          0.06199255585670471,
+          0.059159472584724426,
+          0.05996134132146835,
+          0.059159472584724426,
+          0.061423517763614655,
+          0.06069056689739227,
+          0.06011035293340683,
+          0.06135180592536926,
+          0.06438698619604111,
+          0.03696605563163757,
+          0.07102638483047485,
+          0.05973968654870987,
+          0.061211176216602325,
+          0.05821883678436279,
+          0.03241933882236481,
+          0.031608156859874725,
+          0.0628642737865448,
+          0.058778561651706696,
+          0.06351619958877563,
+          0.0813724473118782,
+          0.058327801525592804,
+          0.06066076457500458,
+          0.05837809294462204,
+          0.05992967635393143,
+          0.05760602653026581,
+          0.061102211475372314,
+          0.05801767110824585,
+          0.06444752216339111,
+          0.0660596415400505,
+          0.061882659792900085,
+          0.06043165922164917,
+          0.07178820669651031,
+          0.06114225834608078,
+          0.061874277889728546,
+          0.06055179983377457,
+          0.0636763870716095,
+          0.05943886935710907,
+          0.03123655915260315,
+          0.05830824375152588,
+          0.03924965858459473,
+          0.07414165884256363,
+          0.061742961406707764,
+          0.06597861647605896,
+          0.05954969674348831,
+          0.03189779818058014,
+          0.030695460736751556,
+          0.03306940197944641,
+          0.062253326177597046,
+          0.06157346069812775,
+          0.03343168646097183,
+          0.05853734910488129,
+          0.06431620568037033,
+          0.07200893014669418,
+          0.0612819567322731,
+          0.06206333637237549,
+          0.0584479421377182,
+          0.058729201555252075,
+          0.06371643394231796,
+          0.06062164902687073,
+          0.06196461617946625,
+          0.056945718824863434,
+          0.06796233355998993,
+          0.05917903035879135,
+          0.06099231541156769,
+          0.056784600019454956,
+          0.03173854202032089,
+          0.03189779818058014,
+          0.030516646802425385,
+          0.030185095965862274,
+          0.02987496554851532,
+          0.03151688724756241,
+          0.06244424730539322,
+          0.05794689059257507,
+          0.0613117590546608,
+          0.06400700658559799,
+          0.03457348793745041,
+          0.05936902016401291,
+          0.04282407462596893,
+          0.07195957005023956
+        ],
+        "up": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "probe_timeline": [
+        [
+          0.0,
+          "refused"
+        ],
+        [
+          0.05,
+          "refused"
+        ],
+        [
+          0.101,
+          "refused"
+        ],
+        [
+          0.151,
+          "refused"
+        ],
+        [
+          0.201,
+          "refused"
+        ],
+        [
+          0.251,
+          "refused"
+        ],
+        [
+          0.302,
+          "refused"
+        ],
+        [
+          0.352,
+          "refused"
+        ],
+        [
+          0.402,
+          "refused"
+        ],
+        [
+          0.453,
+          "refused"
+        ],
+        [
+          0.503,
+          "refused"
+        ],
+        [
+          0.553,
+          "refused"
+        ],
+        [
+          0.603,
+          "refused"
+        ],
+        [
+          0.654,
+          "refused"
+        ],
+        [
+          0.704,
+          "refused"
+        ],
+        [
+          0.754,
+          "refused"
+        ],
+        [
+          0.805,
+          "refused"
+        ],
+        [
+          0.855,
+          "refused"
+        ],
+        [
+          0.905,
+          "refused"
+        ],
+        [
+          0.956,
+          "refused"
+        ],
+        [
+          1.006,
+          "refused"
+        ],
+        [
+          1.056,
+          "refused"
+        ],
+        [
+          1.106,
+          "refused"
+        ],
+        [
+          1.157,
+          "refused"
+        ],
+        [
+          1.207,
+          "refused"
+        ],
+        [
+          1.257,
+          "refused"
+        ],
+        [
+          1.308,
+          "refused"
+        ],
+        [
+          1.358,
+          "refused"
+        ],
+        [
+          1.408,
+          "refused"
+        ],
+        [
+          1.458,
+          "refused"
+        ],
+        [
+          1.509,
+          "refused"
+        ],
+        [
+          1.559,
+          "refused"
+        ],
+        [
+          1.609,
+          "refused"
+        ],
+        [
+          1.66,
+          "refused"
+        ],
+        [
+          1.71,
+          "refused"
+        ],
+        [
+          1.76,
+          "refused"
+        ],
+        [
+          1.81,
+          "refused"
+        ],
+        [
+          1.861,
+          "refused"
+        ],
+        [
+          1.911,
+          "refused"
+        ],
+        [
+          1.961,
+          "refused"
+        ],
+        [
+          2.012,
+          "refused"
+        ],
+        [
+          2.062,
+          "refused"
+        ],
+        [
+          2.112,
+          "refused"
+        ],
+        [
+          2.163,
+          "refused"
+        ],
+        [
+          2.213,
+          "refused"
+        ],
+        [
+          2.263,
+          "refused"
+        ],
+        [
+          2.313,
+          "refused"
+        ],
+        [
+          2.364,
+          "refused"
+        ],
+        [
+          2.414,
+          "refused"
+        ],
+        [
+          2.464,
+          "refused"
+        ],
+        [
+          2.515,
+          "refused"
+        ],
+        [
+          2.565,
+          "refused"
+        ],
+        [
+          2.615,
+          "refused"
+        ],
+        [
+          2.666,
+          "refused"
+        ],
+        [
+          2.716,
+          "refused"
+        ],
+        [
+          2.766,
+          "refused"
+        ],
+        [
+          2.816,
+          "refused"
+        ],
+        [
+          2.867,
+          "refused"
+        ],
+        [
+          2.917,
+          "refused"
+        ],
+        [
+          2.967,
+          "refused"
+        ],
+        [
+          3.018,
+          "refused"
+        ],
+        [
+          3.068,
+          "refused"
+        ],
+        [
+          3.118,
+          "refused"
+        ],
+        [
+          3.168,
+          "refused"
+        ],
+        [
+          3.219,
+          "refused"
+        ],
+        [
+          3.269,
+          "refused"
+        ],
+        [
+          3.319,
+          "refused"
+        ],
+        [
+          3.37,
+          "refused"
+        ],
+        [
+          3.42,
+          "refused"
+        ],
+        [
+          3.47,
+          "refused"
+        ],
+        [
+          3.521,
+          "refused"
+        ],
+        [
+          3.571,
+          "refused"
+        ],
+        [
+          3.621,
+          "refused"
+        ],
+        [
+          3.671,
+          "refused"
+        ],
+        [
+          3.722,
+          "refused"
+        ],
+        [
+          3.772,
+          "refused"
+        ],
+        [
+          3.822,
+          "refused"
+        ],
+        [
+          3.873,
+          "refused"
+        ],
+        [
+          3.923,
+          "refused"
+        ],
+        [
+          3.973,
+          "refused"
+        ],
+        [
+          4.024,
+          "refused"
+        ],
+        [
+          4.074,
+          "refused"
+        ],
+        [
+          4.124,
+          "refused"
+        ],
+        [
+          4.174,
+          "refused"
+        ],
+        [
+          4.225,
+          "refused"
+        ],
+        [
+          4.275,
+          "refused"
+        ],
+        [
+          4.325,
+          "refused"
+        ],
+        [
+          4.376,
+          "refused"
+        ],
+        [
+          4.426,
+          "refused"
+        ],
+        [
+          4.476,
+          "refused"
+        ],
+        [
+          4.526,
+          "refused"
+        ],
+        [
+          4.577,
+          "refused"
+        ],
+        [
+          4.627,
+          "refused"
+        ],
+        [
+          4.677,
+          "refused"
+        ],
+        [
+          4.728,
+          "refused"
+        ],
+        [
+          4.778,
+          "refused"
+        ],
+        [
+          4.828,
+          "refused"
+        ],
+        [
+          4.879,
+          "refused"
+        ],
+        [
+          4.929,
+          "refused"
+        ],
+        [
+          4.979,
+          "refused"
+        ]
+      ],
+      "probe_timeline_marks": [
+        [
+          1.003,
+          "{\"ev\":\"L\",\"i\":0,\"t_us\":1585638628}"
+        ],
+        [
+          2.004,
+          "{\"ev\":\"C\",\"i\":0,\"served\":0,\"t_us\":1586639405}"
+        ],
+        [
+          3.004,
+          "{\"ev\":\"L\",\"i\":1,\"t_us\":1587639585}"
+        ],
+        [
+          4.004,
+          "{\"ev\":\"C\",\"i\":1,\"served\":0,\"t_us\":1588640305}"
+        ],
+        [
+          5.005,
+          "{\"ev\":\"DONE\"}"
+        ],
+        [
+          5.005,
+          ""
+        ]
+      ],
+      "refuse_alwaysbound": {
+        "connect": "ok?",
+        "err": "ConnectionResetError(104, 'Connection reset by peer')",
+        "read_so_far": null
+      },
+      "refuse_alwaysbound_ms": 0.9053526446223259,
+      "refuse_d23_before_listen": "refused",
+      "restart1_e2e": {
+        "connect": "refused"
+      },
+      "restart1_hold_up": [
+        null,
+        4547,
+        "refused"
+      ],
+      "restart1_owner_back": [
+        null,
+        8942,
+        "refused"
+      ],
+      "restart1_owner_killed": [
+        0.00015615485608577728,
+        1,
+        "refused"
+      ],
+      "restart2_owner_killed": [
+        0.00015916861593723297,
+        1,
+        "refused"
+      ],
+      "restart2_probe_after": "refused",
+      "restart2_state_sent": "{\"enum_us\":283,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7300,\"reason\":\"session_open\",\"seq\":1,\"t_us\":1628664925}\n{\"enum_us\":372,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7301,\"reason\":\"session_open\",\"seq\":2,\"t_us\":1628665014}\n{\"enum_us\":450,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7302,\"reason\":\"session_open\",\"seq\":3,\"t_us\":1628665092}\n",
+      "restart3_e2e": {
+        "connect": "refused"
+      },
+      "restart3_hold_up": [
+        null,
+        4453,
+        "refused"
+      ],
+      "restart3_host_back": [
+        null,
+        8981,
+        "refused"
+      ],
+      "restart3_host_down_probe": "refused",
+      "reuseport_after_steady_exit": [
+        7.336027920246124e-05,
+        1,
+        "refused"
+      ],
+      "reuseport_churn": "{\"bind_errors\":0,\"ev\":\"CHURN_DONE\",\"final_open\":false,\"iterations\":2000,\"ms\":37.817624,\"t_us\":1609966960}\n",
+      "reuseport_up": [
+        null,
+        4542,
+        "refused"
+      ],
+      "reuseport_window_host_closes": 0,
+      "reuseport_window_probe_results": {
+        "refused": 260
+      }
+    }
+  },
+  "VIP": {
+    "result": {
+      "host_log": "{\"dst\":\"10.251.0.10:7200\",\"ev\":\"host_tcp_connect\",\"flow\":1,\"peer\":\"10.250.95.2:7200\"}\n{\"dst\":\"10.251.0.10:7201\",\"ev\":\"host_tcp_connect\",\"flow\":3,\"peer\":\"10.250.95.2:7201\"}\n{\"dst\":\"10.251.0.11:7000\",\"ev\":\"host_tcp_connect\",\"flow\":5,\"peer\":\"<metal-address>:7000\"}\n{\"dst\":\"10.251.0.10:7200\",\"ev\":\"host_tcp_connect\",\"flow\":7,\"peer\":\"10.250.95.2:7200\"}\n{\"dst\":\"10.251.0.10:7200\",\"ev\":\"host_tcp_connect\",\"flow\":9,\"peer\":\"10.250.95.2:7200\"}\n{\"dst\":\"10.251.0.10:7200\",\"ev\":\"host_tcp_connect\",\"flow\":11,\"peer\":\"10.250.95.2:7200\"}\n{\"dst\":\"10.251.0.10:7200\",\"ev\":\"host_tcp_connect\",\"flow\":13,\"peer\":\"10.250.95.2:7200\"}\n{\"dst\":\"10.251.0.10:7200\",\"ev\":\"host_tcp_connect\",\"flow\":15,\"peer\":\"10.250.95.2:7200\"}\n",
+      "neg1_no_map_tcp": {
+        "dst": "10.251.0.10:7200",
+        "err": "read: Connection reset by peer (os error 104)",
+        "got": 0,
+        "local": "10.99.7.2:43282",
+        "ok": false,
+        "os_error": 104,
+        "peer": "10.251.0.10:7200",
+        "read_err_kind": "ConnectionReset",
+        "size": 100
+      },
+      "neg1_no_map_udp": {
+        "conn_1": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "10.99.7.2:59684",
+          "ok": false,
+          "peer": "10.251.0.10:7210"
+        },
+        "unconn_1": {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "from": null,
+          "got": null,
+          "local": "0.0.0.0:37794",
+          "ok": false,
+          "peer": ""
+        }
+      },
+      "neg2_tuple_requested_tcfrag": {
+        "conn_0": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 8,
+          "local": "10.99.7.2:42245",
+          "ok": false,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 9,
+          "local": "10.99.7.2:40450",
+          "ok": false,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1439,
+          "local": "10.99.7.2:35694",
+          "ok": false,
+          "peer": "10.251.0.10:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 8,
+          "local": "0.0.0.0:33362",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 9,
+          "local": "0.0.0.0:60085",
+          "ok": false,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1439,
+          "local": "0.0.0.0:50306",
+          "ok": false,
+          "peer": ""
+        }
+      },
+      "programs": "vip_connect4(/sys/fs/cgroup/gvc-spike-1109295)\",\"tag\":\"d6ec622dab236cf1\",\"verified_insns\":38}\n\"vipmap\":[\"10.251.0.10:7200/6=10.250.95.2:7200\",\"10.251.0.10:7201/6=10.250.95.2:7201\",\"10.251.0.10:7210/17=10.250.95.2:7210\",\"10.251.0.11:7000/6=<metal-address>:7000\",\"10.251.0.11:7010/17=<metal-address>:7010\"]\n",
+      "sockname_vip": "{\"connect\":\"ok\",\"getpeername\":\"10.251.0.10:7200\",\"getsockname\":\"10.99.7.2:36458\"}\n",
+      "tcp_vip_hostlocal": {
+        "connect_ms": 0.143696,
+        "dst": "10.251.0.11:7000",
+        "local": "10.99.7.2:36446",
+        "ms": 1.334198,
+        "ok": true,
+        "peer": "10.251.0.11:7000",
+        "server_saw_peer": "<metal-address>:33980",
+        "size": 1000
+      },
+      "tcp_vip_offhost": {
+        "connect_ms": 0.187532,
+        "dst": "10.251.0.10:7200",
+        "local": "10.99.7.2:36420",
+        "ms": 4.145499,
+        "ok": true,
+        "peer": "10.251.0.10:7200",
+        "server_saw_peer": "10.250.95.1:53790",
+        "size": 100000
+      },
+      "tcp_vip_offhost_banner": {
+        "banner": "BANNER peer=10.250.95.1:50574 local=10.250.95.2:7201",
+        "connect_ms": 0.125839,
+        "dst": "10.251.0.10:7201",
+        "local": "10.99.7.2:36434",
+        "ms": 1.319315,
+        "ok": true,
+        "peer": "10.251.0.10:7201",
+        "server_saw_peer": "10.250.95.1:50574",
+        "size": 1000
+      },
+      "tcp_vip_stress_300": {
+        "banner": false,
+        "dst": "10.251.0.10:7200",
+        "early_ack": false,
+        "ev": "tcp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "hold_ms": 0,
+        "iterations": 300,
+        "ok": 300,
+        "parallel": 1,
+        "s": 0.634219649,
+        "timeout_ms": 8000
+      },
+      "udp_vip_first_300": {
+        "connected": false,
+        "dst": "10.251.0.10:7210",
+        "ev": "udp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "iterations": 300,
+        "ok": 300,
+        "s": 0.535120558
+      },
+      "udp_vip_hostlocal": {
+        "conn_0": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 0,
+          "local": "10.99.7.2:33740",
+          "ok": true,
+          "peer": "10.251.0.11:7010"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 1431,
+          "local": "10.99.7.2:53866",
+          "ok": true,
+          "peer": "10.251.0.11:7010"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 59000,
+          "local": "10.99.7.2:38771",
+          "ok": true,
+          "peer": "10.251.0.11:7010"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 0,
+          "local": "0.0.0.0:48579",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 1431,
+          "local": "0.0.0.0:49581",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 59000,
+          "local": "0.0.0.0:36411",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "udp_vip_offhost": {
+        "conn_0": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 0,
+          "local": "10.99.7.2:60113",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1,
+          "local": "10.99.7.2:40467",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1431,
+          "local": "10.99.7.2:44298",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 4096,
+          "local": "10.99.7.2:37249",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 4097,
+          "local": "10.99.7.2:49134",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 59000,
+          "local": "10.99.7.2:41919",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 0,
+          "local": "0.0.0.0:38305",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1,
+          "local": "0.0.0.0:58843",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1431,
+          "local": "0.0.0.0:41989",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 4096,
+          "local": "0.0.0.0:37259",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 4097,
+          "local": "0.0.0.0:48145",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 59000,
+          "local": "0.0.0.0:43967",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "vip_hits": 547
+    }
+  },
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ],
+    "modules_diff": [],
+    "modules_restored": true,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": true
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=14189\n"
+  },
+  "preflight": {
+    "blob_sha256": "02b09df9f29aa539f7e7a8ed95d8c6de6a194d22ef0e36ae6137d9de08f8b024",
+    "cid": 37996,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": []
+  },
+  "substrate": {
+    "guest_uname": "Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \ndummy0           UNKNOWN        5a:af:a4:69:1c:62 <BROADCAST,NOARP,UP,LOWER_UP> \n2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000\n    inet 10.99.7.2/32 scope global dummy0\n       valid_lft forever preferred_lft forever\n",
+    "offhost_topology": "63004: v11h@if63003: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 16:30:a7:22:df:96 brd ff:ff:ff:ff:ff:ff link-netns v11p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv11p0@if63004    UP             10.250.95.2/24 fe80::40f4:b2ff:fecc:7351/64 \ndefault via 10.250.95.1 dev v11p0 \n10.250.95.0/24 dev v11p0 proto kernel scope link src 10.250.95.2 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nNetid State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nudp   UNCONN 0      0        10.250.95.2:7210      0.0.0.0:*   \ntcp   LISTEN 0      128      10.250.95.2:7200      0.0.0.0:*   \ntcp   LISTEN 0      128      10.250.95.2:7201      0.0.0.0:*   \n",
+    "phys": "eno12399np0      UP             14:23:f2:f4:50:e0 <BROADCAST,MULTICAST,UP,LOWER_UP> \n1.1.1.1 via 151.115.99.1 dev eno12399np0 src <metal-address> uid 0 \n    cache \n10.250.95.2 dev v11h src 10.250.95.1 uid 0 \n    cache \n"
+  }
+}

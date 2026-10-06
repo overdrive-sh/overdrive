@@ -1,0 +1,36 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.58
+ip: RTNETLINK answers: File exists
+net.ipv4.tcp_fwmark_accept = 1
+GUEST_NET_BEGIN
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1000
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue qlen 1000
+    inet 10.99.7.2/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local 
+32765:	from all fwmark 0x295 lookup 295 
+32766:	from all lookup main 
+32767:	from all lookup default 
+GUEST_NET_END
+dummy0  lo
+
+thread 'main' (109) panicked at src/owner.rs:587:61:
+ctl connect: Os { code: 104, kind: ConnectionReset, message: "Connection reset by peer" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+GUEST_READY

@@ -1,0 +1,216 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-v11-vip-v14/increment-h/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=1b8e2aca21eddece0196991d pid=1112650
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <metal-target>:/home/ubuntu/overdrive
+
+sent 929,882 bytes  received 10,349 bytes  125,364.13 bytes/sec
+total size is 1,480,981,150  speedup is 1,575.12
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[21:08:05] === preflight
+[21:08:05] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[21:08:05]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[21:08:05]     none
+[21:08:05]     model name	: AMD EPYC 8024P 8-Core Processor
+[21:08:05]     16
+[21:08:05]     crw-rw---- 1 root kvm 10, 232 Oct  5 21:08 /dev/kvm
+[21:08:05] === build
+[21:08:05] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[21:08:05]         Finished `release` profile [optimized] target(s) in 0.12s
+[21:08:06] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/bpf/Cargo.toml  (rc=0)
+[21:08:06]        Compiling vfwd-bpf v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/bpf)
+[21:08:06]         Finished `release` profile [optimized] target(s) in 0.41s
+[21:08:10] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/Cargo.toml  (rc=0)
+[21:08:10]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[21:08:10]         |            ^^^^^^
+[21:08:10]     
+[21:08:10]     warning: `vfwd` (bin "vfwd") generated 3 warnings
+[21:08:10]         Finished `release` profile [optimized + debuginfo] target(s) in 3.80s
+[21:08:10] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[21:08:10]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=8d4b56049b914fd950b9d015f366bb2250dccedf, with debug_info, not stripped
+[21:08:10]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor:        ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[21:08:10]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[21:08:10]     cloud-hypervisor v53.0.0
+[21:08:10]     Migration Protocol Versions: 0
+[21:08:10]     bpf-linker 0.0.0
+[21:08:10]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[21:08:10]     rustc 1.95.0 (59807616e 2026-04-14)
+[21:08:10] === guest image
+[21:08:11] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/initramfs.cpio.gz  (rc=0)
+[21:08:12] launch VM: /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park,--declare,7300,7301,7302,--listen-mode,map --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vm-increment-h-1791234492/serial.log --console off --vsock cid=35284,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vm-increment-h-1791234492/ch.log -v
+[21:08:14] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.59
+net.ipv4.tcp_fwmark_accept = 1
+net.ipv4.fwmark_reflect = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33m4e:e1:d8:e7:5e:40 [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+
+thread 'main' (112) panicked at src/owner.rs:206:18:
+unknown arg 7301
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+   2: vfwd::owner::parse_cfg
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/owner.rs:206:18
+   3: vfwd::owner::run
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/owner.rs:659:13
+   4: vfwd::main
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/main.rs:34:29
+   5: core::ops::function::FnOnce::call_once
+             at ./home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+GUEST_READY
+
+[21:08:15] guest$ uname -a  (rc=0, 0.0s)
+[21:08:15]     Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[21:08:15] $ ip netns add v11p  (rc=0)
+[21:08:15] $ ip link add v11h type veth peer name v11p0  (rc=0)
+[21:08:15] $ ip link set v11p0 netns v11p  (rc=0)
+[21:08:15] $ ip addr add 10.250.95.1/24 dev v11h  (rc=0)
+[21:08:15] $ ip link set v11h mtu 1500 up  (rc=0)
+[21:08:15] $ ip -n v11p addr add 10.250.95.2/24 dev v11p0  (rc=0)
+[21:08:15] $ ip -n v11p link set v11p0 mtu 1500 up  (rc=0)
+[21:08:15] $ ip -n v11p link set lo up  (rc=0)
+[21:08:15] $ ip -n v11p route add default via 10.250.95.1  (rc=0)
+[21:08:16] $ ip -d link show v11h; ip -n v11p -br addr; ip -n v11p route; ethtool -k v11h | grep -E 'udp|frag|segment'; ip netns exec v11p ss -lunt  (rc=0)
+[21:08:16]     63010: v11h@if63009: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+[21:08:16]         link/ether 16:30:a7:22:df:96 brd ff:ff:ff:ff:ff:ff link-netns v11p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 
+[21:08:16]         veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+[21:08:16]     lo               UNKNOWN        127.0.0.1/8 ::1/128 
+[21:08:16]     v11p0@if63010    UP             10.250.95.2/24 fe80::a045:6aff:fe20:6294/64 
+[21:08:16]     default via 10.250.95.1 dev v11p0 
+[21:08:16]     10.250.95.0/24 dev v11p0 proto kernel scope link src 10.250.95.2 
+[21:08:16]     	tx-scatter-gather-fraglist: on
+[21:08:16]     tcp-segmentation-offload: on
+[21:08:16]     	tx-tcp-segmentation: on
+[21:08:16]     	tx-tcp-ecn-segmentation: on
+[21:08:16]     	tx-tcp-mangleid-segmentation: on
+[21:08:16]     	tx-tcp6-segmentation: on
+[21:08:16]     	tx-tcp-accecn-segmentation: on
+[21:08:16]     generic-segmentation-offload: on
+[21:08:16]     tx-fcoe-segmentation: off [fixed]
+[21:08:16]     tx-gre-segmentation: on
+[21:08:16]     tx-gre-csum-segmentation: on
+[21:08:16]     tx-ipxip4-segmentation: on
+[21:08:16]     tx-ipxip6-segmentation: on
+[21:08:16]     tx-udp_tnl-segmentation: on
+[21:08:16]     tx-udp_tnl-csum-segmentation: on
+[21:08:16]     tx-tunnel-remcsum-segmentation: off [fixed]
+[21:08:16]     tx-sctp-segmentation: on
+[21:08:16]     tx-esp-segmentation: off [fixed]
+[21:08:16]     tx-udp-segmentation: on
+[21:08:16]     rx-udp_tunnel-port-offload: off [fixed]
+[21:08:16]     rx-udp-gro-forwarding: off
+[21:08:16]     Netid State  Recv-Q Send-Q Local Address:Port Peer Address:Port
+[21:08:16]     udp   UNCONN 0      0        10.250.95.2:7210      0.0.0.0:*   
+[21:08:16]     tcp   LISTEN 0      128      10.250.95.2:7201      0.0.0.0:*   
+[21:08:16]     tcp   LISTEN 0      128      10.250.95.2:7200      0.0.0.0:*
+[21:08:19] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 --listen-mode level --level-check light > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[21:08:19]     OWNER_READY role=guest pid=125
+[21:08:39] guest(stream)$ /vfwd listen-cycle --port 7300 --cycles 100 --up-ms 100 --down-ms 100  (rc=0, 20.1s, 202 lines)
+[21:08:43] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 --listen-mode level --level-check light > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[21:08:43]     OWNER_READY role=guest pid=144
+[21:08:48] guest(stream)$ /vfwd listen-cycle --port 7300 --cycles 20 --up-ms 100 --down-ms 100  (rc=0, 4.0s, 42 lines)
+[21:09:09] guest(stream)$ /vfwd listen-cycle --port 7300 --cycles 100 --up-ms 100 --down-ms 100  (rc=0, 20.1s, 202 lines)
+[21:09:12] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 --listen-mode event > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[21:09:12]     OWNER_READY role=guest pid=6400
+[21:09:13] guest$ /vfwd listen-churn --port 7302 --iterations 2000 --final closed  (rc=0, 0.0s)
+[21:09:13]     {"bind_errors":0,"ev":"CHURN_DONE","final_open":false,"iterations":2000,"ms":19.445305,"t_us":60517109}
+[21:09:17] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 --listen-mode map > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[21:09:17]     OWNER_READY role=guest pid=6410
+[21:09:23] guest(stream)$ /vfwd listen-cycle --port 7300 --cycles 20 --up-ms 100 --down-ms 100  (rc=0, 4.0s, 42 lines)
+[21:10:00] guest(stream)$ /vfwd listen-cycle --port 7300 --cycles 180 --up-ms 100 --down-ms 100  (rc=0, 36.1s, 362 lines)
+[21:10:05] guest(stream)$ /vfwd listen-cycle --port 7300 --cycles 2 --up-ms 1000 --down-ms 1000  (rc=0, 4.0s, 6 lines)
+[21:10:05] guest$ /vfwd tcp-server --bind 0.0.0.0:7301 > /tmp/k.log 2>&1 </dev/null & echo $! > /tmp/k.pid  (rc=0, 0.0s)
+[21:10:05] $ timeout 20 /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-client --dst <metal-address>:2731 --size 1000  (rc=0)
+[21:10:05]     {"connect_ms":0.117928,"dst":"<metal-address>:2731","local":"<metal-address>:46216","ms":3.197704,"ok":true,"peer":"<metal-address>:2731","server_saw_peer":"<metal-address>:46216","size":1000}
+[21:10:05] guest$ kill -9 $(cat /tmp/k.pid)  (rc=0, 0.0s)
+[21:10:05] guest$ /vfwd tcp-server --bind 0.0.0.0:7301 > /tmp/k.log 2>&1 </dev/null & echo $! > /tmp/k.pid  (rc=0, 0.0s)
+[21:10:05] $ timeout 20 /home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-client --dst <metal-address>:2731 --size 1000  (rc=0)
+[21:10:05]     {"connect_ms":0.14609,"dst":"<metal-address>:2731","local":"<metal-address>:46234","ms":2.646864,"ok":true,"peer":"<metal-address>:2731","server_saw_peer":"<metal-address>:46234","size":1000}
+[21:10:05] guest$ kill -TERM $(cat /tmp/k.pid)  (rc=0, 0.0s)
+[21:10:06] guest(stream)$ /vfwd listen-churn --port 7302 --iterations 2000 --final open --hold-ms 4000 & sleep 0.5; echo PROBE  (rc=0, 0.5s, 3 lines)
+[21:10:10] guest$ /vfwd listen-churn --port 7302 --iterations 2000 --final closed  (rc=0, 0.0s)
+[21:10:10]     {"bind_errors":0,"ev":"CHURN_DONE","final_open":false,"iterations":2000,"ms":37.045652,"t_us":117616585}
+[21:10:10] guest$ /vfwd listen-cycle --reuseport --port 7302 --cycles 1 --up-ms 8000 --down-ms 0 > /tmp/rp.log 2>&1 </dev/null & echo $! > /tmp/rp.pid  (rc=0, 0.0s)
+[21:10:10] guest$ /vfwd listen-churn --reuseport --port 7302 --iterations 2000 --final closed  (rc=0, 0.0s)
+[21:10:10]     {"bind_errors":0,"ev":"CHURN_DONE","final_open":false,"iterations":2000,"ms":20.888917,"t_us":118152436}
+[21:10:11] guest$ kill $(cat /tmp/rp.pid)  (rc=0, 0.0s)
+[21:10:11] guest$ /vfwd listen-cycle --port 7300 --cycles 1 --up-ms 60000 --down-ms 0 > /tmp/hold.log 2>&1 </dev/null & echo $! > /tmp/hold.pid  (rc=0, 0.0s)
+[21:10:11] guest$ kill -9 $(cat /tmp/owner.pid)  (rc=0, 0.0s)
+[21:10:13] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 --listen-mode map > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[21:10:13]     OWNER_READY role=guest pid=10892
+[21:10:13] guest$ kill -9 $(cat /tmp/owner.pid)  (rc=0, 0.0s)
+[21:10:13] guest$ kill $(cat /tmp/hold.pid)  (rc=0, 0.0s)
+[21:10:15] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 --listen-mode map > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[21:10:15]     OWNER_READY role=guest pid=10904
+[21:10:16] guest$ /vfwd listen-cycle --port 7300 --cycles 1 --up-ms 60000 --down-ms 0 > /tmp/hold.log 2>&1 </dev/null & echo $! > /tmp/hold.pid  (rc=0, 0.0s)
+[21:10:17] guest$ /vfwd listen-churn --port 7302 --iterations 4000 --final open --hold-ms 3000 > /tmp/mc.log 2>&1 </dev/null & sleep 0.6; echo  (rc=0, 0.6s)
+[21:10:21] guest$ /vfwd listen-churn --port 7302 --iterations 4000 --final closed  (rc=0, 0.1s)
+[21:10:21]     {"bind_errors":0,"ev":"CHURN_DONE","final_open":false,"iterations":4000,"ms":64.99781899999999,"t_us":128359459}
+[21:10:21] guest$ cat /tmp/owner.out; tail -c 30000 /tmp/owner.log; cat /tmp/owner-stats.json; tail -60 /tmp/sshd.log; tail -20 /tmp/srv7100.log /tmp/srv7101.log  (rc=0, 0.0s)
+[21:10:21]     {"cookie":20331,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342475,"port":7302,"reachable":true,"wake_lag_us":69539}
+[21:10:21]     {"cookie":20331,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342477,"port":7302,"reachable":true,"wake_lag_us":69537}
+[21:10:21]     {"cookie":20332,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342490,"port":7302,"reachable":true,"wake_lag_us":69524}
+[21:10:21]     {"cookie":20332,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342492,"port":7302,"reachable":true,"wake_lag_us":69522}
+[21:10:21]     {"cookie":20333,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342505,"port":7302,"reachable":true,"wake_lag_us":69509}
+[21:10:21]     {"cookie":20333,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342507,"port":7302,"reachable":true,"wake_lag_us":69507}
+[21:10:21]     {"cookie":20334,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342520,"port":7302,"reachable":true,"wake_lag_us":69494}
+[21:10:21]     {"cookie":20334,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342522,"port":7302,"reachable":true,"wake_lag_us":69492}
+[21:10:21]     {"cookie":20335,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342535,"port":7302,"reachable":true,"wake_lag_us":69479}
+[21:10:21]     {"cookie":20335,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342538,"port":7302,"reachable":true,"wake_lag_us":69476}
+[21:10:21]     {"cookie":20336,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342550,"port":7302,"reachable":true,"wake_lag_us":69464}
+[21:10:21]     {"cookie":20336,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342553,"port":7302,"reachable":true,"wake_lag_us":69461}
+[21:10:21]     {"cookie":20337,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342565,"port":7302,"reachable":true,"wake_lag_us":69449}
+[21:10:21]     {"cookie":20337,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342568,"port":7302,"reachable":true,"wake_lag_us":69446}
+[21:10:21]     {"cookie":20338,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342580,"port":7302,"reachable":true,"wake_lag_us":69434}
+[21:10:21]     {"cookie":20338,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342583,"port":7302,"reachable":true,"wake_lag_us":69431}
+[21:10:21]     {"cookie":20339,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342595,"port":7302,"reachable":true,"wake_lag_us":69419}
+[21:10:21]     {"cookie":20339,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342597,"port":7302,"reachable":true,"wake_lag_us":69417}
+[21:10:21]     {"cookie":20340,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342610,"port":7302,"reachable":true,"wake_lag_us":69404}
+[21:10:21]     {"cookie":20340,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342613,"port":7302,"reachable":true,"wake_lag_us":69401}
+[21:10:21]     {"cookie":20341,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342625,"port":7302,"reachable":true,"wake_lag_us":69389}
+[21:10:21]     {"cookie":20341,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342628,"port":7302,"reachable":true,"wake_lag_us":69386}
+[21:10:21]     {"cookie":20342,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342640,"port":7302,"reachable":true,"wake_lag_us":69374}
+[21:10:21]     {"cookie":20342,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342642,"port":7302,"reachable":true,"wake_lag_us":69372}
+[21:10:21]     {"cookie":20343,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342655,"port":7302,"reachable":true,"wake_lag_us":69359}
+[21:10:21]     {"cookie":20343,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342657,"port":7302,"reachable":true,"wake_lag_us":69357}
+[21:10:21]     {"cookie":20344,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342670,"port":7302,"reachable":true,"wake_lag_us":69344}
+[21:10:21]     {"cookie":20344,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342672,"port":7302,"reachable":true,"wake_lag_us":69342}
+[21:10:21]     {"cookie":20345,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342685,"port":7302,"reachable":true,"wake_lag_us":69329}
+[21:10:21]     {"cookie":20345,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342687,"port":7302,"reachable":true,"wake_lag_us":69327}
+[21:10:21]     {"cookie":20346,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342700,"port":7302,"reachable":true,"wake_lag_us":69314}
+[21:10:21]     {"cookie":20346,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342702,"port":7302,"reachable":true,"wake_lag_us":69312}
+[21:10:21]     {"cookie":20347,"ev":"listen_event","family":2,"kind":"start","ktime_us":128342715,"port":7302,"reachable":true,"wake_lag_us":69299}
+[21:10:21]     {"cookie":20347,"ev":"listen_event","family":2,"kind":"stop","ktime_us":128342718,"port":7302,"reachable":true,"wake_lag_us":69296}
+[21:10:21]     {"abort_received":2,"aborted_on_ctl_loss":0,"counters":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,3,3,0,0,3,0,0,0,0,0,0,0,0,7180,8828,0,0,0,0],"ctl_bytes_read":16,"ctl_bytes_written":24,"ctl_connect_failed":2,"ctl_sessions_opened":2,"flows_aborted":1,"flows_active_total":3,"flows_closed":2,"flows_open":0,"k2_drained_shutdowns":5,"listen_events":7180,"listen_state_sent":9,"t_ms":1791234621334.3694,"tcp_accept_flows":3}Server listening on 0.0.0.0 port 22.
+[21:10:21]     ==> /tmp/srv7100.log <==
+[21:10:21]     {"banner":false,"bind":"0.0.0.0:7100","ev":"tcp_server_ready","rst":false}
+[21:10:21]     
+[21:10:21]     ==> /tmp/srv7101.log <==
+[21:10:21]     {"banner":true,"bind":"0.0.0.0:7101","ev":"tcp_server_ready","rst":false}
+[21:10:25] === done
+{"launcher_rc": 0, "wall_s": 178.0}

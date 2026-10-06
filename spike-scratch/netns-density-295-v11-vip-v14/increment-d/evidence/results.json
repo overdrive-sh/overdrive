@@ -1,0 +1,912 @@
+{
+  "V14": {
+    "result": {
+      "app_9_down": [
+        0.00828610360622406,
+        8,
+        "refused"
+      ],
+      "app_9_e2e": {
+        "connect_ms": 0.120832,
+        "dst": "<metal-address>:2731",
+        "local": "<metal-address>:51480",
+        "ms": 3.176922,
+        "ok": true,
+        "peer": "<metal-address>:2731",
+        "server_saw_peer": "<metal-address>:51480",
+        "size": 1000
+      },
+      "app_9_up": [
+        0.008818823844194412,
+        9,
+        "ok"
+      ],
+      "app_TERM_down": [
+        0.009758168831467628,
+        9,
+        "refused"
+      ],
+      "app_TERM_e2e": {
+        "connect_ms": 0.11945,
+        "dst": "<metal-address>:2731",
+        "local": "<metal-address>:51654",
+        "ms": 3.045804,
+        "ok": true,
+        "peer": "<metal-address>:2731",
+        "server_saw_peer": "<metal-address>:51654",
+        "size": 1000
+      },
+      "app_TERM_up": [
+        0.00914719793945551,
+        9,
+        "ok"
+      ],
+      "before_listen_alwaysbound": {
+        "connect": "ok?",
+        "err": "ConnectionResetError(104, 'Connection reset by peer')",
+        "read_so_far": null
+      },
+      "before_listen_alwaysbound_ms": 1.137271523475647,
+      "before_listen_d23": "refused",
+      "churn_closed_probe_after": "refused",
+      "churn_open_lines": [
+        "{\"bind_errors\":0,\"ev\":\"CHURN_DONE\",\"final_open\":true,\"iterations\":2000,\"ms\":37.593447000000005,\"t_us\":36412544}",
+        "PROBE",
+        ""
+      ],
+      "churn_open_probe_after": {
+        "connect": "ok",
+        "read": "HELLO\n"
+      },
+      "cycle_lag_ms": {
+        "down": {
+          "max": 9.806390851736069,
+          "missing": 0,
+          "n": 50,
+          "p50": 8.271319791674614,
+          "p99": 9.806390851736069
+        },
+        "up": {
+          "max": 9.4723179936409,
+          "missing": 0,
+          "n": 50,
+          "p50": 8.062385022640228,
+          "p99": 9.4723179936409
+        }
+      },
+      "cycle_raw_ms": {
+        "down": [
+          7.223743945360184,
+          7.176962681114674,
+          8.297630585730076,
+          8.321385830640793,
+          8.365031331777573,
+          8.706975728273392,
+          9.806390851736069,
+          7.84642156213522,
+          7.894203066825867,
+          7.9183997586369514,
+          7.8224847093224525,
+          7.892570458352566,
+          7.861332967877388,
+          7.923197001218796,
+          7.8943828120827675,
+          7.854452356696129,
+          8.33477545529604,
+          7.880822755396366,
+          7.887412793934345,
+          7.898818701505661,
+          8.333995006978512,
+          8.302927948534489,
+          7.9271020367741585,
+          8.288396522402763,
+          8.271721191704273,
+          8.275296539068222,
+          7.181789726018906,
+          8.280945010483265,
+          8.31046886742115,
+          8.26097559183836,
+          8.32934770733118,
+          8.34631361067295,
+          8.296538144350052,
+          8.320203982293606,
+          8.20621382445097,
+          8.331922814249992,
+          8.310589008033276,
+          8.252792991697788,
+          8.319944143295288,
+          8.252391591668129,
+          8.32761637866497,
+          8.271319791674614,
+          8.243158459663391,
+          8.323769085109234,
+          8.17194115370512,
+          7.421440444886684,
+          9.76027175784111,
+          9.757047519087791,
+          8.31701047718525,
+          7.893692702054977
+        ],
+        "up": [
+          7.985180243849754,
+          8.044629357755184,
+          8.086131885647774,
+          8.114043623209,
+          8.081354200839996,
+          7.772820070385933,
+          7.177524268627167,
+          7.782094180583954,
+          7.720391266047955,
+          7.772599346935749,
+          7.79125839471817,
+          7.772579789161682,
+          7.793131284415722,
+          7.7840471640229225,
+          7.733930833637714,
+          7.761933840811253,
+          8.146983571350574,
+          7.779840379953384,
+          7.785789668560028,
+          7.804017513990402,
+          8.127143606543541,
+          8.107754401862621,
+          7.724868133664131,
+          7.786259986460209,
+          8.056356571614742,
+          8.112931624054909,
+          8.094534277915955,
+          7.999732159078121,
+          8.141954429447651,
+          8.136698044836521,
+          8.090797811746597,
+          8.073221892118454,
+          8.04806500673294,
+          8.091089315712452,
+          8.093913085758686,
+          8.095044642686844,
+          8.079291321337223,
+          8.047522976994514,
+          8.134083822369576,
+          8.106722496449947,
+          8.062385022640228,
+          8.067052811384201,
+          8.047903887927532,
+          8.074034005403519,
+          9.4723179936409,
+          8.646335452795029,
+          8.37698858231306,
+          8.265400305390358,
+          9.437556378543377,
+          8.03845003247261
+        ]
+      },
+      "guest_owner_stats": "{\"aborted_on_ctl_loss\":0,\"counters\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,6,0,0,0,0],\"ctl_connect_failed\":2,\"ctl_sessions_opened\":1,\"flows_open\":0,\"listen_events\":6,\"listen_state_sent\":4,\"t_ms\":1791231460549.4004}{\"ev\":\"ctl_open\",\"t_us\":45253260}\n{\"ev\":\"ctl_closed\",\"t_us\":47091971}\n{\"err\":\"Connection reset by peer (os error 104)\",\"ev\":\"ctl_connect_failed\"}\n{\"err\":\"Connection reset by peer (os error 104)\",\"ev\":\"ctl_connect_failed\"}\n{\"ev\":\"ctl_open\",\"t_us\":47845665}\n",
+      "hold2_up": [
+        0.011278917081654072,
+        11,
+        "ok"
+      ],
+      "hold_up": [
+        0.008237860165536404,
+        8,
+        "ok"
+      ],
+      "host_owner_down_probe": "refused",
+      "host_restarted_e2e": {
+        "connect": "ok",
+        "read": "HELLO\n"
+      },
+      "host_restarted_up": [
+        0.00016175396740436554,
+        1,
+        "ok"
+      ],
+      "owner2_guest_state_sent": "{\"enum_us\":5033,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7300,\"reason\":\"session_open\",\"seq\":1,\"t_us\":45258309}\n{\"enum_us\":5110,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7301,\"reason\":\"session_open\",\"seq\":2,\"t_us\":45258386}\n{\"enum_us\":5182,\"ev\":\"listen_state_sent\",\"event_to_send_us\":null,\"listeners\":0,\"listening\":false,\"port\":7302,\"reason\":\"session_open\",\"seq\":3,\"t_us\":45258458}\n",
+      "owner2_killed_down": [
+        0.02099192887544632,
+        19,
+        "refused"
+      ],
+      "owner2_restarted_probe": "refused",
+      "owner_killed_down": [
+        0.02420274168252945,
+        21,
+        "refused"
+      ],
+      "owner_restarted_e2e": {
+        "connect": "ok",
+        "read": "HELLO\n"
+      },
+      "owner_restarted_up": [
+        0.00019518379122018814,
+        1,
+        "ok"
+      ],
+      "probe_timeline": [
+        [
+          0.0,
+          "refused"
+        ],
+        [
+          0.05,
+          "refused"
+        ],
+        [
+          0.101,
+          "refused"
+        ],
+        [
+          0.151,
+          "refused"
+        ],
+        [
+          0.201,
+          "refused"
+        ],
+        [
+          0.251,
+          "refused"
+        ],
+        [
+          0.302,
+          "refused"
+        ],
+        [
+          0.352,
+          "refused"
+        ],
+        [
+          0.402,
+          "refused"
+        ],
+        [
+          0.453,
+          "refused"
+        ],
+        [
+          0.503,
+          "refused"
+        ],
+        [
+          0.553,
+          "refused"
+        ],
+        [
+          0.604,
+          "refused"
+        ],
+        [
+          0.654,
+          "refused"
+        ],
+        [
+          0.704,
+          "refused"
+        ],
+        [
+          0.754,
+          "refused"
+        ],
+        [
+          0.805,
+          "refused"
+        ],
+        [
+          0.855,
+          "refused"
+        ],
+        [
+          0.905,
+          "refused"
+        ],
+        [
+          0.956,
+          "refused"
+        ],
+        [
+          1.006,
+          "refused"
+        ],
+        [
+          1.056,
+          "ok"
+        ],
+        [
+          1.107,
+          "ok"
+        ],
+        [
+          1.157,
+          "ok"
+        ],
+        [
+          1.207,
+          "ok"
+        ],
+        [
+          1.258,
+          "ok"
+        ],
+        [
+          1.308,
+          "ok"
+        ],
+        [
+          1.358,
+          "ok"
+        ],
+        [
+          1.409,
+          "ok"
+        ],
+        [
+          1.459,
+          "ok"
+        ],
+        [
+          1.509,
+          "ok"
+        ],
+        [
+          1.56,
+          "ok"
+        ],
+        [
+          1.61,
+          "ok"
+        ],
+        [
+          1.66,
+          "ok"
+        ],
+        [
+          1.711,
+          "ok"
+        ],
+        [
+          1.761,
+          "ok"
+        ],
+        [
+          1.811,
+          "ok"
+        ],
+        [
+          1.862,
+          "ok"
+        ],
+        [
+          1.912,
+          "ok"
+        ],
+        [
+          1.962,
+          "ok"
+        ],
+        [
+          2.013,
+          "refused"
+        ],
+        [
+          2.063,
+          "refused"
+        ],
+        [
+          2.113,
+          "refused"
+        ],
+        [
+          2.164,
+          "refused"
+        ],
+        [
+          2.214,
+          "refused"
+        ],
+        [
+          2.264,
+          "refused"
+        ],
+        [
+          2.314,
+          "refused"
+        ],
+        [
+          2.365,
+          "refused"
+        ],
+        [
+          2.415,
+          "refused"
+        ],
+        [
+          2.465,
+          "refused"
+        ],
+        [
+          2.516,
+          "refused"
+        ],
+        [
+          2.566,
+          "refused"
+        ],
+        [
+          2.616,
+          "refused"
+        ],
+        [
+          2.667,
+          "refused"
+        ],
+        [
+          2.717,
+          "refused"
+        ],
+        [
+          2.767,
+          "refused"
+        ],
+        [
+          2.817,
+          "refused"
+        ],
+        [
+          2.868,
+          "refused"
+        ],
+        [
+          2.918,
+          "refused"
+        ],
+        [
+          2.968,
+          "refused"
+        ],
+        [
+          3.019,
+          "ok"
+        ],
+        [
+          3.069,
+          "ok"
+        ],
+        [
+          3.119,
+          "ok"
+        ],
+        [
+          3.17,
+          "ok"
+        ],
+        [
+          3.22,
+          "ok"
+        ],
+        [
+          3.27,
+          "ok"
+        ],
+        [
+          3.321,
+          "ok"
+        ],
+        [
+          3.371,
+          "ok"
+        ],
+        [
+          3.421,
+          "ok"
+        ],
+        [
+          3.472,
+          "ok"
+        ],
+        [
+          3.522,
+          "ok"
+        ],
+        [
+          3.572,
+          "ok"
+        ],
+        [
+          3.623,
+          "ok"
+        ],
+        [
+          3.673,
+          "ok"
+        ],
+        [
+          3.723,
+          "ok"
+        ],
+        [
+          3.773,
+          "ok"
+        ],
+        [
+          3.824,
+          "ok"
+        ],
+        [
+          3.874,
+          "ok"
+        ],
+        [
+          3.924,
+          "ok"
+        ],
+        [
+          3.975,
+          "ok"
+        ],
+        [
+          4.025,
+          "refused"
+        ],
+        [
+          4.075,
+          "refused"
+        ],
+        [
+          4.126,
+          "refused"
+        ],
+        [
+          4.176,
+          "refused"
+        ],
+        [
+          4.226,
+          "refused"
+        ],
+        [
+          4.276,
+          "refused"
+        ],
+        [
+          4.326,
+          "refused"
+        ],
+        [
+          4.377,
+          "refused"
+        ],
+        [
+          4.427,
+          "refused"
+        ],
+        [
+          4.477,
+          "refused"
+        ],
+        [
+          4.527,
+          "refused"
+        ],
+        [
+          4.578,
+          "refused"
+        ],
+        [
+          4.628,
+          "refused"
+        ],
+        [
+          4.678,
+          "refused"
+        ],
+        [
+          4.728,
+          "refused"
+        ],
+        [
+          4.778,
+          "refused"
+        ],
+        [
+          4.829,
+          "refused"
+        ],
+        [
+          4.879,
+          "refused"
+        ],
+        [
+          4.929,
+          "refused"
+        ],
+        [
+          4.979,
+          "refused"
+        ]
+      ],
+      "probe_timeline_marks": [
+        [
+          4517251.751,
+          "{\"ev\":\"L\",\"i\":0,\"t_us\":32083877}"
+        ],
+        [
+          4517252.752,
+          "{\"ev\":\"C\",\"i\":0,\"served\":19,\"t_us\":33084856}"
+        ],
+        [
+          4517253.752,
+          "{\"ev\":\"L\",\"i\":1,\"t_us\":34085147}"
+        ],
+        [
+          4517254.754,
+          "{\"ev\":\"C\",\"i\":1,\"served\":20,\"t_us\":35086303}"
+        ],
+        [
+          4517255.754,
+          "{\"ev\":\"DONE\"}"
+        ],
+        [
+          4517255.754,
+          ""
+        ]
+      ],
+      "reuseport_after_holder_exit": [
+        0.007304164581000805,
+        7,
+        "refused"
+      ],
+      "reuseport_churn_probe_results": {
+        "ok": 255
+      },
+      "reuseport_host_closes": "1\n",
+      "reuseport_up": [
+        0.008148404769599438,
+        8,
+        "ok"
+      ]
+    }
+  },
+  "VIP": {
+    "result": {
+      "tcp_vip_hostlocal": {
+        "connect_ms": 0.063035,
+        "dst": "10.251.0.11:7000",
+        "local": "10.99.7.2:34056",
+        "ms": 1.101418,
+        "ok": true,
+        "peer": "10.251.0.11:7000",
+        "server_saw_peer": "<metal-address>:58514",
+        "size": 1000
+      },
+      "tcp_vip_offhost": {
+        "connect_ms": 0.098769,
+        "dst": "10.251.0.10:7200",
+        "local": "10.99.7.2:34040",
+        "ms": 5.493428,
+        "ok": true,
+        "peer": "10.251.0.10:7200",
+        "server_saw_peer": "10.250.95.1:56134",
+        "size": 100000
+      },
+      "tcp_vip_offhost_banner": {
+        "banner": "BANNER peer=10.250.95.1:40756 local=10.250.95.2:7201",
+        "connect_ms": 0.056846,
+        "dst": "10.251.0.10:7201",
+        "local": "10.99.7.2:34048",
+        "ms": 2.246101,
+        "ok": true,
+        "peer": "10.251.0.10:7201",
+        "server_saw_peer": "10.250.95.1:40756",
+        "size": 1000
+      },
+      "tcp_vip_stress": {
+        "banner": false,
+        "dst": "10.251.0.10:7200",
+        "early_ack": false,
+        "ev": "tcp_stress",
+        "failed": 0,
+        "first_failures": [],
+        "hold_ms": 0,
+        "iterations": 300,
+        "ok": 300,
+        "parallel": 1,
+        "s": 0.529712489,
+        "timeout_ms": 8000
+      },
+      "udp_vip_hostlocal": {
+        "conn_0": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 0,
+          "local": "10.99.7.2:34768",
+          "ok": true,
+          "peer": "10.251.0.11:7010"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 1431,
+          "local": "10.99.7.2:54970",
+          "ok": true,
+          "peer": "10.251.0.11:7010"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 59000,
+          "local": "10.99.7.2:57675",
+          "ok": true,
+          "peer": "10.251.0.11:7010"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 0,
+          "local": "0.0.0.0:37286",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 1431,
+          "local": "0.0.0.0:57227",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.251.0.11:7010",
+          "got": 59000,
+          "local": "0.0.0.0:49002",
+          "ok": true,
+          "peer": ""
+        }
+      },
+      "udp_vip_offhost": {
+        "conn_0": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 0,
+          "local": "10.99.7.2:39239",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_1": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1,
+          "local": "10.99.7.2:52638",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_1431": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1431,
+          "local": "10.99.7.2:56268",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_4096": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 4096,
+          "local": "10.99.7.2:33285",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_4097": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 4097,
+          "local": "10.99.7.2:43059",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "conn_59000": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 59000,
+          "local": "10.99.7.2:36905",
+          "ok": true,
+          "peer": "10.251.0.10:7210"
+        },
+        "unconn_0": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 0,
+          "local": "0.0.0.0:40195",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1,
+          "local": "0.0.0.0:58505",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_1431": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 1431,
+          "local": "0.0.0.0:39758",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4096": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 4096,
+          "local": "0.0.0.0:37300",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_4097": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 4097,
+          "local": "0.0.0.0:46195",
+          "ok": true,
+          "peer": ""
+        },
+        "unconn_59000": {
+          "err": null,
+          "from": "10.251.0.10:7210",
+          "got": 59000,
+          "local": "0.0.0.0:44874",
+          "ok": true,
+          "peer": ""
+        }
+      }
+    }
+  },
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ],
+    "modules_diff": [],
+    "modules_restored": true,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": true
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=180\n"
+  },
+  "preflight": {
+    "blob_sha256": "02b09df9f29aa539f7e7a8ed95d8c6de6a194d22ef0e36ae6137d9de08f8b024",
+    "cid": 30567,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": []
+  },
+  "topo": {
+    "offhost": "63002: v11h@if63001: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 16:30:a7:22:df:96 brd ff:ff:ff:ff:ff:ff link-netns v11p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv11p0@if63002    UP             10.250.95.2/24 fe80::a42c:76ff:fe4c:e6b8/64 \ndefault via 10.250.95.1 dev v11p0 \n10.250.95.0/24 dev v11p0 proto kernel scope link src 10.250.95.2 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nNetid State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nudp   UNCONN 0      0        10.250.95.2:7210      0.0.0.0:*   \ntcp   LISTEN 0      128      10.250.95.2:7200      0.0.0.0:*   \ntcp   LISTEN 0      128      10.250.95.2:7201      0.0.0.0:*   \n"
+  }
+}

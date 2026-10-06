@@ -1,0 +1,2 @@
+{"banner":true,"bind":"<metal-address>:7001","ev":"tcp_server_ready","rst":false}
+{"err":"eof wait Connection reset by peer (os error 104)","ev":"conn","local":"<metal-address>:7001","ok":false,"peer":"<metal-address>:45996"}

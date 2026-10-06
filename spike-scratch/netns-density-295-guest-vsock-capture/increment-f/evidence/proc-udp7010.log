@@ -1,0 +1,10 @@
+{"bind":"<metal-address>:7010","ev":"udp_server_ready"}
+{"ev":"dgram","from":"<metal-address>:59100","len":0,"n":1}
+{"ev":"dgram","from":"<metal-address>:59100","len":1,"n":2}
+{"ev":"dgram","from":"<metal-address>:59100","len":1431,"n":3}
+{"ev":"dgram","from":"<metal-address>:59100","len":4096,"n":4}
+{"ev":"dgram","from":"<metal-address>:59100","len":4097,"n":5}
+{"ev":"dgram","from":"<metal-address>:59100","len":59000,"n":6}
+{"ev":"dgram","from":"<metal-address>:40387","len":59000,"n":7}
+{"ev":"dgram","from":"<metal-address>:40387","len":0,"n":8}
+{"ev":"dgram","from":"<metal-address>:40387","len":8192,"n":9}

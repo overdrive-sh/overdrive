@@ -1,0 +1,5 @@
+OWNER_READY role=host pid=1081594
+
+thread 'main' (1081594) panicked at src/owner.rs:633:72:
+called `Result::unwrap()` on an `Err` value: Os { code: 24, kind: Uncategorized, message: "Too many open files" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

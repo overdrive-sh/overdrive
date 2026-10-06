@@ -1,0 +1,2 @@
+{"banner":false,"bind":"<metal-address>:7002","ev":"tcp_server_ready","rst":true}
+{"bytes":0,"ev":"conn","local":"<metal-address>:7002","ok":true,"peer":"<metal-address>:38422"}

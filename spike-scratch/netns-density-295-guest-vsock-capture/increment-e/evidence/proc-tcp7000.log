@@ -1,0 +1,45 @@
+{"banner":false,"bind":"<metal-address>:7000","ev":"tcp_server_ready","rst":false}
+{"bytes":1000,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:36342"}
+{"bytes":1000,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:36352"}
+{"bytes":1000,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:36368"}
+{"bytes":1000,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:36372"}
+{"bytes":3565,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:36378"}
+{"bytes":1824,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:57266"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:36380"}
+{"bytes":2186,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:60130"}
+{"bytes":889,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:60146"}
+{"bytes":3263,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:60158"}
+{"bytes":2536,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:60170"}
+{"bytes":2677,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:60174"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:57282"}
+{"bytes":3570,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:54400"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:60186"}
+{"bytes":796,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:54428"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:54412"}
+{"bytes":4092,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51120"}
+{"bytes":3205,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51126"}
+{"bytes":3230,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51140"}
+{"bytes":581,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51154"}
+{"bytes":737,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51166"}
+{"bytes":3142,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51176"}
+{"bytes":1438,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51178"}
+{"bytes":1879,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51182"}
+{"bytes":4025,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51198"}
+{"bytes":8,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51202"}
+{"bytes":4040,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51214"}
+{"bytes":377,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51216"}
+{"bytes":2427,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51232"}
+{"bytes":1929,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51242"}
+{"bytes":2888,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51254"}
+{"bytes":2418,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51260"}
+{"bytes":2340,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51276"}
+{"bytes":2546,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51278"}
+{"bytes":2403,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51280"}
+{"bytes":1521,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51282"}
+{"bytes":2588,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51288"}
+{"bytes":1456,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51294"}
+{"bytes":2725,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51306"}
+{"bytes":1202,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51322"}
+{"bytes":2489,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51338"}
+{"bytes":1804,"ev":"conn","local":"<metal-address>:7000","ok":true,"peer":"<metal-address>:51346"}
+{"err":"hdr Connection reset by peer (os error 104)","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:54442"}

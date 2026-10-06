@@ -1,0 +1,9 @@
+tcpdump: listening on eno12399np0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+20:22:27.941594 IP (tos 0x0, ttl 64, id 24313, offset 0, flags [DF], proto UDP (17), length 28)
+    <metal-address>.53944 > 192.0.2.77.9: UDP, length 0
+20:22:27.941622 IP (tos 0x0, ttl 64, id 24314, offset 0, flags [DF], proto UDP (17), length 28)
+    <metal-address>.53944 > 192.0.2.77.9: UDP, length 0
+
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel

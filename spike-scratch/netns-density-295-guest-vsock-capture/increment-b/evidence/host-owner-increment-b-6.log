@@ -1,0 +1,11 @@
+{"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":986684,"programs":[{"id":41796,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":41797,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":41798,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":41799,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":41800,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41}],"role":"host","udp_park":true}
+{"cid":53506,"ev":"host_ready","intakes":["<metal-address>:2222=22","<metal-address>:2710=7100","<metal-address>:2711=7101"]}
+{"cid":53506,"ev":"hello"}
+{"ev":"bad_request"}
+{"ev":"ctl_closed"}
+{"err":"Connection reset by peer (os error 104)","ev":"guest_vsock_connect_failed"}
+{"age_ms":0,"ev":"flow_closed","flow":2,"kind":2,"reset":true,"why":"guest_vsock_connect_failed"}
+{"err":"Connection reset by peer (os error 104)","ev":"guest_vsock_connect_failed"}
+{"age_ms":0,"ev":"flow_closed","flow":4,"kind":2,"reset":true,"why":"guest_vsock_connect_failed"}
+{"err":"Connection reset by peer (os error 104)","ev":"guest_vsock_connect_failed"}
+{"age_ms":0,"ev":"flow_closed","flow":6,"kind":2,"reset":true,"why":"guest_vsock_connect_failed"}

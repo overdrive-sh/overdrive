@@ -1,0 +1,17 @@
+
+thread 'main' (318) panicked at src/owner.rs:887:9:
+ctl connect
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+   2: vfwd::owner::guest_setup
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/owner.rs:887:9
+   3: vfwd::owner::run
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/owner.rs:796:9
+   4: vfwd::main
+             at ./home/ubuntu/overdrive/spike-scratch/netns-density-295-v11-vip-v14/vfwd/src/main.rs:34:29
+   5: core::ops::function::FnOnce::call_once
+             at ./home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

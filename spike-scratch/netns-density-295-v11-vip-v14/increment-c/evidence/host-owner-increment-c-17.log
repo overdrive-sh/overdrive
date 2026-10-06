@@ -1,0 +1,13 @@
+{"ack_oob":true,"arm":true,"declare":[7300,7301,7302],"egress_ifs":["v11h","eno12399np0"],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1081591,"programs":[{"id":42154,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":42155,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":42156,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":42157,"name":"lo_decode(tcx lo egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":42158,"name":"eg_decode_frag(tcx v11h egress)","tag":"a9285dfbbf33b7ff","verified_insns":627},{"id":42158,"name":"eg_decode_frag(tcx eno12399np0 egress)","tag":"a9285dfbbf33b7ff","verified_insns":627},{"id":42159,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":42160,"name":"sockops(/sys/fs/cgroup/gvc-spike-1081591)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","tuple_from_peer":true,"udp_park":true,"unframe":"tc-frag"}
+{"ev":"park_pool","slots":256}
+{"cid":30348,"ev":"host_ready","intakes":["<metal-address>:2222=22","<metal-address>:2710=7100","<metal-address>:2711=7101","<metal-address>:2713=7303"]}
+{"cid":30348,"ev":"hello"}
+{"ev":"ctl_closed","t_us":4516810448423}
+{"cid":30348,"ev":"hello"}
+{"dst":"10.251.0.10:7200","err":"Connection timed out (os error 110)","ev":"dest_connect_failed","flow":1}
+{"age_ms":5005,"ev":"flow_closed","flow":1,"kind":1,"reset":false,"why":"dest_refused"}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":3,"local":"<metal-address>:48408","peer":"10.251.0.10:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":1}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":5,"local":"<metal-address>:59534","peer":"10.251.0.10:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":1}
+{"dst":"10.251.0.10:7210","ev":"host_dg_installed","flow":7,"local":"<metal-address>:48322","peer":"10.251.0.10:7210","smode":2,"tuple_dst":"10.251.0.10:7210","waited_ms":1}
+{"ev":"host_dg_teardown","flow":3}
+{"ev":"host_dg_teardown","flow":7

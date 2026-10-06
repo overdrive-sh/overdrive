@@ -1,0 +1,2 @@
+{"banner":false,"bind":"<metal-address>:7002","ev":"tcp_server_ready","rst":true}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7002","ok":false,"peer":"<metal-address>:52522"}

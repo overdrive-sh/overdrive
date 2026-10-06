@@ -1,0 +1,15 @@
+[package]
+name = "vfwd-bpf"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[dependencies]
+aya-ebpf = "=0.1.1"
+[[bin]]
+name = "vfwd-bpf"
+path = "src/main.rs"
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+debug = false

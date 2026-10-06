@@ -1,0 +1,34 @@
+{"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":987764,"programs":[{"id":41808,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":41809,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":41810,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":41811,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":41812,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41}],"role":"host","udp_park":true}
+{"cid":35131,"ev":"host_ready","intakes":["<metal-address>:2222=22","<metal-address>:2710=7100","<metal-address>:2711=7101"]}
+{"cid":35131,"ev":"hello"}
+{"dst":"<metal-address>:7000","ev":"host_tcp_connect","flow":1}
+{"dst":"<metal-address>:7000","ev":"host_tcp_connect","flow":3}
+{"dst":"<metal-address>:7000","ev":"host_tcp_connect","flow":5}
+{"age_ms":19,"ev":"flow_closed","flow":5,"kind":1,"reset":true,"why":"peer_abort"}
+{"dst":"<metal-address>:7001","ev":"host_tcp_connect","flow":7}
+{"age_ms":0,"ev":"flow_closed","flow":7,"kind":1,"reset":true,"why":"peer_abort"}
+{"dst":"<metal-address>:7002","ev":"host_tcp_connect","flow":9}
+{"dst":"<metal-address>:8080","ev":"host_tcp_connect","flow":11}
+{"ev":"leg_error","events":8,"flow":11,"leg":1,"so_error":32}
+{"age_ms":36,"ev":"flow_closed","flow":11,"kind":1,"reset":true,"why":"leg_error"}
+{"dst":"127.0.0.53:53","ev":"host_dg_installed","flow":13,"local":"127.0.0.1:43670","waited_ms":0}
+{"ev":"host_dg_teardown","flow":13}
+{"dst":"<metal-address>:7010","ev":"host_dg_installed","flow":15,"local":"<metal-address>:49476","waited_ms":0}
+{"ev":"leg_error","events":8200,"flow":1,"leg":1,"so_error":32}
+{"age_ms":10002,"ev":"flow_closed","flow":1,"kind":1,"reset":true,"why":"leg_error"}
+{"ev":"leg_error","events":8200,"flow":3,"leg":1,"so_error":32}
+{"age_ms":10002,"ev":"flow_closed","flow":3,"kind":1,"reset":true,"why":"leg_error"}
+{"ev":"leg_error","events":8200,"flow":9,"leg":1,"so_error":32}
+{"age_ms":10001,"ev":"flow_closed","flow":9,"kind":1,"reset":true,"why":"leg_error"}
+{"ev":"host_dg_teardown","flow":15}
+{"client":"<metal-address>:33460","ev":"host_intake","flow":2,"gport":22}
+{"ev":"leg_error","events":8,"flow":2,"leg":1,"so_error":32}
+{"age_ms":179,"ev":"flow_closed","flow":2,"kind":2,"reset":true,"why":"leg_error"}
+{"client":"<metal-address>:54066","ev":"host_intake","flow":4,"gport":7101}
+{"ev":"leg_error","events":8,"flow":4,"leg":1,"so_error":32}
+{"age_ms":1,"ev":"flow_closed","flow":4,"kind":2,"reset":true,"why":"leg_error"}
+{"client":"<metal-address>:36332","ev":"host_intake","flow":6,"gport":7100}
+{"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":42,"map":"VERD","sock":"<metal-address>:2710"}
+{"ev":"leg_error","events":8200,"flow":6,"leg":1,"so_error":104}
+{"age_ms":8526,"ev":"flow_closed","flow":6,"kind":2,"reset":true,"why":"leg_error"}
+{"ev":"ctl_closed"}

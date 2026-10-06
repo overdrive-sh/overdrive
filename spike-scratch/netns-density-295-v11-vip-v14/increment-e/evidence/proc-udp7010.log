@@ -1,0 +1,7 @@
+{"bind":"<metal-address>:7010","ev":"udp_server_ready"}
+{"ev":"dgram","from":"<metal-address>:48379","len":0,"n":1}
+{"ev":"dgram","from":"<metal-address>:39237","len":1431,"n":2}
+{"ev":"dgram","from":"<metal-address>:56415","len":59000,"n":3}
+{"ev":"dgram","from":"<metal-address>:44370","len":0,"n":4}
+{"ev":"dgram","from":"<metal-address>:45505","len":1431,"n":5}
+{"ev":"dgram","from":"<metal-address>:34879","len":59000,"n":6}

@@ -1,0 +1,180 @@
+[17:41:52] === preflight
+[17:41:52] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[17:41:52]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[17:41:52]     none
+[17:41:52]     model name	: AMD EPYC 8024P 8-Core Processor
+[17:41:52]     16
+[17:41:52]     crw-rw---- 1 root kvm 10, 232 Oct  5 17:41 /dev/kvm
+[17:41:52] === build
+[17:41:52] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[17:41:52]         Finished `release` profile [optimized] target(s) in 0.12s
+[17:41:52] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/bpf/Cargo.toml  (rc=0)
+[17:41:52]         Finished `release` profile [optimized] target(s) in 0.05s
+[17:41:54] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/vfwd/Cargo.toml  (rc=0)
+[17:41:54]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[17:41:54]         |            ^^^^^^
+[17:41:54]     
+[17:41:54]     warning: `vfwd` (bin "vfwd") generated 3 warnings
+[17:41:54]         Finished `release` profile [optimized + debuginfo] target(s) in 2.26s
+[17:41:55] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[17:41:55]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=df3bfdde961a595166a19e947e6ada03a243a79c, with debug_info, not stripped
+[17:41:55]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor:                ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[17:41:55]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[17:41:55]     cloud-hypervisor v53.0.0
+[17:41:55]     Migration Protocol Versions: 0
+[17:41:55]     bpf-linker 0.0.0
+[17:41:55]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[17:41:55]     rustc 1.95.0 (59807616e 2026-04-14)
+[17:41:55] === guest image
+[17:41:56] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs.cpio.gz  (rc=0)
+[17:41:56] launch VM: /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--flush,yes,--udp,park --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vm-increment-c-1791222116/serial.log --console off --vsock cid=35131,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vm-increment-c-1791222116/ch.log -v
+[17:41:58] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.62
+net.ipv4.tcp_fwmark_accept = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33mce:f5:c4:49:2b:9f [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+OWNER_READY role=guest pid=109
+GUEST_READY
+
+[17:41:59] guest$ uname -r; /usr/sbin/ip -br link; /usr/sbin/ip -4 addr; cat /tmp/owner.out  (rc=0, 0.0s)
+[17:41:59]     7.0.0-29-generic
+[17:41:59]     lo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> 
+[17:41:59]     dummy0           UNKNOWN        ce:f5:c4:49:2b:9f <BROADCAST,NOARP,UP,LOWER_UP> 
+[17:41:59]     1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+[17:41:59]         inet 127.0.0.1/8 scope host lo
+[17:41:59]            valid_lft forever preferred_lft forever
+[17:41:59]     2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+[17:41:59]         inet 10.99.7.2/32 scope global dummy0
+[17:41:59]            valid_lft forever preferred_lft forever
+[17:41:59]     OWNER_READY role=guest pid=109
+[17:42:00] guest$ /vfwd sockname --dst <metal-address>:7000; /vfwd sockname --bind 10.99.7.2:0 --dst <metal-address>:7000  (rc=0, 0.0s)
+[17:42:00]     {"connect":"ok","getpeername":"<metal-address>:7000","getsockname":"10.99.7.2:39222"}
+[17:42:00]     {"bind":"10.99.7.2:0","bind_result":"ok","connect":"ok","getpeername":"<metal-address>:7000","getsockname":"10.99.7.2:34277"}
+[17:42:00] guest$ /vfwd tcp-client --dst <metal-address>:7000 --size 1048576  (rc=1, 0.0s)
+[17:42:00]     {"dst":"<metal-address>:7000","err":"read: Connection reset by peer (os error 104)","got":0,"local":"10.99.7.2:39228","ok":false,"os_error":104,"peer":"<metal-address>:7000","read_err_kind":"ConnectionReset","size":1048576}
+[17:42:00] guest$ cat /tmp/owner.out; tail -c 3000 /tmp/owner.log  (rc=0, 0.0s)
+[17:42:00]     OWNER_READY role=guest pid=109
+[17:42:00]     sockhash_insert_failed map=SOCKS fd=50 sock=10.99.7.2:15001 err=SyscallError(SyscallError { call: "bpf_map_update_elem", io_error: Os { code: 95, kind: Unsupported, message: "Operation not supported" } })
+[17:42:00]     sockhash_insert_failed map=SOCKS fd=244 sock=10.99.7.2:15001 err=SyscallError(SyscallError { call: "bpf_map_update_elem", io_error: Os { code: 95, kind: Unsupported, message: "Operation not supported" } })
+[17:42:00]     sockhash_insert_failed map=VERD fd=50 sock=10.99.7.2:15001 err=SyscallError(SyscallError { call: "bpf_map_update_elem", io_error: Os { code: 95, kind: Unsupported, message: "Operation not supported" } })
+[17:42:00]     sockhash_insert_failed map=VERD fd=244 sock=10.99.7.2:15001 err=SyscallError(SyscallError { call: "bpf_map_update_elem", io_error: Os { code: 95, kind: Unsupported, message: "Operation not supported" } })
+[17:42:00]     {"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":109,"programs":[{"id":8,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":9,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":10,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":11,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":12,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":13,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":14,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":15,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":16,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":17,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":18,"name":"sockops","tag":"39b281aa4f25ccfe","verified_insns":34}],"role":"guest","udp_park":true}
+[17:42:00]     {"ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+[17:42:00]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":50,"map":"SOCKS","sock":"10.99.7.2:15001"}
+[17:42:00]     {"app":"10.99.7.2:39222","dst":"<metal-address>:7000","ev":"tcp_connect","flow":1}
+[17:42:00]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":244,"map":"SOCKS","sock":"10.99.7.2:15001"}
+[17:42:00]     {"app":"10.99.7.2:34277","dst":"<metal-address>:7000","ev":"tcp_connect","flow":3}
+[17:42:00]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":50,"map":"VERD","sock":"10.99.7.2:15001"}
+[17:42:00]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":244,"map":"VERD","sock":"10.99.7.2:15001"}
+[17:42:00]     {"app":"10.99.7.2:39228","dst":"<metal-address>:7000","ev":"tcp_connect","flow":5}
+[17:42:00]     {"ev":"leg_error","events":8,"flow":5,"leg":1,"so_error":32}
+[17:42:00]     {"age_ms":19,"ev":"flow_closed","flow":5,"kind":1,"reset":true,"why":"leg_error"}
+[17:42:00] guest$ /vfwd tcp-client --dst <metal-address>:7001 --size 4096 --banner  (rc=1, 0.0s)
+[17:42:00]     {"banner":"BANNER peer=<metal-address>:45996 local=<metal-address>:7001","dst":"<metal-address>:7001","err":"read: Connection reset by peer (os error 104)","got":0,"local":"10.99.7.2:39242","ok":false,"os_error":104,"peer":"<metal-address>:7001","read_err_kind":"ConnectionReset","size":4096}
+[17:42:08] guest$ /vfwd tcp-client --dst <metal-address>:7002 --size 100 --expect-rst  (rc=1, 8.4s)
+[17:42:08]     {"dst":"<metal-address>:7002","err":"read: Resource temporarily unavailable (os error 11)","got":0,"local":"10.99.7.2:39256","ok":false,"os_error":11,"peer":"<metal-address>:7002","read_err_kind":"WouldBlock","size":100}
+[17:42:08] guest$ curl -sS -o /tmp/blob -w '%{http_code} %{size_download} %{local_ip}:%{local_port} %{remote_ip}:%{remote_port}\n' http://<metal-address>:8080/blob.bin; sha256sum /tmp/blob  (rc=0, 0.1s)
+[17:42:08]     curl: (56) Recv failure: Connection reset by peer
+[17:42:08]     200 2031457 10.99.7.2:39264 <metal-address>:8080
+[17:42:08]     49ca82c15c5f57665bd6b8f524557542300db344c71544b98d2bf82af9ae58ba  /tmp/blob
+[17:42:08] guest$ getent hosts example.com; echo rc=$?  (rc=0, 0.0s)
+[17:42:08]     2606:4700:10::6814:179a example.com
+[17:42:08]     2606:4700:10::ac42:93f3 example.com
+[17:42:08]     rc=0
+[17:42:11] guest$ /vfwd udp-client --dst <metal-address>:7010 --sizes 0,1,1431,59000  (rc=1, 3.0s)
+[17:42:11]     {"connected":false,"dst":"<metal-address>:7010","ev":"udp_client","local":"0.0.0.0:50480","ok":false,"peer":"","results":[{"from":"<metal-address>:7010","got":0,"ok":true,"size":0},{"from":"<metal-address>:7010","got":1,"ok":true,"size":1},{"from":"<metal-address>:7010","got":1431,"ok":true,"size":1431},{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":59000}]}
+[17:42:11] guest$ head -c 8000 /tmp/owner.log; cat /tmp/owner-stats.json  (rc=0, 0.0s)
+[17:42:11]     {"ack_oob":true,"ev":"programs_loaded","flush":true,"pid":109,"programs":[{"id":8,"name":"verdict","tag":"354384a026e66a00","verified_insns":323},{"id":9,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":10,"name":"strp_verdict","tag":"4f81f3897a228eec","verified_insns":334},{"id":11,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":12,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":13,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":14,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":15,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":16,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":17,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":18,"name":"sockops","tag":"39b281aa4f25ccfe","verified_insns":34}],"role":"guest","udp_park":true}
+[17:42:11]     {"ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+[17:42:11]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":50,"map":"SOCKS","sock":"10.99.7.2:15001"}
+[17:42:11]     {"app":"10.99.7.2:39222","dst":"<metal-address>:7000","ev":"tcp_connect","flow":1}
+[17:42:11]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":244,"map":"SOCKS","sock":"10.99.7.2:15001"}
+[17:42:11]     {"app":"10.99.7.2:34277","dst":"<metal-address>:7000","ev":"tcp_connect","flow":3}
+[17:42:11]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":50,"map":"VERD","sock":"10.99.7.2:15001"}
+[17:42:11]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":244,"map":"VERD","sock":"10.99.7.2:15001"}
+[17:42:11]     {"app":"10.99.7.2:39228","dst":"<metal-address>:7000","ev":"tcp_connect","flow":5}
+[17:42:11]     {"ev":"leg_error","events":8,"flow":5,"leg":1,"so_error":32}
+[17:42:11]     {"age_ms":19,"ev":"flow_closed","flow":5,"kind":1,"reset":true,"why":"leg_error"}
+[17:42:11]     {"app":"10.99.7.2:39242","dst":"<metal-address>:7001","ev":"tcp_connect","flow":7}
+[17:42:11]     {"ev":"leg_error","events":8,"flow":7,"leg":1,"so_error":32}
+[17:42:11]     {"age_ms":0,"ev":"flow_closed","flow":7,"kind":1,"reset":true,"why":"leg_error"}
+[17:42:11]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":246,"map":"SOCKS","sock":"10.99.7.2:15001"}
+[17:42:11]     {"app":"10.99.7.2:39256","dst":"<metal-address>:7002","ev":"tcp_connect","flow":9}
+[17:42:11]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":246,"map":"VERD","sock":"10.99.7.2:15001"}
+[17:42:11]     {"app":"10.99.7.2:39264","dst":"<metal-address>:8080","ev":"tcp_connect","flow":11}
+[17:42:11]     {"age_ms":36,"ev":"flow_closed","flow":11,"kind":1,"reset":true,"why":"peer_abort"}
+[17:42:11]     {"app":"10.99.7.2:39782","dst":"127.0.0.53:53","ev":"udp_associate","flow":13,"queued_on_trigger":37,"slot":0}
+[17:42:11]     {"ev":"udp_paired","flow":13,"slot":0}
+[17:42:11]     {"ev":"udp_teardown","flow":13,"slot":0,"why":"app_socket_released"}
+[17:42:11]     {"app":"10.99.7.2:50480","dst":"<metal-address>:7010","ev":"udp_associate","flow":15,"queued_on_trigger":8,"slot":1}
+[17:42:11]     {"ev":"udp_paired","flow":15,"slot":1}
+[17:42:11]     {"ev":"k2_drain_timeout","flow":1,"fwd":0,"inq":0,"leg":0,"recv":1,"sent":0}
+[17:42:11]     {"age_ms":10003,"ev":"flow_closed","flow":1,"kind":1,"reset":true,"why":"peer_abort"}
+[17:42:11]     {"ev":"k2_drain_timeout","flow":3,"fwd":0,"inq":0,"leg":0,"recv":1,"sent":0}
+[17:42:11]     {"age_ms":10002,"ev":"flow_closed","flow":3,"kind":1,"reset":true,"why":"peer_abort"}
+[17:42:11]     {"ev":"k2_drain_timeout","flow":9,"fwd":0,"inq":112,"leg":0,"recv":113,"sent":0}
+[17:42:11]     {"age_ms":10001,"ev":"flow_closed","flow":9,"kind":1,"reset":true,"why":"peer_abort"}
+[17:42:11]     {"ev":"udp_teardown","flow":15,"slot":1,"why":"app_socket_released"}
+[17:42:11]     {"abort_received":4,"counters":[6,5,0,5,4,6,0,0,0,0,16,0,5,4,1,1,645,5,2,0,0,2,623,0,0,0,0,0,0,0,0,0],"ctl_bytes_read":96,"ctl_bytes_written":16,"flows_aborted":6,"flows_active_total":6,"flows_open":0,"k2_drain_timeouts":3,"leg_errors":2,"paired_received":8,"park_flush":2,"rcvlowat_rearm":6,"requests_written":10,"sockhash_insert_errors":6,"t_ms":1791222131511.4004,"tcp_connect_flows":6,"udp_associations":2,"udp_slot_released":2,"udp_teardowns":2}
+[17:42:11] $ timeout 20 ssh -i /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@<metal-address> 'echo SSH_CONNECTION=$SSH_CONNECTION; uname -r'  (rc=0)
+[17:42:11]     Warning: Permanently added '[<metal-address>]:2222' (ED25519) to the list of known hosts.
+[17:42:11]     SSH_CONNECTION=<metal-address> 33460 10.99.7.2 22
+[17:42:11]     7.0.0-29-generic
+[17:42:11] $ timeout 20 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-client --dst <metal-address>:2711 --size 4096 --banner  (rc=1)
+[17:42:11]     {"banner":"BANNER peer=<metal-address>:54066 local=10.99.7.2:7101","dst":"<metal-address>:2711","err":"read: Connection reset by peer (os error 104)","got":0,"local":"<metal-address>:54066","ok":false,"os_error":104,"peer":"<metal-address>:2711","read_err_kind":"ConnectionReset","size":4096}
+[17:42:20] $ timeout 20 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-client --dst <metal-address>:2710 --size 65536  (rc=1)
+[17:42:20]     {"dst":"<metal-address>:2710","err":"read: Resource temporarily unavailable (os error 11)","got":0,"local":"<metal-address>:36332","ok":false,"os_error":11,"peer":"<metal-address>:2710","read_err_kind":"WouldBlock","size":65536}
+[17:42:20] guest$ cat /tmp/owner.out; tail -c 30000 /tmp/owner.log; cat /tmp/owner-stats.json; tail -60 /tmp/sshd.log; tail -20 /tmp/srv7100.log /tmp/srv7101.log  (rc=0, 0.0s)
+[17:42:20]     {"ev":"leg_error","events":8,"flow":7,"leg":1,"so_error":32}
+[17:42:20]     {"age_ms":0,"ev":"flow_closed","flow":7,"kind":1,"reset":true,"why":"leg_error"}
+[17:42:20]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":246,"map":"SOCKS","sock":"10.99.7.2:15001"}
+[17:42:20]     {"app":"10.99.7.2:39256","dst":"<metal-address>:7002","ev":"tcp_connect","flow":9}
+[17:42:20]     {"err":"SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })","ev":"sockhash_insert_failed","fd":246,"map":"VERD","sock":"10.99.7.2:15001"}
+[17:42:20]     {"app":"10.99.7.2:39264","dst":"<metal-address>:8080","ev":"tcp_connect","flow":11}
+[17:42:20]     {"age_ms":36,"ev":"flow_closed","flow":11,"kind":1,"reset":true,"why":"peer_abort"}
+[17:42:20]     {"app":"10.99.7.2:39782","dst":"127.0.0.53:53","ev":"udp_associate","flow":13,"queued_on_trigger":37,"slot":0}
+[17:42:20]     {"ev":"udp_paired","flow":13,"slot":0}
+[17:42:20]     {"ev":"udp_teardown","flow":13,"slot":0,"why":"app_socket_released"}
+[17:42:20]     {"app":"10.99.7.2:50480","dst":"<metal-address>:7010","ev":"udp_associate","flow":15,"queued_on_trigger":8,"slot":1}
+[17:42:20]     {"ev":"udp_paired","flow":15,"slot":1}
+[17:42:20]     {"ev":"k2_drain_timeout","flow":1,"fwd":0,"inq":0,"leg":0,"recv":1,"sent":0}
+[17:42:20]     {"age_ms":10003,"ev":"flow_closed","flow":1,"kind":1,"reset":true,"why":"peer_abort"}
+[17:42:20]     {"ev":"k2_drain_timeout","flow":3,"fwd":0,"inq":0,"leg":0,"recv":1,"sent":0}
+[17:42:20]     {"age_ms":10002,"ev":"flow_closed","flow":3,"kind":1,"reset":true,"why":"peer_abort"}
+[17:42:20]     {"ev":"k2_drain_timeout","flow":9,"fwd":0,"inq":112,"leg":0,"recv":113,"sent":0}
+[17:42:20]     {"age_ms":10001,"ev":"flow_closed","flow":9,"kind":1,"reset":true,"why":"peer_abort"}
+[17:42:20]     {"ev":"udp_teardown","flow":15,"slot":1,"why":"app_socket_released"}
+[17:42:20]     {"client":"<metal-address>:33460","ev":"tcp_accept","flow":2,"gport":22}
+[17:42:20]     {"age_ms":179,"ev":"flow_closed","flow":2,"kind":2,"reset":true,"why":"peer_abort"}
+[17:42:20]     {"client":"<metal-address>:54066","ev":"tcp_accept","flow":4,"gport":7101}
+[17:42:20]     {"age_ms":1,"ev":"flow_closed","flow":4,"kind":2,"reset":true,"why":"peer_abort"}
+[17:42:20]     {"client":"<metal-address>:36332","ev":"tcp_accept","flow":6,"gport":7100}
+[17:42:20]     {"abort_received":6,"counters":[6,5,0,5,4,6,0,0,0,0,16,0,5,4,1,1,674,5,2,0,0,2,652,0,0,0,0,0,0,0,0,0],"ctl_bytes_read":112,"ctl_bytes_written":40,"flows_aborted":8,"flows_active_total":9,"flows_open":1,"k2_drain_timeouts":3,"leg_errors":2,"paired_received":8,"park_flush":2,"rcvlowat_rearm":9,"requests_written":10,"sockhash_insert_errors":6,"t_ms":1791222140023.0044,"tcp_accept_flows":3,"tcp_connect_flows":6,"udp_associations":2,"udp_slot_released":2,"udp_teardowns":2}Server listening on 0.0.0.0 port 22.
+[17:42:20]     Connection from <metal-address> port 33460 on 10.99.7.2 port 22 rdomain ""
+[17:42:20]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[17:42:20]     Postponed publickey for root from <metal-address> port 33460 ssh2 [preauth]
+[17:42:20]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[17:42:20]     Accepted publickey for root from <metal-address> port 33460 ssh2: ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ
+[17:42:20]     User child is on pid 146
+[17:42:20]     Starting session: command for root from <metal-address> port 33460 id 0
+[17:42:20]     Close session: user root from <metal-address> port 33460 id 0
+[17:42:20]     Read error from remote host <metal-address> port 33460: Connection reset by peer
+[17:42:20]     ==> /tmp/srv7100.log <==
+[17:42:20]     {"banner":false,"bind":"0.0.0.0:7100","ev":"tcp_server_ready","rst":false}
+[17:42:20]     
+[17:42:20]     ==> /tmp/srv7101.log <==
+[17:42:20]     {"banner":true,"bind":"0.0.0.0:7101","ev":"tcp_server_ready","rst":false}
+[17:42:20]     {"err":"eof wait Connection reset by peer (os error 104)","ev":"conn","local":"10.99.7.2:7101","ok":false,"peer":"<metal-address>:54066"}
+[17:42:23] === done

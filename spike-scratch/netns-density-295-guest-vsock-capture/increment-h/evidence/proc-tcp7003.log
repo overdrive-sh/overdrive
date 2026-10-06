@@ -1,0 +1,3 @@
+{"banner":false,"bind":"<metal-address>:7003","ev":"tcp_server_ready","rst":false}
+{"err":"body Connection reset by peer (os error 104)","ev":"conn","local":"<metal-address>:7003","ok":false,"peer":"<metal-address>:41396"}
+{"err":"body failed to fill whole buffer","ev":"conn","local":"<metal-address>:7003","ok":false,"peer":"<metal-address>:34958"}

@@ -1,0 +1,1 @@
+cat: can't open '/tmp/strace-owner.txt': No such file or directory

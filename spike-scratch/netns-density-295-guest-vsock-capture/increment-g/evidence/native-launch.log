@@ -1,0 +1,320 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-guest-vsock-capture/increment-g/run.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=11e0c77556598ed5aad625a6 pid=992722
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <metal-target>:/home/ubuntu/overdrive
+
+sent 933,849 bytes  received 9,635 bytes  99,314.11 bytes/sec
+total size is 1,480,500,116  speedup is 1,569.18
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[18:15:32] === preflight
+[18:15:32] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[18:15:32]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[18:15:32]     none
+[18:15:32]     model name	: AMD EPYC 8024P 8-Core Processor
+[18:15:32]     16
+[18:15:32]     crw-rw---- 1 root kvm 10, 232 Oct  5 18:15 /dev/kvm
+[18:15:32] === build
+[18:15:33] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[18:15:33]         Finished `release` profile [optimized] target(s) in 0.12s
+[18:15:33] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/bpf/Cargo.toml  (rc=0)
+[18:15:33]         Finished `release` profile [optimized] target(s) in 0.05s
+[18:15:35] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/vfwd/Cargo.toml  (rc=0)
+[18:15:35]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[18:15:35]         |            ^^^^^^
+[18:15:35]     
+[18:15:35]     warning: `vfwd` (bin "vfwd") generated 3 warnings
+[18:15:35]         Finished `release` profile [optimized + debuginfo] target(s) in 2.63s
+[18:15:35] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[18:15:35]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=eba8c7896ed5ff5c875c2b7547f8c3452acfc3f3, with debug_info, not stripped
+[18:15:35]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor:                ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[18:15:35]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[18:15:35]     cloud-hypervisor v53.0.0
+[18:15:35]     Migration Protocol Versions: 0
+[18:15:35]     bpf-linker 0.0.0
+[18:15:35]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[18:15:35]     rustc 1.95.0 (59807616e 2026-04-14)
+[18:15:35] === guest image
+[18:15:37] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs.cpio.gz  (rc=0)
+[18:15:37] launch VM: /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vm-increment-g-1791224137/serial.log --console off --vsock cid=31711,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vm-increment-g-1791224137/ch.log -v
+[18:15:39] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.57
+net.ipv4.tcp_fwmark_accept = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33mb6:a3:2e:be:9a:7b [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+OWNER_READY role=guest pid=109
+GUEST_READY
+
+[18:15:41] guest$ uname -a; /usr/sbin/ip -br link; /usr/sbin/ip -4 addr; /usr/sbin/ip route; /usr/sbin/ip rule; ls /sys/class/net; cat /proc/net/dev  (rc=0, 0.0s)
+[18:15:41]     Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[18:15:41]     lo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> 
+[18:15:41]     dummy0           UNKNOWN        b6:a3:2e:be:9a:7b <BROADCAST,NOARP,UP,LOWER_UP> 
+[18:15:41]     1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+[18:15:41]         inet 127.0.0.1/8 scope host lo
+[18:15:41]            valid_lft forever preferred_lft forever
+[18:15:41]     2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+[18:15:41]         inet 10.99.7.2/32 scope global dummy0
+[18:15:41]            valid_lft forever preferred_lft forever
+[18:15:41]     0:	from all lookup local
+[18:15:41]     32765:	from all fwmark 0x295 lookup 295
+[18:15:41]     32766:	from all lookup main
+[18:15:41]     32767:	from all lookup default
+[18:15:41]     dummy0
+[18:15:41]     lo
+[18:15:41]     Inter-|   Receive                                                |  Transmit
+[18:15:41]      face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+[18:15:41]         lo:   66048    1152    0    0    0     0          0         0    66048    1152    0    0    0     0       0          0
+[18:15:41]     dummy0:       0       0    0    0    0     0          0         0       70       1    0    0    0     0       0          0
+[18:15:41] guest$ /vfwd sockname --dst <metal-address>:7000; /vfwd sockname --bind 10.99.7.2:0 --dst <metal-address>:7000  (rc=0, 0.0s)
+[18:15:41]     {"connect":"ok","getpeername":"<metal-address>:7000","getsockname":"10.99.7.2:43076"}
+[18:15:41]     {"bind":"10.99.7.2:0","bind_result":"ok","connect":"ok","getpeername":"<metal-address>:7000","getsockname":"10.99.7.2:58025"}
+[18:15:41] guest$ /vfwd tcp-client --dst <metal-address>:7000 --size 1048576  (rc=0, 0.1s)
+[18:15:41]     {"connect_ms":0.12948500000000002,"dst":"<metal-address>:7000","local":"10.99.7.2:43084","ms":52.705981,"ok":true,"peer":"<metal-address>:7000","server_saw_peer":"<metal-address>:49086","size":1048576}
+[18:15:44] guest$ /vfwd tcp-client --dst <metal-address>:7000 --size 67108864  (rc=0, 3.4s)
+[18:15:44]     {"connect_ms":0.122054,"dst":"<metal-address>:7000","local":"10.99.7.2:43096","ms":3409.029524,"ok":true,"peer":"<metal-address>:7000","server_saw_peer":"<metal-address>:49088","size":67108864}
+[18:15:44] guest$ /vfwd tcp-client --dst <metal-address>:7003 --size 4194304  (rc=0, 0.4s)
+[18:15:44]     {"connect_ms":0.098569,"dst":"<metal-address>:7003","local":"10.99.7.2:43106","ms":390.500831,"ok":true,"peer":"<metal-address>:7003","server_saw_peer":"<metal-address>:50184","size":4194304}
+[18:15:45] guest$ /vfwd tcp-client --dst <metal-address>:7000 --size 4194304 --read-delay 300  (rc=0, 0.3s)
+[18:15:45]     {"connect_ms":0.164408,"dst":"<metal-address>:7000","local":"10.99.7.2:43116","ms":331.536271,"ok":true,"peer":"<metal-address>:7000","server_saw_peer":"<metal-address>:49100","size":4194304}
+[18:15:45] guest$ /vfwd tcp-client --dst <metal-address>:7002 --size 100 --expect-rst  (rc=0, 0.0s)
+[18:15:45]     {"dst":"<metal-address>:7002","err":"read: Connection reset by peer (os error 104)","got":0,"local":"10.99.7.2:43118","ok":true,"os_error":104,"peer":"<metal-address>:7002","read_err_kind":"ConnectionReset","reset_observed":true,"size":100}
+[18:15:45] guest$ curl -sS -o /tmp/blob -w '%{http_code} %{size_download} local=%{local_ip}:%{local_port} remote=%{remote_ip}:%{remote_port}\n' http://<metal-address>:8080/blob.bin; sha256sum /tmp/blob  (rc=0, 0.1s)
+[18:15:45]     200 2097152 local=10.99.7.2:43130 remote=<metal-address>:8080
+[18:15:45]     abce2f435fcfe792b5a0b072503f344f0b79b82310157e2f032e7c241eb1343c  /tmp/blob
+[18:15:45] guest$ curl -sS -m 15 -o /tmp/ex.html -w '%{http_code} %{size_download} local=%{local_ip}:%{local_port} remote=%{remote_ip}:%{remote_port}\n' http://example.com/; head -c 120 /tmp/ex.html  (rc=0, 0.0s)
+[18:15:45]     200 577 local=10.99.7.2:43132 remote=104.20.23.154:80
+[18:15:45]     <!doctype html><html lang=en><head><meta charset=utf-8><link rel=icon href=data:,><meta name=viewport content="width=dev
+[18:15:45] guest$ timeout 10 nc github.com 22 </dev/null | head -c 40; echo; echo rc=$?  (rc=0, 0.0s)
+[18:15:45]     
+[18:15:45]     rc=0
+[18:15:45] guest$ getent hosts example.com; echo getent_rc=$?; getent ahostsv4 example.com; echo ahosts_rc=$?; dig +time=3 +tries=1 example.com A +short; echo dig_rc=$?; nslookup example.com; echo nslookup_rc=$?  (rc=0, 0.0s)
+[18:15:45]     2606:4700:10::6814:179a example.com
+[18:15:45]     2606:4700:10::ac42:93f3 example.com
+[18:15:45]     getent_rc=0
+[18:15:45]     104.20.23.154   STREAM example.com
+[18:15:45]     104.20.23.154   DGRAM  
+[18:15:45]     104.20.23.154   RAW    
+[18:15:45]     172.66.147.243  STREAM 
+[18:15:45]     172.66.147.243  DGRAM  
+[18:15:45]     172.66.147.243  RAW    
+[18:15:45]     ahosts_rc=0
+[18:15:45]     104.20.23.154
+[18:15:45]     172.66.147.243
+[18:15:45]     dig_rc=0
+[18:15:45]     Server:		127.0.0.53
+[18:15:45]     Address:	127.0.0.53:53
+[18:15:45]     
+[18:15:45]     Non-authoritative answer:
+[18:15:45]     Name:	example.com
+[18:15:45]     Address: 104.20.23.154
+[18:15:45]     Name:	example.com
+[18:15:45]     Address: 172.66.147.243
+[18:15:45]     
+[18:15:45]     Non-authoritative answer:
+[18:15:45]     Name:	example.com
+[18:15:45]     Address: 2606:4700:10::6814:179a
+[18:15:45]     Name:	example.com
+[18:15:45]     Address: 2606:4700:10::ac42:93f3
+[18:15:45]     
+[18:15:45]     nslookup_rc=0
+[18:15:45] guest$ /vfwd udp-client --dst <metal-address>:7010 --sizes 0,1,1431,4096,4097,59000  (rc=0, 0.0s)
+[18:15:45]     {"connected":false,"dst":"<metal-address>:7010","ev":"udp_client","local":"0.0.0.0:55941","ok":true,"peer":"","results":[{"from":"<metal-address>:7010","got":0,"ok":true,"size":0},{"from":"<metal-address>:7010","got":1,"ok":true,"size":1},{"from":"<metal-address>:7010","got":1431,"ok":true,"size":1431},{"from":"<metal-address>:7010","got":4096,"ok":true,"size":4096},{"from":"<metal-address>:7010","got":4097,"ok":true,"size":4097},{"from":"<metal-address>:7010","got":59000,"ok":true,"size":59000}]}
+[18:15:45] guest$ /vfwd udp-client --dst <metal-address>:7010 --sizes 59000,0,1,4097 --connect  (rc=0, 0.0s)
+[18:15:45]     {"connected":true,"dst":"<metal-address>:7010","ev":"udp_client","local":"10.99.7.2:56003","ok":true,"peer":"<metal-address>:7010","results":[{"from":"<metal-address>:7010","got":59000,"ok":true,"size":59000},{"from":"<metal-address>:7010","got":0,"ok":true,"size":0},{"from":"<metal-address>:7010","got":1,"ok":true,"size":1},{"from":"<metal-address>:7010","got":4097,"ok":true,"size":4097}]}
+[18:15:45] $ timeout 30 ssh -i /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@<metal-address> 'echo SSH_CONNECTION=$SSH_CONNECTION; id; /usr/sbin/ip -4 -br addr'  (rc=0)
+[18:15:45]     SSH_CONNECTION=<metal-address> 54138 10.99.7.2 22
+[18:15:45]     uid=0(root) gid=0(root) groups=0(root)
+[18:15:45]     lo               UNKNOWN        127.0.0.1/8 
+[18:15:45]     dummy0           UNKNOWN        10.99.7.2/32
+[18:15:45] $ timeout 30 ssh -i /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -tt root@<metal-address> 'tty; echo PTY_OK; exit' </dev/null  (rc=0)
+[18:15:45]     /dev/pts/0
+[18:15:45]     PTY_OK
+[18:15:46] $ timeout 120 scp -i /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/blob8.bin root@<metal-address>:/tmp/blob8.bin && echo UP_OK  (rc=0)
+[18:15:46]     UP_OK
+[18:15:46] guest$ sha256sum /tmp/blob8.bin  (rc=0, 0.0s)
+[18:15:46]     214f7c7e088cc2f225a11671944da11d3cf61f041e798c0de5fd5bc5acb6a2ba  /tmp/blob8.bin
+[18:15:46] $ rm -f /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/blob8.down; timeout 120 scp -i /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@<metal-address>:/tmp/blob8.bin /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/blob8.down && sha256sum /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/blob8.down  (rc=0)
+[18:15:46]     214f7c7e088cc2f225a11671944da11d3cf61f041e798c0de5fd5bc5acb6a2ba  /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/blob8.down
+[18:15:46] guest$ cat /tmp/sshd.log  (rc=0, 0.0s)
+[18:15:46]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:15:46]     Accepted publickey for root from <metal-address> port 54138 ssh2: ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ
+[18:15:46]     User child is on pid 165
+[18:15:46]     Starting session: command for root from <metal-address> port 54138 id 0
+[18:15:46]     Close session: user root from <metal-address> port 54138 id 0
+[18:15:46]     Received disconnect from <metal-address> port 54138:11: disconnected by user
+[18:15:46]     Disconnected from user root <metal-address> port 54138
+[18:15:46]     Connection from <metal-address> port 54144 on 10.99.7.2 port 22 rdomain ""
+[18:15:46]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:15:46]     Postponed publickey for root from <metal-address> port 54144 ssh2 [preauth]
+[18:15:46]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:15:46]     Accepted publickey for root from <metal-address> port 54144 ssh2: ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ
+[18:15:46]     User child is on pid 170
+[18:15:46]     lastlog_openseek: Couldn't stat /var/log/lastlog: No such file or directory
+[18:15:46]     lastlog_openseek: Couldn't stat /var/log/lastlog: No such file or directory
+[18:15:46]     Starting session: command on pts/0 for root from <metal-address> port 54144 id 0
+[18:15:46]     syslogin_perform_logout: logout() returned an error
+[18:15:46]     Close session: user root from <metal-address> port 54144 id 0
+[18:15:46]     Received disconnect from <metal-address> port 54144:11: disconnected by user
+[18:15:46]     Disconnected from user root <metal-address> port 54144
+[18:15:46]     Connection from <metal-address> port 54152 on 10.99.7.2 port 22 rdomain ""
+[18:15:46]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:15:46]     Postponed publickey for root from <metal-address> port 54152 ssh2 [preauth]
+[18:15:46]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:15:46]     Accepted publickey for root from <metal-address> port 54152 ssh2: ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ
+[18:15:46]     User child is on pid 175
+[18:15:46]     Starting session: subsystem 'sftp' for root from <metal-address> port 54152 id 0
+[18:15:46]     Close session: user root from <metal-address> port 54152 id 0
+[18:15:46]     Received disconnect from <metal-address> port 54152:11: disconnected by user
+[18:15:46]     Disconnected from user root <metal-address> port 54152
+[18:15:46]     Connection from <metal-address> port 45578 on 10.99.7.2 port 22 rdomain ""
+[18:15:46]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:15:46]     Postponed publickey for root from <metal-address> port 45578 ssh2 [preauth]
+[18:15:46]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:15:46]     Accepted publickey for root from <metal-address> port 45578 ssh2: ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ
+[18:15:46]     User child is on pid 181
+[18:15:46]     Starting session: subsystem 'sftp' for root from <metal-address> port 45578 id 0
+[18:15:46]     Close session: user root from <metal-address> port 45578 id 0
+[18:15:46]     Received disconnect from <metal-address> port 45578:11: disconnected by user
+[18:15:46]     Disconnected from user root <metal-address> port 45578
+[18:15:47] guest$ nohup strace -f -qq -yy -s 0 -e trace=read,write,readv,writev,recvfrom,sendto,recvmsg,sendmsg,recvmmsg,sendmmsg,splice,sendfile,pread64,pwrite64 -p $(cat /tmp/owner.pid) -o /tmp/strace-owner.txt >/dev/null 2>&1 </dev/null & echo $! > /tmp/strace.pid; sleep 1; cat /tmp/strace.pid  (rc=0, 1.0s)
+[18:15:47]     187
+[18:15:52] guest$ /vfwd tcp-client --dst <metal-address>:7000 --size 67108864  (rc=0, 3.4s)
+[18:15:52]     {"connect_ms":0.16251500000000002,"dst":"<metal-address>:7000","local":"10.99.7.2:43144","ms":3354.28784,"ok":true,"peer":"<metal-address>:7000","server_saw_peer":"<metal-address>:45934","size":67108864}
+[18:15:52] guest$ getent hosts example.com  (rc=0, 0.1s)
+[18:15:52]     2606:4700:10::6814:179a example.com
+[18:15:52]     2606:4700:10::ac42:93f3 example.com
+[18:15:52] guest$ /vfwd udp-client --dst <metal-address>:7010 --sizes 0,1431,59000  (rc=0, 0.1s)
+[18:15:52]     {"connected":false,"dst":"<metal-address>:7010","ev":"udp_client","local":"0.0.0.0:45049","ok":true,"peer":"","results":[{"from":"<metal-address>:7010","got":0,"ok":true,"size":0},{"from":"<metal-address>:7010","got":1431,"ok":true,"size":1431},{"from":"<metal-address>:7010","got":59000,"ok":true,"size":59000}]}
+[18:15:52] $ timeout 120 scp -i /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/blob8.bin root@<metal-address>:/tmp/blob8b.bin && echo UP_OK  (rc=0)
+[18:15:52]     UP_OK
+[18:15:53] $ timeout 30 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-client --dst <metal-address>:2710 --size 65536  (rc=0)
+[18:15:53]     {"connect_ms":0.173762,"dst":"<metal-address>:2710","local":"<metal-address>:36130","ms":101.033124,"ok":true,"peer":"<metal-address>:2710","server_saw_peer":"<metal-address>:36130","size":65536}
+[18:15:55] guest$ kill -INT $(cat /tmp/strace.pid); sleep 1  (rc=0, 1.0s)
+[18:15:55]     sh: can't kill pid 187: No such process
+[18:15:55] guest$ cat /tmp/owner-stats.json  (rc=0, 0.0s)
+[18:15:55]     {"abort_received":1,"counters":[11,21,0,9,21,11,0,0,0,0,0,0,23,23,3,3,55554,46,12,0,0,10,55557,17,11,0,6,0,0,0,0,0],"ctl_bytes_read":176,"ctl_bytes_written":48,"flows_aborted":1,"flows_active_total":17,"flows_closed":16,"flows_open":0,"k2_drained_shutdowns":33,"paired_received":21,"park_flush":21,"post_accept_rearm":11,"requests_written":31,"t_ms":1791224154975.4382,"tcp_accept_flows":6,"tcp_connect_flows":11,"udp_associations":10,"udp_slot_released":12,"udp_teardowns":10}
+[18:16:10] guest$ /vfwd tcp-stress --dst <metal-address>:7000 --iterations 10000 --max-size 4096  (rc=0, 15.0s)
+[18:16:10]     {"banner":false,"dst":"<metal-address>:7000","early_ack":false,"ev":"tcp_stress","failed":0,"first_failures":[],"hold_ms":0,"iterations":10000,"ok":10000,"parallel":1,"s":15.03453664,"timeout_ms":8000}
+[18:16:25] guest$ /vfwd tcp-stress --dst <metal-address>:7000 --iterations 10000 --max-size 4096 --parallel 8  (rc=0, 15.8s)
+[18:16:25]     {"banner":false,"dst":"<metal-address>:7000","early_ack":false,"ev":"tcp_stress","failed":0,"first_failures":[],"hold_ms":0,"iterations":10000,"ok":10000,"parallel":8,"s":15.819396628,"timeout_ms":8000}
+[18:16:43] guest$ /vfwd tcp-stress --dst <metal-address>:7001 --iterations 10000 --max-size 4096 --banner  (rc=0, 17.8s)
+[18:16:43]     {"banner":true,"dst":"<metal-address>:7001","early_ack":false,"ev":"tcp_stress","failed":0,"first_failures":[],"hold_ms":0,"iterations":10000,"ok":10000,"parallel":1,"s":17.806529986,"timeout_ms":8000}
+[18:16:57] guest$ /vfwd tcp-stress --dst <metal-address>:7004 --iterations 10000 --max-size 4096 --early-ack  (rc=0, 13.7s)
+[18:16:57]     {"banner":false,"dst":"<metal-address>:7004","early_ack":true,"ev":"tcp_stress","failed":0,"first_failures":[],"hold_ms":0,"iterations":10000,"ok":10000,"parallel":1,"s":13.699097038,"timeout_ms":8000}
+[18:17:31] $ timeout 1500 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-stress --dst <metal-address>:2711 --iterations 10000 --banner --max-size 4096  (rc=0)
+[18:17:31]     {"banner":true,"dst":"<metal-address>:2711","early_ack":false,"ev":"tcp_stress","failed":1,"first_failures":[{"i":255,"r":{"banner":"BANNER peer=<metal-address>:47142 local=10.99.7.2:7101","dst":"<metal-address>:2711","err":"read: Resource temporarily unavailable (os error 11)","got":0,"local":"<metal-address>:47142","ok":false,"os_error":11,"peer":"<metal-address>:2711","read_err_kind":"WouldBlock","size":1471}}],"hold_ms":0,"iterations":10000,"ok":9999,"parallel":1,"s":34.167839176,"timeout_ms":8000}
+[18:17:55] $ timeout 1500 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-stress --dst <metal-address>:2710 --iterations 10000 --max-size 4096  (rc=0)
+[18:17:55]     {"banner":false,"dst":"<metal-address>:2710","early_ack":false,"ev":"tcp_stress","failed":0,"first_failures":[],"hold_ms":0,"iterations":10000,"ok":10000,"parallel":1,"s":23.751757,"timeout_ms":8000}
+[18:18:08] guest$ /vfwd udp-stress --dst <metal-address>:7010 --iterations 10000 --size 64  (rc=0, 12.5s)
+[18:18:08]     {"connected":false,"dst":"<metal-address>:7010","ev":"udp_stress","failed":0,"first_failures":[],"iterations":10000,"ok":10000,"s":12.535040182}
+[18:18:10] guest$ /vfwd udp-stress --dst <metal-address>:7010 --iterations 2000 --size 64 --connect  (rc=0, 2.0s)
+[18:18:10]     {"connected":true,"dst":"<metal-address>:7010","ev":"udp_stress","failed":0,"first_failures":[],"iterations":2000,"ok":2000,"s":2.003454651}
+[18:18:10] guest$ ok=0; for i in $(seq 200); do getent hosts example.com >/dev/null && ok=$((ok+1)); done; echo dns_ok=$ok/200  (rc=0, 0.4s)
+[18:18:10]     dns_ok=200/200
+[18:18:12] guest$ /usr/bin/ss -tna; /usr/bin/ss -una  (rc=0, 0.0s)
+[18:18:12]     UNCONN 0      0          10.99.7.2:20003      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20004      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20005      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20006      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20007      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20008      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20009      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20010      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20011      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20012      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20013      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20014      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20015      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20016      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20017      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20018      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20019      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20020      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20021      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20022      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20023      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20024      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20025      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20026      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20027      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20028      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20029      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20030      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20031      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20032      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20033      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20034      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20035      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20036      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20037      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20038      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20039      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20040      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20041      0.0.0.0:*   
+[18:18:12]     UNCONN 0      0          10.99.7.2:20042      0.0.0.0:*
+[18:18:12] guest$ cat /tmp/owner-stats.json  (rc=0, 0.0s)
+[18:18:12]     {"abort_received":2,"counters":[40011,12221,0,40009,12221,40011,0,0,0,0,0,0,12223,12223,3,3,300426,24446,12212,0,0,12210,300429,48364,40011,0,20006,0,0,0,0,0],"ctl_bytes_read":417784,"ctl_bytes_written":160048,"flows_aborted":2,"flows_active_total":60017,"flows_closed":60015,"flows_open":0,"k2_drained_shutdowns":120032,"paired_received":52221,"park_flush":52221,"post_accept_rearm":40011,"requests_written":64431,"t_ms":1791224292149.4397,"tcp_accept_flows":20006,"tcp_connect_flows":40011,"udp_associations":12210,"udp_slot_released":12212,"udp_teardowns":12210}
+[18:18:12] guest$ cat /tmp/owner.out; tail -c 30000 /tmp/owner.log; cat /tmp/owner-stats.json; tail -60 /tmp/sshd.log; tail -20 /tmp/srv7100.log /tmp/srv7101.log  (rc=0, 0.0s)
+[18:18:12]     {"bytes":3392,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38100"}
+[18:18:12]     {"bytes":3590,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38114"}
+[18:18:12]     {"bytes":2042,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38116"}
+[18:18:12]     {"bytes":3511,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38128"}
+[18:18:12]     {"bytes":3374,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38148"}
+[18:18:12]     {"bytes":1272,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38150"}
+[18:18:12]     {"bytes":2623,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38170"}
+[18:18:12]     {"bytes":3563,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38182"}
+[18:18:12]     {"bytes":3922,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38184"}
+[18:18:12]     {"bytes":2704,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38210"}
+[18:18:12]     {"bytes":1659,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38214"}
+[18:18:12]     {"bytes":2167,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38226"}
+[18:18:12]     {"bytes":615,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38240"}
+[18:18:12]     {"bytes":3875,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38254"}
+[18:18:12]     {"bytes":1789,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38256"}
+[18:18:12]     {"bytes":1778,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38266"}
+[18:18:12]     {"bytes":2781,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38280"}
+[18:18:12]     {"bytes":938,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:38290"}
+[18:18:12]     
+[18:18:12]     ==> /tmp/srv7101.log <==
+[18:18:12]     {"bytes":563,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49140"}
+[18:18:12]     {"bytes":1271,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49148"}
+[18:18:12]     {"bytes":3392,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49172"}
+[18:18:12]     {"bytes":3590,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49174"}
+[18:18:12]     {"bytes":2042,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49192"}
+[18:18:12]     {"bytes":3511,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49204"}
+[18:18:12]     {"bytes":3374,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49206"}
+[18:18:12]     {"bytes":1272,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49216"}
+[18:18:12]     {"bytes":2623,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49226"}
+[18:18:12]     {"bytes":3563,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49232"}
+[18:18:12]     {"bytes":3922,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49242"}
+[18:18:12]     {"bytes":2704,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49250"}
+[18:18:12]     {"bytes":1659,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49256"}
+[18:18:12]     {"bytes":2167,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49266"}
+[18:18:12]     {"bytes":615,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49274"}
+[18:18:12]     {"bytes":3875,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49284"}
+[18:18:12]     {"bytes":1789,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49296"}
+[18:18:12]     {"bytes":1778,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49306"}
+[18:18:12]     {"bytes":2781,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49314"}
+[18:18:12]     {"bytes":938,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:49318"}
+[18:18:16] === done
+{"launcher_rc": 0, "wall_s": 201.3}

@@ -1,0 +1,34 @@
+----------------------------------------
+Exception occurred during processing of request from ('66.132.172.212', 53072)
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/server.py", line 1422, in finish_request
+    self.RequestHandlerClass(request, client_address, self,
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                             directory=args.directory)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/server.py", line 732, in __init__
+    super().__init__(*args, **kwargs)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/server.py", line 496, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/usr/lib/python3.14/socket.py", line 725, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+66.132.172.212 - - [05/Oct/2026 18:29:09] "GET / HTTP/1.1" 200 -
+66.132.172.212 - - [05/Oct/2026 18:29:14] code 400, message Bad request version ('À\\x14À')
+66.132.172.212 - - [05/Oct/2026 18:29:14] "\x16\x03\x01\x00î\x01\x00\x00ê\x03\x03|_êi\x9f³\x903èÎ\x1fGU|n·eß\x07gí¥\x0cAý\x028=¯,\x96\x97 \x9baÑ¬\x07\x8b\x13\x91(IF-W\x8eÊÅ\x11\x7fs\x1b>¹ \x98\x1aç\x14Ù/K+p\x00&Ì¨Ì©À/À0À+À,À\x13À\x09À\x14À" 400 -
+66.132.172.212 - - [05/Oct/2026 18:29:16] "GET / HTTP/1.1" 200 -
+66.132.172.212 - - [05/Oct/2026 18:29:17] code 505, message Invalid HTTP version (2.0)
+66.132.172.212 - - [05/Oct/2026 18:29:17] "PRI * HTTP/2.0" 505 -

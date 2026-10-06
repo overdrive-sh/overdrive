@@ -1,0 +1,179 @@
+[17:54:16] === preflight
+[17:54:16] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[17:54:16]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[17:54:16]     none
+[17:54:16]     model name	: AMD EPYC 8024P 8-Core Processor
+[17:54:16]     16
+[17:54:16]     crw-rw---- 1 root kvm 10, 232 Oct  5 17:54 /dev/kvm
+[17:54:16] === build
+[17:54:17] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[17:54:17]         Finished `release` profile [optimized] target(s) in 0.12s
+[17:54:17] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/bpf/Cargo.toml  (rc=0)
+[17:54:17]        Compiling vfwd-bpf v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/bpf)
+[17:54:17]         Finished `release` profile [optimized] target(s) in 0.32s
+[17:54:19] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/vfwd/Cargo.toml  (rc=0)
+[17:54:19]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[17:54:19]         |            ^^^^^^
+[17:54:19]     
+[17:54:19]     warning: `vfwd` (bin "vfwd") generated 3 warnings
+[17:54:19]         Finished `release` profile [optimized + debuginfo] target(s) in 2.53s
+[17:54:19] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[17:54:19]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=29cda0b1bcbd48413ed37e29ed5c8dc4f577cc93, with debug_info, not stripped
+[17:54:19]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor:                ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[17:54:19]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[17:54:19]     cloud-hypervisor v53.0.0
+[17:54:19]     Migration Protocol Versions: 0
+[17:54:19]     bpf-linker 0.0.0
+[17:54:19]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[17:54:19]     rustc 1.95.0 (59807616e 2026-04-14)
+[17:54:19] === guest image
+[17:54:21] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs.cpio.gz  (rc=0)
+[17:54:22] launch VM: /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vm-increment-d-1791222862/serial.log --console off --vsock cid=53221,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vm-increment-d-1791222862/ch.log -v
+[17:54:24] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.58
+net.ipv4.tcp_fwmark_accept = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33m36:ff:17:f1:b3:3d [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+OWNER_READY role=guest pid=109
+GUEST_READY
+
+[17:54:25] guest$ /vfwd sockname --dst <metal-address>:7000; /vfwd sockname --bind 10.99.7.2:0 --dst <metal-address>:7000  (rc=0, 0.0s)
+[17:54:25]     {"connect":"ok","getpeername":"<metal-address>:7000","getsockname":"10.99.7.2:59496"}
+[17:54:25]     {"bind":"10.99.7.2:0","bind_result":"ok","connect":"ok","getpeername":"<metal-address>:7000","getsockname":"10.99.7.2:41071"}
+[17:54:25] guest$ /vfwd tcp-client --dst <metal-address>:7000 --size 1048576  (rc=0, 0.1s)
+[17:54:25]     {"connect_ms":0.11317,"dst":"<metal-address>:7000","local":"10.99.7.2:59510","ms":55.704554,"ok":true,"peer":"<metal-address>:7000","server_saw_peer":"<metal-address>:38584","size":1048576}
+[17:54:25] guest$ cat /tmp/owner.out; tail -c 4000 /tmp/owner.log  (rc=0, 0.0s)
+[17:54:25]     OWNER_READY role=guest pid=109
+[17:54:25]     {"ack_oob":true,"arm":true,"ev":"programs_loaded","flush":true,"intake_park":true,"pid":109,"programs":[{"id":8,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":9,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":10,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":11,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":12,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":13,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":14,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":15,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":16,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":17,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":18,"name":"sockops(root cgroup)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"guest","udp_park":true}
+[17:54:25]     {"ev":"park_pool","slots":256}
+[17:54:25]     {"ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+[17:54:25]     {"app":"10.99.7.2:59496","dst":"<metal-address>:7000","ev":"tcp_connect","flow":1,"park":0}
+[17:54:25]     {"app":"10.99.7.2:41071","dst":"<metal-address>:7000","ev":"tcp_connect","flow":3,"park":1}
+[17:54:25]     {"age_ms":3,"ev":"flow_closed","flow":1,"kind":1,"reset":false,"why":"both_directions_done"}
+[17:54:25]     {"age_ms":2,"ev":"flow_closed","flow":3,"kind":1,"reset":false,"why":"both_directions_done"}
+[17:54:25]     {"app":"10.99.7.2:59510","dst":"<metal-address>:7000","ev":"tcp_connect","flow":5,"park":2}
+[17:54:25]     {"age_ms":53,"ev":"flow_closed","flow":5,"kind":1,"reset":false,"why":"both_directions_done"}
+[17:54:25] guest$ /vfwd tcp-client --dst <metal-address>:7001 --size 4096 --banner  (rc=0, 0.0s)
+[17:54:25]     {"banner":"BANNER peer=<metal-address>:44556 local=<metal-address>:7001","connect_ms":0.13584400000000002,"dst":"<metal-address>:7001","local":"10.99.7.2:59520","ms":2.972233,"ok":true,"peer":"<metal-address>:7001","server_saw_peer":"<metal-address>:44556","size":4096}
+[17:54:25] guest$ /vfwd tcp-client --dst <metal-address>:7002 --size 100 --expect-rst  (rc=0, 0.0s)
+[17:54:25]     {"dst":"<metal-address>:7002","err":"read: Connection reset by peer (os error 104)","got":0,"local":"10.99.7.2:59536","ok":true,"os_error":104,"peer":"<metal-address>:7002","read_err_kind":"ConnectionReset","reset_observed":true,"size":100}
+[17:54:25] guest$ /vfwd tcp-client --dst <metal-address>:7003 --size 4194304  (rc=0, 0.4s)
+[17:54:25]     {"connect_ms":0.163466,"dst":"<metal-address>:7003","local":"10.99.7.2:59540","ms":383.53461599999997,"ok":true,"peer":"<metal-address>:7003","server_saw_peer":"<metal-address>:53146","size":4194304}
+[17:54:25] guest$ /vfwd tcp-client --dst <metal-address>:7000 --size 4194304 --read-delay 300  (rc=0, 0.3s)
+[17:54:25]     {"connect_ms":0.152109,"dst":"<metal-address>:7000","local":"10.99.7.2:59556","ms":329.355679,"ok":true,"peer":"<metal-address>:7000","server_saw_peer":"<metal-address>:38600","size":4194304}
+[17:54:25] guest$ curl -sS -o /tmp/blob -w '%{http_code} %{size_download} %{local_ip}:%{local_port} %{remote_ip}:%{remote_port}\n' http://<metal-address>:8080/blob.bin; sha256sum /tmp/blob  (rc=0, 0.1s)
+[17:54:25]     200 2097152 10.99.7.2:59570 <metal-address>:8080
+[17:54:25]     abce2f435fcfe792b5a0b072503f344f0b79b82310157e2f032e7c241eb1343c  /tmp/blob
+[17:54:25] guest$ getent hosts example.com; echo rc=$?  (rc=0, 0.0s)
+[17:54:25]     2606:4700:10::ac42:93f3 example.com
+[17:54:25]     2606:4700:10::6814:179a example.com
+[17:54:25]     rc=0
+[17:54:28] guest$ /vfwd udp-client --dst <metal-address>:7010 --sizes 0,1,1431,59000  (rc=1, 3.0s)
+[17:54:28]     {"connected":false,"dst":"<metal-address>:7010","ev":"udp_client","local":"0.0.0.0:58875","ok":false,"peer":"","results":[{"from":"<metal-address>:7010","got":0,"ok":true,"size":0},{"from":"<metal-address>:7010","got":1,"ok":true,"size":1},{"from":"<metal-address>:7010","got":1431,"ok":true,"size":1431},{"err":"recv Resource temporarily unavailable (os error 11)","ok":false,"size":59000}]}
+[17:57:29] guest$ /vfwd tcp-stress --dst <metal-address>:7000 --iterations 200 --max-size 4096  (rc=None, 180.1s)
+[17:57:29]     
+[17:57:29]     HARNESS_EXCEPTION TimeoutError('timed out')
+[18:00:29] guest$ /vfwd tcp-stress --dst <metal-address>:7001 --iterations 200 --max-size 4096 --banner  (rc=None, 180.1s)
+[18:00:29]     
+[18:00:29]     HARNESS_EXCEPTION TimeoutError('timed out')
+[18:00:29] $ timeout 20 ssh -i /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/keys/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@<metal-address> 'echo SSH_CONNECTION=$SSH_CONNECTION; uname -r'  (rc=0)
+[18:00:29]     Warning: Permanently added '[<metal-address>]:2222' (ED25519) to the list of known hosts.
+[18:00:29]     SSH_CONNECTION=<metal-address> 51344 10.99.7.2 22
+[18:00:29]     7.0.0-29-generic
+[18:00:29] $ timeout 30 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-client --dst <metal-address>:2711 --size 4096 --banner  (rc=0)
+[18:00:29]     {"banner":"BANNER peer=<metal-address>:49838 local=10.99.7.2:7101","connect_ms":0.09855900000000001,"dst":"<metal-address>:2711","local":"<metal-address>:49838","ms":1.753239,"ok":true,"peer":"<metal-address>:2711","server_saw_peer":"<metal-address>:49838","size":4096}
+[18:00:29] $ timeout 30 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-client --dst <metal-address>:2710 --size 65536  (rc=0)
+[18:00:29]     {"connect_ms":0.09625500000000001,"dst":"<metal-address>:2710","local":"<metal-address>:44630","ms":4.327193,"ok":true,"peer":"<metal-address>:2710","server_saw_peer":"<metal-address>:44630","size":65536}
+[18:00:30] $ timeout 120 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd tcp-stress --dst <metal-address>:2711 --iterations 200 --banner --max-size 4096  (rc=0)
+[18:00:30]     {"banner":true,"dst":"<metal-address>:2711","ev":"tcp_stress","failed":0,"first_failures":[],"iterations":200,"ok":200,"parallel":1,"s":0.591043449}
+[18:00:30] guest$ cat /tmp/owner-stats.json; tail -c 3000 /tmp/owner.log  (rc=0, 0.0s)
+[18:00:30]     {"abort_received":1,"counters":[310,5,0,309,4,310,0,0,0,0,16,0,5,4,1,1,4853,5,2,0,0,2,4851,297,310,0,46,0,0,0,0,0],"ctl_bytes_read":2504,"ctl_bytes_written":568,"flows_aborted":26,"flows_active_total":356,"flows_closed":326,"flows_open":4,"k2_drain_timeouts":64,"k2_drained_shutdowns":614,"leg_errors":25,"paired_received":312,"park_flush":312,"requests_written":314,"t_ms":1791223229608.4163,"tcp_accept_flows":46,"tcp_connect_flows":310,"udp_associations":2,"udp_slot_released":2,"udp_teardowns":2}_accept","flow":14,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":14,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49868","ev":"tcp_accept","flow":16,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":16,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49872","ev":"tcp_accept","flow":18,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":18,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49886","ev":"tcp_accept","flow":20,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":20,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49902","ev":"tcp_accept","flow":22,"gport":7101}
+[18:00:30]     {"age_ms":3,"ev":"flow_closed","flow":22,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49910","ev":"tcp_accept","flow":24,"gport":7101}
+[18:00:30]     {"age_ms":1,"ev":"flow_closed","flow":24,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49916","ev":"tcp_accept","flow":26,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":26,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49918","ev":"tcp_accept","flow":28,"gport":7101}
+[18:00:30]     {"age_ms":1,"ev":"flow_closed","flow":28,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49926","ev":"tcp_accept","flow":30,"gport":7101}
+[18:00:30]     {"age_ms":3,"ev":"flow_closed","flow":30,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49942","ev":"tcp_accept","flow":32,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":32,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49950","ev":"tcp_accept","flow":34,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":34,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49952","ev":"tcp_accept","flow":36,"gport":7101}
+[18:00:30]     {"age_ms":1,"ev":"flow_closed","flow":36,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49964","ev":"tcp_accept","flow":38,"gport":7101}
+[18:00:30]     {"age_ms":3,"ev":"flow_closed","flow":38,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49978","ev":"tcp_accept","flow":40,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":40,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:49992","ev":"tcp_accept","flow":42,"gport":7101}
+[18:00:30]     {"age_ms":3,"ev":"flow_closed","flow":42,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:50004","ev":"tcp_accept","flow":44,"gport":7101}
+[18:00:30]     {"age_ms":0,"ev":"flow_closed","flow":44,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:50018","ev":"tcp_accept","flow":46,"gport":7101}
+[18:00:30]     {"age_ms":1,"ev":"flow_closed","flow":46,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:50024","ev":"tcp_accept","flow":48,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":48,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30] guest$ cat /tmp/owner.out; tail -c 30000 /tmp/owner.log; cat /tmp/owner-stats.json; tail -60 /tmp/sshd.log; tail -20 /tmp/srv7100.log /tmp/srv7101.log  (rc=0, 0.0s)
+[18:00:30]     {"client":"<metal-address>:50018","ev":"tcp_accept","flow":46,"gport":7101}
+[18:00:30]     {"age_ms":1,"ev":"flow_closed","flow":46,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"client":"<metal-address>:50024","ev":"tcp_accept","flow":48,"gport":7101}
+[18:00:30]     {"age_ms":2,"ev":"flow_closed","flow":48,"kind":2,"reset":false,"why":"both_directions_done"}
+[18:00:30]     {"abort_received":1,"counters":[310,5,0,309,4,310,0,0,0,0,16,0,5,4,1,1,4853,5,2,0,0,2,4851,297,310,0,46,0,0,0,0,0],"ctl_bytes_read":2504,"ctl_bytes_written":568,"flows_aborted":26,"flows_active_total":356,"flows_closed":326,"flows_open":4,"k2_drain_timeouts":64,"k2_drained_shutdowns":614,"leg_errors":25,"paired_received":312,"park_flush":312,"requests_written":314,"t_ms":1791223229608.4163,"tcp_accept_flows":46,"tcp_connect_flows":310,"udp_associations":2,"udp_slot_released":2,"udp_teardowns":2}Server listening on 0.0.0.0 port 22.
+[18:00:30]     Connection from <metal-address> port 51344 on 10.99.7.2 port 22 rdomain ""
+[18:00:30]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:00:30]     Postponed publickey for root from <metal-address> port 51344 ssh2 [preauth]
+[18:00:30]     Accepted key ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ found at /root/.ssh/authorized_keys:1
+[18:00:30]     Accepted publickey for root from <metal-address> port 51344 ssh2: ED25519 SHA256:oAQBun5IAvDgr7WVimIt2NSA7bQ5Iy3N4Qgsd7g7PkQ
+[18:00:30]     User child is on pid 149
+[18:00:30]     Starting session: command for root from <metal-address> port 51344 id 0
+[18:00:30]     Close session: user root from <metal-address> port 51344 id 0
+[18:00:30]     Received disconnect from <metal-address> port 51344:11: disconnected by user
+[18:00:30]     Disconnected from user root <metal-address> port 51344
+[18:00:30]     ==> /tmp/srv7100.log <==
+[18:00:30]     {"banner":false,"bind":"0.0.0.0:7100","ev":"tcp_server_ready","rst":false}
+[18:00:30]     {"bytes":65536,"ev":"conn","local":"10.99.7.2:7100","ok":true,"peer":"<metal-address>:44630"}
+[18:00:30]     
+[18:00:30]     ==> /tmp/srv7101.log <==
+[18:00:30]     {"bytes":1737,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51426"}
+[18:00:30]     {"bytes":3494,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51432"}
+[18:00:30]     {"bytes":4095,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51442"}
+[18:00:30]     {"bytes":2594,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51452"}
+[18:00:30]     {"bytes":1174,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51464"}
+[18:00:30]     {"bytes":1085,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51468"}
+[18:00:30]     {"bytes":2741,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51476"}
+[18:00:30]     {"bytes":1026,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51480"}
+[18:00:30]     {"bytes":2442,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51492"}
+[18:00:30]     {"bytes":3387,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51500"}
+[18:00:30]     {"bytes":1249,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51512"}
+[18:00:30]     {"bytes":1514,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51518"}
+[18:00:30]     {"bytes":2979,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51534"}
+[18:00:30]     {"bytes":3574,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51538"}
+[18:00:30]     {"bytes":3951,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51542"}
+[18:00:30]     {"bytes":1873,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51556"}
+[18:00:30]     {"bytes":3615,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51564"}
+[18:00:30]     {"bytes":1187,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51578"}
+[18:00:30]     {"bytes":2956,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51590"}
+[18:00:30]     {"bytes":3325,"ev":"conn","local":"10.99.7.2:7101","ok":true,"peer":"<metal-address>:51606"}
+[18:00:33] === done

@@ -1,0 +1,3 @@
+OWNER_READY role=host pid=1110950
+sockhash_insert_failed map=VERD fd=579 sock=212.4.0.0:0 err=SyscallError(SyscallError { call: "bpf_map_update_elem", io_error: Os { code: 95, kind: Unsupported, message: "Operation not supported" } })
+sockhash_insert_failed map=SOCKS fd=600 sock=211.4.0.0:0 err=SyscallError(SyscallError { call: "bpf_map_update_elem", io_error: Os { code: 95, kind: Unsupported, message: "Operation not supported" } })

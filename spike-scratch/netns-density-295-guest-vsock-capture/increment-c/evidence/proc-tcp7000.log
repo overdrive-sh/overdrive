@@ -1,0 +1,4 @@
+{"banner":false,"bind":"<metal-address>:7000","ev":"tcp_server_ready","rst":false}
+{"err":"eof wait Connection reset by peer (os error 104)","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:58288"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:58270"}
+{"err":"hdr failed to fill whole buffer","ev":"conn","local":"<metal-address>:7000","ok":false,"peer":"<metal-address>:58282"}

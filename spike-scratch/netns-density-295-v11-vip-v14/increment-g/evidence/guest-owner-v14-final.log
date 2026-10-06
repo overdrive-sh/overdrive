@@ -1,0 +1,23 @@
+{"ack_oob":true,"arm":true,"declare":[7300,7301,7302],"egress_ifs":[],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":4469,"programs":[{"id":68,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":69,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":70,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":71,"name":"lo_decode(tcx lo egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":72,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":73,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":74,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":75,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":76,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":77,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":78,"name":"sockops(root cgroup)","tag":"d3503b23d0e6960e","verified_insns":260},{"id":79,"name":"listen_start(fexit inet_csk_listen_start)","tag":"c546b9f4bb5015a3","verified_insns":114},{"id":80,"name":"listen_stop(fexit inet_csk_listen_stop)","tag":"75bbcb6a8014345d","verified_insns":97}],"role":"guest","tuple_from_peer":true,"udp_park":true,"unframe":"tc"}
+{"ev":"park_pool","slots":256}
+{"ev":"ctl_open","t_us":86901724}
+{"ev":"lset_seeded","lset":"{}"}
+{"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7300,"reason":"session_open","seq":1,"t_us":86901808}
+{"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7301,"reason":"session_open","seq":2,"t_us":86901872}
+{"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7302,"reason":"session_open","seq":3,"t_us":86901936}
+{"ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+{"cookie":9759,"ev":"listen_event","family":2,"kind":"start","ktime_us":88966664,"port":7300,"reachable":true,"wake_lag_us":38}
+{"ev":"listen_state_sent","event_to_send_us":173,"listeners":1,"listening":true,"mode":"event","port":7300,"reason":"event","seq":4,"t_us":88966837}
+{"ev":"bad_accept_request"}
+{"ev":"ctl_closed","t_us":88968971}
+{"err":"Connection reset by peer (os error 104)","ev":"ctl_connect_failed"}
+{"err":"Connection reset by peer (os error 104)","ev":"ctl_connect_failed"}
+{"ev":"ctl_open","t_us":89721820}
+{"ev":"lset_seeded","lset":"{7300: {9759}}"}
+{"ev":"listen_state_sent","event_to_send_us":null,"listeners":1,"listening":true,"mode":"event","port":7300,"reason":"session_open","seq":5,"t_us":89722020}
+{"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7301,"reason":"session_open","seq":6,"t_us":89722161}
+{"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7302,"reason":"session_open","seq":7,"t_us":89722309}
+{"client":"<metal-address>:38268","ev":"tcp_accept","flow":2,"gport":7300}
+{"client":"<metal-address>:38282","ev":"tcp_accept","flow":4,"gport":7300}
+{"age_ms":1,"ev":"flow_closed","flow":2,"kind":2,"reset":false,"why":"both_directions_done"}
+{"age_ms":1,"ev":"flow_closed","flow":4,"kind":2,"reset":false,"why":"both_directions_done"}

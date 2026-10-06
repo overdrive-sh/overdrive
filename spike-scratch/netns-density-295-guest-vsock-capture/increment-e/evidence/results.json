@@ -1,0 +1,288 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ],
+    "modules_diff": [],
+    "modules_restored": true,
+    "root_cgroup_bpf_unchanged": true,
+    "spike_cgroups_left": []
+  },
+  "owner": {
+    "guest_stats": "{\"counters\":[18,7,0,19,9,18,0,0,0,0,0,0,9,9,2,2,109,18,2,0,0,2,109,11,18,0,0,0,0,0,0,0],\"ctl_bytes_read\":160,\"flows_active_total\":18,\"flows_closed\":17,\"flows_open\":1,\"k2_drain_timeouts\":4,\"k2_drained_shutdowns\":30,\"paired_received\":20,\"park_flush\":20,\"requests_written\":22,\"t_ms\":1791223582289.3428,\"tcp_connect_flows\":18,\"udp_associations\":2,\"udp_slot_released\":2,\"udp_teardowns\":2}",
+    "host_stats": {
+      "counters": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        9,
+        9,
+        2,
+        2,
+        48,
+        0,
+        0,
+        0,
+        0,
+        0,
+        48,
+        17,
+        0,
+        0,
+        18,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ctl_bytes_read": 8,
+      "ctl_bytes_written": 160,
+      "flows_active_total": 18,
+      "flows_closed": 17,
+      "flows_open": 1,
+      "k2_drained_shutdowns": 34,
+      "request_bytes_read": 352,
+      "t_ms": 1791223582389.2007,
+      "tcp_connect_flows": 18,
+      "udp_associations": 2,
+      "udp_teardowns": 2
+    }
+  },
+  "preflight": {
+    "blob_sha256": "abce2f435fcfe792b5a0b072503f344f0b79b82310157e2f032e7c241eb1343c",
+    "cid": 56333,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": []
+  },
+  "v3": {
+    "reuse_seq_0": {
+      "connect_ms": 0.129625,
+      "dst": "<metal-address>:7000",
+      "local": "10.99.7.2:39846",
+      "ms": 3.720499,
+      "ok": true,
+      "peer": "<metal-address>:7000",
+      "server_saw_peer": "<metal-address>:36342",
+      "size": 1000
+    },
+    "reuse_seq_1": {
+      "connect_ms": 0.12232399999999999,
+      "dst": "<metal-address>:7000",
+      "local": "10.99.7.2:39854",
+      "ms": 2.9832389999999998,
+      "ok": true,
+      "peer": "<metal-address>:7000",
+      "server_saw_peer": "<metal-address>:36352",
+      "size": 1000
+    },
+    "reuse_seq_2": {
+      "connect_ms": 0.14910400000000001,
+      "dst": "<metal-address>:7000",
+      "local": "10.99.7.2:39856",
+      "ms": 2.134152,
+      "ok": true,
+      "peer": "<metal-address>:7000",
+      "server_saw_peer": "<metal-address>:36368",
+      "size": 1000
+    },
+    "reuse_seq_3": {
+      "connect_ms": 0.137477,
+      "dst": "<metal-address>:7000",
+      "local": "10.99.7.2:39866",
+      "ms": 2.321734,
+      "ok": true,
+      "peer": "<metal-address>:7000",
+      "server_saw_peer": "<metal-address>:36372",
+      "size": 1000
+    },
+    "stress40_egress_pool8": {
+      "banner": false,
+      "dst": "<metal-address>:7000",
+      "ev": "tcp_stress",
+      "failed": 5,
+      "first_failures": [
+        {
+          "i": 1,
+          "r": {
+            "dst": "<metal-address>:7000",
+            "err": "read: Resource temporarily unavailable (os error 11)",
+            "got": 0,
+            "local": "10.99.7.2:39880",
+            "ok": false,
+            "os_error": 11,
+            "peer": "<metal-address>:7000",
+            "read_err_kind": "WouldBlock",
+            "size": 1080
+          }
+        },
+        {
+          "i": 3,
+          "r": {
+            "dst": "<metal-address>:7000",
+            "err": "read: Resource temporarily unavailable (os error 11)",
+            "got": 0,
+            "local": "10.99.7.2:39898",
+            "ok": false,
+            "os_error": 11,
+            "peer": "<metal-address>:7000",
+            "read_err_kind": "WouldBlock",
+            "size": 3154
+          }
+        },
+        {
+          "i": 9,
+          "r": {
+            "dst": "<metal-address>:7000",
+            "err": "read: Resource temporarily unavailable (os error 11)",
+            "got": 0,
+            "local": "10.99.7.2:53826",
+            "ok": false,
+            "os_error": 11,
+            "peer": "<metal-address>:7000",
+            "read_err_kind": "WouldBlock",
+            "size": 2209
+          }
+        },
+        {
+          "i": 11,
+          "r": {
+            "dst": "<metal-address>:7000",
+            "err": "read: Resource temporarily unavailable (os error 11)",
+            "got": 0,
+            "local": "10.99.7.2:48540",
+            "ok": false,
+            "os_error": 11,
+            "peer": "<metal-address>:7000",
+            "read_err_kind": "WouldBlock",
+            "size": 2187
+          }
+        },
+        {
+          "i": 13,
+          "r": {
+            "dst": "<metal-address>:7000",
+            "err": "read: Resource temporarily unavailable (os error 11)",
+            "got": 0,
+            "local": "10.99.7.2:47972",
+            "ok": false,
+            "os_error": 11,
+            "peer": "<metal-address>:7000",
+            "read_err_kind": "WouldBlock",
+            "size": 830
+          }
+        }
+      ],
+      "iterations": 40,
+      "ok": 35,
+      "parallel": 1,
+      "s": 41.2658289
+    }
+  },
+  "v4": {
+    "inbound_stress40_banner_pool8": "{\"banner\":true,\"dst\":\"<metal-address>:2711\",\"ev\":\"tcp_stress\",\"failed\":0,\"first_failures\":[],\"iterations\":40,\"ok\":40,\"parallel\":1,\"s\":0.108852645}\n"
+  },
+  "v5": {
+    "udp_connected": {
+      "connected": true,
+      "dst": "<metal-address>:7010",
+      "ev": "udp_client",
+      "local": "10.99.7.2:34611",
+      "ok": true,
+      "peer": "<metal-address>:7010",
+      "results": [
+        {
+          "from": "<metal-address>:7010",
+          "got": 59000,
+          "ok": true,
+          "size": 59000
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 0,
+          "ok": true,
+          "size": 0
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 8192,
+          "ok": true,
+          "size": 8192
+        }
+      ]
+    },
+    "udp_unconnected": {
+      "connected": false,
+      "dst": "<metal-address>:7010",
+      "ev": "udp_client",
+      "local": "0.0.0.0:53060",
+      "ok": true,
+      "peer": "",
+      "results": [
+        {
+          "from": "<metal-address>:7010",
+          "got": 0,
+          "ok": true,
+          "size": 0
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 1,
+          "ok": true,
+          "size": 1
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 1431,
+          "ok": true,
+          "size": 1431
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 4096,
+          "ok": true,
+          "size": 4096
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 4097,
+          "ok": true,
+          "size": 4097
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 59000,
+          "ok": true,
+          "size": 59000
+        }
+      ]
+    }
+  }
+}

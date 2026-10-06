@@ -1,0 +1,172 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      18
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ],
+    "modules_diff": [],
+    "modules_restored": true,
+    "root_cgroup_bpf_unchanged": true
+  },
+  "d15": {
+    "guest_net": "7.0.0-29-generic\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \ndummy0           UNKNOWN        ce:f5:c4:49:2b:9f <BROADCAST,NOARP,UP,LOWER_UP> \n1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\n    inet 127.0.0.1/8 scope host lo\n       valid_lft forever preferred_lft forever\n2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000\n    inet 10.99.7.2/32 scope global dummy0\n       valid_lft forever preferred_lft forever\nOWNER_READY role=guest pid=109\n",
+    "sockname": "{\"connect\":\"ok\",\"getpeername\":\"<metal-address>:7000\",\"getsockname\":\"10.99.7.2:39222\"}\n{\"bind\":\"10.99.7.2:0\",\"bind_result\":\"ok\",\"connect\":\"ok\",\"getpeername\":\"<metal-address>:7000\",\"getsockname\":\"10.99.7.2:34277\"}\n"
+  },
+  "owner": {
+    "after_first_tcp": "OWNER_READY role=guest pid=109\nsockhash_insert_failed map=SOCKS fd=50 sock=10.99.7.2:15001 err=SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })\nsockhash_insert_failed map=SOCKS fd=244 sock=10.99.7.2:15001 err=SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })\nsockhash_insert_failed map=VERD fd=50 sock=10.99.7.2:15001 err=SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })\nsockhash_insert_failed map=VERD fd=244 sock=10.99.7.2:15001 err=SyscallError(SyscallError { call: \"bpf_map_update_elem\", io_error: Os { code: 95, kind: Unsupported, message: \"Operation not supported\" } })\n{\"ack_oob\":true,\"ev\":\"programs_loaded\",\"flush\":true,\"pid\":109,\"programs\":[{\"id\":8,\"name\":\"verdict\",\"tag\":\"354384a026e66a00\",\"verified_insns\":323},{\"id\":9,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":10,\"name\":\"strp_verdict\",\"tag\":\"4f81f3897a228eec\",\"verified_insns\":334},{\"id\":11,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"59011738e914c2f5\",\"verified_insns\":423},{\"id\":12,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":13,\"name\":\"connect4\",\"tag\":\"ad52658a44f6fc01\",\"verified_insns\":234},{\"id\":14,\"name\":\"sendmsg4\",\"tag\":\"25313d2a991262c4\",\"verified_insns\":204},{\"id\":15,\"name\":\"recvmsg4\",\"tag\":\"5924dfd9424078bf\",\"verified_insns\":82},{\"id\":16,\"name\":\"getpeername4\",\"tag\":\"90774192d60dfced\",\"verified_insns\":127},{\"id\":17,\"name\":\"sock_release\",\"tag\":\"e4511879b8661ea8\",\"verified_insns\":69},{\"id\":18,\"name\":\"sockops\",\"tag\":\"39b281aa4f25ccfe\",\"verified_insns\":34}],\"role\":\"guest\",\"udp_park\":true}\n{\"ev\":\"guest_ready\",\"slots\":64,\"w\":\"10.99.7.2\"}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":50,\"map\":\"SOCKS\",\"sock\":\"10.99.7.2:15001\"}\n{\"app\":\"10.99.7.2:39222\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":1}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":244,\"map\":\"SOCKS\",\"sock\":\"10.99.7.2:15001\"}\n{\"app\":\"10.99.7.2:34277\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":3}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":50,\"map\":\"VERD\",\"sock\":\"10.99.7.2:15001\"}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":244,\"map\":\"VERD\",\"sock\":\"10.99.7.2:15001\"}\n{\"app\":\"10.99.7.2:39228\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":5}\n{\"ev\":\"leg_error\",\"events\":8,\"flow\":5,\"leg\":1,\"so_error\":32}\n{\"age_ms\":19,\"ev\":\"flow_closed\",\"flow\":5,\"kind\":1,\"reset\":true,\"why\":\"leg_error\"}\n",
+    "guest_log_head": "{\"ack_oob\":true,\"ev\":\"programs_loaded\",\"flush\":true,\"pid\":109,\"programs\":[{\"id\":8,\"name\":\"verdict\",\"tag\":\"354384a026e66a00\",\"verified_insns\":323},{\"id\":9,\"name\":\"strp_parse\",\"tag\":\"22614579d5370f67\",\"verified_insns\":62},{\"id\":10,\"name\":\"strp_verdict\",\"tag\":\"4f81f3897a228eec\",\"verified_insns\":334},{\"id\":11,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"59011738e914c2f5\",\"verified_insns\":423},{\"id\":12,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":13,\"name\":\"connect4\",\"tag\":\"ad52658a44f6fc01\",\"verified_insns\":234},{\"id\":14,\"name\":\"sendmsg4\",\"tag\":\"25313d2a991262c4\",\"verified_insns\":204},{\"id\":15,\"name\":\"recvmsg4\",\"tag\":\"5924dfd9424078bf\",\"verified_insns\":82},{\"id\":16,\"name\":\"getpeername4\",\"tag\":\"90774192d60dfced\",\"verified_insns\":127},{\"id\":17,\"name\":\"sock_release\",\"tag\":\"e4511879b8661ea8\",\"verified_insns\":69},{\"id\":18,\"name\":\"sockops\",\"tag\":\"39b281aa4f25ccfe\",\"verified_insns\":34}],\"role\":\"guest\",\"udp_park\":true}\n{\"ev\":\"guest_ready\",\"slots\":64,\"w\":\"10.99.7.2\"}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":50,\"map\":\"SOCKS\",\"sock\":\"10.99.7.2:15001\"}\n{\"app\":\"10.99.7.2:39222\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":1}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":244,\"map\":\"SOCKS\",\"sock\":\"10.99.7.2:15001\"}\n{\"app\":\"10.99.7.2:34277\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":3}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":50,\"map\":\"VERD\",\"sock\":\"10.99.7.2:15001\"}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":244,\"map\":\"VERD\",\"sock\":\"10.99.7.2:15001\"}\n{\"app\":\"10.99.7.2:39228\",\"dst\":\"<metal-address>:7000\",\"ev\":\"tcp_connect\",\"flow\":5}\n{\"ev\":\"leg_error\",\"events\":8,\"flow\":5,\"leg\":1,\"so_error\":32}\n{\"age_ms\":19,\"ev\":\"flow_closed\",\"flow\":5,\"kind\":1,\"reset\":true,\"why\":\"leg_error\"}\n{\"app\":\"10.99.7.2:39242\",\"dst\":\"<metal-address>:7001\",\"ev\":\"tcp_connect\",\"flow\":7}\n{\"ev\":\"leg_error\",\"events\":8,\"flow\":7,\"leg\":1,\"so_error\":32}\n{\"age_ms\":0,\"ev\":\"flow_closed\",\"flow\":7,\"kind\":1,\"reset\":true,\"why\":\"leg_error\"}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":246,\"map\":\"SOCKS\",\"sock\":\"10.99.7.2:15001\"}\n{\"app\":\"10.99.7.2:39256\",\"dst\":\"<metal-address>:7002\",\"ev\":\"tcp_connect\",\"flow\":9}\n{\"err\":\"SyscallError(SyscallError { call: \\\"bpf_map_update_elem\\\", io_error: Os { code: 95, kind: Unsupported, message: \\\"Operation not supported\\\" } })\",\"ev\":\"sockhash_insert_failed\",\"fd\":246,\"map\":\"VERD\",\"sock\":\"10.99.7.2:15001\"}\n{\"app\":\"10.99.7.2:39264\",\"dst\":\"<metal-address>:8080\",\"ev\":\"tcp_connect\",\"flow\":11}\n{\"age_ms\":36,\"ev\":\"flow_closed\",\"flow\":11,\"kind\":1,\"reset\":true,\"why\":\"peer_abort\"}\n{\"app\":\"10.99.7.2:39782\",\"dst\":\"127.0.0.53:53\",\"ev\":\"udp_associate\",\"flow\":13,\"queued_on_trigger\":37,\"slot\":0}\n{\"ev\":\"udp_paired\",\"flow\":13,\"slot\":0}\n{\"ev\":\"udp_teardown\",\"flow\":13,\"slot\":0,\"why\":\"app_socket_released\"}\n{\"app\":\"10.99.7.2:50480\",\"dst\":\"<metal-address>:7010\",\"ev\":\"udp_associate\",\"flow\":15,\"queued_on_trigger\":8,\"slot\":1}\n{\"ev\":\"udp_paired\",\"flow\":15,\"slot\":1}\n{\"ev\":\"k2_drain_timeout\",\"flow\":1,\"fwd\":0,\"inq\":0,\"leg\":0,\"recv\":1,\"sent\":0}\n{\"age_ms\":10003,\"ev\":\"flow_closed\",\"flow\":1,\"kind\":1,\"reset\":true,\"why\":\"peer_abort\"}\n{\"ev\":\"k2_drain_timeout\",\"flow\":3,\"fwd\":0,\"inq\":0,\"leg\":0,\"recv\":1,\"sent\":0}\n{\"age_ms\":10002,\"ev\":\"flow_closed\",\"flow\":3,\"kind\":1,\"reset\":true,\"why\":\"peer_abort\"}\n{\"ev\":\"k2_drain_timeout\",\"flow\":9,\"fwd\":0,\"inq\":112,\"leg\":0,\"recv\":113,\"sent\":0}\n{\"age_ms\":10001,\"ev\":\"flow_closed\",\"flow\":9,\"kind\":1,\"reset\":true,\"why\":\"peer_abort\"}\n{\"ev\":\"udp_teardown\",\"flow\":15,\"slot\":1,\"why\":\"app_socket_released\"}\n{\"abort_received\":4,\"counters\":[6,5,0,5,4,6,0,0,0,0,16,0,5,4,1,1,645,5,2,0,0,2,623,0,0,0,0,0,0,0,0,0],\"ctl_bytes_read\":96,\"ctl_bytes_written\":16,\"flows_aborted\":6,\"flows_active_total\":6,\"flows_open\":0,\"k2_drain_timeouts\":3,\"leg_errors\":2,\"paired_received\":8,\"park_flush\":2,\"rcvlowat_rearm\":6,\"requests_written\":10,\"sockhash_insert_errors\":6,\"t_ms\":1791222131511.4004,\"tcp_connect_flows\":6,\"udp_associations\":2,\"udp_slot_released\":2,\"udp_teardowns\":2}",
+    "host_stats": {
+      "abort_received": 2,
+      "counters": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+        5,
+        1,
+        1,
+        105,
+        0,
+        0,
+        0,
+        0,
+        0,
+        101,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ctl_bytes_read": 24,
+      "ctl_bytes_written": 96,
+      "flows_aborted": 6,
+      "flows_active_total": 6,
+      "flows_open": 0,
+      "k2_drained_shutdowns": 3,
+      "leg_errors": 4,
+      "rcvlowat_rearm": 6,
+      "request_bytes_read": 160,
+      "t_ms": 1791222131175.277,
+      "tcp_connect_flows": 6,
+      "udp_associations": 2,
+      "udp_teardowns": 1
+    }
+  },
+  "preflight": {
+    "blob_sha256": "abce2f435fcfe792b5a0b072503f344f0b79b82310157e2f032e7c241eb1343c",
+    "cid": 35131,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": []
+  },
+  "v2": {
+    "curl_host": "curl: (56) Recv failure: Connection reset by peer\n200 2031457 10.99.7.2:39264 <metal-address>:8080\n49ca82c15c5f57665bd6b8f524557542300db344c71544b98d2bf82af9ae58ba  /tmp/blob\n",
+    "rst_once": {
+      "dst": "<metal-address>:7002",
+      "err": "read: Resource temporarily unavailable (os error 11)",
+      "got": 0,
+      "local": "10.99.7.2:39256",
+      "ok": false,
+      "os_error": 11,
+      "peer": "<metal-address>:7002",
+      "read_err_kind": "WouldBlock",
+      "size": 100
+    },
+    "tcp_1mib": {
+      "dst": "<metal-address>:7000",
+      "err": "read: Connection reset by peer (os error 104)",
+      "got": 0,
+      "local": "10.99.7.2:39228",
+      "ok": false,
+      "os_error": 104,
+      "peer": "<metal-address>:7000",
+      "read_err_kind": "ConnectionReset",
+      "size": 1048576
+    }
+  },
+  "v3": {
+    "banner_once": {
+      "banner": "BANNER peer=<metal-address>:45996 local=<metal-address>:7001",
+      "dst": "<metal-address>:7001",
+      "err": "read: Connection reset by peer (os error 104)",
+      "got": 0,
+      "local": "10.99.7.2:39242",
+      "ok": false,
+      "os_error": 104,
+      "peer": "<metal-address>:7001",
+      "read_err_kind": "ConnectionReset",
+      "size": 4096
+    }
+  },
+  "v4": {
+    "inbound_banner_once": "{\"banner\":\"BANNER peer=<metal-address>:54066 local=10.99.7.2:7101\",\"dst\":\"<metal-address>:2711\",\"err\":\"read: Connection reset by peer (os error 104)\",\"got\":0,\"local\":\"<metal-address>:54066\",\"ok\":false,\"os_error\":104,\"peer\":\"<metal-address>:2711\",\"read_err_kind\":\"ConnectionReset\",\"size\":4096}\n",
+    "inbound_plain_once": "{\"dst\":\"<metal-address>:2710\",\"err\":\"read: Resource temporarily unavailable (os error 11)\",\"got\":0,\"local\":\"<metal-address>:36332\",\"ok\":false,\"os_error\":11,\"peer\":\"<metal-address>:2710\",\"read_err_kind\":\"WouldBlock\",\"size\":65536}\n",
+    "ssh_once": "Warning: Permanently added '[<metal-address>]:2222' (ED25519) to the list of known hosts.\nSSH_CONNECTION=<metal-address> 33460 10.99.7.2 22\n7.0.0-29-generic\n"
+  },
+  "v5": {
+    "getent": "2606:4700:10::6814:179a example.com\n2606:4700:10::ac42:93f3 example.com\nrc=0\n",
+    "udp_unconnected": {
+      "connected": false,
+      "dst": "<metal-address>:7010",
+      "ev": "udp_client",
+      "local": "0.0.0.0:50480",
+      "ok": false,
+      "peer": "",
+      "results": [
+        {
+          "from": "<metal-address>:7010",
+          "got": 0,
+          "ok": true,
+          "size": 0
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 1,
+          "ok": true,
+          "size": 1
+        },
+        {
+          "from": "<metal-address>:7010",
+          "got": 1431,
+          "ok": true,
+          "size": 1431
+        },
+        {
+          "err": "recv Resource temporarily unavailable (os error 11)",
+          "ok": false,
+          "size": 59000
+        }
+      ]
+    }
+  }
+}
