@@ -36,6 +36,14 @@ structure or test support is **not** a blocker and is never routed back
 to DESIGN; a review finding about internal structure is a note for the
 DELIVER reviewer, not a DESIGN finding.
 
+**This rule governs implementation, not design.** Producing the contract
+is DESIGN's job: the architect defines whatever interface the correct design
+needs — new methods, types, variants, errors, ports — and pins it in the
+feature delta. An architect never picks a weaker design to avoid adding API,
+and never treats "new public surface" as a reason to stop. What `.claude/rules/design.md`
+asks of the architect is to *surface* the contract it defined, not to avoid
+defining one.
+
 This binds three roles:
 
 - **Crafters**: build only the API the design names. If you need an

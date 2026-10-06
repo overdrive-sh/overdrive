@@ -152,6 +152,53 @@ experiments or a new testing framework.
 
 ---
 
+## Quint conformance — the DESIGN model is the DISTILL oracle
+
+When a design carries a model-checked Quint specification
+(`.claude/rules/design.md` § "Concurrent protocols carry a model-checked Quint
+specification"), DISTILL uses that specification as the oracle for the
+protocol's owner. Conformance tests use the
+[`quint-connect`](https://github.com/quint-co/quint-connect) crate
+(`quint-connect.workspace = true` under `[dev-dependencies]`): Quint generates
+traces from `specs/quint/<subsystem>/`, and a Rust driver replays each step
+against the implementation and compares state after every step.
+
+- **The driver drives production, not a copy.** Each Quint action maps to a
+  call on the production owner through its driving ports, with `Sim*` adapters
+  at the driven ports. A driver that re-implements the protocol in test code
+  checks the model against itself — reject it as testing theater.
+- **State projection reads observable state.** The driver's `State` is
+  projected from the owner's public observation surface (its accessors, audit
+  facts, or observation rows), not from private fields reached for the test.
+  If the owner exposes no way to observe a modelled variable, that is a
+  testability gap to surface for design approval, not licence to add API.
+- **One spec, one oracle.** Tests reference the spec in place
+  (`specs/quint/<subsystem>/…`). Never copy or fork the spec into a crate; a
+  divergence between the spec and the test oracle is the drift this lane exists
+  to prevent. A behaviour change goes into the spec first (DESIGN), then the
+  driver.
+- **Both trace modes.** Pin the named Quint runs that encode the design's
+  critical scenarios (`#[quint_test]`) and run randomized simulation traces
+  (`#[quint_run]`) with the seed printed on failure, under the same
+  reproducibility rules as DST.
+- **Complementary to `overdrive-sim`, never a substitute.** Conformance shows
+  the code follows the modelled protocol along generated traces. Seeded
+  simulation still covers the real composition — action dispatch, ports,
+  integration, faults and schedules the model abstracts away — and the
+  § "DISTILL — prove composed system behavior" requirements still apply.
+  Kernel behaviour the model assumes is still proven at Tier 3.
+- **Placement and lane.** Conformance tests live with the owning crate's
+  acceptance or integration tests and follow § "Integration vs unit gating":
+  they spawn the `quint` CLI, so they run under `integration-tests` through
+  `cargo xtask lima run --` (the Lima template provisions the pinned Quint
+  toolchain).
+- **DISTILL completeness.** Every invariant in the spec has at least one
+  conformance test path that exercises the modelled actions it constrains, and
+  the scenario specification records which spec, run, and invariant each test
+  replays.
+
+---
+
 ## Integration vs unit gating
 
 **Tests that touch real infrastructure MUST be gated behind an
@@ -1828,6 +1875,8 @@ Per-PR (critical path ≈ 15 minutes):
   F  cargo xtask mutants --diff origin/main
                                          diff-scoped (nextest per      (min)
                                          mutation); kill rate ≥ 80%
+  Q  cargo xtask quint typecheck         Quint specs                   (s)
+     cargo xtask quint check --ci        model checks marked ci = true (min)
 
 Nightly:
   G  Tier 3 + Tier 4 against bpf-next                                  soft-fail
@@ -1861,6 +1910,10 @@ Explicitly out of scope:
 ```
 Logic bug under concurrency, timing, ordering, or partition?
     → Tier 1 (DST)
+
+Does the code follow a protocol the design model-checked in Quint?
+    → quint-connect conformance against specs/quint/<subsystem>/
+      (in addition to DST, never instead of it)
 
 Pure function whose argument space exceeds a dozen hand-picked cases?
     → Property-based test (proptest)

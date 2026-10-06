@@ -43,6 +43,40 @@ material decisions were not surfaced to the user is `CHANGES_REQUESTED`, not
 accepted. The reviewer must name the missing user decision rather than
 substituting its own judgment.
 
+## Design the correct mechanism — never a fallback around a missing fact
+
+**Choose the design that is correct, not the one that changes least.** A
+DESIGN is judged by whether its contract makes the wrong state unreachable,
+not by how few APIs it adds or how much existing code it reuses. If the
+correct design needs a new method, type, error variant, port or wire field,
+define it (CLAUDE.md § "Implement to the design" governs crafters, not the
+architect) and surface it as a decision.
+
+**A fallback is a design defect.** A fallback, retry-and-guess loop,
+exclusion list, preference order, "treat any failure as X" rule, or other
+heuristic that exists to compensate for a fact the design cannot observe, or
+for a check and an action that are not atomic, means the mechanism is wrong.
+Fix the cause instead:
+
+- **Make the fact observable.** Read the typed outcome at the owner that
+  produces it instead of inferring it from a downstream symptom (a process
+  exit, a timeout, a missing row).
+- **Make the claim atomic.** Let the operation that takes the resource report
+  whether it got it (`.claude/rules/rust.md` § "Check-and-act must be
+  atomic"), rather than guessing beforehand and repairing afterwards.
+- **Give shared state one owner, or named holders.** A state that several
+  actors can enter or leave needs an explicit holder set, not a convention
+  about who acts first.
+
+If the fact genuinely cannot be observed or the step cannot be made atomic,
+say why, state the resulting exposure and its bound, and add the validation
+item that measures it — never present the heuristic as the design.
+
+**Symptoms during review:** "falls back to", "as a best effort", "treat every
+X as a possible Y", a set of "already-failed" candidates consulted on retry, a
+weaker behaviour chosen because the correct one "would need new API", or an
+accepted exposure that a different contract would remove.
+
 ## One ADR records one decision — never use an ADR as a design bucket
 
 An Architecture Decision Record captures **one independently decidable and
@@ -210,6 +244,90 @@ simulation cannot observe, it names the real production entry point and the
 Tier-3 real-kernel or native-metal evidence. A test-only state or hand-wired
 adapter is not evidence that the production gate is correct.
 
+## Concurrent protocols carry a model-checked Quint specification
+
+A design that adds or changes a **concurrent, ordered, or crash-sensitive
+protocol** — sessions, leases, claims, admission latches, slot or ID
+allocation, multi-step boot or teardown ordering, state shared by more than one
+owner — carries a [Quint](https://quint-lang.org/) specification of that
+protocol, model-checked before independent DESIGN review. Prose review finds
+interleaving defects only when a reviewer happens to imagine the interleaving;
+a model checker enumerates them.
+
+Every DESIGN contains a `Formal protocol model` section. If the design changes
+no such protocol, record `Not applicable` with one sentence of evidence, the
+same way as `Lifecycle Gate Ownership`.
+
+### What the specification contains
+
+- **Location.** `specs/quint/<subsystem>/` at the repository root: the specs,
+  a `checks.toml` listing every check, `hazard/` variants, `evidence/`, and a
+  `README.md` stating the abstraction. The directory is permanent. It is not a
+  spike (never `spike-scratch/`) and is not archived at FINALIZE, because
+  DISTILL conformance tests reference it (`.claude/rules/testing.md`
+  § "Quint conformance").
+- **The design's own rules, at the design's abstraction.** Model the owners,
+  states, messages and orderings the design pins, not an idealised protocol.
+  Where the design is too vague to model, the gap is a design finding: name the
+  decision and pin it, do not guess in the spec.
+- **Invariants and progress properties** for every safety or liveness promise
+  the design makes, each named after the decision it defends.
+- **A hazard variant per design rule.** Remove or weaken the rule and show the
+  checker finds a counterexample (`expect = "violation"` in `checks.toml`). An
+  invariant that never fails proves nothing; this is how the spec proves each
+  rule is load-bearing and each invariant has teeth.
+- **Explicit assumptions.** Kernel, VMM, network and environment behaviour is
+  an assumption in the model, never a modelled fact. Each assumption maps to
+  the validation item, proven spike fact, or Tier-3 scenario that discharges
+  it. An assumption with no discharging item is a design finding.
+- **Environment faults** the design claims to survive (crash at each step,
+  foreign mutation of shared kernel state, restart) are modelled as actions.
+
+### Running it
+
+The architect does not write or run the model in its own context. It
+dispatches the `quint-modeler` agent (`.claude/agents/quint-modeler.md`) with
+the subsystem directory and the decision ids to model, the same way it
+dispatches its reviewer, and acts on the returned verdicts, counterexamples and
+underspecified points. Model-checking output stays in the modeler's context.
+
+`cargo xtask quint typecheck` and `cargo xtask quint check [--subsystem <dir>]
+[--ci] [--jobs N] [--timeout SECS]` run the specs and `checks.toml` inside Lima
+(`cargo xtask lima run --`), as one foreground command. Each check states its
+expected outcome; a tool error or timeout always fails. The command owns
+timeouts (per check `timeout_secs`, overridable by `--timeout`), cleanup of
+every Quint and JVM process it starts, and parallelism; authors never script
+their own runners, watchdogs, sleeps or kills around it. Mark checks that
+finish in under two minutes `ci = true`; CI runs them on every change.
+
+Evidence is written only by the command: a full run with `--record` replaces
+`evidence/` with the summary (tool versions, spec hashes, every verdict) and
+the counterexample traces of that run, and `cargo xtask quint
+verify-evidence` fails when the recorded evidence no longer matches the specs.
+Git history keeps earlier runs. The subsystem directory holds only specs,
+`hazard/` specs, `checks.toml`, `README.md` and the recorded `evidence/` —
+never runner scripts, copies of earlier specs, or per-round directories.
+
+### How results feed the design
+
+- A counterexample against the design's rules is a design defect. Fix the
+  design (with user approval per § "Surface material design decisions"), then
+  re-run every check.
+- A counterexample that only an environment fault reaches is either a
+  documented, bounded exposure in the design or a design defect; it is never
+  silently dropped.
+- The spec states the design's current decisions. When the design changes,
+  the spec changes in the same revision.
+
+### What the specification does not replace
+
+- **Real-kernel evidence.** The model assumes kernel behaviour; Tier-3 and
+  native-metal validation prove it.
+- **Seeded `overdrive-sim` invariants.** The model covers the abstract
+  protocol exhaustively to a bound; simulation runs the real production
+  composition. Both are required (§ "Required boundary scenarios").
+- **Lifecycle Gate Ownership** and the other DESIGN artifacts above.
+
 ## Orchestrator and reviewer enforcement
 
 Architect recommendations are hypotheses until checked against the lifecycle
@@ -229,7 +347,11 @@ The DESIGN reviewer blocks approval when any of the following is true:
 - unaffected-state counterexamples or executable obligations are missing;
 - the cited failure cannot be traced through the real production entry point;
 - spike feasibility is presented as proof that a particular architecture or
-  state transition is required.
+  state transition is required;
+- the design changes a concurrent, ordered, or crash-sensitive protocol and
+  the `Formal protocol model` section is absent, has unrun checks, lacks a
+  hazard variant per rule, carries an unresolved counterexample, or leaves an
+  assumption with no discharging validation item.
 
 This is enforced first as a DESIGN artifact and blocking review contract, then
 as executable state-boundary scenarios in DISTILL/DELIVER. Do not claim that
