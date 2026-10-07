@@ -73,6 +73,32 @@ user, and both cost a rework cycle. The cost of surfacing a gap is one
 message; the cost of inventing past it is a wrong contract that
 propagates until someone notices.
 
+## Overdrive runs on its own appliance OS — design for that threat model
+
+Overdrive ships as an immutable appliance OS with a pinned kernel (ADR-0068):
+no SSH, no operator shell, no third-party daemons. Only Overdrive writes the
+node's kernel state — nft tables, routes, BPF programs and maps, cgroups,
+network namespaces, vsock CIDs. Design, model and validate for that
+environment, not for a general-purpose Linux host.
+
+- **Do not design for foreign software mutating Overdrive's kernel state.**
+  "firewalld flushes the table", "another process detaches the BPF link",
+  "an admin deletes the route" are general-purpose-host assumptions. They are
+  not design drivers, Quint fault actions, validation items or trust-boundary
+  statements. Where the image itself could do it (for example a network
+  manager that deletes routes it did not create), the fix is the image
+  configuration, not runtime defence.
+- **Do not design for a root-level compromise.** An attacker with root on the
+  node owns it; a recovery path does not change that.
+- **Do design for Overdrive's own failures.** A crash mid-sequence, a restart,
+  and one Overdrive component's bug leaving another's state partial are real.
+  Converge-on-boot and observe → diff → converge (`.claude/rules/reconcilers.md`)
+  exist for these, and precisely because there is no operator to repair the
+  node by hand.
+
+When a proposed recovery, audit, fence or retry path defends only against an
+actor that cannot exist on the appliance, drop it.
+
 ## Repository structure
 
 Workspace crates live under `crates/` (plus `xtask/` for build tooling).

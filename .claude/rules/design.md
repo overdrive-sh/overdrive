@@ -77,6 +77,24 @@ X as a possible Y", a set of "already-failed" candidates consulted on retry, a
 weaker behaviour chosen because the correct one "would need new API", or an
 accepted exposure that a different contract would remove.
 
+## Look for a kernel (BPF) mechanism before designing a userspace one
+
+For packet and socket steering, admission, policy enforcement and forwarding,
+evaluate the in-kernel mechanisms first: `sk_lookup`, sockops and `sk_msg`,
+cgroup socket hooks, tc and XDP, and socket maps. A kernel mechanism decides at
+the point where the packet or connection exists, so it removes whole classes of
+userspace state, races and repair paths — a socket-map entry that disappears
+when its socket closes needs no revoke, retry or audit.
+
+Choose a userspace mechanism only for a stated reason: it needs state the
+kernel cannot hold, a call BPF cannot make, or it exceeds a verifier limit. The
+ADR records the BPF alternative that was evaluated and why it lost. This
+applies to kernel-adjacent dataplane design, not to control-plane logic.
+
+**Symptoms during review:** a userspace listener, proxy, firewall-set
+bookkeeping or revoke/retry protocol standing between a connection and its
+destination with no BPF alternative named in the ADR.
+
 ## One ADR records one decision — never use an ADR as a design bucket
 
 An Architecture Decision Record captures **one independently decidable and
@@ -296,8 +314,12 @@ underspecified points. Model-checking output stays in the modeler's context.
 (`cargo xtask lima run --`), as one foreground command. Each check states its
 expected outcome; a tool error or timeout always fails. The command owns
 timeouts (per check `timeout_secs`, overridable by `--timeout`), cleanup of
-every Quint and JVM process it starts, and parallelism; authors never script
-their own runners, watchdogs, sleeps or kills around it. Mark checks that
+every Quint and JVM process it starts, and parallelism: each check starts only
+when its memory/CPU reservation (TLC heap and workers, or Apalache heap plus
+one CPU) fits the budget, so the default run is safe and `--jobs 1` is never
+needed; a check that needs more declares `heap_mb` / `workers` in
+`checks.toml`. Authors never script their own runners, watchdogs, sleeps or
+kills around it. Mark checks that
 finish in under two minutes `ci = true`; CI runs them on every change.
 
 Evidence is written only by the command: a full run with `--record` replaces
