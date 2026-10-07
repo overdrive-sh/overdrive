@@ -36,6 +36,9 @@
  *   - Per-CID serialization (M-7): provision, activate, teardown, quiesce, restore, session
  *     open/loss are each ONE atomic action. Flow events are NOT in that order (the design lists
  *     only those six), so each flow step is its own action and interleaves with them.
+ *   - `quiesced` is the node admission latch as flows see it: under D8a-HOLD (ADR-0169, revision 8)
+ *     it is the projection "the holder set is non-empty"; who may quiesce and restore, and the
+ *     named holders, are modelled in module D (steering.qnt).
  *   - Time is abstract: deadlines (FLOW_REQUEST_DEADLINE, FLOW_PAIRING_DEADLINE) are nondeterministic
  *     failure actions.
  *

@@ -6,10 +6,11 @@
 # search of the finite instance (no step bound).
 # expect "holds" = the design property; "violation" = a non-vacuity witness (the behaviour is
 # reachable), a hazard/teeth instance (one design rule switched off), or an environment fault /
-# documented limitation / accepted, bounded design behaviour. Expectations were written before the
-# recorded runs (round 2: docs/feature/netns-density-295/spike/quint-owner-findings-r2.md; round 3,
-# after the user decisions of 2026-10-06 on U-5/K-A4, D16-PREF and D8a-READMIT, and on the
-# accepted exposures D8a-PROBE / D8a-FLUSH: quint-owner-findings-r3.md).
+# documented trust-boundary behaviour. Expectations are the predictions written before the recorded
+# run (round 4d, design revision 9 items 1-8 as of 2026-10-07: D16-CLAIM, D8a-HOLD, D8a-LOOKUP, D8a-ROUTE,
+# D8a-FENCE (one owner and one runtime repair of the guest prefix, the serialized guest-prefix order, every
+# quiesce call and every intake listener close verifies first), U-6, UP-5, UP-7, UP-11, UP-12;
+# findings: docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r4.md).
 # ci = true only for checks measured under 2 minutes wall-clock on the Lima VM (`cargo xtask quint check`).
 
 
@@ -252,6 +253,7 @@ backend = "apalache"
 max_steps = 8
 expect = "holds"
 ci = false
+timeout_secs = 1800
 
 [[check]]
 name = "udp-slots-witness-late-paired"
@@ -363,9 +365,10 @@ expect = "violation"
 ci = true
 
 
-# Module C: CID lease, next-fit, D16-EXCL with D16-PREF (prefer unexcluded offsets, fall back to an
-# excluded free offset, refuse only when no offset is free). Safety = CidUnique, NoExcludedWhileUnexcludedFree,
-# NoRefusalWhileFree. Apalache stalls on the next-fit fold; TLC is the evidence for holds
+# Module C: CID lease with the atomic kernel claim (D16-CLAIM). Safety = CidUnique, ClaimHeld,
+# NoLaunchClash, NoSkipWhileClaimable, NoLeakedClaim — under foreign churn forever, serve crash + restart
+# with surviving VMMs, pre-READY exits and claim errors
+
 [[check]]
 name = "cid-lease-safety-tlc"
 spec = "cid_lease.qnt"
@@ -376,273 +379,202 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "cid-lease-two-foreign-safety-tlc"
+name = "cid-lease-three-safety-tlc"
 spec = "cid_lease.qnt"
-main = "lease_twoForeign"
+main = "lease_three"
 invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "cid-lease-single-safety-apalache"
+name = "cid-lease-live-safety-tlc"
 spec = "cid_lease.qnt"
-main = "lease_single"
+main = "lease_live"
 invariant = "Safety"
-backend = "apalache"
-max_steps = 9
+backend = "tlc"
 expect = "holds"
 ci = true
 
+# D16-CLAIM placement progress: placed whenever a free offset's CID stays unheld
 [[check]]
 name = "cid-lease-eventually-placed"
 spec = "cid_lease.qnt"
-main = "lease_ok"
+main = "lease_live"
 temporal = "EventuallyPlaced"
 backend = "tlc"
 expect = "holds"
 ci = true
 
-
-# Restart guarantee (2 workloads, so an unexcluded offset is always free at a retry): within one serve
-# process no offset fails twice; across a restart it may, once
+# Non-vacuity witnesses (expected violation)
 [[check]]
-name = "cid-lease-boot-no-reclash-within-boot"
-spec = "cid_lease.qnt"
-main = "lease_boot"
-invariant = "NoReclashWithinBoot"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-boot-cid-unique"
-spec = "cid_lease.qnt"
-main = "lease_boot"
-invariant = "CidUnique"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-boot-retry-same-foreign"
-spec = "cid_lease.qnt"
-main = "lease_single_boot"
-invariant = "RetryNeverSameForeignCid"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-boot-reclash-ever"
-spec = "cid_lease.qnt"
-main = "lease_boot"
-invariant = "NoReclashEver"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-transient-safety"
-spec = "cid_lease.qnt"
-main = "lease_transient"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-
-# Finding r2-1 (refused while usable offsets free) — expected gone under D16-PREF (r2: violation)
-[[check]]
-name = "cid-lease-transient-starved"
-spec = "cid_lease.qnt"
-main = "lease_transient"
-invariant = "NoStarvedOnUsableOffset"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-transient-eventually-placed"
-spec = "cid_lease.qnt"
-main = "lease_transient"
-temporal = "EventuallyPlaced"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-witness-fallback"
-spec = "cid_lease.qnt"
-main = "lease_transient"
-invariant = "WitnessNoFallback"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Two workloads with transient pre-READY exits: preference and fallback under concurrent placement
-[[check]]
-name = "cid-lease-transient-two-safety-tlc"
-spec = "cid_lease.qnt"
-main = "lease_transientTwo"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-transient-two-eventually-placed"
-spec = "cid_lease.qnt"
-main = "lease_transientTwo"
-temporal = "EventuallyPlaced"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-
-# Consequences of the fallback (documented, accepted with D16-PREF): when only excluded offsets are
-# free, the retry may return to an excluded (foreign) offset and fail there again within one process;
-# the fallback may even return the offset that just failed while other excluded offsets are free
-[[check]]
-name = "cid-lease-fallback-reclash"
+name = "cid-lease-witness-skip"
 spec = "cid_lease.qnt"
 main = "lease_ok"
-invariant = "NoReclashWithinBoot"
+invariant = "WitnessNoSkip"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-fallback-same-foreign"
+name = "cid-lease-witness-orphan-skip"
 spec = "cid_lease.qnt"
 main = "lease_ok"
-invariant = "RetryNeverSameForeignCid"
+invariant = "WitnessNoOrphanSkip"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-retry-different-unless-all-held"
+name = "cid-lease-witness-held-elsewhere"
 spec = "cid_lease.qnt"
 main = "lease_ok"
-invariant = "RetryDifferentUnlessAllHeld"
+invariant = "WitnessNoHeldElsewhere"
 backend = "tlc"
-expect = "holds"
+expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-transient-two-retry-different"
+name = "cid-lease-witness-claim-error"
 spec = "cid_lease.qnt"
-main = "lease_transientTwo"
-invariant = "RetryDifferentUnlessAllHeld"
+main = "lease_ok"
+invariant = "WitnessNoClaimErr"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-witness-clash"
+name = "cid-lease-witness-running"
 spec = "cid_lease.qnt"
-main = "lease_single"
-invariant = "WitnessNoClash"
-backend = "apalache"
-max_steps = 9
+main = "lease_ok"
+invariant = "WitnessNoRunning"
+backend = "tlc"
 expect = "violation"
 ci = true
 
-
-# Teeth: the r1 finding-2 counterexamples come back without D16-EXCL
+# Documented: the refusal is decided per claim ioctl, so GuestCidsHeldElsewhere can be returned while an
+# offset tried earlier in the walk has just been released by a foreign user (non-terminal; placement retries)
 [[check]]
-name = "cid-lease-hazard-no-exclusion"
+name = "cid-lease-refusal-snapshot"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "RefusalSnapshotConsistent"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth for D16-CLAIM
+[[check]]
+name = "cid-lease-hazard-check-then-claim"
 spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugNoExclusion"
-invariant = "RetryDifferentUnlessAllHeld"
+main = "lease_bugCheckThenClaim"
+invariant = "NoLaunchClash"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-hazard-no-exclusion-foreign"
+name = "cid-lease-hazard-check-then-claim-held"
 spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugNoExclusion"
-invariant = "RetryNeverSameForeignCid"
+main = "lease_bugCheckThenClaim"
+invariant = "ClaimHeld"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-hazard-no-exclusion-reclash"
+name = "cid-lease-hazard-release-before-vmm"
 spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugNoExclusion"
-invariant = "NoReclashWithinBoot"
+main = "lease_bugReleaseBeforeVmm"
+invariant = "NoLaunchClash"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-hazard-no-exclusion-preference"
+name = "cid-lease-hazard-release-before-vmm-held"
 spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugNoExclusion"
-invariant = "NoExcludedWhileUnexcludedFree"
+main = "lease_bugReleaseBeforeVmm"
+invariant = "ClaimHeld"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-hazard-first-fit-no-exclusion"
+name = "cid-lease-hazard-remember-inuse"
 spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_single_bugFirstFitNoExclusion"
-invariant = "RetryNeverSameCid"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# Teeth for D16-PREF: the r2 rule (refuse when every free offset is excluded) brings r2-1 back
-[[check]]
-name = "cid-lease-hazard-refuse-starved"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_transient_bugRefuse"
-invariant = "NoStarvedOnUsableOffset"
+main = "lease_bugRemember"
+invariant = "NoSkipWhileClaimable"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-hazard-refuse-while-free"
+name = "cid-lease-hazard-remember-refusal"
 spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_transient_bugRefuse"
-invariant = "NoRefusalWhileFree"
+main = "lease_bugRemember"
+invariant = "RefusalEachClaimInUse"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "cid-lease-hazard-refuse-eventually-placed"
+name = "cid-lease-hazard-remember-inuse-placed"
 spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_transient_bugRefuse"
+main = "lease_live_bugRemember"
 temporal = "EventuallyPlaced"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 
-# Prediction: with D16-EXCL, next-fit is no longer needed for the retry guarantee
-[[check]]
-name = "cid-lease-first-fit-with-exclusion"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_firstFitWithExclusion"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-
-# Module D: boot route/rules (D8a, D8a-ROUTE, U-4), intake listeners (D23, D8a-REVOKE), activation (U-6)
+# Module D: guest-prefix steering (D8a-LOOKUP, D8a-ROUTE, D8a-FENCE), intake listeners (D23, U-6, U-3, M-7),
+# named quiescence holders (D8a-HOLD), per-component recovery (ADR-0124). Round 4d: one owner and one
+# runtime repair of the guest prefix (repair_guest_prefix), the serialized guest-prefix order, every quiesce
+# call and every intake listener close verifies first (Revision 9 decisions items 3, 7, 8)
 [[check]]
 name = "steering-safety-tlc"
 spec = "steering.qnt"
 main = "steer_ok"
 invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Named views of Safety on steer_ok (foreign nft flush on, steer failing forever, entry deletion, crash)
+[[check]]
+name = "steering-flush-no-wildcard"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "NoWildcardReached"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-reach-only-serving"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "ReachOnlyServing"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-noflush-safety-tlc"
+spec = "steering.qnt"
+main = "steer_noflush"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-noflush-unmarked-on-legc"
+spec = "steering.qnt"
+main = "steer_noflush"
+invariant = "UnmarkedOnLegC"
 backend = "tlc"
 expect = "holds"
 ci = true
@@ -657,6 +589,30 @@ expect = "holds"
 ci = true
 
 [[check]]
+name = "steering-safety-apalache"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 12
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+
+# A foreign flush lets unmarked host-local traffic reach a steered intake directly (ADR-0124 window; documented)
+[[check]]
+name = "steering-flush-unmarked-bypass"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "UnmarkedOnLegC"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Progress on the design instances
+[[check]]
 name = "steering-two-activation-completes"
 spec = "steering.qnt"
 main = "steer_two"
@@ -666,65 +622,10 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "steering-two-quiesce-completes"
+name = "steering-serving-reachable"
 spec = "steering.qnt"
-main = "steer_two"
-temporal = "QuiesceCompletes"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "steering-two-witness-err-with-resetting"
-spec = "steering.qnt"
-main = "steer_two"
-invariant = "WitnessNoErrWithResetting"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "steering-safety-apalache"
-spec = "steering.qnt"
-main = "steer_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 16
-expect = "holds"
-ci = true
-
-[[check]]
-name = "steering-quiesce-completes"
-spec = "steering.qnt"
-main = "steer_ok"
-temporal = "QuiesceCompletes"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "steering-listener-follows-guest"
-spec = "steering.qnt"
-main = "steer_ok"
-temporal = "ListenerFollowsGuest"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "steering-resetting-resolves"
-spec = "steering.qnt"
-main = "steer_ok"
-temporal = "ResettingResolves"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "steering-activation-completes"
-spec = "steering.qnt"
-main = "steer_ok"
-temporal = "ActivationCompletes"
+main = "steer_live"
+temporal = "ServingReachable"
 backend = "tlc"
 expect = "holds"
 ci = true
@@ -732,39 +633,20 @@ ci = true
 [[check]]
 name = "steering-boot-opens"
 spec = "steering.qnt"
-main = "steer_live"
+main = "steer_boot"
 temporal = "BootOpens"
 backend = "tlc"
 expect = "holds"
 ci = true
 
-[[check]]
-name = "steering-witness-admitted"
-spec = "steering.qnt"
-main = "steer_ok"
-invariant = "WitnessNoAdmitted"
-backend = "apalache"
-max_steps = 18
-expect = "violation"
-ci = true
 
+# Non-vacuity witnesses: each behaviour is reachable (expected violation)
 [[check]]
-name = "steering-witness-crash-after-route"
+name = "steering-witness-steered"
 spec = "steering.qnt"
 main = "steer_ok"
-invariant = "WitnessNoCrashAfterRoute"
-backend = "apalache"
-max_steps = 18
-expect = "violation"
-ci = true
-
-[[check]]
-name = "steering-witness-quiesce-take-down"
-spec = "steering.qnt"
-main = "steer_ok"
-invariant = "WitnessNoQuiesceWithListener"
-backend = "apalache"
-max_steps = 18
+invariant = "WitnessNoSteered"
+backend = "tlc"
 expect = "violation"
 ci = true
 
@@ -773,242 +655,201 @@ name = "steering-witness-second-allocation"
 spec = "steering.qnt"
 main = "steer_ok"
 invariant = "WitnessNoSecondAllocation"
-backend = "apalache"
-max_steps = 18
+backend = "tlc"
 expect = "violation"
 ci = true
 
-# Accepted, bounded design behaviour (D8a-PROBE, 2026-10-06): a resetting listener refuses marked probes while
-# its removal is retried — reachable, not a defect
 [[check]]
-name = "steering-witness-revoke-retry"
+name = "steering-witness-boot-refusal"
 spec = "steering.qnt"
 main = "steer_ok"
-invariant = "WitnessNoRevokeRetry"
-backend = "apalache"
-max_steps = 18
+invariant = "WitnessNoBootRefusal"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-resteer"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoResteer"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-overlap"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoOverlap"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-still-quiesced"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoStillQuiesced"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-crash-with-route"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoCrashWithRoute"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-legc"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoLegC"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-fenced-while-down"
+spec = "steering.qnt"
+main = "steer_ok"
+invariant = "WitnessNoRefusedWhileDown"
+backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
 name = "steering-witness-activation-err"
 spec = "steering.qnt"
-main = "steer_ok"
+main = "steer_two"
 invariant = "WitnessNoActivationErr"
-backend = "apalache"
-max_steps = 18
-expect = "violation"
-ci = true
-
-
-# Teeth for D8a-REVOKE: the r1 finding-1 counterexample comes back
-[[check]]
-name = "steering-hazard-revoke-fail-closes"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_bugRevokeFailCloses"
-invariant = "NoHostServiceReached"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "steering-hazard-revoke-fail-closes-names"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_bugRevokeFailCloses"
-invariant = "ElementNamesListener"
-backend = "apalache"
-max_steps = 18
-expect = "violation"
-ci = true
-
-[[check]]
-name = "steering-hazard-revoke-fail-closes-quiesce"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_bugRevokeFailCloses"
-temporal = "QuiesceCompletes"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "steering-hazard-release-with-element"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_bugRevokeFailClosesNoElemGuard"
-invariant = "NoReleaseWithElement"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 
-# K-D3 dropped (V-23): leaks occur only inside the flush window; the route is never kept or added without the rules
+# Teeth, D8a-LOOKUP / K-L3 (expected violation)
 [[check]]
-name = "steering-env-flush-safety"
+name = "steering-hazard-element-set"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlush"
-invariant = "SafetyUnderFlush"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Finding r2-2 (a resetting listener wanted again serves with no element after a flush) — expected gone
-# under D8a-READMIT (r2: violation)
-[[check]]
-name = "steering-env-flush-admitted-has-element"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlush"
-invariant = "AdmittedHasElement"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "steering-hazard-rewant-keeps-element"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlushBugRewantKeeps"
-invariant = "AdmittedHasElement"
+main = "steer_bugElementSet"
+invariant = "ReachOnlyServing"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "steering-hazard-repair-outside-quiesce"
+name = "steering-hazard-element-set-flush"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlushBugRepairOutsideQuiesce"
-invariant = "AdmittedHasElement"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# Accepted, bounded K-D3 exposure (D8a-FLUSH, 2026-10-06): a foreign flush exposes host services
-# (the two violations below are that documented exposure) and the exposure ends at the audit's repair
-# (serve up) or the next boot's start_shared_owner (ExposureEnds holds; teeth without audit fairness)
-[[check]]
-name = "steering-env-flush-exposure-ends"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlush"
-temporal = "ExposureEnds"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "steering-hazard-exposure-no-audit-fairness"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlushNoAuditFairness"
-temporal = "ExposureEndsNoAuditFairness"
+main = "steer_bugElementSetFlush"
+invariant = "NoWildcardReached"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "steering-env-flush-route-implies-rules"
+name = "steering-hazard-element-close-first"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlush"
-invariant = "RouteImpliesRules"
+main = "steer_bugElementCloseFirst"
+invariant = "NoWildcardReached"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "steering-env-flush-host-service"
+name = "steering-hazard-steering-in-nft"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlush"
-invariant = "NoHostServiceReached"
+main = "steer_bugSteeringInNft"
+invariant = "NoWildcardReached"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "steering-env-flush-witness-refusal"
+name = "steering-hazard-unpinned"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlush"
-invariant = "WitnessNoBootRefusal"
-backend = "apalache"
-max_steps = 18
-expect = "violation"
-ci = true
-
-[[check]]
-name = "steering-hazard-converge-ignores-rules"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_envFlushBugConverge"
-invariant = "ConvergeNeedsRules"
+main = "steer_bugUnpinned"
+invariant = "NothingDeliveredWhileDown"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "steering-hazard-route-first-boot-opens"
+name = "steering-hazard-nonloopback-assign"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugNonloopback"
+invariant = "RemoteNeverDirect"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-entry-outlives-close"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugEntryOutlives"
+invariant = "EntryNamesServingListener"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Teeth, D8a-ROUTE (expected violation)
+[[check]]
+name = "steering-hazard-route-first"
 spec = "hazard/steering_hazards.qnt"
 main = "steer_bugRouteFirst"
-temporal = "BootOpens"
+invariant = "RouteImpliesSteering"
 backend = "tlc"
 expect = "violation"
 ci = true
 
-
-# Prediction: with D8a-ROUTE the reversed boot order fails to start rather than leaking
 [[check]]
-name = "steering-hazard-route-first-safety"
+name = "steering-hazard-route-first-wildcard"
 spec = "hazard/steering_hazards.qnt"
 main = "steer_bugRouteFirst"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "steering-hazard-route-first-no-check"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_bugRouteFirstNoCheck"
-invariant = "RouteImpliesRules"
+invariant = "NoWildcardReached"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "steering-hazard-route-first-no-check-host-service"
+name = "steering-hazard-no-verify"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_bugRouteFirstNoCheck"
-invariant = "NoHostServiceReached"
-backend = "apalache"
-max_steps = 18
-expect = "violation"
-ci = true
-
-[[check]]
-name = "steering-hazard-admit-first"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_bugAdmitFirst"
-invariant = "NoHostServiceReached"
+main = "steer_bugNoVerify"
+invariant = "ConvergeNeedsSteering"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "steering-hazard-close-first"
+name = "steering-hazard-no-verify-wildcard"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_bugCloseFirst"
-invariant = "NoHostServiceReached"
+main = "steer_bugNoVerify"
+invariant = "NoWildcardReached"
 backend = "tlc"
 expect = "violation"
 ci = true
 
-[[check]]
-name = "steering-hazard-quiesce-keeps"
-spec = "hazard/steering_hazards.qnt"
-main = "steer_bugQuiesceKeeps"
-invariant = "NoListenerWhileQuiesced"
-backend = "tlc"
-expect = "violation"
-ci = true
 
+# Teeth, U-6 / U-3 (expected violation)
 [[check]]
-name = "steering-hazard-act-err-early"
+name = "steering-hazard-rollback-leaves-listener"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_bugActErrEarly"
+main = "steer_bugRollback"
 invariant = "ActivationAllOrNothing"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-rollback-leaves-listener-reach"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRollback"
+invariant = "ReachOnlyServing"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1023,15 +864,677 @@ expect = "violation"
 ci = true
 
 [[check]]
-name = "steering-hazard-no-owner-fairness"
+name = "steering-hazard-teardown-keeps-listeners"
 spec = "hazard/steering_hazards.qnt"
-main = "steer_liveTeeth"
-temporal = "QuiesceCompletesNoFairness"
+main = "steer_bugTeardownKeeps"
+invariant = "NoReleaseWithListener"
 backend = "tlc"
 expect = "violation"
 ci = true
 
-# Deeper bounded runs (parity with the first model check's depths); not for CI
+
+# Teeth, M-7 / D8a-HOLD (expected violation)
+[[check]]
+name = "steering-hazard-quiesce-keeps"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugQuiesceKeeps"
+invariant = "QuiescedClosesListeners"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-quiesce-keeps-reach"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugQuiesceKeeps"
+invariant = "ReachOnlyServing"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-any-restore"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugAnyRestore"
+invariant = "NoReopenBeforeRepair"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-repair-without-hold"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRepairNoHold"
+invariant = "NoRepairWithoutHold"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Teeth, D8a-FENCE (fence, never removal; lift only after a fresh verify; only boot and repair_guest_prefix lift)
+[[check]]
+name = "steering-hazard-remove-not-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRemoveNotFence"
+invariant = "NoElsewhere"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-remove-not-fence-down"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRemoveNotFence"
+invariant = "FenceHoldsWhileStopped"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-no-fresh-verify"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugNoFreshVerify"
+invariant = "RouteLocalOnlyVerified"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-no-fresh-verify-ghost"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugNoFreshVerify"
+invariant = "ConvergeNeedsSteering"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-restore-lifts-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRestoreLiftsFence"
+invariant = "ExposureOnlyInTamperWindow"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-restore-lifts-fence-route"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRestoreLiftsFence"
+invariant = "RouteLocalOnlyVerified"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-restore-lifts-fence-other-lift"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugRestoreLiftsFence"
+invariant = "OnlyGuestPrefixRecoveryLifts"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Teeth, item 7: every quiesce call and every intake listener close verifies first (expected violation)
+[[check]]
+name = "steering-hazard-quiesce-no-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugQuiesceNoFence"
+invariant = "QuiescenceNeverWidens"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-quiesce-no-fence-gps"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugQuiesceNoFence"
+invariant = "SteeringQuiesceNeverWidens"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-join-no-verify"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugJoinNoVerify"
+invariant = "OpenExposureWithinTwoSteeringSteps"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-close-no-verify"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugCloseNoVerify"
+invariant = "CloseNeverWidens"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Teeth, one owner and one runtime repair of the guest prefix (another recovery's repair converges the
+# steering and lifts the route: round 4c's total converge_shared) (expected violation)
+[[check]]
+name = "steering-hazard-other-repairs-prefix"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugOtherRepairsPrefix"
+invariant = "OnlyGuestPrefixRecoveryLifts"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-other-repairs-prefix-fenced"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugOtherRepairsPrefix"
+invariant = "FencedWhileSteeringRecovers"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Teeth, the serialized guest-prefix order (a fence between a lift's verify and its route write: F-4c-5).
+# The -converge view holds: each lift did verify; the defect is the order, not a missing verify
+[[check]]
+name = "steering-hazard-unserialized-lift-window"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugUnserializedLift"
+invariant = "ExposureOnlyInTamperWindow"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-unserialized-lift-route"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugUnserializedLift"
+invariant = "RouteLocalOnlyVerified"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-unserialized-lift-converge"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_bugUnserializedLift"
+invariant = "ConvergeNeedsSteering"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Trust boundary: root link detach. SafetyUnderDetach holds; the named violations are the documented
+# trust-boundary consequences, F-4d-1 (the guest-prefix fail-stop after a failed post-repair audit leaves
+# `local`), and witnesses
+[[check]]
+name = "steering-env-detach-safety"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "SafetyUnderDetach"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "steering-env-detach-all-safety"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetachAll"
+invariant = "SafetyUnderDetach"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "steering-env-detach-wildcard"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "NoWildcardReached"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-detach-route-implies-steering"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "RouteImpliesSteering"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-detach-down"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "NothingDeliveredWhileDown"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-detach-remote-direct"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "RemoteNeverDirect"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-detach-held-servable-wildcard"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "WitnessNoServableWildcardWhileHeld"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-detach-route-widens"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "RouteNeverWidens"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-detach-gps-failstop-fenced"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "GuestPrefixFailStopFenced"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-detach-two-step-window"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "ExposureWithinTwoSteeringSteps"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-recovery-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "WitnessNoRecoveryFence"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-one-step-exposure"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "WitnessNoOneStepExposure"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-quiesce-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "WitnessNoQuiesceFence"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-join-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "WitnessNoJoinFence"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-close-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envDetach"
+invariant = "WitnessNoCloseFence"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-fail-stop"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_repairForever"
+invariant = "WitnessNoFailStop"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Trust boundary: root detaches the link between a close's passing verify and the close (F-4d-3)
+[[check]]
+name = "steering-env-close-gap-widens"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envCloseGap"
+invariant = "NoOwnerStepWidens"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-close-gap-window"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envCloseGap"
+invariant = "ExposureOnlyInTamperWindow"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# A fence fails: the quiesce (design text) and the close (UP-15, modelled the same way) go on
+[[check]]
+name = "steering-env-fence-fail-widens"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFenceFail"
+invariant = "QuiescenceNeverWidens"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-fence-fail-close-widens"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFenceFail"
+invariant = "CloseNeverWidens"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-fence-fail-window"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envFenceFail"
+invariant = "ExposureOnlyInTamperWindow"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+
+# Progress of the detach window and of the guest-prefix recovery (TLC). DetachExposureEnds (no owner
+# fairness) is predicted violated: the recovery's quiesce, which carries its verify + fence, waits behind an
+# in-flight activation item (UP-13)
+[[check]]
+name = "steering-detach-exposure-ends"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLive"
+temporal = "DetachExposureEnds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-detach-exposure-ends-with-owner"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLive"
+temporal = "DetachExposureEndsWithOwner"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "steering-detach-exposure-ends-find-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLive"
+temporal = "DetachExposureEndsFindFence"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "steering-solo-detach-exposure-ends-find-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLiveSolo"
+temporal = "DetachExposureEndsFindFence"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-recovery-resolves"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLive"
+temporal = "SteeringRecoveryResolves"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "steering-repair-forever-resolves"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_repairForever"
+temporal = "SteeringRecoveryResolves"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "steering-recovery-resolves-all-recoveries"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLiveNoCrash"
+temporal = "SteeringRecoveryResolvesAllRecoveries"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "steering-repair-forever-resolves-all-recoveries"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_repairForeverNoCrash"
+temporal = "SteeringRecoveryResolvesAllRecoveries"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+
+# Teeth of the recovery rules (UP-6, UP-7, D8a-HOLD). any-restore-exposure-covered holds: every quiesce call
+# verifies and fences, so an early restore cannot prolong the exposure; D8a-HOLD keeps its teeth on
+# NoReopenBeforeRepair and SteeringRecoveryResolves
+[[check]]
+name = "steering-hazard-redo-no-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLiveSoloRedoNoFence"
+temporal = "DetachExposureEndsFindFence"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-redo-no-count"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLiveRedoNoCount"
+temporal = "SteeringRecoveryResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-any-restore-exposure-covered"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLiveAnyRestore"
+temporal = "DetachExposureEndsWithOwner"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-hazard-any-restore-resolves"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLiveAnyRestore"
+temporal = "SteeringRecoveryResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-no-recovery-fairness"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_detachLiveNoFairness"
+temporal = "DetachExposureEndsNoRecoveryFairness"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Other recoveries' progress does not depend on the guest-prefix recovery (UP-11)
+[[check]]
+name = "steering-flush-legc-bypass-ends"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_flushLive"
+temporal = "LegCBypassEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-flush-detach-legc-bypass-ends"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_flushDetachLive"
+temporal = "LegCBypassEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# steer failing forever: the serving port stays refused (safety holds: steering-safety-tlc runs steer-fails-forever)
+[[check]]
+name = "steering-steer-forever-unreachable"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_steerForever"
+temporal = "ServingReachable"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Trust boundary: root removes / replaces / fences the tagged route or sets `local` (UP-5). SafetyUnderRouteTamper
+# includes ElsewhereOnlyInRemovalWindow, ElsewhereWithinGpsRepair, RootFenceWithinGpsRepair, NoOwnerStepWidens
+# and OnlyGuestPrefixRecoveryLifts
+[[check]]
+name = "steering-env-root-route-safety"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envRootRoute"
+invariant = "SafetyUnderRouteTamper"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-env-root-route-elsewhere"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envRootRoute"
+invariant = "NoElsewhere"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-root-route-unverified-local"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envRootRoute"
+invariant = "RouteLocalOnlyVerified"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-env-root-route-down"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envRootRoute"
+invariant = "FenceHoldsWhileStopped"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-route-repair"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envRootRoute"
+invariant = "WitnessNoRouteRepair"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-three-step-elsewhere"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envRootRoute"
+invariant = "WitnessNoThreeStepElsewhere"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-witness-six-step-root-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_envRootRoute"
+invariant = "WitnessNoSixStepRootFence"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# UP-5 progress: a root route removal / root fence ends under fairness of the guest-prefix recovery
+[[check]]
+name = "steering-root-route-removal-ends"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_rootRouteLive"
+temporal = "RouteTamperEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "steering-root-fence-ends"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_rootRouteLive"
+temporal = "RootFenceEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Teeth, UP-5 (expected violation)
+[[check]]
+name = "steering-hazard-audit-ignores-route-removal"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_rootRouteLiveAuditIgnores"
+temporal = "RouteTamperEnds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "steering-hazard-audit-ignores-route-fence"
+spec = "hazard/steering_hazards.qnt"
+main = "steer_rootRouteLiveAuditIgnores"
+temporal = "RootFenceEnds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Deeper bounded run (parity with the first model check's depth); not for CI
 [[check]]
 name = "owner-flows-safety-apalache-deep"
 spec = "owner_flows.qnt"
@@ -1041,23 +1544,4 @@ backend = "apalache"
 max_steps = 14
 expect = "holds"
 ci = false
-
-[[check]]
-name = "steering-safety-apalache-deep"
-spec = "steering.qnt"
-main = "steer_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 20
-expect = "holds"
-ci = false
-
-[[check]]
-name = "steering-two-safety-apalache"
-spec = "steering.qnt"
-main = "steer_two"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 16
-expect = "holds"
-ci = true
+timeout_secs = 1800

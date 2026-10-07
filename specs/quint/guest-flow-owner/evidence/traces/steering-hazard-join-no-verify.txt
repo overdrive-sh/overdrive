@@ -1,0 +1,79 @@
+# steering-hazard-join-no-verify: counterexample, 11 state(s) (from the TLC trace)
+
+State 1
+  rmv = FALSE
+  stop = "none"
+  alloc = "Absent"
+  win = 0
+  up = TRUE
+  verified = {}
+  latch = FALSE
+  steerLeft = 0
+  convLeft = 0
+  holders = {}
+  repLeft = 0
+  route = "absent"
+  link = FALSE
+  lis = {}
+  verSince = FALSE
+  fenceLeft = 0
+  lastLS = {}
+  sess = FALSE
+  rules = FALSE
+  boot = 0
+  bindLeft = 0
+  tamper = FALSE
+  flowL = TRUE
+  winE = 0
+  winF = 0
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  estab = FALSE
+  rfn = FALSE
+  gen = 0
+  revokeLeft = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  entries = {}
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = {"boot"}
+  verSince = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 7 [ForeignFlush]
+  rules = FALSE
+
+State 8 [RecQuiesce]
+  latch = TRUE
+  holders = {"IpRules"}
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 9 [RootDetach]
+  link = FALSE
+  tamper = TRUE
+
+State 10 [AuditFind]
+  win = 1
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+
+State 11 [RecQuiesceGps]
+  win = 2
+  holders = {"IpRules", "GuestPrefixSteering"}
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> TRUE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]

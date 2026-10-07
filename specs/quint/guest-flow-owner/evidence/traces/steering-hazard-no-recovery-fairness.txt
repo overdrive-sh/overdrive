@@ -1,0 +1,107 @@
+# steering-hazard-no-recovery-fairness: counterexample, 19 state(s) (from the TLC trace)
+
+State 1
+  gen = 0
+  up = TRUE
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+  entries = {}
+  rules = FALSE
+  rmv = FALSE
+  flowL = TRUE
+  tamper = FALSE
+  bindLeft = 0
+  win = 0
+  stop = "none"
+  revokeLeft = 0
+  lastLS = {}
+  holders = {}
+  estab = FALSE
+  repLeft = 0
+  lis = {}
+  link = FALSE
+  verified = {}
+  sess = FALSE
+  boot = 0
+  winE = 0
+  winF = 0
+  fenceLeft = 0
+  verSince = FALSE
+  alloc = "Absent"
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  latch = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  rfn = FALSE
+  steerLeft = 0
+  convLeft = 0
+  route = "absent"
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 6 [BootStep]
+  up = FALSE
+  tamper = FALSE
+  stop = "refused"
+  estab = TRUE
+  boot = 0
+  g = [ routeUnverified |-> FALSE, refused |-> TRUE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  route = "fence"
+
+State 7 [Restart]
+  up = TRUE
+  stop = "none"
+
+State 8 [BootStep]
+  boot = 1
+
+State 9 [BootStep]
+  boot = 2
+
+State 10 [ListenerTaskExit]
+  flowL = FALSE
+
+State 11 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 12 [BootStep]
+  verified = {"boot"}
+  boot = 4
+  verSince = TRUE
+
+State 13 [BootStep]
+  boot = 5
+  route = "local"
+
+State 14 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 15 [Teardown]
+  alloc = "Retiring"
+
+State 16 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 17 [Release]
+  alloc = "Absent"
+
+State 18 [AuditFind]
+  win = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+
+State 19 [Stuttering]
+  (no change)

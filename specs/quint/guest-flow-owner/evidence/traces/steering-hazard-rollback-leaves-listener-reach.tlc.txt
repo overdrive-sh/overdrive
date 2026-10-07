@@ -1,0 +1,755 @@
+State 1: <Initial predicate>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Absent"
+/\ steer_bugRollback_steering_link = FALSE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = FALSE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 0
+/\ steer_bugRollback_steering_gen = 0
+/\ steer_bugRollback_steering_route = "absent"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = FALSE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = FALSE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = FALSE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 2: <steer_bugRollback_steering_BootStep line 1677, col 3 to line 1767, col 43 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Absent"
+/\ steer_bugRollback_steering_link = FALSE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = FALSE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 1
+/\ steer_bugRollback_steering_gen = 0
+/\ steer_bugRollback_steering_route = "absent"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = FALSE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = FALSE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = FALSE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 3: <steer_bugRollback_steering_BootStep line 1677, col 3 to line 1767, col 43 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Absent"
+/\ steer_bugRollback_steering_link = FALSE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = FALSE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 2
+/\ steer_bugRollback_steering_gen = 0
+/\ steer_bugRollback_steering_route = "absent"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = FALSE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = FALSE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 4: <steer_bugRollback_steering_BootStep line 1677, col 3 to line 1767, col 43 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Absent"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = FALSE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 3
+/\ steer_bugRollback_steering_gen = 0
+/\ steer_bugRollback_steering_route = "absent"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = FALSE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = FALSE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 5: <steer_bugRollback_steering_BootStep line 1677, col 3 to line 1767, col 43 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Absent"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = FALSE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 4
+/\ steer_bugRollback_steering_gen = 0
+/\ steer_bugRollback_steering_route = "absent"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = FALSE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 6: <steer_bugRollback_steering_BootStep line 1677, col 3 to line 1767, col 43 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Absent"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = FALSE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 0
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 7: <steer_bugRollback_steering_Provision line 1923, col 3 to line 1933, col 43 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Provisioned"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = FALSE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 1
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 8: <steer_bugRollback_steering_SessOpen line 1939, col 3 to line 1949, col 43 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Provisioned"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = TRUE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 1
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 9: <steer_bugRollback_steering_ListenState line 1897, col 3 to line 1917, col 75 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Provisioned"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = TRUE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 1
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {2}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 10: <steer_bugRollback_steering_ListenState line 1897, col 3 to line 1917, col 75 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Provisioned"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = TRUE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 1
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {1, 2}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 11: <steer_bugRollback_steering_ActivateBegin line 1974, col 3 to line 1988, col 68 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Activating"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = TRUE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 1
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {1, 2}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 12: <steer_bugRollback_steering_BindListen line 1773, col 3 to line 1785, col 68 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Activating"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = TRUE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 1
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {1, 2}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {2}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 13: <steer_bugRollback_steering_Steer line 1791, col 3 to line 1813, col 7 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Activating"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = TRUE
+/\ steer_bugRollback_steering_bindLeft = 1
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 1
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {1, 2}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {2}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {2}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 14: <steer_bugRollback_steering_BindFail line 1298, col 3 to line 1320, col 49 of module steer_bugRollback>
+/\ steer_bugRollback_steering_holders = {}
+/\ steer_bugRollback_steering_rfn = FALSE
+/\ steer_bugRollback_steering_repLeft = 0
+/\ steer_bugRollback_steering_alloc = "Provisioned"
+/\ steer_bugRollback_steering_link = TRUE
+/\ steer_bugRollback_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> TRUE,
+  actErrDone |-> TRUE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugRollback_steering_latch = FALSE
+/\ steer_bugRollback_steering_sess = TRUE
+/\ steer_bugRollback_steering_bindLeft = 0
+/\ steer_bugRollback_steering_boot = 5
+/\ steer_bugRollback_steering_gen = 1
+/\ steer_bugRollback_steering_route = "local"
+/\ steer_bugRollback_steering_winE = 0
+/\ steer_bugRollback_steering_winF = 0
+/\ steer_bugRollback_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugRollback_steering_lastLS = {1, 2}
+/\ steer_bugRollback_steering_rmv = FALSE
+/\ steer_bugRollback_steering_rules = TRUE
+/\ steer_bugRollback_steering_win = 0
+/\ steer_bugRollback_steering_flowL = TRUE
+/\ steer_bugRollback_steering_tamper = FALSE
+/\ steer_bugRollback_steering_up = TRUE
+/\ steer_bugRollback_steering_verified = {"boot"}
+/\ steer_bugRollback_steering_convLeft = 0
+/\ steer_bugRollback_steering_fenceLeft = 0
+/\ steer_bugRollback_steering_lis = {2}
+/\ steer_bugRollback_steering_estab = TRUE
+/\ steer_bugRollback_steering_steerLeft = 1
+/\ steer_bugRollback_steering_verSince = TRUE
+/\ steer_bugRollback_steering_stop = "none"
+/\ steer_bugRollback_steering_entries = {2}
+/\ steer_bugRollback_steering_revokeLeft = 0
+/\ steer_bugRollback_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]

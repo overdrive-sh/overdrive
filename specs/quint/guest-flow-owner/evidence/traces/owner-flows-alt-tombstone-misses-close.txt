@@ -1,0 +1,68 @@
+# owner-flows-alt-tombstone-misses-close: counterexample, 15 state(s) (from the TLC trace)
+
+State 1
+  alloc = "Absent"
+  badPaired = FALSE
+  vmGen = 0
+  abortDiscarded = {}
+  toHostPaired = {}
+  toGuestAbort = {}
+  gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+  quiesced = FALSE
+  gen = 0
+  vmUp = FALSE
+  phantom = FALSE
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  claim = FALSE
+  hf = <<[st |-> "none", gen |-> 0]>>
+  resurrected = FALSE
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+  toHostRefused = {}
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [VmStart]
+  vmGen = 1
+  vmUp = TRUE
+
+State 4 [GuestOpenFlow]
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 5 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 6 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "pending", gen |-> 1]>>
+
+State 7 [HostAcceptFlow]
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 8 [HostAcceptSession]
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "live", gen |-> 1]>>
+  claim = TRUE
+
+State 9 [Activate]
+  alloc = "Active"
+
+State 10 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 11 [HostAcceptSession]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "live", gen |-> 1]>>
+
+State 12 [HostOpenAccept]
+  hf = <<[st |-> "req", gen |-> 1]>>
+
+State 13 [Teardown]
+  alloc = "Retiring"
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 1]>>
+  claim = FALSE
+  hf = <<[st |-> "closed", gen |-> 1]>>
+
+State 14 [HostAcceptFlow]
+  flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 15 [Stuttering]
+  (no change)
