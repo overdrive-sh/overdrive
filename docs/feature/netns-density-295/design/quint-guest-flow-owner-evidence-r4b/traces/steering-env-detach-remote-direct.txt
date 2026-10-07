@@ -1,0 +1,75 @@
+# steering-env-detach-remote-direct: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  rules = FALSE
+  stop = "none"
+  verified = FALSE
+  lis = {}
+  route = "absent"
+  steerLeft = 0
+  repLeft = 1
+  lastLS = {}
+  boot = 0
+  gen = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  entries = {}
+  att = 0
+  convLeft = 1
+  tamper = FALSE
+  flowL = TRUE
+  bindLeft = 1
+  estab = FALSE
+  latch = FALSE
+  verSince = FALSE
+  win = 0
+  sess = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  link = FALSE
+  revokeLeft = 0
+  up = TRUE
+  holders = {}
+  alloc = "Absent"
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 5 [BootStep]
+  verified = TRUE
+  boot = 4
+  verSince = TRUE
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ForeignFlush]
+  rules = FALSE
+
+State 10 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 11 [ListenState]
+  lastLS = {1}
+
+State 12 [ActivateBegin]
+  alloc = "Activating"
+
+State 13 [BindListen]
+  lis = {1}

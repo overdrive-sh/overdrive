@@ -1,0 +1,386 @@
+State 1: <Initial predicate>
+/\ steer_bugQuiesceBeforeFence_steering_win = 0
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 0
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "absent"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE
+
+State 2: <steer_bugQuiesceBeforeFence_steering_BootStep line 1288, col 3 to line 1412, col 53 of module steer_bugQuiesceBeforeFence>
+/\ steer_bugQuiesceBeforeFence_steering_win = 0
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 1
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "absent"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE
+
+State 3: <steer_bugQuiesceBeforeFence_steering_BootStep line 1288, col 3 to line 1412, col 53 of module steer_bugQuiesceBeforeFence>
+/\ steer_bugQuiesceBeforeFence_steering_win = 0
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 2
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "absent"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE
+
+State 4: <steer_bugQuiesceBeforeFence_steering_BootStep line 1288, col 3 to line 1412, col 53 of module steer_bugQuiesceBeforeFence>
+/\ steer_bugQuiesceBeforeFence_steering_win = 0
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 3
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "absent"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE
+
+State 5: <steer_bugQuiesceBeforeFence_steering_BootStep line 1288, col 3 to line 1412, col 53 of module steer_bugQuiesceBeforeFence>
+/\ steer_bugQuiesceBeforeFence_steering_win = 0
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 4
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "absent"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE
+
+State 6: <steer_bugQuiesceBeforeFence_steering_BootStep line 1288, col 3 to line 1412, col 53 of module steer_bugQuiesceBeforeFence>
+/\ steer_bugQuiesceBeforeFence_steering_win = 0
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 5
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "local"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE
+
+State 7: <steer_bugQuiesceBeforeFence_steering_RootDetach line 1752, col 3 to line 1772, col 47 of module steer_bugQuiesceBeforeFence>
+/\ steer_bugQuiesceBeforeFence_steering_win = 0
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 5
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "local"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE
+
+State 8: <steer_bugQuiesceBeforeFence_steering_AuditFind line 1850, col 3 to line 1874, col 47 of module steer_bugQuiesceBeforeFence>
+/\ steer_bugQuiesceBeforeFence_steering_win = 1
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 5
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "local"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE
+
+State 9: <steer_bugQuiesceBeforeFence_steering_RecQuiesceGps line 1926, col 3 to line 1945, col 49 of module steer_bugQuiesceBeforeFence>
+/\ steer_bugQuiesceBeforeFence_steering_win = 2
+/\ steer_bugQuiesceBeforeFence_steering_repLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "qheld", FlowListeners |-> "idle"]
+/\ steer_bugQuiesceBeforeFence_steering_sess = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_flowL = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_estab = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_steerLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_latch = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_convLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_bindLeft = 1
+/\ steer_bugQuiesceBeforeFence_steering_link = FALSE
+/\ steer_bugQuiesceBeforeFence_steering_entries = {}
+/\ steer_bugQuiesceBeforeFence_steering_revokeLeft = 0
+/\ steer_bugQuiesceBeforeFence_steering_verSince = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_lis = {}
+/\ steer_bugQuiesceBeforeFence_steering_stop = "none"
+/\ steer_bugQuiesceBeforeFence_steering_lastLS = {}
+/\ steer_bugQuiesceBeforeFence_steering_gen = 0
+/\ steer_bugQuiesceBeforeFence_steering_boot = 5
+/\ steer_bugQuiesceBeforeFence_steering_alloc = "Absent"
+/\ steer_bugQuiesceBeforeFence_steering_rules = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_att = 0
+/\ steer_bugQuiesceBeforeFence_steering_route = "local"
+/\ steer_bugQuiesceBeforeFence_steering_tamper = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugQuiesceBeforeFence_steering_verified = TRUE
+/\ steer_bugQuiesceBeforeFence_steering_holders = {"GuestPrefixSteering"}
+/\ steer_bugQuiesceBeforeFence_steering_up = TRUE

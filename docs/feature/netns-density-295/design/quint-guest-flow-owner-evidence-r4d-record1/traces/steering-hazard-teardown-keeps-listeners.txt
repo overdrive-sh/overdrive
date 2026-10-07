@@ -1,0 +1,85 @@
+# steering-hazard-teardown-keeps-listeners: counterexample, 14 state(s) (from the TLC trace)
+
+State 1
+  steerLeft = 0
+  gen = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+  rmv = FALSE
+  fenceLeft = 0
+  win = 0
+  bindLeft = 1
+  up = TRUE
+  alloc = "Absent"
+  latch = FALSE
+  stop = "none"
+  entries = {}
+  lis = {}
+  revokeLeft = 0
+  route = "absent"
+  lastLS = {}
+  tamper = FALSE
+  verified = {}
+  rules = FALSE
+  flowL = TRUE
+  holders = {}
+  link = FALSE
+  repLeft = 0
+  sess = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  verSince = FALSE
+  rfn = FALSE
+  boot = 0
+  winE = 0
+  winF = 0
+  estab = FALSE
+  convLeft = 1
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = {"boot"}
+  verSince = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ActivateBegin]
+  alloc = "Activating"
+
+State 10 [ActivateOk]
+  alloc = "Active"
+
+State 11 [ListenState]
+  lastLS = {1}
+
+State 12 [BindListen]
+  lis = {1}
+
+State 13 [Teardown]
+  alloc = "Retiring"
+  sess = FALSE
+
+State 14 [Release]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> TRUE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  alloc = "Absent"
+  lastLS = {}

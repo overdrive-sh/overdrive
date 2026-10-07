@@ -1,0 +1,26 @@
+# cid-lease-witness-claim-error: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  walker = 0
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 0
+  todo = {}
+  exitsLeft = 1
+  errsLeft = 1
+  foreignLeft = 0
+
+State 2 [ForeignRelease]
+  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+
+State 3 [AssignBegin]
+  walker = 1
+  todo = {0, 1, 2}
+
+State 4 [AssignClaimErr]
+  walker = 0
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> TRUE, refusedUnasked |-> FALSE ]
+  todo = {}
+  errsLeft = 0

@@ -1,0 +1,67 @@
+# steering-hazard-rollback-leaves-listener: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  verified = FALSE
+  lastLS = {}
+  lis = {}
+  gen = 0
+  alloc = "Absent"
+  up = TRUE
+  rules = FALSE
+  convLeft = 0
+  route = FALSE
+  bindLeft = 1
+  sess = FALSE
+  holders = {}
+  link = FALSE
+  steerLeft = 1
+  revokeLeft = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  flowL = TRUE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  latch = FALSE
+  boot = 0
+  entries = {}
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  route = TRUE
+  boot = 5
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ListenState]
+  lastLS = {1}
+
+State 10 [ListenState]
+  lastLS = {1, 2}
+
+State 11 [ActivateBegin]
+  alloc = "Activating"
+
+State 12 [BindListen]
+  lis = {2}
+
+State 13 [BindFail]
+  alloc = "Provisioned"
+  bindLeft = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> TRUE, actErrDone |-> TRUE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]

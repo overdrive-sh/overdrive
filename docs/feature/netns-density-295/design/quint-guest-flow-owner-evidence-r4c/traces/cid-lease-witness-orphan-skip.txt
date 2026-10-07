@@ -1,0 +1,48 @@
+# cid-lease-witness-orphan-skip: counterexample, 9 state(s) (from the TLC trace)
+
+State 1
+  walker = 0
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 0
+  todo = {}
+  exitsLeft = 1
+  errsLeft = 1
+  foreignLeft = 0
+
+State 2 [ForeignRelease]
+  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+
+State 3 [AssignBegin]
+  walker = 1
+  todo = {0, 1, 2}
+
+State 4 [AssignTry]
+  walker = 0
+  al = << [ st |-> "admitted", off |-> 0, loc |-> "slot", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 1
+  todo = {}
+
+State 5 [LaunchBegin]
+  al = << [ st |-> "launching", off |-> 0, loc |-> "taken", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+
+State 6 [CreateOk]
+  al = << [ st |-> "running", off |-> 0, loc |-> "vmm", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+
+State 7 [Boot]
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 0
+
+State 8 [AssignBegin]
+  walker = 1
+  todo = {0, 1, 2}
+
+State 9 [AssignTry]
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> TRUE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  todo = {1, 2}

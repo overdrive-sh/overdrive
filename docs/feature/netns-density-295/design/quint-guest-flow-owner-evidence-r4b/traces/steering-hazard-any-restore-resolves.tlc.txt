@@ -1,0 +1,789 @@
+State 1: <Initial predicate>
+/\ steer_detachLiveAnyRestore_steering_boot = 0
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = FALSE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = FALSE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "absent"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 0
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 2: <steer_detachLiveAnyRestore_steering_ListenerTaskExit line 1852, col 3 to line 1868, col 46 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 0
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = FALSE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = FALSE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "absent"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 0
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 3: <steer_detachLiveAnyRestore_steering_BootStep line 1315, col 3 to line 1439, col 52 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 1
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = FALSE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = FALSE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "absent"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 0
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 4: <steer_detachLiveAnyRestore_steering_BootStep line 1315, col 3 to line 1439, col 52 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 2
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = FALSE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "absent"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 0
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 5: <steer_detachLiveAnyRestore_steering_BootStep line 1315, col 3 to line 1439, col 52 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 3
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = FALSE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "absent"
+/\ steer_detachLiveAnyRestore_steering_link = TRUE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 0
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 6: <steer_detachLiveAnyRestore_steering_BootStep line 1315, col 3 to line 1439, col 52 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 4
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = FALSE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = TRUE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "absent"
+/\ steer_detachLiveAnyRestore_steering_link = TRUE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 0
+/\ steer_detachLiveAnyRestore_steering_verSince = TRUE
+
+State 7: <steer_detachLiveAnyRestore_steering_RootDetach line 1776, col 3 to line 1796, col 46 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 4
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = FALSE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = TRUE
+/\ steer_detachLiveAnyRestore_steering_tamper = TRUE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "absent"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 0
+/\ steer_detachLiveAnyRestore_steering_verSince = TRUE
+
+State 8: <steer_detachLiveAnyRestore_steering_BootStep line 1315, col 3 to line 1439, col 52 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = TRUE
+/\ steer_detachLiveAnyRestore_steering_tamper = TRUE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "local"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 0
+/\ steer_detachLiveAnyRestore_steering_verSince = TRUE
+
+State 9: <steer_detachLiveAnyRestore_steering_Provision line 1611, col 3 to line 1622, col 46 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = TRUE
+/\ steer_detachLiveAnyRestore_steering_tamper = TRUE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Provisioned"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "local"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = TRUE
+
+State 10: <steer_detachLiveAnyRestore_steering_RecQuiesce line 2238, col 3 to line 2250, col 52 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = FALSE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = TRUE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = TRUE
+/\ steer_detachLiveAnyRestore_steering_tamper = TRUE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Provisioned"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "held"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveAnyRestore_steering_route = "local"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = TRUE
+
+State 11: <steer_detachLiveAnyRestore_steering_RecRepair line 2256, col 3 to line 2299, col 46 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = TRUE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = TRUE
+/\ steer_detachLiveAnyRestore_steering_tamper = TRUE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Provisioned"
+/\ steer_detachLiveAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveAnyRestore_steering_route = "local"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = TRUE
+
+State 12: <steer_detachLiveAnyRestore_steering_Teardown line 1685, col 3 to line 1695, col 46 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = TRUE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = TRUE
+/\ steer_detachLiveAnyRestore_steering_tamper = TRUE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Retiring"
+/\ steer_detachLiveAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveAnyRestore_steering_route = "local"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = TRUE
+
+State 13: <steer_detachLiveAnyRestore_steering_AuditFind line 1874, col 3 to line 1898, col 46 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = TRUE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 1
+/\ steer_detachLiveAnyRestore_steering_verified = TRUE
+/\ steer_detachLiveAnyRestore_steering_tamper = TRUE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Retiring"
+/\ steer_detachLiveAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveAnyRestore_steering_route = "local"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = TRUE
+
+State 14: <steer_detachLiveAnyRestore_steering_RecFence line 1904, col 3 to line 1944, col 46 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = TRUE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 2
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Retiring"
+/\ steer_detachLiveAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "fenced",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveAnyRestore_steering_route = "fence"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 15: <steer_detachLiveAnyRestore_steering_RecQuiesceGps line 1950, col 3 to line 1969, col 48 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = TRUE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Retiring"
+/\ steer_detachLiveAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveAnyRestore_steering_route = "fence"
+/\ steer_detachLiveAnyRestore_steering_link = FALSE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 16: <steer_detachLiveAnyRestore_steering_RepConverge line 1975, col 3 to line 2016, col 46 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = TRUE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Retiring"
+/\ steer_detachLiveAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "conv",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveAnyRestore_steering_route = "fence"
+/\ steer_detachLiveAnyRestore_steering_link = TRUE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 17: <steer_detachLiveAnyRestore_steering_Release line 1701, col 3 to line 1719, col 7 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = TRUE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "conv",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveAnyRestore_steering_route = "fence"
+/\ steer_detachLiveAnyRestore_steering_link = TRUE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 18: <steer_detachLiveAnyRestore_steering_RecRestore line 1141, col 3 to line 1248, col 52 of module steer_detachLiveAnyRestore>
+/\ steer_detachLiveAnyRestore_steering_boot = 5
+/\ steer_detachLiveAnyRestore_steering_entries = {}
+/\ steer_detachLiveAnyRestore_steering_flowL = TRUE
+/\ steer_detachLiveAnyRestore_steering_estab = TRUE
+/\ steer_detachLiveAnyRestore_steering_latch = FALSE
+/\ steer_detachLiveAnyRestore_steering_att = 0
+/\ steer_detachLiveAnyRestore_steering_lastLS = {}
+/\ steer_detachLiveAnyRestore_steering_revokeLeft = 0
+/\ steer_detachLiveAnyRestore_steering_win = 0
+/\ steer_detachLiveAnyRestore_steering_verified = FALSE
+/\ steer_detachLiveAnyRestore_steering_tamper = FALSE
+/\ steer_detachLiveAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> TRUE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_detachLiveAnyRestore_steering_alloc = "Absent"
+/\ steer_detachLiveAnyRestore_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveAnyRestore_steering_sess = FALSE
+/\ steer_detachLiveAnyRestore_steering_rules = TRUE
+/\ steer_detachLiveAnyRestore_steering_holders = {}
+/\ steer_detachLiveAnyRestore_steering_route = "fence"
+/\ steer_detachLiveAnyRestore_steering_link = TRUE
+/\ steer_detachLiveAnyRestore_steering_up = TRUE
+/\ steer_detachLiveAnyRestore_steering_steerLeft = 0
+/\ steer_detachLiveAnyRestore_steering_convLeft = 0
+/\ steer_detachLiveAnyRestore_steering_repLeft = 0
+/\ steer_detachLiveAnyRestore_steering_lis = {}
+/\ steer_detachLiveAnyRestore_steering_bindLeft = 0
+/\ steer_detachLiveAnyRestore_steering_stop = "none"
+/\ steer_detachLiveAnyRestore_steering_gen = 1
+/\ steer_detachLiveAnyRestore_steering_verSince = FALSE
+
+State 19: Stuttering

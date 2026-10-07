@@ -1,0 +1,626 @@
+State 1: <Initial predicate>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {}
+/\ steer_two_steering_lastLS = {}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Absent"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = FALSE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "absent"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 0
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = FALSE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = FALSE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = FALSE
+/\ steer_two_steering_estab = FALSE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 0
+
+State 2: <steer_two_steering_BootStep line 1356, col 3 to line 1432, col 35 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {}
+/\ steer_two_steering_lastLS = {}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Absent"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = FALSE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "absent"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 0
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = FALSE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = FALSE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = FALSE
+/\ steer_two_steering_estab = FALSE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 1
+
+State 3: <steer_two_steering_BootStep line 1356, col 3 to line 1432, col 35 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {}
+/\ steer_two_steering_lastLS = {}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Absent"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = FALSE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "absent"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 0
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = FALSE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = FALSE
+/\ steer_two_steering_estab = FALSE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 2
+
+State 4: <steer_two_steering_BootStep line 1356, col 3 to line 1432, col 35 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {}
+/\ steer_two_steering_lastLS = {}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Absent"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = FALSE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "absent"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 0
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = TRUE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = FALSE
+/\ steer_two_steering_estab = FALSE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 3
+
+State 5: <steer_two_steering_BootStep line 1356, col 3 to line 1432, col 35 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {"boot"}
+/\ steer_two_steering_lastLS = {}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Absent"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = TRUE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "absent"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 0
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = TRUE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = FALSE
+/\ steer_two_steering_estab = FALSE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 4
+
+State 6: <steer_two_steering_BootStep line 1356, col 3 to line 1432, col 35 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {"boot"}
+/\ steer_two_steering_lastLS = {}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Absent"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = TRUE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "local"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 0
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = TRUE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = FALSE
+/\ steer_two_steering_estab = TRUE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 5
+
+State 7: <steer_two_steering_Provision line 1571, col 3 to line 1579, col 35 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {"boot"}
+/\ steer_two_steering_lastLS = {}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Provisioned"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = TRUE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "local"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 1
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = TRUE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = FALSE
+/\ steer_two_steering_estab = TRUE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 5
+
+State 8: <steer_two_steering_SessOpen line 1585, col 3 to line 1593, col 35 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {"boot"}
+/\ steer_two_steering_lastLS = {}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Provisioned"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = TRUE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "local"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 1
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = TRUE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = TRUE
+/\ steer_two_steering_estab = TRUE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 5
+
+State 9: <steer_two_steering_ListenState line 1552, col 3 to line 1565, col 35 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {"boot"}
+/\ steer_two_steering_lastLS = {1}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Provisioned"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = TRUE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "local"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 1
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = TRUE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = TRUE
+/\ steer_two_steering_estab = TRUE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 5
+
+State 10: <steer_two_steering_ActivateBegin line 1612, col 3 to line 1626, col 52 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {"boot"}
+/\ steer_two_steering_lastLS = {1}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Activating"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = TRUE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "local"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 1
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 1
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = TRUE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = TRUE
+/\ steer_two_steering_estab = TRUE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 5
+
+State 11: <steer_two_steering_BindFail line 1059, col 3 to line 1069, col 44 of module steer_two>
+/\ steer_two_steering_lis = {}
+/\ steer_two_steering_tamper = FALSE
+/\ steer_two_steering_winE = 0
+/\ steer_two_steering_winF = 0
+/\ steer_two_steering_verified = {"boot"}
+/\ steer_two_steering_lastLS = {1}
+/\ steer_two_steering_convLeft = 0
+/\ steer_two_steering_alloc = "Provisioned"
+/\ steer_two_steering_latch = FALSE
+/\ steer_two_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_two_steering_verSince = TRUE
+/\ steer_two_steering_rfn = FALSE
+/\ steer_two_steering_route = "local"
+/\ steer_two_steering_steerLeft = 1
+/\ steer_two_steering_bindLeft = 0
+/\ steer_two_steering_stop = "none"
+/\ steer_two_steering_entries = {}
+/\ steer_two_steering_revokeLeft = 0
+/\ steer_two_steering_gen = 1
+/\ steer_two_steering_fenceLeft = 0
+/\ steer_two_steering_rules = TRUE
+/\ steer_two_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_two_steering_flowL = TRUE
+/\ steer_two_steering_rmv = FALSE
+/\ steer_two_steering_win = 0
+/\ steer_two_steering_holders = {}
+/\ steer_two_steering_link = TRUE
+/\ steer_two_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> TRUE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_two_steering_repLeft = 0
+/\ steer_two_steering_sess = TRUE
+/\ steer_two_steering_estab = TRUE
+/\ steer_two_steering_up = TRUE
+/\ steer_two_steering_boot = 5

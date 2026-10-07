@@ -1,0 +1,72 @@
+# steering-hazard-element-close-first: counterexample, 15 state(s) (from the TLC trace)
+
+State 1
+  bindLeft = 1
+  boot = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  lastLS = {}
+  holders = {}
+  flowL = TRUE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  latch = FALSE
+  entries = {}
+  verified = FALSE
+  lis = {}
+  sess = FALSE
+  steerLeft = 0
+  revokeLeft = 0
+  gen = 0
+  link = FALSE
+  alloc = "Absent"
+  rules = FALSE
+  route = FALSE
+  convLeft = 1
+  up = TRUE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 5 [BootStep]
+  boot = 4
+  verified = TRUE
+
+State 6 [BootStep]
+  boot = 5
+  route = TRUE
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ActivateBegin]
+  alloc = "Activating"
+
+State 10 [ActivateOk]
+  alloc = "Active"
+
+State 11 [ListenState]
+  lastLS = {1}
+
+State 12 [BindListen]
+  lis = {1}
+
+State 13 [Steer]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> TRUE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  entries = {1}
+
+State 14 [ListenState]
+  lastLS = {}
+
+State 15 [TakeDown]
+  lis = {}

@@ -1,0 +1,74 @@
+# steering-hazard-act-ok-partial: counterexample, 11 state(s) (from the TLC trace)
+
+State 1
+  bindLeft = 1
+  rules = FALSE
+  lastLS = {}
+  flowL = TRUE
+  entries = {}
+  lis = {}
+  link = FALSE
+  tamper = FALSE
+  sess = FALSE
+  estab = FALSE
+  boot = 0
+  winE = 0
+  holders = {}
+  winF = 0
+  verified = {}
+  repLeft = 0
+  convLeft = 1
+  fenceLeft = 0
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  rfn = FALSE
+  verSince = FALSE
+  steerLeft = 0
+  alloc = "Absent"
+  revokeLeft = 0
+  gen = 0
+  latch = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  rmv = FALSE
+  up = TRUE
+  route = "absent"
+  stop = "none"
+  win = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  boot = 4
+  verified = {"boot"}
+  verSince = TRUE
+
+State 6 [BootStep]
+  estab = TRUE
+  boot = 5
+  route = "local"
+
+State 7 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ListenState]
+  lastLS = {1}
+
+State 10 [ActivateBegin]
+  alloc = "Activating"
+
+State 11 [ActivateOk]
+  alloc = "Active"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> TRUE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]

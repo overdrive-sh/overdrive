@@ -1,0 +1,83 @@
+# steering-env-close-gap-widens: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  rules = FALSE
+  winE = 0
+  winF = 0
+  bindLeft = 0
+  flowL = TRUE
+  fenceLeft = 0
+  entries = {}
+  estab = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  rfn = FALSE
+  holders = {}
+  repLeft = 0
+  revokeLeft = 0
+  gen = 0
+  stop = "none"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+  rmv = FALSE
+  alloc = "Absent"
+  latch = FALSE
+  verified = {}
+  win = 0
+  convLeft = 0
+  up = TRUE
+  route = "absent"
+  link = FALSE
+  lastLS = {}
+  verSince = FALSE
+  steerLeft = 0
+  sess = FALSE
+  lis = {}
+  boot = 0
+  tamper = FALSE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = {"boot"}
+  verSince = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  estab = TRUE
+  route = "local"
+  boot = 5
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ActivateBegin]
+  alloc = "Activating"
+
+State 10 [ActivateOk]
+  alloc = "Active"
+
+State 11 [ListenState]
+  lastLS = {1}
+
+State 12 [BindListen]
+  lis = {1}
+
+State 13 [ListenState]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> TRUE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  link = FALSE
+  lastLS = {}
+  lis = {}
+  tamper = TRUE

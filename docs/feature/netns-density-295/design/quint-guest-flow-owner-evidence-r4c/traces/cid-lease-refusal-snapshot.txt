@@ -1,0 +1,38 @@
+# cid-lease-refusal-snapshot: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  walker = 0
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 0
+  todo = {}
+  exitsLeft = 1
+  errsLeft = 1
+  foreignLeft = 0
+
+State 2 [AssignBegin]
+  walker = 1
+  todo = {0, 1, 2}
+
+State 3 [AssignTry]
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  todo = {1, 2}
+
+State 4 [ForeignRelease]
+  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+
+State 5 [ForeignTake]
+  kern = (0 :> 0 @@ 1 :> -1 @@ 2 :> 0)
+
+State 6 [ForeignTake]
+  kern = (0 :> 0 @@ 1 :> -1 @@ 2 :> -1)
+
+State 7 [AssignTry]
+  todo = {2}
+
+State 8 [AssignTry]
+  walker = 0
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> TRUE, refusedClaimable |-> TRUE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  todo = {}

@@ -1,0 +1,90 @@
+# steering-hazard-quiesce-no-fence: counterexample, 15 state(s) (from the TLC trace)
+
+State 1
+  stop = "none"
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  estab = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  rfn = FALSE
+  bindLeft = 0
+  gen = 0
+  link = FALSE
+  fenceLeft = 0
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+  rmv = FALSE
+  sess = FALSE
+  alloc = "Absent"
+  boot = 0
+  win = 0
+  latch = FALSE
+  steerLeft = 0
+  entries = {}
+  winE = 0
+  winF = 0
+  verified = {}
+  route = "absent"
+  lastLS = {}
+  lis = {}
+  up = TRUE
+  holders = {}
+  revokeLeft = 0
+  repLeft = 0
+  tamper = FALSE
+  verSince = FALSE
+  rules = FALSE
+  flowL = TRUE
+  convLeft = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  boot = 4
+  verified = {"boot"}
+  verSince = TRUE
+
+State 6 [BootStep]
+  estab = TRUE
+  boot = 5
+  route = "local"
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ForeignFlush]
+  rules = FALSE
+
+State 10 [ActivateBegin]
+  alloc = "Activating"
+
+State 11 [ActivateOk]
+  alloc = "Active"
+
+State 12 [RootDetach]
+  link = FALSE
+  tamper = TRUE
+
+State 13 [ListenState]
+  lastLS = {1}
+
+State 14 [BindListen]
+  lis = {1}
+
+State 15 [RecQuiesce]
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> TRUE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  latch = TRUE
+  lis = {}
+  holders = {"IpRules"}

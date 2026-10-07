@@ -1,0 +1,51 @@
+# steering-hazard-no-verify-wildcard: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  tamper = FALSE
+  holders = {}
+  alloc = "Absent"
+  verified = FALSE
+  sess = FALSE
+  up = TRUE
+  lis = {}
+  rules = FALSE
+  repLeft = 0
+  route = "absent"
+  link = FALSE
+  gen = 0
+  stop = "none"
+  revokeLeft = 0
+  att = 0
+  entries = {}
+  convLeft = 1
+  bindLeft = 1
+  lastLS = {}
+  boot = 0
+  flowL = TRUE
+  verSince = FALSE
+  estab = FALSE
+  latch = FALSE
+  steerLeft = 0
+  win = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [ConvergeFail]
+  convLeft = 0
+  boot = 3
+
+State 5 [BootStep]
+  boot = 4
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+  g = [ routeUnverified |-> TRUE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]

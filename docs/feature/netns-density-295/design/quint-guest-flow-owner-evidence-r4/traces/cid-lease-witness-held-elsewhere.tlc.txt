@@ -1,0 +1,188 @@
+State 1: <Initial predicate>
+/\ lease_ok_cid_lease_walker = 0
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> FALSE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE ]
+/\ lease_ok_cid_lease_kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_todo = {}
+/\ lease_ok_cid_lease_exitsLeft = 1
+/\ lease_ok_cid_lease_errsLeft = 1
+/\ lease_ok_cid_lease_foreignLeft = 0
+
+State 2: <lease_ok_cid_lease_AssignBegin line 632, col 3 to line 687, col 38 of module lease_ok>
+/\ lease_ok_cid_lease_walker = 1
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> FALSE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE ]
+/\ lease_ok_cid_lease_kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_todo = {0, 1, 2}
+/\ lease_ok_cid_lease_exitsLeft = 1
+/\ lease_ok_cid_lease_errsLeft = 1
+/\ lease_ok_cid_lease_foreignLeft = 0
+
+State 3: <lease_ok_cid_lease_AssignTry line 693, col 3 to line 789, col 38 of module lease_ok>
+/\ lease_ok_cid_lease_walker = 1
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE ]
+/\ lease_ok_cid_lease_kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_todo = {1, 2}
+/\ lease_ok_cid_lease_exitsLeft = 1
+/\ lease_ok_cid_lease_errsLeft = 1
+/\ lease_ok_cid_lease_foreignLeft = 0
+
+State 4: <lease_ok_cid_lease_ForeignTake line 553, col 3 to line 554, col 70 of module lease_ok>
+/\ lease_ok_cid_lease_walker = 1
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE ]
+/\ lease_ok_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> 0)
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_todo = {1, 2}
+/\ lease_ok_cid_lease_exitsLeft = 1
+/\ lease_ok_cid_lease_errsLeft = 1
+/\ lease_ok_cid_lease_foreignLeft = 0
+
+State 5: <lease_ok_cid_lease_AssignTry line 693, col 3 to line 789, col 38 of module lease_ok>
+/\ lease_ok_cid_lease_walker = 1
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE ]
+/\ lease_ok_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> 0)
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_todo = {2}
+/\ lease_ok_cid_lease_exitsLeft = 1
+/\ lease_ok_cid_lease_errsLeft = 1
+/\ lease_ok_cid_lease_foreignLeft = 0
+
+State 6: <lease_ok_cid_lease_ForeignTake line 553, col 3 to line 554, col 70 of module lease_ok>
+/\ lease_ok_cid_lease_walker = 1
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE ]
+/\ lease_ok_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_todo = {2}
+/\ lease_ok_cid_lease_exitsLeft = 1
+/\ lease_ok_cid_lease_errsLeft = 1
+/\ lease_ok_cid_lease_foreignLeft = 0
+
+State 7: <lease_ok_cid_lease_AssignTry line 693, col 3 to line 789, col 38 of module lease_ok>
+/\ lease_ok_cid_lease_walker = 0
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> TRUE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE ]
+/\ lease_ok_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_todo = {}
+/\ lease_ok_cid_lease_exitsLeft = 1
+/\ lease_ok_cid_lease_errsLeft = 1
+/\ lease_ok_cid_lease_foreignLeft = 0

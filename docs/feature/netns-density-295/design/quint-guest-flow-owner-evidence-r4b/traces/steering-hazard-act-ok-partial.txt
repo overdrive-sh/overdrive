@@ -1,0 +1,69 @@
+# steering-hazard-act-ok-partial: counterexample, 11 state(s) (from the TLC trace)
+
+State 1
+  revokeLeft = 0
+  up = TRUE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  convLeft = 1
+  bindLeft = 1
+  alloc = "Absent"
+  lastLS = {}
+  verSince = FALSE
+  rules = FALSE
+  route = "absent"
+  holders = {}
+  lis = {}
+  sess = FALSE
+  gen = 0
+  repLeft = 0
+  tamper = FALSE
+  link = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  att = 0
+  flowL = TRUE
+  verified = FALSE
+  estab = FALSE
+  entries = {}
+  stop = "none"
+  latch = FALSE
+  steerLeft = 0
+  boot = 0
+  win = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  verified = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  route = "local"
+  estab = TRUE
+  boot = 5
+
+State 7 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ListenState]
+  lastLS = {1}
+
+State 10 [ActivateBegin]
+  alloc = "Activating"
+
+State 11 [ActivateOk]
+  alloc = "Active"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> TRUE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]

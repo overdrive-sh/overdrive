@@ -1,0 +1,78 @@
+# steering-hazard-any-restore: counterexample, 12 state(s) (from the TLC trace)
+
+State 1
+  up = TRUE
+  gen = 0
+  verified = FALSE
+  att = 0
+  steerLeft = 0
+  revokeLeft = 0
+  flowL = TRUE
+  estab = FALSE
+  latch = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  lastLS = {}
+  convLeft = 1
+  bindLeft = 1
+  sess = FALSE
+  win = 0
+  holders = {}
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  verSince = FALSE
+  link = FALSE
+  repLeft = 0
+  tamper = FALSE
+  stop = "none"
+  alloc = "Absent"
+  rules = FALSE
+  lis = {}
+  route = "absent"
+  boot = 0
+  entries = {}
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = TRUE
+  verSince = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  estab = TRUE
+  route = "local"
+  boot = 5
+
+State 7 [ForeignFlush]
+  rules = FALSE
+
+State 8 [ListenerTaskExit]
+  flowL = FALSE
+
+State 9 [RecQuiesce]
+  latch = TRUE
+  holders = {"IpRules"}
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 10 [RecQuiesce]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> TRUE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  holders = {"IpRules", "FlowListeners"}
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "idle", FlowListeners |-> "held"]
+
+State 11 [RecRepair]
+  rec = [ IpRules |-> "repaired", GuestPrefixSteering |-> "idle", FlowListeners |-> "held" ]
+  rules = TRUE
+
+State 12 [RecRestore]
+  latch = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> TRUE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> TRUE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  holders = {}
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]

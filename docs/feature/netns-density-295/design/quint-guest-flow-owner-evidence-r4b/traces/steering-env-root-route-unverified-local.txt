@@ -1,0 +1,35 @@
+# steering-env-root-route-unverified-local: counterexample, 2 state(s) (from the TLC trace)
+
+State 1
+  win = 0
+  sess = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  convLeft = 1
+  bindLeft = 1
+  tamper = FALSE
+  link = FALSE
+  flowL = TRUE
+  verSince = FALSE
+  estab = FALSE
+  latch = FALSE
+  revokeLeft = 0
+  stop = "none"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  lis = {}
+  holders = {}
+  gen = 0
+  boot = 0
+  steerLeft = 0
+  repLeft = 0
+  up = TRUE
+  att = 0
+  alloc = "Absent"
+  verified = FALSE
+  entries = {}
+  rules = FALSE
+  route = "absent"
+  lastLS = {}
+
+State 2 [RootRoute]
+  tamper = TRUE
+  route = "local"

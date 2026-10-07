@@ -8,7 +8,8 @@ assignment (independent DESIGN review finding M-9) confirmed by user
 Amends on acceptance: ADR-0118 (assignment order of the address pool).
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN — PROPOSED 2026-10-05*. Depends on ADR-0146. How the derived CID is
-made the lease's own on the host kernel is ADR-0170 (D16-CLAIM).
+made the lease's own on the host kernel is ADR-0170 (D16-CLAIM, approved by
+user 2026-10-07; pending independent DESIGN review).
 
 ## Context
 
@@ -37,8 +38,9 @@ the offset of the allocation's `workload_addr` within the node's guest prefix.
   ADR-0170.
 
 Uniqueness among Overdrive's own VMs follows from lease uniqueness over
-Admitted and Retiring leases; uniqueness against other vhost users on the
-host is the kernel's claim (ADR-0170).
+Admitted and Retiring leases; uniqueness against a CID still held by a VMM
+the pool does not lease (one that survived a `serve` crash) is the kernel's
+claim (ADR-0170).
 
 ## Alternatives considered
 

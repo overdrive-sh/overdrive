@@ -1,0 +1,105 @@
+# steering-hazard-restore-lifts-fence-route: counterexample, 15 state(s) (from the TLC trace)
+
+State 1
+  up = TRUE
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  rmv = FALSE
+  stop = "none"
+  verSince = FALSE
+  entries = {}
+  win = 0
+  lastLS = {}
+  revokeLeft = 0
+  alloc = "Absent"
+  latch = FALSE
+  tamper = FALSE
+  link = FALSE
+  holders = {}
+  fenceLeft = 0
+  lis = {}
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  repLeft = 1
+  route = "absent"
+  sess = FALSE
+  steerLeft = 0
+  boot = 0
+  bindLeft = 1
+  winE = 0
+  winF = 0
+  rules = FALSE
+  flowL = TRUE
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  rfn = FALSE
+  estab = FALSE
+  verified = {}
+  gen = 0
+  convLeft = 1
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  boot = 4
+  verified = {"boot"}
+
+State 6 [ForeignFlush]
+  rules = FALSE
+
+State 7 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 8 [BootStep]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> TRUE ]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 9 [AuditFind]
+  win = 1
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+
+State 10 [RecQuiesce]
+  verSince = FALSE
+  latch = TRUE
+  tamper = FALSE
+  holders = {"IpRules"}
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> TRUE, widenClose |-> FALSE, widenRoute |-> TRUE ]
+  route = "fence"
+  rec = [ IpRules |-> "held", GuestPrefixSteering |-> "found", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+
+State 11 [RepConverge]
+  win = 0
+  link = TRUE
+  rules = TRUE
+  rec = [ IpRules |-> "conv", GuestPrefixSteering |-> "found", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+
+State 12 [RepVerify]
+  verSince = TRUE
+  rec = [ IpRules |-> "ver", GuestPrefixSteering |-> "found", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  verified = {"IpRules", "boot"}
+
+State 13 [RepRoute]
+  route = "local"
+  rec = [ IpRules |-> "repaired", GuestPrefixSteering |-> "found", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+
+State 14 [RecFence]
+  verSince = FALSE
+  route = "fence"
+  rec = [ IpRules |-> "repaired", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+
+State 15 [RecRestore]
+  latch = FALSE
+  holders = {}
+  route = "local"
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  verified = {"boot"}

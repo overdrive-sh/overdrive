@@ -1,0 +1,865 @@
+State 1: <Initial predicate>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = FALSE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "absent"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 0
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 2: <steer_bugUnserializedLift_steering_BootStep line 1812, col 3 to line 1928, col 51 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = FALSE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "absent"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 1
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 3: <steer_bugUnserializedLift_steering_BootStep line 1812, col 3 to line 1928, col 51 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = FALSE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "absent"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = TRUE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 2
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 4: <steer_bugUnserializedLift_steering_BootStep line 1812, col 3 to line 1928, col 51 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = FALSE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "absent"
+/\ steer_bugUnserializedLift_steering_link = TRUE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = TRUE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 3
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 5: <steer_bugUnserializedLift_steering_BootStep line 1812, col 3 to line 1928, col 51 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = FALSE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {"boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = TRUE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "absent"
+/\ steer_bugUnserializedLift_steering_link = TRUE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = TRUE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 4
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 6: <steer_bugUnserializedLift_steering_BootStep line 1812, col 3 to line 1928, col 51 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {"boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = TRUE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "local"
+/\ steer_bugUnserializedLift_steering_link = TRUE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = TRUE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 7: <steer_bugUnserializedLift_steering_RootDetach line 2274, col 3 to line 2298, col 45 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = TRUE
+/\ steer_bugUnserializedLift_steering_verified = {"boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = TRUE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "local"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = TRUE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 8: <steer_bugUnserializedLift_steering_ForeignFlush line 2246, col 3 to line 2268, col 45 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = TRUE
+/\ steer_bugUnserializedLift_steering_verified = {"boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = TRUE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "local"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 9: <steer_bugUnserializedLift_steering_AuditFind line 2380, col 3 to line 2406, col 45 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = TRUE
+/\ steer_bugUnserializedLift_steering_verified = {"boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = FALSE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = TRUE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 1
+/\ steer_bugUnserializedLift_steering_route = "local"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 10: <steer_bugUnserializedLift_steering_RecQuiesceGps line 2412, col 3 to line 2426, col 142 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {"GuestPrefixSteering"}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {"boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = TRUE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 2
+/\ steer_bugUnserializedLift_steering_route = "fence"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 11: <steer_bugUnserializedLift_steering_RepFence line 2432, col 3 to line 2481, col 45 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {"GuestPrefixSteering"}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {"boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = TRUE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "fence"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 12: <steer_bugUnserializedLift_steering_RepConverge line 2487, col 3 to line 2552, col 45 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {"GuestPrefixSteering"}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "conv", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {"boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = TRUE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "fence"
+/\ steer_bugUnserializedLift_steering_link = TRUE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 13: <steer_bugUnserializedLift_steering_RepVerify line 2630, col 3 to line 2700, col 45 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {"GuestPrefixSteering"}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "ver", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = TRUE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = TRUE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "fence"
+/\ steer_bugUnserializedLift_steering_link = TRUE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 14: <steer_bugUnserializedLift_steering_RootDetach line 2274, col 3 to line 2298, col 45 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {"GuestPrefixSteering"}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "ver", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = TRUE
+/\ steer_bugUnserializedLift_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = TRUE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = TRUE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "fence"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 15: <steer_bugUnserializedLift_steering_RecQuiesce line 2802, col 3 to line 2819, col 142 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {"IpRules", "GuestPrefixSteering"}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [IpRules |-> "held", GuestPrefixSteering |-> "ver", FlowListeners |-> "idle"]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = TRUE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  joinFenced |-> TRUE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "fence"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0
+
+State 16: <steer_bugUnserializedLift_steering_RepRoute line 2706, col 3 to line 2756, col 7 of module steer_bugUnserializedLift>
+/\ steer_bugUnserializedLift_steering_holders = {"IpRules", "GuestPrefixSteering"}
+/\ steer_bugUnserializedLift_steering_estab = TRUE
+/\ steer_bugUnserializedLift_steering_repLeft = 0
+/\ steer_bugUnserializedLift_steering_entries = {}
+/\ steer_bugUnserializedLift_steering_rec = [ IpRules |-> "held",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "idle" ]
+/\ steer_bugUnserializedLift_steering_lastLS = {}
+/\ steer_bugUnserializedLift_steering_rfn = FALSE
+/\ steer_bugUnserializedLift_steering_tamper = FALSE
+/\ steer_bugUnserializedLift_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_bugUnserializedLift_steering_convLeft = 0
+/\ steer_bugUnserializedLift_steering_gen = 0
+/\ steer_bugUnserializedLift_steering_stop = "none"
+/\ steer_bugUnserializedLift_steering_up = TRUE
+/\ steer_bugUnserializedLift_steering_steerLeft = 0
+/\ steer_bugUnserializedLift_steering_alloc = "Absent"
+/\ steer_bugUnserializedLift_steering_revokeLeft = 0
+/\ steer_bugUnserializedLift_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_bugUnserializedLift_steering_latch = TRUE
+/\ steer_bugUnserializedLift_steering_rmv = FALSE
+/\ steer_bugUnserializedLift_steering_verSince = FALSE
+/\ steer_bugUnserializedLift_steering_fenceLeft = 0
+/\ steer_bugUnserializedLift_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  joinFenced |-> TRUE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE,
+  otherLift |-> FALSE ]
+/\ steer_bugUnserializedLift_steering_win = 0
+/\ steer_bugUnserializedLift_steering_route = "local"
+/\ steer_bugUnserializedLift_steering_link = FALSE
+/\ steer_bugUnserializedLift_steering_sess = FALSE
+/\ steer_bugUnserializedLift_steering_rules = FALSE
+/\ steer_bugUnserializedLift_steering_lis = {}
+/\ steer_bugUnserializedLift_steering_flowL = TRUE
+/\ steer_bugUnserializedLift_steering_boot = 5
+/\ steer_bugUnserializedLift_steering_winE = 0
+/\ steer_bugUnserializedLift_steering_winF = 0
+/\ steer_bugUnserializedLift_steering_bindLeft = 0

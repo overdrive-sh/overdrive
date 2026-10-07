@@ -1,0 +1,87 @@
+# steering-hazard-restore-lifts-fence: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  lastLS = {}
+  att = 0
+  flowL = TRUE
+  estab = FALSE
+  entries = {}
+  latch = FALSE
+  sess = FALSE
+  convLeft = 1
+  bindLeft = 1
+  tamper = FALSE
+  revokeLeft = 0
+  win = 0
+  link = FALSE
+  verSince = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  stop = "none"
+  alloc = "Absent"
+  rules = FALSE
+  boot = 0
+  route = "absent"
+  holders = {}
+  lis = {}
+  steerLeft = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  gen = 0
+  repLeft = 1
+  verified = FALSE
+  up = TRUE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  boot = 4
+  verified = TRUE
+
+State 6 [BootStep]
+  estab = TRUE
+  boot = 5
+  route = "local"
+
+State 7 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 8 [ForeignFlush]
+  rules = FALSE
+
+State 9 [RecQuiesce]
+  latch = TRUE
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  holders = {"IpRules"}
+
+State 10 [AuditFind]
+  win = 1
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+
+State 11 [RecFence]
+  tamper = FALSE
+  win = 2
+  verSince = FALSE
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle"]
+  route = "fence"
+  verified = FALSE
+
+State 12 [RecRepair]
+  win = 0
+  rec = [ IpRules |-> "repaired", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle" ]
+  rules = TRUE
+
+State 13 [RecRestore]
+  latch = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle"]
+  route = "local"
+  holders = {}

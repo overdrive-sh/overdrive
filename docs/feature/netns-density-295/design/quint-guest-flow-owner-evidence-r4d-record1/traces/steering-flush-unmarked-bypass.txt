@@ -1,0 +1,79 @@
+# steering-flush-unmarked-bypass: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  lis = {}
+  link = FALSE
+  lastLS = {}
+  estab = FALSE
+  sess = FALSE
+  up = TRUE
+  tamper = FALSE
+  boot = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  winE = 0
+  winF = 0
+  bindLeft = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  entries = {}
+  rfn = FALSE
+  alloc = "Absent"
+  latch = FALSE
+  gen = 0
+  route = "absent"
+  holders = {}
+  verified = {}
+  repLeft = 0
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+  steerLeft = 0
+  rmv = FALSE
+  revokeLeft = 0
+  stop = "none"
+  rules = FALSE
+  win = 0
+  verSince = FALSE
+  flowL = TRUE
+  fenceLeft = 0
+  convLeft = 1
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  boot = 4
+  verified = {"boot"}
+  verSince = TRUE
+
+State 6 [BootStep]
+  estab = TRUE
+  boot = 5
+  route = "local"
+
+State 7 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ListenState]
+  lastLS = {1}
+
+State 10 [ActivateBegin]
+  alloc = "Activating"
+
+State 11 [BindListen]
+  lis = {1}
+
+State 12 [Steer]
+  entries = {1}
+
+State 13 [ForeignFlush]
+  rules = FALSE

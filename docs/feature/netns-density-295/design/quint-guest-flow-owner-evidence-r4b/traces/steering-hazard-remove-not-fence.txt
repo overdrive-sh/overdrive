@@ -1,0 +1,50 @@
+# steering-hazard-remove-not-fence: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  flowL = TRUE
+  estab = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  latch = FALSE
+  repLeft = 1
+  revokeLeft = 0
+  up = TRUE
+  lastLS = {}
+  win = 0
+  verified = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  entries = {}
+  sess = FALSE
+  alloc = "Absent"
+  steerLeft = 0
+  tamper = FALSE
+  convLeft = 1
+  rules = FALSE
+  link = FALSE
+  route = "absent"
+  lis = {}
+  bindLeft = 1
+  stop = "none"
+  gen = 0
+  verSince = FALSE
+  boot = 0
+  holders = {}
+  att = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [ConvergeFail]
+  estab = TRUE
+  g = [ routeUnverified |-> FALSE, refused |-> TRUE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  up = FALSE
+  convLeft = 0
+  stop = "refused"
+  boot = 0
+
+State 5 [Restart]
+  up = TRUE
+  stop = "none"

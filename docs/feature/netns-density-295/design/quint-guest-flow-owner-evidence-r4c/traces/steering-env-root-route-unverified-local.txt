@@ -1,0 +1,40 @@
+# steering-env-root-route-unverified-local: counterexample, 2 state(s) (from the TLC trace)
+
+State 1
+  lis = {}
+  route = "absent"
+  boot = 0
+  winE = 0
+  winF = 0
+  rules = FALSE
+  flowL = TRUE
+  holders = {}
+  repLeft = 0
+  entries = {}
+  verified = {}
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  convLeft = 1
+  lastLS = {}
+  rfn = FALSE
+  revokeLeft = 0
+  estab = FALSE
+  verSince = FALSE
+  tamper = FALSE
+  gen = 0
+  stop = "none"
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  rmv = FALSE
+  win = 0
+  steerLeft = 0
+  alloc = "Absent"
+  up = TRUE
+  latch = FALSE
+  link = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  bindLeft = 1
+  sess = FALSE
+  fenceLeft = 0
+
+State 2 [RootRoute]
+  route = "local"
+  tamper = TRUE

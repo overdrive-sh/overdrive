@@ -1,0 +1,52 @@
+# steering-hazard-unpinned: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  sess = FALSE
+  flowL = TRUE
+  verified = FALSE
+  lastLS = {}
+  entries = {}
+  latch = FALSE
+  link = FALSE
+  up = TRUE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  revokeLeft = 0
+  boot = 0
+  convLeft = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  alloc = "Absent"
+  rules = FALSE
+  bindLeft = 1
+  steerLeft = 0
+  route = FALSE
+  holders = {}
+  lis = {}
+  gen = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [ForeignFlush]
+  rules = FALSE
+
+State 6 [BootStep]
+  verified = TRUE
+  boot = 4
+
+State 7 [BootStep]
+  boot = 5
+  route = TRUE
+
+State 8 [Crash]
+  verified = FALSE
+  link = FALSE
+  up = FALSE
+  boot = 0

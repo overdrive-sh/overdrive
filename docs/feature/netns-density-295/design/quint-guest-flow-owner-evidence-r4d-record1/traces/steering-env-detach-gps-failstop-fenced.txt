@@ -1,0 +1,119 @@
+# steering-env-detach-gps-failstop-fenced: counterexample, 18 state(s) (from the TLC trace)
+
+State 1
+  verSince = FALSE
+  convLeft = 1
+  alloc = "Absent"
+  latch = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  rfn = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  revokeLeft = 0
+  lastLS = {}
+  entries = {}
+  route = "absent"
+  up = TRUE
+  stop = "none"
+  bindLeft = 0
+  tamper = FALSE
+  gen = 0
+  fenceLeft = 0
+  rules = FALSE
+  flowL = TRUE
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+  rmv = FALSE
+  holders = {}
+  repLeft = 1
+  steerLeft = 0
+  win = 0
+  link = FALSE
+  sess = FALSE
+  estab = FALSE
+  verified = {}
+  boot = 0
+  winE = 0
+  winF = 0
+  lis = {}
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  verified = {"boot"}
+  boot = 4
+
+State 6 [BootStep]
+  route = "local"
+  estab = TRUE
+  boot = 5
+
+State 7 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 8 [AuditFind]
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+  win = 1
+
+State 9 [RecQuiesceGps]
+  verSince = FALSE
+  latch = TRUE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+  route = "fence"
+  tamper = FALSE
+  holders = {"GuestPrefixSteering"}
+  win = 2
+
+State 10 [RepFence]
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle"]
+  win = 0
+
+State 11 [RepFail]
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 1, FlowListeners |-> 0]
+  repLeft = 0
+
+State 12 [RepFence]
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle"]
+
+State 13 [RepConverge]
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "conv", FlowListeners |-> "idle"]
+  link = TRUE
+
+State 14 [RepVerify]
+  verSince = TRUE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "ver", FlowListeners |-> "idle"]
+  verified = {"GuestPrefixSteering", "boot"}
+
+State 15 [RepRoute]
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "repaired", FlowListeners |-> "idle" ]
+  route = "local"
+
+State 16 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 17 [RecRedoGps]
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 2, FlowListeners |-> 0]
+  win = 1
+
+State 18 [FailStop]
+  latch = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  up = FALSE
+  stop = "failstopGps"
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+  holders = {}
+  win = 2
+  verified = {}
+  boot = 0

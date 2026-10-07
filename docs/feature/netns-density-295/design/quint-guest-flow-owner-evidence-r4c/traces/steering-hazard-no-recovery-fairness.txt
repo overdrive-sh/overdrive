@@ -1,0 +1,82 @@
+# steering-hazard-no-recovery-fairness: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  gen = 0
+  up = TRUE
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  entries = {}
+  rules = FALSE
+  rmv = FALSE
+  flowL = TRUE
+  tamper = FALSE
+  bindLeft = 0
+  win = 0
+  stop = "none"
+  revokeLeft = 0
+  lastLS = {}
+  holders = {}
+  estab = FALSE
+  repLeft = 0
+  lis = {}
+  link = FALSE
+  verified = {}
+  sess = FALSE
+  boot = 0
+  winE = 0
+  winF = 0
+  fenceLeft = 0
+  verSince = FALSE
+  alloc = "Absent"
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  latch = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  rfn = FALSE
+  steerLeft = 0
+  convLeft = 0
+  route = "absent"
+
+State 2 [ListenerTaskExit]
+  flowL = FALSE
+
+State 3 [BootStep]
+  boot = 1
+
+State 4 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 5 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 6 [BootStep]
+  verified = {"boot"}
+  boot = 4
+  verSince = TRUE
+
+State 7 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 8 [BootStep]
+  estab = TRUE
+  boot = 5
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> TRUE ]
+  route = "local"
+
+State 9 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 10 [Teardown]
+  alloc = "Retiring"
+
+State 11 [Release]
+  alloc = "Absent"
+
+State 12 [AuditFind]
+  win = 1
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+
+State 13 [Stuttering]
+  (no change)

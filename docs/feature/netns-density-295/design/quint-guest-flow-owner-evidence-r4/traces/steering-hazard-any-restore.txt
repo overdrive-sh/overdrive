@@ -1,0 +1,69 @@
+# steering-hazard-any-restore: counterexample, 12 state(s) (from the TLC trace)
+
+State 1
+  up = TRUE
+  gen = 0
+  verified = FALSE
+  steerLeft = 0
+  revokeLeft = 0
+  flowL = TRUE
+  latch = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  lastLS = {}
+  convLeft = 1
+  bindLeft = 1
+  sess = FALSE
+  holders = {}
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  link = FALSE
+  alloc = "Absent"
+  rules = FALSE
+  lis = {}
+  route = FALSE
+  boot = 0
+  entries = {}
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  route = TRUE
+  boot = 5
+
+State 7 [ForeignFlush]
+  rules = FALSE
+
+State 8 [ListenerTaskExit]
+  flowL = FALSE
+
+State 9 [RecQuiesce]
+  latch = TRUE
+  holders = {"FlowListeners"}
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "held"]
+
+State 10 [RecRepair]
+  flowL = TRUE
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "repaired" ]
+
+State 11 [RecQuiesce]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> TRUE, revokeKept |-> FALSE ]
+  holders = {"IpRules", "FlowListeners"}
+  rec = [ IpRules |-> "held", GuestPrefixSteering |-> "idle", FlowListeners |-> "repaired" ]
+
+State 12 [RecRestore]
+  latch = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> TRUE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> TRUE, revokeKept |-> FALSE ]
+  holders = {}
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]

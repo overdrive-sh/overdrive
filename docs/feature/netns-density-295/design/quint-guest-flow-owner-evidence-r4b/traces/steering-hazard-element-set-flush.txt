@@ -1,0 +1,55 @@
+# steering-hazard-element-set-flush: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  route = "absent"
+  link = FALSE
+  verified = FALSE
+  up = TRUE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  att = 0
+  stop = "none"
+  holders = {}
+  flowL = TRUE
+  boot = 0
+  convLeft = 1
+  estab = FALSE
+  win = 0
+  repLeft = 0
+  latch = FALSE
+  lastLS = {}
+  bindLeft = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  verSince = FALSE
+  steerLeft = 0
+  entries = {}
+  tamper = FALSE
+  lis = {}
+  alloc = "Absent"
+  revokeLeft = 1
+  sess = FALSE
+  rules = FALSE
+  gen = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = TRUE
+  boot = 4
+  verSince = TRUE
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 7 [ForeignFlush]
+  rules = FALSE

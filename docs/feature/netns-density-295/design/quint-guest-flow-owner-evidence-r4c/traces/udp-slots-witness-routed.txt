@@ -1,0 +1,35 @@
+# udp-slots-witness-routed: counterexample, 5 state(s) (from the ITF trace)
+
+State 1
+  sockAlive = Map(1 -> true, 2 -> true)
+  releasePending = Map(1 -> false, 2 -> false)
+  slots = Map(0 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
+  picks = Set()
+  nextFid = 1
+  host = Map(1 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
+  toGuestPaired = Set()
+  toGuestRefused = Set()
+  toGuestAbort = Set()
+  toHostAbort = Set()
+  toHostEnd = Set()
+  misdelivered = false
+  lateIgnored = false
+  endedNoNew = Set()
+  staleReassoc = false
+  guestEnded = Set()
+
+State 2
+  slots = Map(0 -> { dest: 1, fid: 0, holders: 1, owned: true, parked: Set((1, 1)), routed: false, sock: 1 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
+
+State 3
+  slots = Map(0 -> { dest: 1, fid: 1, holders: 1, owned: true, parked: Set((1, 1)), routed: false, sock: 1 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
+  nextFid = 2
+  host = Map(1 -> { dest: 1, slot: 0, sock: 1, st: "req" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
+
+State 4
+  host = Map(1 -> { dest: 1, slot: 0, sock: 1, st: "paired" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
+  toGuestPaired = Set(1)
+
+State 5
+  slots = Map(0 -> { dest: 1, fid: 1, holders: 1, owned: true, parked: Set(), routed: true, sock: 1 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
+  toGuestPaired = Set()

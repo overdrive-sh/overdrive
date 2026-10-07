@@ -1,0 +1,66 @@
+# steering-witness-resteer: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  holders = {}
+  lis = {}
+  convLeft = 1
+  lastLS = {}
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  gen = 0
+  flowL = TRUE
+  bindLeft = 1
+  latch = FALSE
+  sess = FALSE
+  entries = {}
+  link = FALSE
+  revokeLeft = 0
+  steerLeft = 0
+  alloc = "Absent"
+  boot = 0
+  rules = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  verified = FALSE
+  route = FALSE
+  up = TRUE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  boot = 4
+  verified = TRUE
+
+State 6 [BootStep]
+  boot = 5
+  route = TRUE
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ActivateBegin]
+  alloc = "Activating"
+
+State 10 [ActivateOk]
+  alloc = "Active"
+
+State 11 [ListenState]
+  lastLS = {1}
+
+State 12 [BindListen]
+  lis = {1}
+
+State 13 [Steer]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> TRUE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  entries = {1}

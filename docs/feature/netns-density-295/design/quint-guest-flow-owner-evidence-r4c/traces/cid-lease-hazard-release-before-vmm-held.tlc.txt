@@ -1,0 +1,139 @@
+State 1: <Initial predicate>
+/\ lease_bugReleaseBeforeVmm_cid_lease_errsLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_bugReleaseBeforeVmm_cid_lease_kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_todo = {}
+/\ lease_bugReleaseBeforeVmm_cid_lease_walker = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> FALSE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE,
+  refusedUnasked |-> FALSE ]
+/\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_exitsLeft = 1
+/\ lease_bugReleaseBeforeVmm_cid_lease_foreignLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 0
+
+State 2: <lease_bugReleaseBeforeVmm_cid_lease_ForeignRelease line 749, col 3 to line 754, col 6 of module lease_bugReleaseBeforeVmm>
+/\ lease_bugReleaseBeforeVmm_cid_lease_errsLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_bugReleaseBeforeVmm_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_todo = {}
+/\ lease_bugReleaseBeforeVmm_cid_lease_walker = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> FALSE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE,
+  refusedUnasked |-> FALSE ]
+/\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_exitsLeft = 1
+/\ lease_bugReleaseBeforeVmm_cid_lease_foreignLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 0
+
+State 3: <lease_bugReleaseBeforeVmm_cid_lease_AssignBegin line 853, col 3 to line 933, col 55 of module lease_bugReleaseBeforeVmm>
+/\ lease_bugReleaseBeforeVmm_cid_lease_errsLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_bugReleaseBeforeVmm_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_todo = {0, 1, 2}
+/\ lease_bugReleaseBeforeVmm_cid_lease_walker = 1
+/\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> FALSE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE,
+  refusedUnasked |-> FALSE ]
+/\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_exitsLeft = 1
+/\ lease_bugReleaseBeforeVmm_cid_lease_foreignLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 0
+
+State 4: <lease_bugReleaseBeforeVmm_cid_lease_AssignTry line 939, col 3 to line 1060, col 55 of module lease_bugReleaseBeforeVmm>
+/\ lease_bugReleaseBeforeVmm_cid_lease_errsLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "admitted",
+     off |-> 0,
+     loc |-> "slot",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_bugReleaseBeforeVmm_cid_lease_kern = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_todo = {}
+/\ lease_bugReleaseBeforeVmm_cid_lease_walker = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> FALSE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE,
+  refusedUnasked |-> FALSE ]
+/\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_exitsLeft = 1
+/\ lease_bugReleaseBeforeVmm_cid_lease_foreignLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 1
+
+State 5: <lease_bugReleaseBeforeVmm_cid_lease_LaunchBegin line 463, col 3 to line 510, col 46 of module lease_bugReleaseBeforeVmm>
+/\ lease_bugReleaseBeforeVmm_cid_lease_errsLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "launching",
+     off |-> 0,
+     loc |-> "taken",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_bugReleaseBeforeVmm_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_todo = {}
+/\ lease_bugReleaseBeforeVmm_cid_lease_walker = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> FALSE,
+  skipOrphan |-> FALSE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE,
+  refusedUnasked |-> FALSE ]
+/\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseBeforeVmm_cid_lease_exitsLeft = 1
+/\ lease_bugReleaseBeforeVmm_cid_lease_foreignLeft = 0
+/\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 1

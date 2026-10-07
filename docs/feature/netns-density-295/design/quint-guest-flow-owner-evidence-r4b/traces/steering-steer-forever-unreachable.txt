@@ -1,0 +1,93 @@
+# steering-steer-forever-unreachable: counterexample, 18 state(s) (from the TLC trace)
+
+State 1
+  boot = 0
+  gen = 0
+  revokeLeft = 0
+  lastLS = {}
+  flowL = TRUE
+  estab = FALSE
+  att = 0
+  latch = FALSE
+  steerLeft = 0
+  verified = FALSE
+  tamper = FALSE
+  up = TRUE
+  holders = {}
+  win = 0
+  sess = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  alloc = "Absent"
+  repLeft = 0
+  link = FALSE
+  convLeft = 0
+  rules = FALSE
+  route = "absent"
+  bindLeft = 0
+  verSince = FALSE
+  stop = "none"
+  entries = {}
+  lis = {}
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 5 [BootStep]
+  boot = 4
+  verified = TRUE
+  verSince = TRUE
+
+State 6 [BootStep]
+  boot = 5
+  estab = TRUE
+  route = "local"
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ListenState]
+  lastLS = {1}
+
+State 10 [ActivateBegin]
+  alloc = "Activating"
+
+State 11 [BindListen]
+  lis = {1}
+
+State 12 [SteerFail]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> TRUE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  alloc = "Provisioned"
+  lis = {}
+
+State 13 [ListenState]
+  lastLS = {}
+
+State 14 [ActivateBegin]
+  alloc = "Activating"
+
+State 15 [ActivateOk]
+  alloc = "Active"
+
+State 16 [ListenState]
+  lastLS = {1}
+
+State 17 [BindListen]
+  lis = {1}
+
+State 18 [SteerFail]
+  lis = {}
+
+-> loops back to State 17

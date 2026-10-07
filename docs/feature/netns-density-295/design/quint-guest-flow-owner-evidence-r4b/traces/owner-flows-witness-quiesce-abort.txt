@@ -1,0 +1,54 @@
+# owner-flows-witness-quiesce-abort: counterexample, 11 state(s) (from the ITF trace)
+
+State 1
+  alloc = "Absent"
+  gen = 0
+  vmGen = 0
+  vmUp = false
+  quiesced = false
+  claim = false
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  badPaired = false
+  hf = Map(1 -> { gen: 0, st: "none" })
+  gf = Map(1 -> { c: 0, gen: 0, st: "none" })
+  toHostPaired = Set()
+  toHostRefused = Set()
+  toGuestAbort = Set()
+  resurrected = false
+  abortDiscarded = Set()
+  phantom = false
+
+State 2
+  alloc = "Provisioned"
+  gen = 1
+
+State 3
+  vmGen = 1
+  vmUp = true
+
+State 4
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "queued" })
+
+State 5
+  sess = Map(1 -> { gen: 1, st: "pending" }, 2 -> { gen: 0, st: "none" })
+
+State 6
+  claim = true
+  sess = Map(1 -> { gen: 1, st: "live" }, 2 -> { gen: 0, st: "none" })
+
+State 7
+  alloc = "Active"
+
+State 8
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "accepted" })
+
+State 9
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 1, st: "accepted" })
+
+State 10
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 2, st: "read" })
+
+State 11
+  quiesced = true
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 2, st: "closed" })

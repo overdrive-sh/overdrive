@@ -1,0 +1,67 @@
+# steering-hazard-unpinned: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  verified = {}
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  convLeft = 1
+  fenceLeft = 0
+  up = TRUE
+  holders = {}
+  steerLeft = 0
+  verSince = FALSE
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  repLeft = 0
+  alloc = "Absent"
+  entries = {}
+  rfn = FALSE
+  latch = FALSE
+  revokeLeft = 0
+  bindLeft = 1
+  stop = "none"
+  route = "absent"
+  gen = 0
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  rmv = FALSE
+  rules = FALSE
+  flowL = TRUE
+  win = 0
+  link = FALSE
+  tamper = FALSE
+  sess = FALSE
+  estab = FALSE
+  boot = 0
+  lis = {}
+  lastLS = {}
+  winE = 0
+  winF = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [ForeignFlush]
+  rules = FALSE
+
+State 5 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 6 [BootStep]
+  verified = {"boot"}
+  verSince = TRUE
+  boot = 4
+
+State 7 [BootStep]
+  route = "local"
+  estab = TRUE
+  boot = 5
+
+State 8 [Crash]
+  verified = {}
+  up = FALSE
+  stop = "crash"
+  link = FALSE
+  boot = 0

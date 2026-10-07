@@ -1,0 +1,95 @@
+# steering-steer-forever-unreachable: counterexample, 17 state(s) (from the TLC trace)
+
+State 1
+  link = FALSE
+  entries = {}
+  verSince = FALSE
+  sess = FALSE
+  route = "absent"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  boot = 0
+  rfn = FALSE
+  bindLeft = 0
+  winE = 0
+  winF = 0
+  holders = {}
+  rules = FALSE
+  repLeft = 0
+  flowL = TRUE
+  fenceLeft = 0
+  lastLS = {}
+  gen = 0
+  steerLeft = 0
+  tamper = FALSE
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  rmv = FALSE
+  estab = FALSE
+  win = 0
+  revokeLeft = 0
+  stop = "none"
+  up = TRUE
+  lis = {}
+  verified = {}
+  convLeft = 0
+  alloc = "Absent"
+  latch = FALSE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  boot = 4
+  verified = {"boot"}
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ListenState]
+  lastLS = {1}
+
+State 10 [ActivateBegin]
+  alloc = "Activating"
+
+State 11 [BindListen]
+  lis = {1}
+
+State 12 [SteerFail]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> TRUE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  lis = {}
+  alloc = "Provisioned"
+
+State 13 [ListenState]
+  lastLS = {}
+
+State 14 [ActivateBegin]
+  alloc = "Activating"
+
+State 15 [ActivateOk]
+  alloc = "Active"
+
+State 16 [ListenState]
+  lastLS = {1}
+
+State 17 [BindListen]
+  lis = {1}
+
+-> loops back to State 16

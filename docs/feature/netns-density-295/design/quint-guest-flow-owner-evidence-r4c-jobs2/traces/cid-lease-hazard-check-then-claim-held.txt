@@ -1,0 +1,27 @@
+# cid-lease-hazard-check-then-claim-held: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  cursor = 0
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  todo = {}
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  errsLeft = 0
+  foreignLeft = 0
+  walker = 0
+  exitsLeft = 1
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+
+State 2 [ForeignRelease]
+  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+
+State 3 [AssignBegin]
+  todo = {0, 1, 2}
+  walker = 1
+
+State 4 [AssignTry]
+  cursor = 1
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  todo = {}
+  al = << [ st |-> "admitted", off |-> 0, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  walker = 0

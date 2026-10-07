@@ -1,0 +1,64 @@
+# steering-witness-activation-err: counterexample, 12 state(s) (from the TLC trace)
+
+State 1
+  route = FALSE
+  up = TRUE
+  boot = 0
+  holders = {}
+  convLeft = 0
+  steerLeft = 1
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  bindLeft = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  flowL = TRUE
+  latch = FALSE
+  entries = {}
+  sess = FALSE
+  lis = {}
+  link = FALSE
+  gen = 0
+  verified = FALSE
+  alloc = "Absent"
+  lastLS = {}
+  revokeLeft = 0
+  rules = FALSE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [ForeignFlush]
+  rules = FALSE
+
+State 5 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 6 [BootStep]
+  boot = 4
+  verified = TRUE
+
+State 7 [BootStep]
+  route = TRUE
+  boot = 5
+
+State 8 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 9 [SessOpen]
+  sess = TRUE
+
+State 10 [ListenState]
+  lastLS = {1}
+
+State 11 [ActivateBegin]
+  alloc = "Activating"
+
+State 12 [BindFail]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> TRUE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  bindLeft = 0
+  alloc = "Provisioned"

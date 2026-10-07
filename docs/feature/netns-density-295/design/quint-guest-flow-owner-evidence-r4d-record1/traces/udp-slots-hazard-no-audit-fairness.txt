@@ -1,0 +1,46 @@
+# udp-slots-hazard-no-audit-fairness: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  toHostAbort = {}
+  misdelivered = FALSE
+  toHostEnd = {}
+  endedNoNew = {}
+  picks = {}
+  toGuestAbort = {}
+  nextFid = 1
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, routed |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, routed |-> FALSE, parked |-> {}, holders |-> 0 ] )
+  lateIgnored = FALSE
+  guestEnded = {}
+  sockAlive = <<TRUE, TRUE>>
+  host = << [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0], [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+  staleReassoc = FALSE
+  releasePending = <<FALSE, FALSE>>
+  toGuestPaired = {}
+  toGuestRefused = {}
+
+State 2 [SockCloseReportLost]
+  sockAlive = <<TRUE, FALSE>>
+
+State 3 [AppClaim]
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, routed |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 0, routed |-> FALSE, parked |-> {<<1, 1>>}, holders |-> 1 ] )
+
+State 4 [GuestAssociate]
+  nextFid = 2
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, routed |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 1, routed |-> FALSE, parked |-> {<<1, 1>>}, holders |-> 1 ] )
+  host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 1], [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+
+State 5 [GuestPairingTimeout]
+  toHostAbort = {1}
+  endedNoNew = {1}
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, routed |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 0, routed |-> FALSE, parked |-> {}, holders |-> 1 ] )
+  guestEnded = {1}
+
+State 6 [SockCloseReportLost]
+  sockAlive = <<FALSE, FALSE>>
+
+State 7 [HostRecvEnd]
+  toHostAbort = {}
+  host = << [sock |-> 1, dest |-> 1, st |-> "closed", slot |-> 1], [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+
+State 8 [Stuttering]
+  (no change)

@@ -1,0 +1,797 @@
+State 1: <Initial predicate>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = FALSE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 0
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "absent"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = FALSE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = FALSE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 2: <steer_bugAnyRestore_steering_BootStep line 1484, col 3 to line 1579, col 45 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = FALSE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 1
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "absent"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = FALSE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = FALSE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 3: <steer_bugAnyRestore_steering_BootStep line 1484, col 3 to line 1579, col 45 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = FALSE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 2
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "absent"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = TRUE
+/\ steer_bugAnyRestore_steering_verSince = FALSE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = FALSE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 4: <steer_bugAnyRestore_steering_BootStep line 1484, col 3 to line 1579, col 45 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 3
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "absent"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = TRUE
+/\ steer_bugAnyRestore_steering_verSince = FALSE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = FALSE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 5: <steer_bugAnyRestore_steering_BootStep line 1484, col 3 to line 1579, col 45 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 4
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "absent"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = TRUE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = FALSE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 6: <steer_bugAnyRestore_steering_ForeignFlush line 1854, col 3 to line 1874, col 72 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 4
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "absent"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = FALSE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 7: <steer_bugAnyRestore_steering_BootStep line 1484, col 3 to line 1579, col 45 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 5
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "local"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = TRUE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 8: <steer_bugAnyRestore_steering_ListenerTaskExit line 1952, col 3 to line 1965, col 72 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 5
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "local"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = FALSE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = TRUE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 9: <steer_bugAnyRestore_steering_RecQuiesce line 2289, col 3 to line 2315, col 55 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 5
+/\ steer_bugAnyRestore_steering_latch = TRUE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {"FlowListeners"}
+/\ steer_bugAnyRestore_steering_route = "local"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = FALSE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = TRUE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 10: <steer_bugAnyRestore_steering_RepConverge line 2069, col 3 to line 2121, col 72 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "conv",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 5
+/\ steer_bugAnyRestore_steering_latch = TRUE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {"FlowListeners"}
+/\ steer_bugAnyRestore_steering_route = "local"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = TRUE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 11: <steer_bugAnyRestore_steering_RepVerify line 2166, col 3 to line 2210, col 72 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 5
+/\ steer_bugAnyRestore_steering_latch = TRUE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {"FlowListeners"}
+/\ steer_bugAnyRestore_steering_route = "local"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"FlowListeners", "boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = TRUE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 12: <steer_bugAnyRestore_steering_RecQuiesce line 2289, col 3 to line 2315, col 55 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "held",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 5
+/\ steer_bugAnyRestore_steering_latch = TRUE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {"IpRules", "FlowListeners"}
+/\ steer_bugAnyRestore_steering_route = "local"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"FlowListeners", "boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = TRUE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 13: <steer_bugAnyRestore_steering_RepRoute line 2216, col 3 to line 2252, col 7 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "held",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 5
+/\ steer_bugAnyRestore_steering_latch = TRUE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {"IpRules", "FlowListeners"}
+/\ steer_bugAnyRestore_steering_route = "local"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"FlowListeners", "boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = TRUE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+
+State 14: <steer_bugAnyRestore_steering_RecRestore line 1346, col 3 to line 1438, col 41 of module steer_bugAnyRestore>
+/\ steer_bugAnyRestore_steering_revokeLeft = 0
+/\ steer_bugAnyRestore_steering_bindLeft = 1
+/\ steer_bugAnyRestore_steering_steerLeft = 0
+/\ steer_bugAnyRestore_steering_link = TRUE
+/\ steer_bugAnyRestore_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugAnyRestore_steering_entries = {}
+/\ steer_bugAnyRestore_steering_up = TRUE
+/\ steer_bugAnyRestore_steering_rfn = FALSE
+/\ steer_bugAnyRestore_steering_sess = FALSE
+/\ steer_bugAnyRestore_steering_alloc = "Absent"
+/\ steer_bugAnyRestore_steering_fenceLeft = 0
+/\ steer_bugAnyRestore_steering_boot = 5
+/\ steer_bugAnyRestore_steering_latch = FALSE
+/\ steer_bugAnyRestore_steering_winE = 0
+/\ steer_bugAnyRestore_steering_winF = 0
+/\ steer_bugAnyRestore_steering_gen = 0
+/\ steer_bugAnyRestore_steering_holders = {}
+/\ steer_bugAnyRestore_steering_route = "local"
+/\ steer_bugAnyRestore_steering_repLeft = 0
+/\ steer_bugAnyRestore_steering_verified = {"boot"}
+/\ steer_bugAnyRestore_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugAnyRestore_steering_convLeft = 1
+/\ steer_bugAnyRestore_steering_rmv = FALSE
+/\ steer_bugAnyRestore_steering_lastLS = {}
+/\ steer_bugAnyRestore_steering_win = 0
+/\ steer_bugAnyRestore_steering_rules = FALSE
+/\ steer_bugAnyRestore_steering_verSince = TRUE
+/\ steer_bugAnyRestore_steering_flowL = TRUE
+/\ steer_bugAnyRestore_steering_tamper = FALSE
+/\ steer_bugAnyRestore_steering_lis = {}
+/\ steer_bugAnyRestore_steering_stop = "none"
+/\ steer_bugAnyRestore_steering_estab = TRUE
+/\ steer_bugAnyRestore_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> TRUE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]

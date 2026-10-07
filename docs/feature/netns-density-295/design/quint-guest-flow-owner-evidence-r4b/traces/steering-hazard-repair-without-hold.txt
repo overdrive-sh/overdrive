@@ -1,0 +1,59 @@
+# steering-hazard-repair-without-hold: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  lis = {}
+  repLeft = 0
+  boot = 0
+  gen = 0
+  verified = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  att = 0
+  alloc = "Absent"
+  entries = {}
+  revokeLeft = 0
+  rules = FALSE
+  route = "absent"
+  lastLS = {}
+  convLeft = 1
+  win = 0
+  sess = FALSE
+  bindLeft = 1
+  steerLeft = 0
+  verSince = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  up = TRUE
+  link = FALSE
+  tamper = FALSE
+  flowL = TRUE
+  estab = FALSE
+  holders = {}
+  latch = FALSE
+  stop = "none"
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 5 [BootStep]
+  boot = 4
+  verified = TRUE
+  verSince = TRUE
+
+State 6 [BootStep]
+  boot = 5
+  route = "local"
+  estab = TRUE
+
+State 7 [ForeignFlush]
+  rules = FALSE
+
+State 8 [RecRepairNoHold]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> TRUE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  rules = TRUE

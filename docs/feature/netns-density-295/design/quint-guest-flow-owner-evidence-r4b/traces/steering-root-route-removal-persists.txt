@@ -1,0 +1,71 @@
+# steering-root-route-removal-persists: counterexample, 12 state(s) (from the TLC trace)
+
+State 1
+  verSince = FALSE
+  entries = {}
+  stop = "none"
+  win = 0
+  up = TRUE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  boot = 0
+  alloc = "Absent"
+  rules = FALSE
+  steerLeft = 0
+  route = "absent"
+  verified = FALSE
+  lis = {}
+  revokeLeft = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  gen = 0
+  lastLS = {}
+  holders = {}
+  sess = FALSE
+  convLeft = 0
+  att = 0
+  flowL = TRUE
+  estab = FALSE
+  repLeft = 0
+  latch = FALSE
+  link = FALSE
+  bindLeft = 0
+  tamper = FALSE
+
+State 2 [RootRoute]
+  route = "local"
+  tamper = TRUE
+
+State 3 [BootStep]
+  boot = 1
+
+State 4 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 5 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 6 [BootStep]
+  verSince = TRUE
+  boot = 4
+  verified = TRUE
+
+State 7 [BootStep]
+  boot = 5
+  estab = TRUE
+
+State 8 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 9 [Teardown]
+  alloc = "Retiring"
+
+State 10 [RootRoute]
+  route = "absent"
+
+State 11 [Release]
+  alloc = "Absent"
+
+State 12 [Stuttering]
+  (no change)

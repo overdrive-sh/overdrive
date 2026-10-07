@@ -1,0 +1,90 @@
+# steering-hazard-element-close-first: counterexample, 14 state(s) (from the TLC trace)
+
+State 1
+  fenceLeft = 0
+  stop = "none"
+  alloc = "Absent"
+  latch = FALSE
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  rfn = FALSE
+  verified = {}
+  route = "absent"
+  convLeft = 1
+  link = FALSE
+  gen = 0
+  verSince = FALSE
+  sess = FALSE
+  rules = FALSE
+  revokeLeft = 0
+  flowL = TRUE
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  boot = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  rmv = FALSE
+  winE = 0
+  winF = 0
+  bindLeft = 1
+  up = TRUE
+  lastLS = {}
+  win = 0
+  entries = {}
+  estab = FALSE
+  tamper = FALSE
+  steerLeft = 0
+  lis = {}
+  holders = {}
+  repLeft = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = {"boot"}
+  verSince = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 7 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ListenState]
+  lastLS = {1}
+
+State 10 [ActivateBegin]
+  alloc = "Activating"
+
+State 11 [BindListen]
+  lis = {1}
+
+State 12 [Steer]
+  entries = {1}
+
+State 13 [Crash]
+  stop = "crash"
+  alloc = "Absent"
+  verified = {}
+  sess = FALSE
+  boot = 0
+  up = FALSE
+  lastLS = {}
+  lis = {}
+
+State 14 [Restart]
+  stop = "none"
+  up = TRUE

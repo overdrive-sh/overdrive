@@ -1,0 +1,68 @@
+# steering-flush-unmarked-bypass: counterexample, 14 state(s) (from the TLC trace)
+
+State 1
+  holders = {}
+  lis = {}
+  convLeft = 1
+  lastLS = {}
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  gen = 0
+  flowL = TRUE
+  bindLeft = 1
+  latch = FALSE
+  sess = FALSE
+  entries = {}
+  link = FALSE
+  revokeLeft = 0
+  steerLeft = 0
+  alloc = "Absent"
+  boot = 0
+  rules = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  verified = FALSE
+  route = FALSE
+  up = TRUE
+
+State 2 [ListenerTaskExit]
+  flowL = FALSE
+
+State 3 [BootStep]
+  boot = 1
+
+State 4 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 5 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 6 [BootStep]
+  boot = 4
+  verified = TRUE
+
+State 7 [BootStep]
+  boot = 5
+  route = TRUE
+
+State 8 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 9 [SessOpen]
+  sess = TRUE
+
+State 10 [ListenState]
+  lastLS = {1}
+
+State 11 [ActivateBegin]
+  alloc = "Activating"
+
+State 12 [BindListen]
+  lis = {1}
+
+State 13 [Steer]
+  entries = {1}
+
+State 14 [ForeignFlush]
+  rules = FALSE

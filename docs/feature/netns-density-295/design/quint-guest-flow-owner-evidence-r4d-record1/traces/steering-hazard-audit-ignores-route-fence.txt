@@ -1,0 +1,77 @@
+# steering-hazard-audit-ignores-route-fence: counterexample, 12 state(s) (from the TLC trace)
+
+State 1
+  winE = 0
+  winF = 0
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  rfn = FALSE
+  up = TRUE
+  alloc = "Absent"
+  lastLS = {}
+  latch = FALSE
+  entries = {}
+  revokeLeft = 0
+  gen = 0
+  fenceLeft = 0
+  route = "absent"
+  att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+  tamper = FALSE
+  rmv = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, joinFenced |-> FALSE, closeFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE, otherLift |-> FALSE ]
+  verified = {}
+  stop = "none"
+  convLeft = 0
+  steerLeft = 0
+  win = 0
+  holders = {}
+  repLeft = 0
+  rules = FALSE
+  flowL = TRUE
+  verSince = FALSE
+  lis = {}
+  link = FALSE
+  bindLeft = 0
+  sess = FALSE
+  estab = FALSE
+  boot = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = {"boot"}
+  verSince = TRUE
+  boot = 4
+
+State 6 [RootRoute]
+  route = "local"
+  tamper = TRUE
+
+State 7 [BootStep]
+  estab = TRUE
+  boot = 5
+
+State 8 [RootRoute]
+  rfn = TRUE
+  route = "fence"
+
+State 9 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 10 [Teardown]
+  alloc = "Retiring"
+
+State 11 [Release]
+  alloc = "Absent"
+
+State 12 [Stuttering]
+  (no change)

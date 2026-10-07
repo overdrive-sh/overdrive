@@ -1,0 +1,41 @@
+# cid-lease-hazard-remember-refusal: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  errsLeft = 0
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  todo = {}
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  walker = 0
+  foreignLeft = 0
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  exitsLeft = 1
+  cursor = 0
+
+State 2 [AssignBegin]
+  todo = {0, 1, 2}
+  walker = 1
+
+State 3 [AssignTry]
+  todo = {1, 2}
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+
+State 4 [ForeignTake]
+  kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> 0)
+
+State 5 [AssignTry]
+  todo = {2}
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0, 1} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+
+State 6 [ForeignTake]
+  kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+
+State 7 [AssignTry]
+  todo = {}
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0, 1, 2} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  walker = 0
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> TRUE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+
+State 8 [AssignBegin]
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> TRUE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> TRUE ]

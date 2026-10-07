@@ -1,0 +1,80 @@
+# owner-flows-alt-tombstone-misses-close: counterexample, 18 state(s) (from the TLC trace)
+
+State 1
+  alloc = "Absent"
+  badPaired = FALSE
+  vmGen = 0
+  abortDiscarded = {}
+  toHostPaired = {}
+  toGuestAbort = {}
+  gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+  quiesced = FALSE
+  gen = 0
+  vmUp = FALSE
+  phantom = FALSE
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  claim = FALSE
+  hf = <<[st |-> "none", gen |-> 0]>>
+  resurrected = FALSE
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+  toHostRefused = {}
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [VmStart]
+  vmGen = 1
+  vmUp = TRUE
+
+State 4 [Teardown]
+  alloc = "Retiring"
+
+State 5 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+
+State 6 [GuestOpenSession]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
+
+State 7 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 8 [VmStop]
+  vmUp = FALSE
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
+  flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 9 [Release]
+  alloc = "Absent"
+
+State 10 [Provision]
+  alloc = "Provisioned"
+  gen = 2
+
+State 11 [VmStart]
+  vmGen = 2
+  vmUp = TRUE
+
+State 12 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 1]>>
+
+State 13 [HostAcceptSession]
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 1]>>
+  claim = TRUE
+
+State 14 [Activate]
+  alloc = "Active"
+
+State 15 [HostOpenAccept]
+  hf = <<[st |-> "req", gen |-> 2]>>
+
+State 16 [HostSessionLoss]
+  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 1]>>
+  claim = FALSE
+  hf = <<[st |-> "closed", gen |-> 2]>>
+
+State 17 [Teardown]
+  alloc = "Retiring"
+
+State 18 [Stuttering]
+  (no change)

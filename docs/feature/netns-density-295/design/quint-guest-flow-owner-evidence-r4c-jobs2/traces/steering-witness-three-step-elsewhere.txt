@@ -1,0 +1,76 @@
+# steering-witness-three-step-elsewhere: counterexample, 10 state(s) (from the TLC trace)
+
+State 1
+  lis = {}
+  route = "absent"
+  boot = 0
+  winE = 0
+  winF = 0
+  rules = FALSE
+  flowL = TRUE
+  holders = {}
+  repLeft = 0
+  entries = {}
+  verified = {}
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  convLeft = 1
+  lastLS = {}
+  rfn = FALSE
+  revokeLeft = 0
+  estab = FALSE
+  verSince = FALSE
+  tamper = FALSE
+  gen = 0
+  stop = "none"
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  rmv = FALSE
+  win = 0
+  steerLeft = 0
+  alloc = "Absent"
+  up = TRUE
+  latch = FALSE
+  link = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  bindLeft = 1
+  sess = FALSE
+  fenceLeft = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 5 [BootStep]
+  boot = 4
+  verified = {"boot"}
+  verSince = TRUE
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 7 [RootRoute]
+  route = "absent"
+  rmv = TRUE
+
+State 8 [RecQuiesce]
+  winE = 1
+  holders = {"LocalRoute"}
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "held" ]
+  latch = TRUE
+
+State 9 [RepConverge]
+  winE = 2
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "conv" ]
+
+State 10 [RepVerify]
+  winE = 3
+  verified = {"LocalRoute", "boot"}
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "ver" ]

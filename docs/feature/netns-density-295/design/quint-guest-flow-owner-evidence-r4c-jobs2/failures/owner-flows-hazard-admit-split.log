@@ -1,0 +1,31 @@
+===== attempt 1: /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/attempt-1.log =====
+Picked up JAVA_TOOL_OPTIONS: -XX:-UsePerfData -Djava.io.tmpdir=/Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/tmp-1
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/_apalache-out/server/2026-10-07T08-06-59_13176581827000053916
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@08:06:59.310
+Starting checker server on port 36667...                          I@08:06:59.315
+The Apalache server is running on port 36667. Press Ctrl-C to stop.
+Oct 07, 2026 8:07:01 AM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+As of 2022/09/29 (release 21.7) makeExtensionsImmutable should not be called from protobuf gencode. If you are seeing this message, your gencode is vulnerable to a denial of service attack. You should regenerate your code using protobuf 25.6 or later. Use the latest version that meets your needs. However, if you understand the risks and wish to continue with vulnerable gencode, you can set the system property `-Dcom.google.protobuf.use_unsafe_pre22_gencode` on the command line to silence this warning. You also can set `-Dcom.google.protobuf.error_on_unsafe_pre22_gencode` to throw an error instead. See security vulnerability: https://github.com/protocolbuffers/protobuf/security/advisories/GHSA-h4h5-3hr4-j3g2
+
+===== attempt 2: /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/attempt-2.log =====
+Picked up JAVA_TOOL_OPTIONS: -XX:-UsePerfData -Djava.io.tmpdir=/Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/tmp-2
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/_apalache-out/server/2026-10-07T08-08-57_3014291654905384074
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@08:08:57.863
+Starting checker server on port 34241...                          I@08:08:57.877
+The Apalache server is running on port 34241. Press Ctrl-C to stop.
+Oct 07, 2026 8:08:59 AM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+As of 2022/09/29 (release 21.7) makeExtensionsImmutable should not be called from protobuf gencode. If you are seeing this message, your gencode is vulnerable to a denial of service attack. You should regenerate your code using protobuf 25.6 or later. Use the latest version that meets your needs. However, if you understand the risks and wish to continue with vulnerable gencode, you can set the system property `-Dcom.google.protobuf.use_unsafe_pre22_gencode` on the command line to silence this warning. You also can set `-Dcom.google.protobuf.error_on_unsafe_pre22_gencode` to throw an error instead. See security vulnerability: https://github.com/protocolbuffers/protobuf/security/advisories/GHSA-h4h5-3hr4-j3g2
+
+===== /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/events.log =====
+1791353217.152 attempt 1 start pgid=425060 port=36667 timeout=900s log=/Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/attempt-1.log
+1791353335.343 attempt 1 end StartupHang after 120.1s; group 425060 killed; verdict Retry { cause: "Apalache server not ready (no first pass) within 120s; process group killed, retrying on a fresh port" }
+1791353335.347 attempt 2 start pgid=425183 port=34241 timeout=900s log=/Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/owner-flows-hazard-admit-split/attempt-2.log
+1791353453.337 attempt 2 end StartupHang after 120.0s; group 425183 killed; verdict Final { outcome: ToolError, cause: Some("Apalache server never became ready (no first pass) within 120s on 2 attempts (fresh port each)") }

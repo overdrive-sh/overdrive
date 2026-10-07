@@ -1,0 +1,62 @@
+# steering-hazard-steering-in-nft: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  steerLeft = 0
+  gen = 0
+  bindLeft = 1
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  rmv = FALSE
+  stop = "none"
+  win = 0
+  alloc = "Absent"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  latch = FALSE
+  lastLS = {}
+  route = "absent"
+  lis = {}
+  verified = {}
+  link = FALSE
+  convLeft = 1
+  tamper = FALSE
+  sess = FALSE
+  rules = FALSE
+  boot = 0
+  flowL = TRUE
+  verSince = FALSE
+  revokeLeft = 0
+  winE = 0
+  winF = 0
+  up = TRUE
+  holders = {}
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  repLeft = 0
+  rfn = FALSE
+  entries = {}
+  fenceLeft = 0
+  estab = FALSE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = {"boot"}
+  boot = 4
+  verSince = TRUE
+
+State 6 [ForeignFlush]
+  link = FALSE
+  rules = FALSE
+
+State 7 [BootStep]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> TRUE ]
+  route = "local"
+  boot = 5
+  estab = TRUE

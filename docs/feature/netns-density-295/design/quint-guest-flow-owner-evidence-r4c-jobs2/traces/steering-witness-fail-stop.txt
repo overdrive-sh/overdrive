@@ -1,0 +1,84 @@
+# steering-witness-fail-stop: counterexample, 11 state(s) (from the TLC trace)
+
+State 1
+  gen = 0
+  convLeft = 0
+  fenceLeft = 0
+  route = "absent"
+  lastLS = {}
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  rmv = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  verSince = FALSE
+  win = 0
+  tamper = FALSE
+  rules = FALSE
+  link = FALSE
+  flowL = TRUE
+  bindLeft = 0
+  sess = FALSE
+  entries = {}
+  boot = 0
+  lis = {}
+  winE = 0
+  winF = 0
+  estab = FALSE
+  revokeLeft = 0
+  up = TRUE
+  holders = {}
+  repLeft = 0
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  rfn = FALSE
+  alloc = "Absent"
+  steerLeft = 0
+  latch = FALSE
+  stop = "none"
+  verified = {}
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  rules = TRUE
+  boot = 2
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  boot = 4
+  verified = {"boot"}
+
+State 6 [BootStep]
+  route = "local"
+  boot = 5
+  estab = TRUE
+
+State 7 [ListenerTaskExit]
+  flowL = FALSE
+
+State 8 [RecQuiesce]
+  holders = {"FlowListeners"}
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "held", LocalRoute |-> "idle" ]
+  latch = TRUE
+
+State 9 [RepFail]
+  route = "fence"
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 1, LocalRoute |-> 0 ]
+  verSince = FALSE
+
+State 10 [RepFail]
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 2, LocalRoute |-> 0 ]
+
+State 11 [FailStop]
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  flowL = TRUE
+  boot = 0
+  up = FALSE
+  holders = {}
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+  latch = FALSE
+  stop = "failstop"
+  verified = {}

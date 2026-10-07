@@ -1,0 +1,87 @@
+# steering-hazard-quiesce-before-fence-widens: counterexample, 15 state(s) (from the TLC trace)
+
+State 1
+  win = 0
+  repLeft = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  sess = FALSE
+  flowL = TRUE
+  estab = FALSE
+  steerLeft = 0
+  latch = FALSE
+  convLeft = 1
+  bindLeft = 1
+  link = FALSE
+  entries = {}
+  revokeLeft = 0
+  verSince = FALSE
+  lis = {}
+  stop = "none"
+  lastLS = {}
+  gen = 0
+  boot = 0
+  alloc = "Absent"
+  rules = FALSE
+  att = 0
+  route = "absent"
+  tamper = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  verified = FALSE
+  holders = {}
+  up = TRUE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  boot = 4
+  verified = TRUE
+
+State 6 [BootStep]
+  estab = TRUE
+  boot = 5
+  route = "local"
+
+State 7 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ActivateBegin]
+  alloc = "Activating"
+
+State 10 [ActivateOk]
+  alloc = "Active"
+
+State 11 [ListenState]
+  lastLS = {1}
+
+State 12 [BindListen]
+  lis = {1}
+
+State 13 [RootDetach]
+  link = FALSE
+  tamper = TRUE
+
+State 14 [AuditFind]
+  win = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+
+State 15 [RecQuiesceGps]
+  win = 2
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "qheld", FlowListeners |-> "idle"]
+  latch = TRUE
+  lis = {}
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> TRUE, gpsWidened |-> TRUE ]
+  holders = {"GuestPrefixSteering"}

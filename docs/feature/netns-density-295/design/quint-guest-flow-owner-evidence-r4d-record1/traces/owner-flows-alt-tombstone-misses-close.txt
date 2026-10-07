@@ -1,0 +1,81 @@
+# owner-flows-alt-tombstone-misses-close: counterexample, 18 state(s) (from the TLC trace)
+
+State 1
+  alloc = "Absent"
+  badPaired = FALSE
+  vmGen = 0
+  abortDiscarded = {}
+  toHostPaired = {}
+  toGuestAbort = {}
+  gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+  quiesced = FALSE
+  gen = 0
+  vmUp = FALSE
+  phantom = FALSE
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  claim = FALSE
+  hf = <<[st |-> "none", gen |-> 0]>>
+  resurrected = FALSE
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+  toHostRefused = {}
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [Teardown]
+  alloc = "Retiring"
+
+State 4 [Release]
+  alloc = "Absent"
+
+State 5 [Provision]
+  alloc = "Provisioned"
+  gen = 2
+
+State 6 [VmStart]
+  vmGen = 2
+  vmUp = TRUE
+
+State 7 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+
+State 8 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
+
+State 9 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+
+State 10 [HostAcceptSession]
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+  claim = TRUE
+
+State 11 [Activate]
+  alloc = "Active"
+
+State 12 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+
+State 13 [HostAcceptFlow]
+  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "accepted", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+
+State 14 [HostOpenAccept]
+  hf = <<[st |-> "req", gen |-> 2]>>
+
+State 15 [HostAcceptSession]
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+
+State 16 [Teardown]
+  alloc = "Retiring"
+  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+  claim = FALSE
+  hf = <<[st |-> "closed", gen |-> 2]>>
+  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+
+State 17 [HostAcceptFlow]
+  flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+
+State 18 [Quiesce]
+  quiesced = TRUE
+
+-> loops back to State 17

@@ -1,0 +1,76 @@
+===== attempt 1: /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/attempt-1.log =====
+[TLC] Compiling to TLA+ (via Apalache)...
+Picked up JAVA_TOOL_OPTIONS: -XX:-UsePerfData -Djava.io.tmpdir=/Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/_apalache-out/server/2026-10-07T09-03-16_4600243816581222911
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@09:03:16.163
+Starting checker server on port 43123...                          I@09:03:16.170
+The Apalache server is running on port 43123. Press Ctrl-C to stop.
+Oct 07, 2026 9:03:17 AM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+As of 2022/09/29 (release 21.7) makeExtensionsImmutable should not be called from protobuf gencode. If you are seeing this message, your gencode is vulnerable to a denial of service attack. You should regenerate your code using protobuf 25.6 or later. Use the latest version that meets your needs. However, if you understand the risks and wish to continue with vulnerable gencode, you can set the system property `-Dcom.google.protobuf.use_unsafe_pre22_gencode` on the command line to silence this warning. You also can set `-Dcom.google.protobuf.error_on_unsafe_pre22_gencode` to throw an error instead. See security vulnerability: https://github.com/protocolbuffers/protobuf/security/advisories/GHSA-h4h5-3hr4-j3g2
+PASS #0: SanyParser                                               I@09:03:19.502
+[TLC] Running TLC model checker...
+
+Picked up JAVA_TOOL_OPTIONS: -XX:-UsePerfData -Djava.io.tmpdir=/Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1
+TLC2 Version 2.19 of 08 August 2024
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 33 and seed -299154329486041925 with 8 workers on 8 cores with 8192MB heap and 64MB offheap memory [pid: 438215] (Linux 7.0.0-34-generic aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1/quint-tlc-XUOYwd/steer_detachLiveAnyRestore.tla
+Parsing file /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1/Integers.tla
+Parsing file /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1/Sequences.tla
+Parsing file /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1/FiniteSets.tla
+Parsing file /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1/TLC.tla
+Parsing file /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1/Apalache.tla
+Parsing file /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1/Variants.tla
+Parsing file /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/tmp-1/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Apalache
+Semantic processing of module Variants
+Semantic processing of module steer_detachLiveAnyRestore
+Starting... (2026-10-07 09:03:20)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-07 09:03:20.
+Checking temporal properties for the current state space with 36873 total distinct states at (2026-10-07 09:03:23)
+Finished checking temporal properties in 00s at 2026-10-07 09:03:24
+Progress(22) at 2026-10-07 09:03:24: 420,493 states generated (420,493 s/min), 36,873 distinct states found (36,873 ds/min), 12,193 states left on queue.
+Checking temporal properties for the current state space with 600909 total distinct states at (2026-10-07 09:04:23)
+Finished checking temporal properties in 06s at 2026-10-07 09:04:29
+Progress(31) at 2026-10-07 09:04:29: 8,122,588 states generated (7,702,095 s/min), 600,910 distinct states found (564,037 ds/min), 133,202 states left on queue.
+Checking temporal properties for the current state space with 1157081 total distinct states at (2026-10-07 09:05:28)
+Finished checking temporal properties in 11s at 2026-10-07 09:05:39
+Progress(34) at 2026-10-07 09:05:39: 16,374,840 states generated (8,252,252 s/min), 1,157,092 distinct states found (556,182 ds/min), 215,846 states left on queue.
+Checking temporal properties for the current state space with 1727937 total distinct states at (2026-10-07 09:06:38)
+Finished checking temporal properties in 20s at 2026-10-07 09:06:58
+Progress(36) at 2026-10-07 09:06:58: 25,321,842 states generated (8,947,002 s/min), 1,727,937 distinct states found (570,845 ds/min), 278,050 states left on queue.
+Checking temporal properties for the current state space with 2200016 total distinct states at (2026-10-07 09:07:57)
+Finished checking temporal properties in 27s at 2026-10-07 09:08:25
+Progress(38) at 2026-10-07 09:08:25: 32,698,457 states generated (7,376,615 s/min), 2,200,033 distinct states found (472,096 ds/min), 322,351 states left on queue.
+Progress(40) at 2026-10-07 09:09:24: 41,787,434 states generated (9,088,977 s/min), 2,743,380 distinct states found (543,347 ds/min), 347,175 states left on queue.
+Checking temporal properties for the current state space with 3179779 total distinct states at (2026-10-07 09:10:23)
+Finished checking temporal properties in 43s at 2026-10-07 09:11:07
+Progress(41) at 2026-10-07 09:11:07: 48,975,537 states generated (7,188,103 s/min), 3,179,779 distinct states found (436,399 ds/min), 369,760 states left on queue.
+Progress(42) at 2026-10-07 09:12:06: 57,580,834 states generated (8,605,297 s/min), 3,690,509 distinct states found (510,730 ds/min), 378,608 states left on queue.
+Progress(44) at 2026-10-07 09:13:05: 69,091,617 states generated (11,510,783 s/min), 4,351,319 distinct states found (660,810 ds/min), 378,859 states left on queue.
+Checking temporal properties for the current state space with 4734836 total distinct states at (2026-10-07 09:14:04)
+Finished checking temporal properties in 01min 15s at 2026-10-07 09:15:19
+Progress(45) at 2026-10-07 09:15:19: 75,919,639 states generated (6,828,022 s/min), 4,734,853 distinct states found (383,534 ds/min), 363,222 states left on queue.
+Progress(46) at 2026-10-07 09:16:18: 82,939,614 states generated (7,019,975 s/min), 5,121,764 distinct states found (386,911 ds/min), 335,690 states left on queue.
+Progress(47) at 2026-10-07 09:17:17: 89,295,636 states generated (6,356,022 s/min), 5,462,661 distinct states found (340,897 ds/min), 301,034 states left on queue.
+Progress(48) at 2026-10-07 09:18:16: 95,690,465 states generated (6,394,829 s/min), 5,808,806 distinct states found (346,145 ds/min), 269,740 states left on queue.
+Progress(50) at 2026-10-07 09:19:15: 103,351,754 states generated (7,661,289 s/min), 6,211,835 distinct states found (403,029 ds/min), 214,780 states left on queue.
+
+[failure] TLC encountered an error (990243ms).
+error: TLC error (see output above)
+
+===== /Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/events.log =====
+1791356580.656 attempt 1 start pgid=438156 port=43123 timeout=1800s log=/Users/marcus/conductor/workspaces/helios/wellington-v2/target/quint/guest-flow-owner/steering-hazard-any-restore-exposure/attempt-1.log
+1791357590.903 attempt 1 end Exited { success: false } after 1027.6s; group 438156 killed; verdict Final { outcome: ToolError, cause: Some("quint exited non-zero without a recognised result (see the attempt log)") }

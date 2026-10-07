@@ -1,0 +1,3136 @@
+State 1: <Initial predicate>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_detachLiveNoCrash_steering_route = "absent"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 0
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = FALSE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = FALSE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 2: <steer_detachLiveNoCrash_steering_ListenerTaskExit line 2108, col 3 to line 2123, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_detachLiveNoCrash_steering_route = "absent"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 0
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = FALSE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = FALSE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 3: <steer_detachLiveNoCrash_steering_BootStep line 1597, col 3 to line 1713, col 49 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_detachLiveNoCrash_steering_route = "absent"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 1
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = FALSE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = FALSE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 4: <steer_detachLiveNoCrash_steering_BootStep line 1597, col 3 to line 1713, col 49 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_detachLiveNoCrash_steering_route = "absent"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 2
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = FALSE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 5: <steer_detachLiveNoCrash_steering_BootStep line 1597, col 3 to line 1713, col 49 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_detachLiveNoCrash_steering_route = "absent"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 3
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = FALSE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 6: <steer_detachLiveNoCrash_steering_BootStep line 1597, col 3 to line 1713, col 49 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_detachLiveNoCrash_steering_route = "absent"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 4
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = FALSE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 7: <steer_detachLiveNoCrash_steering_RootDetach line 2027, col 3 to line 2050, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_detachLiveNoCrash_steering_route = "absent"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 4
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = FALSE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 8: <steer_detachLiveNoCrash_steering_BootStep line 1597, col 3 to line 1713, col 49 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 9: <steer_detachLiveNoCrash_steering_AuditFind line 2129, col 3 to line 2153, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 1
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 0
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 10: <steer_detachLiveNoCrash_steering_Provision line 1880, col 3 to line 1889, col 49 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 1
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Provisioned"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 11: <steer_detachLiveNoCrash_steering_RecQuiesce line 2507, col 3 to line 2539, col 17 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 1
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Provisioned"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 12: <steer_detachLiveNoCrash_steering_Teardown line 1947, col 3 to line 1955, col 49 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Retiring"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 13: <steer_detachLiveNoCrash_steering_Release line 1961, col 3 to line 1979, col 7 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 1
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 14: <steer_detachLiveNoCrash_steering_RepFail line 2309, col 3 to line 2352, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 15: <steer_detachLiveNoCrash_steering_RepConverge line 2245, col 3 to line 2303, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "conv",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 16: <steer_detachLiveNoCrash_steering_RepVerify line 2358, col 3 to line 2413, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 17: <steer_detachLiveNoCrash_steering_RootDetach line 2027, col 3 to line 2050, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 18: <steer_detachLiveNoCrash_steering_RepRoute line 2419, col 3 to line 2462, col 7 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 19: <steer_detachLiveNoCrash_steering_RecFence line 2159, col 3 to line 2213, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 1
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "fenced",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 20: <steer_detachLiveNoCrash_steering_RecQuiesceGps line 2219, col 3 to line 2239, col 89 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 21: <steer_detachLiveNoCrash_steering_RecRestore line 1449, col 3 to line 1546, col 45 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 22: <steer_detachLiveNoCrash_steering_ListenerTaskExit line 2108, col 3 to line 2123, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 23: <steer_detachLiveNoCrash_steering_RecQuiesce line 2507, col 3 to line 2539, col 17 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 24: <steer_detachLiveNoCrash_steering_RepConverge line 2245, col 3 to line 2303, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "conv",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 25: <steer_detachLiveNoCrash_steering_RootDetach line 2027, col 3 to line 2050, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "conv",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 26: <steer_detachLiveNoCrash_steering_RepVerify line 2358, col 3 to line 2413, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 27: <steer_detachLiveNoCrash_steering_RepConverge line 2245, col 3 to line 2303, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "conv",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 28: <steer_detachLiveNoCrash_steering_RepVerify line 2358, col 3 to line 2413, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 29: <steer_detachLiveNoCrash_steering_RootDetach line 2027, col 3 to line 2050, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 30: <steer_detachLiveNoCrash_steering_RepRoute line 2419, col 3 to line 2462, col 7 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 31: <steer_detachLiveNoCrash_steering_RepConverge line 2245, col 3 to line 2303, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 1
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "conv",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 32: <steer_detachLiveNoCrash_steering_RecRestore line 1449, col 3 to line 1546, col 45 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "conv",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 33: <steer_detachLiveNoCrash_steering_ListenerTaskExit line 2108, col 3 to line 2123, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "conv",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 34: <steer_detachLiveNoCrash_steering_RepVerify line 2358, col 3 to line 2413, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "ver",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 35: <steer_detachLiveNoCrash_steering_RepRoute line 2419, col 3 to line 2462, col 7 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 36: <steer_detachLiveNoCrash_steering_RootDetach line 2027, col 3 to line 2050, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 37: <steer_detachLiveNoCrash_steering_RecQuiesce line 2507, col 3 to line 2539, col 17 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 38: <steer_detachLiveNoCrash_steering_RepConverge line 2245, col 3 to line 2303, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "conv",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 39: <steer_detachLiveNoCrash_steering_ListenerTaskExit line 2108, col 3 to line 2123, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "conv",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 40: <steer_detachLiveNoCrash_steering_RootDetach line 2027, col 3 to line 2050, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "conv",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 41: <steer_detachLiveNoCrash_steering_RepVerify line 2358, col 3 to line 2413, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "held",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = FALSE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 42: <steer_detachLiveNoCrash_steering_RepConverge line 2245, col 3 to line 2303, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "conv",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 43: <steer_detachLiveNoCrash_steering_RepVerify line 2358, col 3 to line 2413, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"GuestPrefixSteering", "FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "repaired",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 1,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 44: <steer_detachLiveNoCrash_steering_RecRestore line 1449, col 3 to line 1546, col 45 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 45: <steer_detachLiveNoCrash_steering_RecQuiesce line 2507, col 3 to line 2539, col 17 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners", "LocalRoute"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "held" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 46: <steer_detachLiveNoCrash_steering_RootDetach line 2027, col 3 to line 2050, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners", "LocalRoute"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "ver",
+  LocalRoute |-> "held" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 47: <steer_detachLiveNoCrash_steering_RepRoute line 2419, col 3 to line 2462, col 7 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners", "LocalRoute"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "held" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 48: <steer_detachLiveNoCrash_steering_AuditFind line 2129, col 3 to line 2153, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 1
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners", "LocalRoute"}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "held" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 49: <steer_detachLiveNoCrash_steering_RepConverge line 2245, col 3 to line 2303, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 1
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"FlowListeners", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"FlowListeners", "LocalRoute"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "repaired",
+  LocalRoute |-> "conv" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 1,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 50: <steer_detachLiveNoCrash_steering_RecRestore line 1449, col 3 to line 1546, col 45 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"LocalRoute"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "conv" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 51: <steer_detachLiveNoCrash_steering_RepVerify line 2358, col 3 to line 2413, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"LocalRoute", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"LocalRoute"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "ver" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 52: <steer_detachLiveNoCrash_steering_RepRoute line 2419, col 3 to line 2462, col 7 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = TRUE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"LocalRoute", "boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {"LocalRoute"}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "repaired" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 53: <steer_detachLiveNoCrash_steering_RecRestore line 1449, col 3 to line 1546, col 45 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = TRUE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 54: <steer_detachLiveNoCrash_steering_RootDetach line 2027, col 3 to line 2050, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 0
+/\ steer_detachLiveNoCrash_steering_tamper = TRUE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "local"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = TRUE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+State 55: <steer_detachLiveNoCrash_steering_RecFence line 2159, col 3 to line 2213, col 80 of module steer_detachLiveNoCrash>
+/\ steer_detachLiveNoCrash_steering_bindLeft = 0
+/\ steer_detachLiveNoCrash_steering_win = 1
+/\ steer_detachLiveNoCrash_steering_tamper = FALSE
+/\ steer_detachLiveNoCrash_steering_stop = "none"
+/\ steer_detachLiveNoCrash_steering_entries = {}
+/\ steer_detachLiveNoCrash_steering_alloc = "Absent"
+/\ steer_detachLiveNoCrash_steering_fenceLeft = 0
+/\ steer_detachLiveNoCrash_steering_lis = {}
+/\ steer_detachLiveNoCrash_steering_latch = FALSE
+/\ steer_detachLiveNoCrash_steering_steerLeft = 0
+/\ steer_detachLiveNoCrash_steering_verified = {"boot"}
+/\ steer_detachLiveNoCrash_steering_holders = {}
+/\ steer_detachLiveNoCrash_steering_link = FALSE
+/\ steer_detachLiveNoCrash_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_detachLiveNoCrash_steering_route = "fence"
+/\ steer_detachLiveNoCrash_steering_repLeft = 0
+/\ steer_detachLiveNoCrash_steering_sess = FALSE
+/\ steer_detachLiveNoCrash_steering_boot = 5
+/\ steer_detachLiveNoCrash_steering_verSince = FALSE
+/\ steer_detachLiveNoCrash_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "fenced",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_detachLiveNoCrash_steering_rules = TRUE
+/\ steer_detachLiveNoCrash_steering_winE = 0
+/\ steer_detachLiveNoCrash_steering_winF = 0
+/\ steer_detachLiveNoCrash_steering_rfn = FALSE
+/\ steer_detachLiveNoCrash_steering_flowL = TRUE
+/\ steer_detachLiveNoCrash_steering_convLeft = 0
+/\ steer_detachLiveNoCrash_steering_up = TRUE
+/\ steer_detachLiveNoCrash_steering_gen = 1
+/\ steer_detachLiveNoCrash_steering_revokeLeft = 0
+/\ steer_detachLiveNoCrash_steering_estab = TRUE
+/\ steer_detachLiveNoCrash_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_detachLiveNoCrash_steering_lastLS = {}
+/\ steer_detachLiveNoCrash_steering_rmv = FALSE
+
+Back to state 21: <steer_detachLiveNoCrash_steering_RecQuiesceGps line 2219, col 3 to line 2239, col 89 of module steer_detachLiveNoCrash>

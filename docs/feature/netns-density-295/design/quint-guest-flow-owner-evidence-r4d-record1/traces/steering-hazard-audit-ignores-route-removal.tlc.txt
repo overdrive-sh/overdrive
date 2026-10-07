@@ -1,0 +1,595 @@
+State 1: <Initial predicate>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 0
+
+State 2: <steer_rootRouteLiveAuditIgnores_steering_BootStep line 1843, col 3 to line 1962, col 57 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 1
+
+State 3: <steer_rootRouteLiveAuditIgnores_steering_BootStep line 1843, col 3 to line 1962, col 57 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 2
+
+State 4: <steer_rootRouteLiveAuditIgnores_steering_BootStep line 1843, col 3 to line 1962, col 57 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 3
+
+State 5: <steer_rootRouteLiveAuditIgnores_steering_BootStep line 1843, col 3 to line 1962, col 57 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {"boot"}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 4
+
+State 6: <steer_rootRouteLiveAuditIgnores_steering_RootRoute line 2339, col 3 to line 2367, col 51 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "local"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {"boot"}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 4
+
+State 7: <steer_rootRouteLiveAuditIgnores_steering_BootStep line 1843, col 3 to line 1962, col 57 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "local"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {"boot"}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 5
+
+State 8: <steer_rootRouteLiveAuditIgnores_steering_Provision line 2138, col 3 to line 2151, col 57 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Provisioned"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 1
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "local"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {"boot"}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 5
+
+State 9: <steer_rootRouteLiveAuditIgnores_steering_Teardown line 2220, col 3 to line 2235, col 103 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Retiring"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 1
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "local"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {"boot"}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 5
+
+State 10: <steer_rootRouteLiveAuditIgnores_steering_RootRoute line 2339, col 3 to line 2367, col 51 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Retiring"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 1
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {"boot"}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 5
+
+State 11: <steer_rootRouteLiveAuditIgnores_steering_Release line 2241, col 3 to line 2259, col 7 of module steer_rootRouteLiveAuditIgnores>
+/\ steer_rootRouteLiveAuditIgnores_steering_winE = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_winF = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLiveAuditIgnores_steering_rfn = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_up = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_alloc = "Absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_lastLS = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_latch = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_entries = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_revokeLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_gen = 1
+/\ steer_rootRouteLiveAuditIgnores_steering_fenceLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_route = "absent"
+/\ steer_rootRouteLiveAuditIgnores_steering_att = [IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0]
+/\ steer_rootRouteLiveAuditIgnores_steering_tamper = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_rmv = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  joinFenced |-> FALSE,
+  closeFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE,
+  otherLift |-> FALSE ]
+/\ steer_rootRouteLiveAuditIgnores_steering_verified = {"boot"}
+/\ steer_rootRouteLiveAuditIgnores_steering_stop = "none"
+/\ steer_rootRouteLiveAuditIgnores_steering_convLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_steerLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_win = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_holders = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_repLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_rules = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_flowL = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_verSince = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_lis = {}
+/\ steer_rootRouteLiveAuditIgnores_steering_link = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_bindLeft = 0
+/\ steer_rootRouteLiveAuditIgnores_steering_sess = FALSE
+/\ steer_rootRouteLiveAuditIgnores_steering_estab = TRUE
+/\ steer_rootRouteLiveAuditIgnores_steering_boot = 5
+
+State 12: Stuttering

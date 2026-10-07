@@ -1,0 +1,62 @@
+# steering-hazard-unpinned: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  sess = FALSE
+  flowL = TRUE
+  estab = FALSE
+  verified = FALSE
+  lastLS = {}
+  entries = {}
+  latch = FALSE
+  att = 0
+  link = FALSE
+  up = TRUE
+  stop = "none"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  win = 0
+  revokeLeft = 0
+  boot = 0
+  convLeft = 1
+  tamper = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  alloc = "Absent"
+  rules = FALSE
+  bindLeft = 1
+  verSince = FALSE
+  steerLeft = 0
+  route = "absent"
+  holders = {}
+  lis = {}
+  gen = 0
+  repLeft = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = TRUE
+  boot = 4
+  verSince = TRUE
+
+State 6 [BootStep]
+  estab = TRUE
+  boot = 5
+  route = "local"
+
+State 7 [Crash]
+  verified = FALSE
+  link = FALSE
+  up = FALSE
+  stop = "crash"
+  boot = 0
+
+State 8 [ForeignFlush]
+  rules = FALSE

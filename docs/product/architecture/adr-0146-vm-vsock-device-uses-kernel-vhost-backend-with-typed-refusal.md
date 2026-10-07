@@ -4,8 +4,7 @@
 
 **Proposed — decision D2 approved by user 2026-10-05; the launch on a device
 the admission lease already claimed (D16-CLAIM, ADR-0170) approved by user
-2026-10-06 (direction: correct design over simple); pending independent
-DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+2026-10-07; pending independent DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
 
 The VMM path inside this decision is already ruled: **D13 = (a), APPROVED
@@ -71,7 +70,7 @@ production launch hook, uid drop, launch seccomp filter or Landlock rules.
   CH exit before READY. The driver projects it through the existing pre-READY
   VMM-exit start failure; the lease is retired and released, and placement
   may retry with a fresh lease and claim. No owner branches on CH's diagnostic
-  text. A CID held by another vhost user cannot cause it: the claim was taken
+  text. A CID still held by another VMM cannot cause it: the claim was taken
   before launch. It is non-terminal for the node.
 - **No snapshot, migration or pause.** Overdrive does not snapshot, migrate or
   pause a vhost-kernel VM. The fork refuses snapshot and migration; pause is

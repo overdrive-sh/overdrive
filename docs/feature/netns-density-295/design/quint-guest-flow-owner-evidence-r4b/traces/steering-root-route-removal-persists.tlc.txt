@@ -1,0 +1,474 @@
+State 1: <Initial predicate>
+/\ steer_rootRouteLive_steering_verSince = FALSE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 0
+/\ steer_rootRouteLive_steering_alloc = "Absent"
+/\ steer_rootRouteLive_steering_rules = FALSE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "absent"
+/\ steer_rootRouteLive_steering_verified = FALSE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 0
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = FALSE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = FALSE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = FALSE
+
+State 2: <steer_rootRouteLive_steering_RootRoute line 1674, col 3 to line 1694, col 72 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = FALSE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 0
+/\ steer_rootRouteLive_steering_alloc = "Absent"
+/\ steer_rootRouteLive_steering_rules = FALSE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "local"
+/\ steer_rootRouteLive_steering_verified = FALSE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 0
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = FALSE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = FALSE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 3: <steer_rootRouteLive_steering_BootStep line 1236, col 3 to line 1341, col 45 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = FALSE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 1
+/\ steer_rootRouteLive_steering_alloc = "Absent"
+/\ steer_rootRouteLive_steering_rules = FALSE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "local"
+/\ steer_rootRouteLive_steering_verified = FALSE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 0
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = FALSE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = FALSE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 4: <steer_rootRouteLive_steering_BootStep line 1236, col 3 to line 1341, col 45 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = FALSE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 2
+/\ steer_rootRouteLive_steering_alloc = "Absent"
+/\ steer_rootRouteLive_steering_rules = TRUE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "local"
+/\ steer_rootRouteLive_steering_verified = FALSE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 0
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = FALSE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = FALSE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 5: <steer_rootRouteLive_steering_BootStep line 1236, col 3 to line 1341, col 45 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = FALSE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 3
+/\ steer_rootRouteLive_steering_alloc = "Absent"
+/\ steer_rootRouteLive_steering_rules = TRUE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "local"
+/\ steer_rootRouteLive_steering_verified = FALSE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 0
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = FALSE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = TRUE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 6: <steer_rootRouteLive_steering_BootStep line 1236, col 3 to line 1341, col 45 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = TRUE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 4
+/\ steer_rootRouteLive_steering_alloc = "Absent"
+/\ steer_rootRouteLive_steering_rules = TRUE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "local"
+/\ steer_rootRouteLive_steering_verified = TRUE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 0
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = FALSE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = TRUE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 7: <steer_rootRouteLive_steering_BootStep line 1236, col 3 to line 1341, col 45 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = TRUE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 5
+/\ steer_rootRouteLive_steering_alloc = "Absent"
+/\ steer_rootRouteLive_steering_rules = TRUE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "local"
+/\ steer_rootRouteLive_steering_verified = TRUE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 0
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = TRUE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = TRUE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 8: <steer_rootRouteLive_steering_Provision line 1501, col 3 to line 1510, col 72 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = TRUE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 5
+/\ steer_rootRouteLive_steering_alloc = "Provisioned"
+/\ steer_rootRouteLive_steering_rules = TRUE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "local"
+/\ steer_rootRouteLive_steering_verified = TRUE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 1
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = TRUE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = TRUE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 9: <steer_rootRouteLive_steering_Teardown line 1568, col 3 to line 1577, col 72 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = TRUE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 5
+/\ steer_rootRouteLive_steering_alloc = "Retiring"
+/\ steer_rootRouteLive_steering_rules = TRUE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "local"
+/\ steer_rootRouteLive_steering_verified = TRUE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 1
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = TRUE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = TRUE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 10: <steer_rootRouteLive_steering_RootRoute line 1674, col 3 to line 1694, col 72 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = TRUE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 5
+/\ steer_rootRouteLive_steering_alloc = "Retiring"
+/\ steer_rootRouteLive_steering_rules = TRUE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "absent"
+/\ steer_rootRouteLive_steering_verified = TRUE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 1
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = TRUE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = TRUE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 11: <steer_rootRouteLive_steering_Release line 1583, col 3 to line 1600, col 7 of module steer_rootRouteLive>
+/\ steer_rootRouteLive_steering_verSince = TRUE
+/\ steer_rootRouteLive_steering_entries = {}
+/\ steer_rootRouteLive_steering_stop = "none"
+/\ steer_rootRouteLive_steering_win = 0
+/\ steer_rootRouteLive_steering_up = TRUE
+/\ steer_rootRouteLive_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_rootRouteLive_steering_boot = 5
+/\ steer_rootRouteLive_steering_alloc = "Absent"
+/\ steer_rootRouteLive_steering_rules = TRUE
+/\ steer_rootRouteLive_steering_steerLeft = 0
+/\ steer_rootRouteLive_steering_route = "absent"
+/\ steer_rootRouteLive_steering_verified = TRUE
+/\ steer_rootRouteLive_steering_lis = {}
+/\ steer_rootRouteLive_steering_revokeLeft = 0
+/\ steer_rootRouteLive_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_rootRouteLive_steering_gen = 1
+/\ steer_rootRouteLive_steering_lastLS = {}
+/\ steer_rootRouteLive_steering_holders = {}
+/\ steer_rootRouteLive_steering_sess = FALSE
+/\ steer_rootRouteLive_steering_convLeft = 0
+/\ steer_rootRouteLive_steering_att = 0
+/\ steer_rootRouteLive_steering_flowL = TRUE
+/\ steer_rootRouteLive_steering_estab = TRUE
+/\ steer_rootRouteLive_steering_repLeft = 0
+/\ steer_rootRouteLive_steering_latch = FALSE
+/\ steer_rootRouteLive_steering_link = TRUE
+/\ steer_rootRouteLive_steering_bindLeft = 0
+/\ steer_rootRouteLive_steering_tamper = TRUE
+
+State 12: Stuttering

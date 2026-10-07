@@ -1,0 +1,76 @@
+# steering-hazard-no-recovery-fairness: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  route = "absent"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  holders = {}
+  sess = FALSE
+  win = 0
+  tamper = FALSE
+  link = FALSE
+  repLeft = 0
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  verified = FALSE
+  flowL = TRUE
+  estab = FALSE
+  latch = FALSE
+  stop = "none"
+  entries = {}
+  boot = 0
+  lis = {}
+  convLeft = 0
+  revokeLeft = 0
+  up = TRUE
+  gen = 0
+  bindLeft = 0
+  steerLeft = 0
+  alloc = "Absent"
+  verSince = FALSE
+  lastLS = {}
+  rules = FALSE
+  att = 0
+
+State 2 [ListenerTaskExit]
+  flowL = FALSE
+
+State 3 [BootStep]
+  boot = 1
+
+State 4 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 5 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 6 [BootStep]
+  verified = TRUE
+  boot = 4
+  verSince = TRUE
+
+State 7 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 8 [BootStep]
+  route = "local"
+  estab = TRUE
+  boot = 5
+
+State 9 [AuditFind]
+  win = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+
+State 10 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 11 [Teardown]
+  alloc = "Retiring"
+
+State 12 [Release]
+  alloc = "Absent"
+
+State 13 [Stuttering]
+  (no change)

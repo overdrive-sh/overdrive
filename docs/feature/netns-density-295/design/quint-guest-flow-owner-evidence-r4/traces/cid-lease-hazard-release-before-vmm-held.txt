@@ -1,0 +1,32 @@
+# cid-lease-hazard-release-before-vmm-held: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  errsLeft = 0
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  todo = {}
+  walker = 0
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE ]
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  exitsLeft = 1
+  foreignLeft = 0
+  cursor = 0
+
+State 2 [ForeignRelease]
+  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+
+State 3 [AssignBegin]
+  todo = {0, 1, 2}
+  walker = 1
+
+State 4 [AssignTry]
+  al = << [ st |-> "admitted", off |-> 0, loc |-> "slot", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  kern = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  todo = {}
+  walker = 0
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 1
+
+State 5 [LaunchBegin]
+  al = << [ st |-> "launching", off |-> 0, loc |-> "taken", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)

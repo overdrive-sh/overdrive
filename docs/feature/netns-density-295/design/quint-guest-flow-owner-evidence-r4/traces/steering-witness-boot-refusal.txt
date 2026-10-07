@@ -1,0 +1,37 @@
+# steering-witness-boot-refusal: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  holders = {}
+  lis = {}
+  convLeft = 1
+  lastLS = {}
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  gen = 0
+  flowL = TRUE
+  bindLeft = 1
+  latch = FALSE
+  sess = FALSE
+  entries = {}
+  link = FALSE
+  revokeLeft = 0
+  steerLeft = 0
+  alloc = "Absent"
+  boot = 0
+  rules = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  verified = FALSE
+  route = FALSE
+  up = TRUE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [ConvergeFail]
+  convLeft = 0
+  g = [ routeUnverified |-> FALSE, refused |-> TRUE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  boot = 0
+  up = FALSE

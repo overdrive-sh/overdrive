@@ -1,0 +1,54 @@
+# steering-hazard-repair-without-hold: counterexample, 9 state(s) (from the TLC trace)
+
+State 1
+  lis = {}
+  boot = 0
+  gen = 0
+  verified = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  alloc = "Absent"
+  entries = {}
+  revokeLeft = 0
+  rules = FALSE
+  route = FALSE
+  lastLS = {}
+  convLeft = 1
+  sess = FALSE
+  bindLeft = 1
+  steerLeft = 0
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  up = TRUE
+  link = FALSE
+  flowL = TRUE
+  holders = {}
+  latch = FALSE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 5 [BootStep]
+  boot = 4
+  verified = TRUE
+
+State 6 [ForeignFlush]
+  rules = FALSE
+
+State 7 [BootStep]
+  boot = 5
+  route = TRUE
+
+State 8 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 9 [RecRepairNoHold]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> TRUE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  rules = TRUE

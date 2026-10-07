@@ -1,0 +1,36 @@
+# steering-hazard-route-first: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  bindLeft = 1
+  sess = FALSE
+  flowL = TRUE
+  entries = {}
+  latch = FALSE
+  link = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  revokeLeft = 0
+  verified = FALSE
+  boot = 0
+  alloc = "Absent"
+  lis = {}
+  rules = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  route = FALSE
+  holders = {}
+  gen = 0
+  steerLeft = 0
+  lastLS = {}
+  up = TRUE
+  convLeft = 1
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  boot = 3
+  g = [ routeUnverified |-> TRUE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  route = TRUE

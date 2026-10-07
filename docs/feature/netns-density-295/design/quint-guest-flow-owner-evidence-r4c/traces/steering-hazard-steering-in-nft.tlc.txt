@@ -1,0 +1,398 @@
+State 1: <Initial predicate>
+/\ steer_bugSteeringInNft_steering_steerLeft = 0
+/\ steer_bugSteeringInNft_steering_gen = 0
+/\ steer_bugSteeringInNft_steering_bindLeft = 1
+/\ steer_bugSteeringInNft_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugSteeringInNft_steering_rmv = FALSE
+/\ steer_bugSteeringInNft_steering_stop = "none"
+/\ steer_bugSteeringInNft_steering_win = 0
+/\ steer_bugSteeringInNft_steering_alloc = "Absent"
+/\ steer_bugSteeringInNft_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_bugSteeringInNft_steering_latch = FALSE
+/\ steer_bugSteeringInNft_steering_lastLS = {}
+/\ steer_bugSteeringInNft_steering_route = "absent"
+/\ steer_bugSteeringInNft_steering_lis = {}
+/\ steer_bugSteeringInNft_steering_verified = {}
+/\ steer_bugSteeringInNft_steering_link = FALSE
+/\ steer_bugSteeringInNft_steering_convLeft = 1
+/\ steer_bugSteeringInNft_steering_tamper = FALSE
+/\ steer_bugSteeringInNft_steering_sess = FALSE
+/\ steer_bugSteeringInNft_steering_rules = FALSE
+/\ steer_bugSteeringInNft_steering_boot = 0
+/\ steer_bugSteeringInNft_steering_flowL = TRUE
+/\ steer_bugSteeringInNft_steering_verSince = FALSE
+/\ steer_bugSteeringInNft_steering_revokeLeft = 0
+/\ steer_bugSteeringInNft_steering_winE = 0
+/\ steer_bugSteeringInNft_steering_winF = 0
+/\ steer_bugSteeringInNft_steering_up = TRUE
+/\ steer_bugSteeringInNft_steering_holders = {}
+/\ steer_bugSteeringInNft_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugSteeringInNft_steering_repLeft = 0
+/\ steer_bugSteeringInNft_steering_rfn = FALSE
+/\ steer_bugSteeringInNft_steering_entries = {}
+/\ steer_bugSteeringInNft_steering_fenceLeft = 0
+/\ steer_bugSteeringInNft_steering_estab = FALSE
+
+State 2: <steer_bugSteeringInNft_steering_BootStep line 1553, col 3 to line 1665, col 48 of module steer_bugSteeringInNft>
+/\ steer_bugSteeringInNft_steering_steerLeft = 0
+/\ steer_bugSteeringInNft_steering_gen = 0
+/\ steer_bugSteeringInNft_steering_bindLeft = 1
+/\ steer_bugSteeringInNft_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugSteeringInNft_steering_rmv = FALSE
+/\ steer_bugSteeringInNft_steering_stop = "none"
+/\ steer_bugSteeringInNft_steering_win = 0
+/\ steer_bugSteeringInNft_steering_alloc = "Absent"
+/\ steer_bugSteeringInNft_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_bugSteeringInNft_steering_latch = FALSE
+/\ steer_bugSteeringInNft_steering_lastLS = {}
+/\ steer_bugSteeringInNft_steering_route = "absent"
+/\ steer_bugSteeringInNft_steering_lis = {}
+/\ steer_bugSteeringInNft_steering_verified = {}
+/\ steer_bugSteeringInNft_steering_link = FALSE
+/\ steer_bugSteeringInNft_steering_convLeft = 1
+/\ steer_bugSteeringInNft_steering_tamper = FALSE
+/\ steer_bugSteeringInNft_steering_sess = FALSE
+/\ steer_bugSteeringInNft_steering_rules = FALSE
+/\ steer_bugSteeringInNft_steering_boot = 1
+/\ steer_bugSteeringInNft_steering_flowL = TRUE
+/\ steer_bugSteeringInNft_steering_verSince = FALSE
+/\ steer_bugSteeringInNft_steering_revokeLeft = 0
+/\ steer_bugSteeringInNft_steering_winE = 0
+/\ steer_bugSteeringInNft_steering_winF = 0
+/\ steer_bugSteeringInNft_steering_up = TRUE
+/\ steer_bugSteeringInNft_steering_holders = {}
+/\ steer_bugSteeringInNft_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugSteeringInNft_steering_repLeft = 0
+/\ steer_bugSteeringInNft_steering_rfn = FALSE
+/\ steer_bugSteeringInNft_steering_entries = {}
+/\ steer_bugSteeringInNft_steering_fenceLeft = 0
+/\ steer_bugSteeringInNft_steering_estab = FALSE
+
+State 3: <steer_bugSteeringInNft_steering_BootStep line 1553, col 3 to line 1665, col 48 of module steer_bugSteeringInNft>
+/\ steer_bugSteeringInNft_steering_steerLeft = 0
+/\ steer_bugSteeringInNft_steering_gen = 0
+/\ steer_bugSteeringInNft_steering_bindLeft = 1
+/\ steer_bugSteeringInNft_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugSteeringInNft_steering_rmv = FALSE
+/\ steer_bugSteeringInNft_steering_stop = "none"
+/\ steer_bugSteeringInNft_steering_win = 0
+/\ steer_bugSteeringInNft_steering_alloc = "Absent"
+/\ steer_bugSteeringInNft_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_bugSteeringInNft_steering_latch = FALSE
+/\ steer_bugSteeringInNft_steering_lastLS = {}
+/\ steer_bugSteeringInNft_steering_route = "absent"
+/\ steer_bugSteeringInNft_steering_lis = {}
+/\ steer_bugSteeringInNft_steering_verified = {}
+/\ steer_bugSteeringInNft_steering_link = FALSE
+/\ steer_bugSteeringInNft_steering_convLeft = 1
+/\ steer_bugSteeringInNft_steering_tamper = FALSE
+/\ steer_bugSteeringInNft_steering_sess = FALSE
+/\ steer_bugSteeringInNft_steering_rules = TRUE
+/\ steer_bugSteeringInNft_steering_boot = 2
+/\ steer_bugSteeringInNft_steering_flowL = TRUE
+/\ steer_bugSteeringInNft_steering_verSince = FALSE
+/\ steer_bugSteeringInNft_steering_revokeLeft = 0
+/\ steer_bugSteeringInNft_steering_winE = 0
+/\ steer_bugSteeringInNft_steering_winF = 0
+/\ steer_bugSteeringInNft_steering_up = TRUE
+/\ steer_bugSteeringInNft_steering_holders = {}
+/\ steer_bugSteeringInNft_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugSteeringInNft_steering_repLeft = 0
+/\ steer_bugSteeringInNft_steering_rfn = FALSE
+/\ steer_bugSteeringInNft_steering_entries = {}
+/\ steer_bugSteeringInNft_steering_fenceLeft = 0
+/\ steer_bugSteeringInNft_steering_estab = FALSE
+
+State 4: <steer_bugSteeringInNft_steering_BootStep line 1553, col 3 to line 1665, col 48 of module steer_bugSteeringInNft>
+/\ steer_bugSteeringInNft_steering_steerLeft = 0
+/\ steer_bugSteeringInNft_steering_gen = 0
+/\ steer_bugSteeringInNft_steering_bindLeft = 1
+/\ steer_bugSteeringInNft_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugSteeringInNft_steering_rmv = FALSE
+/\ steer_bugSteeringInNft_steering_stop = "none"
+/\ steer_bugSteeringInNft_steering_win = 0
+/\ steer_bugSteeringInNft_steering_alloc = "Absent"
+/\ steer_bugSteeringInNft_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_bugSteeringInNft_steering_latch = FALSE
+/\ steer_bugSteeringInNft_steering_lastLS = {}
+/\ steer_bugSteeringInNft_steering_route = "absent"
+/\ steer_bugSteeringInNft_steering_lis = {}
+/\ steer_bugSteeringInNft_steering_verified = {}
+/\ steer_bugSteeringInNft_steering_link = TRUE
+/\ steer_bugSteeringInNft_steering_convLeft = 1
+/\ steer_bugSteeringInNft_steering_tamper = FALSE
+/\ steer_bugSteeringInNft_steering_sess = FALSE
+/\ steer_bugSteeringInNft_steering_rules = TRUE
+/\ steer_bugSteeringInNft_steering_boot = 3
+/\ steer_bugSteeringInNft_steering_flowL = TRUE
+/\ steer_bugSteeringInNft_steering_verSince = FALSE
+/\ steer_bugSteeringInNft_steering_revokeLeft = 0
+/\ steer_bugSteeringInNft_steering_winE = 0
+/\ steer_bugSteeringInNft_steering_winF = 0
+/\ steer_bugSteeringInNft_steering_up = TRUE
+/\ steer_bugSteeringInNft_steering_holders = {}
+/\ steer_bugSteeringInNft_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugSteeringInNft_steering_repLeft = 0
+/\ steer_bugSteeringInNft_steering_rfn = FALSE
+/\ steer_bugSteeringInNft_steering_entries = {}
+/\ steer_bugSteeringInNft_steering_fenceLeft = 0
+/\ steer_bugSteeringInNft_steering_estab = FALSE
+
+State 5: <steer_bugSteeringInNft_steering_BootStep line 1553, col 3 to line 1665, col 48 of module steer_bugSteeringInNft>
+/\ steer_bugSteeringInNft_steering_steerLeft = 0
+/\ steer_bugSteeringInNft_steering_gen = 0
+/\ steer_bugSteeringInNft_steering_bindLeft = 1
+/\ steer_bugSteeringInNft_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugSteeringInNft_steering_rmv = FALSE
+/\ steer_bugSteeringInNft_steering_stop = "none"
+/\ steer_bugSteeringInNft_steering_win = 0
+/\ steer_bugSteeringInNft_steering_alloc = "Absent"
+/\ steer_bugSteeringInNft_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_bugSteeringInNft_steering_latch = FALSE
+/\ steer_bugSteeringInNft_steering_lastLS = {}
+/\ steer_bugSteeringInNft_steering_route = "absent"
+/\ steer_bugSteeringInNft_steering_lis = {}
+/\ steer_bugSteeringInNft_steering_verified = {"boot"}
+/\ steer_bugSteeringInNft_steering_link = TRUE
+/\ steer_bugSteeringInNft_steering_convLeft = 1
+/\ steer_bugSteeringInNft_steering_tamper = FALSE
+/\ steer_bugSteeringInNft_steering_sess = FALSE
+/\ steer_bugSteeringInNft_steering_rules = TRUE
+/\ steer_bugSteeringInNft_steering_boot = 4
+/\ steer_bugSteeringInNft_steering_flowL = TRUE
+/\ steer_bugSteeringInNft_steering_verSince = TRUE
+/\ steer_bugSteeringInNft_steering_revokeLeft = 0
+/\ steer_bugSteeringInNft_steering_winE = 0
+/\ steer_bugSteeringInNft_steering_winF = 0
+/\ steer_bugSteeringInNft_steering_up = TRUE
+/\ steer_bugSteeringInNft_steering_holders = {}
+/\ steer_bugSteeringInNft_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugSteeringInNft_steering_repLeft = 0
+/\ steer_bugSteeringInNft_steering_rfn = FALSE
+/\ steer_bugSteeringInNft_steering_entries = {}
+/\ steer_bugSteeringInNft_steering_fenceLeft = 0
+/\ steer_bugSteeringInNft_steering_estab = FALSE
+
+State 6: <steer_bugSteeringInNft_steering_BootStep line 1553, col 3 to line 1665, col 48 of module steer_bugSteeringInNft>
+/\ steer_bugSteeringInNft_steering_steerLeft = 0
+/\ steer_bugSteeringInNft_steering_gen = 0
+/\ steer_bugSteeringInNft_steering_bindLeft = 1
+/\ steer_bugSteeringInNft_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugSteeringInNft_steering_rmv = FALSE
+/\ steer_bugSteeringInNft_steering_stop = "none"
+/\ steer_bugSteeringInNft_steering_win = 0
+/\ steer_bugSteeringInNft_steering_alloc = "Absent"
+/\ steer_bugSteeringInNft_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_bugSteeringInNft_steering_latch = FALSE
+/\ steer_bugSteeringInNft_steering_lastLS = {}
+/\ steer_bugSteeringInNft_steering_route = "local"
+/\ steer_bugSteeringInNft_steering_lis = {}
+/\ steer_bugSteeringInNft_steering_verified = {"boot"}
+/\ steer_bugSteeringInNft_steering_link = TRUE
+/\ steer_bugSteeringInNft_steering_convLeft = 1
+/\ steer_bugSteeringInNft_steering_tamper = FALSE
+/\ steer_bugSteeringInNft_steering_sess = FALSE
+/\ steer_bugSteeringInNft_steering_rules = TRUE
+/\ steer_bugSteeringInNft_steering_boot = 5
+/\ steer_bugSteeringInNft_steering_flowL = TRUE
+/\ steer_bugSteeringInNft_steering_verSince = TRUE
+/\ steer_bugSteeringInNft_steering_revokeLeft = 0
+/\ steer_bugSteeringInNft_steering_winE = 0
+/\ steer_bugSteeringInNft_steering_winF = 0
+/\ steer_bugSteeringInNft_steering_up = TRUE
+/\ steer_bugSteeringInNft_steering_holders = {}
+/\ steer_bugSteeringInNft_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugSteeringInNft_steering_repLeft = 0
+/\ steer_bugSteeringInNft_steering_rfn = FALSE
+/\ steer_bugSteeringInNft_steering_entries = {}
+/\ steer_bugSteeringInNft_steering_fenceLeft = 0
+/\ steer_bugSteeringInNft_steering_estab = TRUE
+
+State 7: <steer_bugSteeringInNft_steering_ForeignFlush line 1951, col 3 to line 1972, col 78 of module steer_bugSteeringInNft>
+/\ steer_bugSteeringInNft_steering_steerLeft = 0
+/\ steer_bugSteeringInNft_steering_gen = 0
+/\ steer_bugSteeringInNft_steering_bindLeft = 1
+/\ steer_bugSteeringInNft_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_bugSteeringInNft_steering_rmv = FALSE
+/\ steer_bugSteeringInNft_steering_stop = "none"
+/\ steer_bugSteeringInNft_steering_win = 0
+/\ steer_bugSteeringInNft_steering_alloc = "Absent"
+/\ steer_bugSteeringInNft_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_bugSteeringInNft_steering_latch = FALSE
+/\ steer_bugSteeringInNft_steering_lastLS = {}
+/\ steer_bugSteeringInNft_steering_route = "local"
+/\ steer_bugSteeringInNft_steering_lis = {}
+/\ steer_bugSteeringInNft_steering_verified = {"boot"}
+/\ steer_bugSteeringInNft_steering_link = FALSE
+/\ steer_bugSteeringInNft_steering_convLeft = 1
+/\ steer_bugSteeringInNft_steering_tamper = FALSE
+/\ steer_bugSteeringInNft_steering_sess = FALSE
+/\ steer_bugSteeringInNft_steering_rules = FALSE
+/\ steer_bugSteeringInNft_steering_boot = 5
+/\ steer_bugSteeringInNft_steering_flowL = TRUE
+/\ steer_bugSteeringInNft_steering_verSince = TRUE
+/\ steer_bugSteeringInNft_steering_revokeLeft = 0
+/\ steer_bugSteeringInNft_steering_winE = 0
+/\ steer_bugSteeringInNft_steering_winF = 0
+/\ steer_bugSteeringInNft_steering_up = TRUE
+/\ steer_bugSteeringInNft_steering_holders = {}
+/\ steer_bugSteeringInNft_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_bugSteeringInNft_steering_repLeft = 0
+/\ steer_bugSteeringInNft_steering_rfn = FALSE
+/\ steer_bugSteeringInNft_steering_entries = {}
+/\ steer_bugSteeringInNft_steering_fenceLeft = 0
+/\ steer_bugSteeringInNft_steering_estab = TRUE

@@ -1,0 +1,854 @@
+State 1: <Initial predicate>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = FALSE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 0
+/\ steer_envDetachConcurrent_steering_route = "absent"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = FALSE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = FALSE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 2: <steer_envDetachConcurrent_steering_BootStep line 1570, col 3 to line 1686, col 51 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = FALSE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 1
+/\ steer_envDetachConcurrent_steering_route = "absent"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = FALSE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = FALSE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 3: <steer_envDetachConcurrent_steering_BootStep line 1570, col 3 to line 1686, col 51 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = FALSE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 2
+/\ steer_envDetachConcurrent_steering_route = "absent"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = TRUE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = FALSE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 4: <steer_envDetachConcurrent_steering_ForeignFlush line 1978, col 3 to line 2000, col 45 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = FALSE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 2
+/\ steer_envDetachConcurrent_steering_route = "absent"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = FALSE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = FALSE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 5: <steer_envDetachConcurrent_steering_BootStep line 1570, col 3 to line 1686, col 51 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = TRUE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = FALSE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 3
+/\ steer_envDetachConcurrent_steering_route = "absent"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = FALSE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = FALSE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 6: <steer_envDetachConcurrent_steering_BootStep line 1570, col 3 to line 1686, col 51 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = TRUE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = FALSE
+/\ steer_envDetachConcurrent_steering_verSince = TRUE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 4
+/\ steer_envDetachConcurrent_steering_route = "absent"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = FALSE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = FALSE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 7: <steer_envDetachConcurrent_steering_BootStep line 1570, col 3 to line 1686, col 51 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = TRUE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = FALSE
+/\ steer_envDetachConcurrent_steering_verSince = TRUE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "local"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = FALSE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 8: <steer_envDetachConcurrent_steering_RootDetach line 2006, col 3 to line 2030, col 45 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = TRUE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = FALSE
+/\ steer_envDetachConcurrent_steering_verSince = TRUE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "local"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> FALSE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = FALSE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 9: <steer_envDetachConcurrent_steering_RecQuiesce line 2498, col 3 to line 2530, col 17 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = TRUE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "fence"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = FALSE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "held",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {"IpRules"}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 10: <steer_envDetachConcurrent_steering_RepConverge line 2232, col 3 to line 2291, col 45 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = TRUE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = TRUE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "fence"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = TRUE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "conv",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {"IpRules"}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 11: <steer_envDetachConcurrent_steering_RepVerify line 2347, col 3 to line 2403, col 45 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"IpRules", "boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = TRUE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = TRUE
+/\ steer_envDetachConcurrent_steering_verSince = TRUE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "fence"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = TRUE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "ver",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {"IpRules"}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 12: <steer_envDetachConcurrent_steering_RootDetach line 2006, col 3 to line 2030, col 45 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = TRUE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"IpRules", "boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = TRUE
+/\ steer_envDetachConcurrent_steering_verSince = TRUE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "fence"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = TRUE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "ver",
+  GuestPrefixSteering |-> "idle",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {"IpRules"}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 13: <steer_envDetachConcurrent_steering_AuditFind line 2112, col 3 to line 2138, col 45 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = TRUE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"IpRules", "boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = TRUE
+/\ steer_envDetachConcurrent_steering_verSince = TRUE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "fence"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = TRUE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "ver",
+  GuestPrefixSteering |-> "found",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {"IpRules"}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 14: <steer_envDetachConcurrent_steering_RecFence line 2144, col 3 to line 2199, col 45 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"IpRules", "boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = TRUE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "fence"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> FALSE ]
+/\ steer_envDetachConcurrent_steering_rules = TRUE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "ver",
+  GuestPrefixSteering |-> "fenced",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {"IpRules"}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"
+
+State 15: <steer_envDetachConcurrent_steering_RepRoute line 2409, col 3 to line 2452, col 7 of module steer_envDetachConcurrent>
+/\ steer_envDetachConcurrent_steering_revokeLeft = 0
+/\ steer_envDetachConcurrent_steering_tamper = FALSE
+/\ steer_envDetachConcurrent_steering_win = 0
+/\ steer_envDetachConcurrent_steering_steerLeft = 0
+/\ steer_envDetachConcurrent_steering_verified = {"IpRules", "boot"}
+/\ steer_envDetachConcurrent_steering_convLeft = 0
+/\ steer_envDetachConcurrent_steering_lastLS = {}
+/\ steer_envDetachConcurrent_steering_alloc = "Absent"
+/\ steer_envDetachConcurrent_steering_link = FALSE
+/\ steer_envDetachConcurrent_steering_lis = {}
+/\ steer_envDetachConcurrent_steering_latch = TRUE
+/\ steer_envDetachConcurrent_steering_verSince = FALSE
+/\ steer_envDetachConcurrent_steering_sess = FALSE
+/\ steer_envDetachConcurrent_steering_entries = {}
+/\ steer_envDetachConcurrent_steering_boot = 5
+/\ steer_envDetachConcurrent_steering_route = "local"
+/\ steer_envDetachConcurrent_steering_winE = 0
+/\ steer_envDetachConcurrent_steering_winF = 0
+/\ steer_envDetachConcurrent_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE,
+  quiesceFenced |-> TRUE,
+  widenClose |-> FALSE,
+  widenRoute |-> TRUE ]
+/\ steer_envDetachConcurrent_steering_rules = TRUE
+/\ steer_envDetachConcurrent_steering_rec = [ IpRules |-> "repaired",
+  GuestPrefixSteering |-> "fenced",
+  FlowListeners |-> "idle",
+  LocalRoute |-> "idle" ]
+/\ steer_envDetachConcurrent_steering_flowL = TRUE
+/\ steer_envDetachConcurrent_steering_holders = {"IpRules"}
+/\ steer_envDetachConcurrent_steering_rfn = FALSE
+/\ steer_envDetachConcurrent_steering_repLeft = 0
+/\ steer_envDetachConcurrent_steering_up = TRUE
+/\ steer_envDetachConcurrent_steering_bindLeft = 0
+/\ steer_envDetachConcurrent_steering_gen = 0
+/\ steer_envDetachConcurrent_steering_estab = TRUE
+/\ steer_envDetachConcurrent_steering_att = [ IpRules |-> 0,
+  GuestPrefixSteering |-> 0,
+  FlowListeners |-> 0,
+  LocalRoute |-> 0 ]
+/\ steer_envDetachConcurrent_steering_fenceLeft = 0
+/\ steer_envDetachConcurrent_steering_rmv = FALSE
+/\ steer_envDetachConcurrent_steering_stop = "none"

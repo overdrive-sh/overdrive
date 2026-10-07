@@ -1,0 +1,617 @@
+State 1: <Initial predicate>
+/\ steer_detachLiveNoFairness_steering_route = FALSE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = FALSE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = FALSE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 0
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 0
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = FALSE
+
+State 2: <steer_detachLiveNoFairness_steering_BootStep line 537, col 3 to line 628, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = FALSE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = FALSE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = FALSE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 1
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 0
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = FALSE
+
+State 3: <steer_detachLiveNoFairness_steering_BootStep line 537, col 3 to line 628, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = FALSE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = FALSE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = FALSE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 2
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 0
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 4: <steer_detachLiveNoFairness_steering_BootStep line 537, col 3 to line 628, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = FALSE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = TRUE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = FALSE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = FALSE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 3
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 0
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 5: <steer_detachLiveNoFairness_steering_BootStep line 537, col 3 to line 628, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = FALSE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = TRUE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = FALSE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 4
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 0
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 6: <steer_detachLiveNoFairness_steering_ListenerTaskExit line 897, col 3 to line 913, col 46 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = FALSE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = TRUE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = FALSE
+/\ steer_detachLiveNoFairness_steering_latch = FALSE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 4
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 0
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 7: <steer_detachLiveNoFairness_steering_BootStep line 537, col 3 to line 628, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = TRUE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = FALSE
+/\ steer_detachLiveNoFairness_steering_latch = FALSE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 0
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 8: <steer_detachLiveNoFairness_steering_RecQuiesce line 919, col 3 to line 964, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = TRUE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "held"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = FALSE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 0
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 9: <steer_detachLiveNoFairness_steering_Provision line 1497, col 3 to line 1508, col 46 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = TRUE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "held"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = FALSE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Provisioned"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 10: <steer_detachLiveNoFairness_steering_RootDetach line 856, col 3 to line 871, col 46 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"FlowListeners"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "held"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = FALSE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Provisioned"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 11: <steer_detachLiveNoFairness_steering_RecQuiesce line 919, col 3 to line 964, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "held"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = FALSE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Provisioned"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 12: <steer_detachLiveNoFairness_steering_RecRepair line 970, col 3 to line 992, col 46 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Provisioned"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 13: <steer_detachLiveNoFairness_steering_RecRestore line 1055, col 3 to line 1120, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Provisioned"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 14: <steer_detachLiveNoFairness_steering_Teardown line 1547, col 3 to line 1557, col 46 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Retiring"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 15: <steer_detachLiveNoFairness_steering_Release line 1218, col 3 to line 1236, col 7 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 16: <steer_detachLiveNoFairness_steering_ListenerTaskExit line 897, col 3 to line 913, col 46 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"GuestPrefixSteering"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "idle"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = FALSE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 17: <steer_detachLiveNoFairness_steering_RecQuiesce line 919, col 3 to line 964, col 52 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "held", FlowListeners |-> "held"]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = FALSE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+State 18: <steer_detachLiveNoFairness_steering_RecRepair line 970, col 3 to line 992, col 46 of module steer_detachLiveNoFairness>
+/\ steer_detachLiveNoFairness_steering_route = TRUE
+/\ steer_detachLiveNoFairness_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> TRUE,
+  overlapped |-> TRUE,
+  revokeKept |-> FALSE ]
+/\ steer_detachLiveNoFairness_steering_holders = {"GuestPrefixSteering", "FlowListeners"}
+/\ steer_detachLiveNoFairness_steering_sess = FALSE
+/\ steer_detachLiveNoFairness_steering_link = FALSE
+/\ steer_detachLiveNoFairness_steering_rec = [ IpRules |-> "idle",
+  GuestPrefixSteering |-> "held",
+  FlowListeners |-> "repaired" ]
+/\ steer_detachLiveNoFairness_steering_verified = TRUE
+/\ steer_detachLiveNoFairness_steering_flowL = TRUE
+/\ steer_detachLiveNoFairness_steering_latch = TRUE
+/\ steer_detachLiveNoFairness_steering_entries = {}
+/\ steer_detachLiveNoFairness_steering_boot = 5
+/\ steer_detachLiveNoFairness_steering_lis = {}
+/\ steer_detachLiveNoFairness_steering_convLeft = 0
+/\ steer_detachLiveNoFairness_steering_revokeLeft = 0
+/\ steer_detachLiveNoFairness_steering_up = TRUE
+/\ steer_detachLiveNoFairness_steering_gen = 1
+/\ steer_detachLiveNoFairness_steering_bindLeft = 0
+/\ steer_detachLiveNoFairness_steering_steerLeft = 0
+/\ steer_detachLiveNoFairness_steering_alloc = "Absent"
+/\ steer_detachLiveNoFairness_steering_lastLS = {}
+/\ steer_detachLiveNoFairness_steering_rules = TRUE
+
+Back to state 15: <steer_detachLiveNoFairness_steering_RecRestore line 1055, col 3 to line 1120, col 52 of module steer_detachLiveNoFairness>

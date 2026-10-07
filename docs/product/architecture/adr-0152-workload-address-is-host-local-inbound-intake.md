@@ -4,30 +4,25 @@
 
 **Proposed — decision D8 approved by user 2026-10-05; its residual
 pre-activation difference D15-R1 acknowledged by user 2026-10-05; decision
-D8a — the guest-prefix firewall rules and the boot convergence of the shared
-route (independent DESIGN review findings B-2, H-4) — approved by user
-2026-10-06; its two corrections from the formal model check
-(`spike/quint-owner-findings.md` findings 1 and K-D3) — an element whose
-removal fails keeps its listener bound until it is gone (D8a-REVOKE), and
-boot keeps or adds the route only when the steering rules are verified
-present (D8a-ROUTE) — and the ruling that the route is never removed at
-shutdown (U-4) approved by user 2026-10-06; the re-assertion of a wanted
-port's element at every serving period (D8a-REASSERT, recorded in ADR-0163),
-named quiescence holders (D8a-HOLD, ADR-0169), and the two residual,
-fail-closed exposures as now bounded — a `connect()` completing on a port no
-longer wanted whose element removal keeps failing (D8a-PROBE) and other
-software deleting the shared firewall table (D8a-FLUSH) — approved by user
-2026-10-06 (direction: correct design over simple); pending independent
-DESIGN review.** GH #295. Recorded in the
-#295 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
-2026-10-05*. Whether an intake listener exists while no guest application
-listens is ADR-0163. Inbound UDP service to VMs is deferred to **#310** (user
-ruling D15, 2026-10-05).
+D8a — only bound intake listeners are reachable at the guest prefix, and the
+boot convergence of the shared route (independent DESIGN review findings B-2,
+H-4) — approved by user 2026-10-06; boot keeps or adds the route only behind
+verified steering (D8a-ROUTE) and the route is never removed at shutdown
+(U-4), approved by user 2026-10-06, D8a-ROUTE restated for the steering
+mechanism and approved by user 2026-10-07; the steering mechanism — a pinned
+socket-lookup program over a listener-keyed socket map (D8a-LOOKUP,
+ADR-0171) — and the boot fence of the prefix when that steering cannot be
+verified (D8a-FENCE) approved by user 2026-10-07; pending independent DESIGN
+review.** GH #295.
+Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
+DESIGN — PROPOSED 2026-10-05*. Whether an intake listener exists while no
+guest application listens is ADR-0163. Inbound UDP service to VMs is deferred
+to **#310** (user ruling D15, 2026-10-05).
 
 Amends on acceptance: ADR-0125 (constant rules: rules 2–3 and
 `outbound_sources` removed; `managed_guest_ips` replaced by the constant guest
-prefix; the `intake_listeners` set and two rules added) and ADR-0137 (boot
-convergence covers `intake_listeners`).
+prefix; an output reject and a prerouting drop of guest-prefix traffic that is
+neither exempt nor diverted added).
 
 ## Context
 
@@ -73,49 +68,53 @@ the client writing immediately.
 
 ## Decision
 
-1. **Shared local route, converged on boot, only behind verified rules.** The
-   guest prefix is host-local through one shared `local` route on `lo` whose
-   preferred source is the node's guest gateway address, tagged with
+1. **Shared local route, converged on boot, only behind verified steering.**
+   The guest prefix is host-local through one shared `local` route on `lo`
+   whose preferred source is the node's guest gateway address, tagged with
    Overdrive's route protocol identifier. There is no per-allocation route or
-   netdevice. Every boot first verifies that the guest-prefix steering rules
-   of point 2 are present in the shared firewall table as pinned. Only then
-   does it observe the routes covering the prefix and converge: an identical
-   route is kept; an Overdrive-tagged route for the prefix with different
-   attributes is replaced; a missing route is added; a route not tagged by
-   Overdrive that overlaps the prefix refuses startup with a typed error
-   naming it. If the rules are not verified present, boot removes an
-   Overdrive-tagged route for the prefix and refuses startup with a typed
-   error: the prefix is never locally deliverable without the rules. The
-   route is node infrastructure: `serve` never removes it at shutdown,
-   graceful or not; it persists across restarts and every boot converges it.
-   While `serve` is down the persistent firewall rules (point 2) keep the
-   prefix fail-closed.
-2. **Only bound intake listeners are reachable at the guest prefix.** The
-   host firewall holds a set `intake_listeners` of `(workload_addr, port)`
-   elements. The owner adds an element only after the listener is bound and
-   listening, and removes it before closing the listener, so the set never
-   names a port without a bound intake listener. If removing the element
-   fails, the listener stays bound and the removal is retried; the listener
-   closes only after the element is gone. While its removal is pending, the
-   listener pairs nothing: every connection it accepts is reset. Teardown does
-   not complete, and the allocation's lease (with its address and CID) is not
-   released, while any element of the allocation exists. A wanted port's
-   element is asserted present at the start of every serving period and
-   retried until it is (ADR-0163), and a repair of these rules runs only while
-   the repairing recovery holds quiescence (ADR-0169). The constant rules then
-   are:
-   - output: a marked (leg-S / probe) TCP connection to the guest prefix whose
-     `(address, port)` is not in `intake_listeners` is rejected with a TCP
-     reset — placed before the leg-S mark exemption;
-   - output and prerouting: every other packet to the guest prefix not
-     accepted by the leg-S exemption or diverted to leg-C
-     (`inbound_destinations`) is dropped — the output rule rejects (TCP reset,
-     ICMP port-unreachable otherwise) so host-local clients see a refusal at
-     once; the prerouting rule drops, as today for remote traffic.
+   netdevice. Every boot first converges and verifies the guest-prefix
+   steering of point 2 (ADR-0171). Only then does it observe the routes
+   covering the prefix and converge: an identical route is kept; an
+   Overdrive-tagged route for the prefix with different attributes is
+   replaced; a missing route is added; a route not tagged by Overdrive that
+   overlaps the prefix refuses startup with a typed error naming it. If the
+   steering cannot be verified, boot fences the prefix — the tagged route
+   becomes a `prohibit` route for the prefix, in one route replace — and
+   refuses startup with a typed error: the prefix is never locally
+   deliverable without verified steering, and fenced traffic is refused
+   rather than routed elsewhere (ADR-0171). The tagged route has exactly
+   these two forms, `local` and the fence (D8a-FENCE), and only a boot
+   convergence that has just verified and probed the steering puts `local`
+   back. Boot is the only writer of the route and of the steering program:
+   on the appliance only Overdrive writes these kernel objects (ADR-0068), and
+   at runtime the owner changes the steering only by inserting entries and by
+   closing listeners, both of which report their outcome to the owner, so
+   neither the route nor the steering has a runtime audit or repair. A crash
+   at any boot step leaves either the earlier state or the new one, and the
+   next boot converges it. The route is node infrastructure: `serve` never
+   removes it at shutdown, graceful or not; it persists across restarts and
+   every boot converges it. While `serve` is down the pinned steering
+   (point 2) keeps the prefix fail-closed.
+2. **Only bound intake listeners are reachable at the guest prefix.** Local
+   delivery to the prefix is decided by a pinned socket-lookup program whose
+   socket map names, per `(workload_addr, port)`, the open intake listener
+   (ADR-0171): a host-local TCP connection is assigned to that listener or
+   refused with a reset; everything else to the prefix is dropped. The owner
+   inserts a listener's entry after it listens; closing the listener removes
+   the entry in the same kernel step. No connection to the prefix ever
+   reaches a host socket other than an open intake listener or leg-C.
+   Constant firewall rules keep host-local and remote traffic on its path:
+   - output and prerouting: every packet to the guest prefix not accepted by
+     the leg-S exemption or diverted to leg-C (`inbound_destinations`) is
+     dropped — the output rule rejects (TCP reset, ICMP port-unreachable
+     otherwise) so host-local clients see a refusal at once; the prerouting
+     rule drops, as today for remote traffic. So an unmarked host-local client
+     reaches an intake only through leg-C.
 
-   The guest gateway is excluded from the guest-prefix match; it is the DNS
-   address (ADR-0154). These rules replace the per-allocation
-   `managed_guest_ips` set, whose membership is no longer needed.
+   The guest gateway is excluded from the guest-prefix match of both the
+   program and the rules; it is the DNS address (ADR-0154). These replace the
+   per-allocation `managed_guest_ips` set, whose membership is no longer
+   needed.
 3. **Intake listeners.** A host TCP listener on `workload_addr:port` may exist
    only for a declared TCP listen port (the PORT-295-C projection), only while
    the allocation is Active and node forwarding is not quiesced, and only under
@@ -155,15 +154,24 @@ the client writing immediately.
   destination.** Changes the meaning of rules 1 and 6. Rejected.
 - **A per-allocation host netdevice per guest address.** Reintroduces per-VM
   netdevices. Rejected (ADR-0145).
-- **Close the listener when its element's removal fails, and retry the
-  removal later.** The element then admits marked connections to a port with
-  no intake listener, which reach a wildcard host service; it survives
-  quiescence, teardown and lease release, and the next allocation on the
-  address inherits a pre-admitted port. Found by the formal model
-  (`spike/quint-owner-findings.md`, finding 1). Rejected.
-- **Converge the route at boot without checking the rules.** A table removed
-  by other software between the rule step and the route step leaves the prefix
-  locally delivered with no steering (model `steer_envFlush`). Rejected.
+- **Steering by a firewall set of admitted `(address, port)` elements.** The
+  element and the listener are two kernel objects: a failed removal forces the
+  listener to stay bound (a probe sees `connect()` complete on a port no
+  longer served; teardown and lease release wait). ADR-0171 records the
+  comparison. Rejected.
+- **Converge the route at boot without verifying the steering.** A boot whose
+  steering convergence failed — a program the kernel rejects, or a crash
+  part-way — would leave the prefix locally delivered with no verified
+  decision. Rejected.
+- **Remove the route when the steering cannot be verified.** The prefix is
+  then not local: host-local connects and arriving packets follow the default
+  route and leave the host instead of being refused. Rejected for the fence.
+- **Audit and repair the steering and the route at runtime.** On the
+  appliance nothing but the owner writes them, and every runtime write (an
+  entry insert, a listener close) reports its outcome to the owner, so a
+  runtime audit could detect only a change made by software that does not
+  exist on the appliance. Boot convergence covers Overdrive's own crashes.
+  Rejected.
 - **Remove the route at graceful shutdown.** Adds a shutdown step that a crash
   skips anyway, so boot convergence and the persistent rules must already
   handle a left-behind route; removing it buys nothing and makes graceful and
@@ -183,41 +191,26 @@ the client writing immediately.
   refused at once; under the bridge topology it went unanswered while the TAP
   was down. This is the residual pre-activation difference D15-R1, which the
   user acknowledged on 2026-10-05.
-- While `overdrive serve` is down the firewall rules persist and keep the
-  prefix fail-closed; boot convergence clears `intake_listeners` (ADR-0137
-  discipline), reinstalls the rules, verifies them, and only then
-  re-converges the route.
-- Residual (D8a-PROBE): when a port is no longer wanted (the guest stopped
-  listening, quiescence, teardown, session loss) and its element's removal
-  keeps failing, the listener stays bound and resets what it accepts, so a
-  marked TCP probe to that port can see `connect()` succeed before the reset.
-  It never affects a wanted port: a wanted port serves at once and its element
-  is re-asserted (ADR-0163). It is irreducible in this design: the element and
-  the listener are two kernel objects that cannot be changed in one step;
-  fail-closed order removes the element before closing the listener; while
-  the element cannot be removed, the port's connections must land on an
-  Overdrive listener rather than on a wildcard host service, and a listening
-  socket completes the handshake. It lasts only while a kernel write keeps
-  failing, affects only that port, pairs no flow and reaches no host service.
-  Teardown waits, holding the lease (CleanupPending, ADR-0141). Removing it
-  would need a design in which the listener itself is the steering decision
-  (no separate element), which is not this ADR's decision.
-- Residual (D8a-FLUSH): if other software deletes the shared firewall table
-  while the route is present, the prefix is locally delivered without
-  steering — a wildcard host service on a declared port can be reached —
-  until the rules are restored. Overdrive cannot prevent a root process from
-  deleting its table; it can only detect and repair. While `serve` is up the
-  window is at most one audit period (1 s) plus the firewall recovery's own
-  ADR-0124 bound (5 s), else `serve` fail-stops: the bound is real because no
-  other recovery can reopen forwarding while the firewall recovery holds
-  quiescence (ADR-0169). While `serve` is down it lasts until the next boot
-  reinstalls and verifies the rules. Validation item V-23 measures the
-  window; a measured window above these bounds is surfaced to the user again.
-- One more firewall set with one element per bound intake listener, and two
-  constant rules. `managed_guest_ips` and its element lifecycle are deleted.
+- While `overdrive serve` is down the pinned steering keeps the prefix
+  fail-closed: every listener closed with the process, so every lookup for the
+  prefix drops; after a boot refusal the fence keeps it refused. The next
+  boot converges the steering, verifies and probes it, and only then
+  re-converges the route to `local`.
+- Closing an intake listener ends its reachability in the same kernel step, so
+  a port the guest stopped serving refuses at once; teardown, quiescence and
+  lease release never wait on a steering write (ADR-0171).
+- A shared firewall table left partial by a failure of the mTLS worker does
+  not open the prefix to host services; it affects only the existing mTLS
+  interception rules, under ADR-0124's existing recovery.
+- Only Overdrive writes the route and the steering on the appliance; the
+  image configuration (ADR-0068) carries no network manager or daemon that
+  removes routes it did not create. That is an assumption of the design,
+  discharged by the image, not by a runtime check.
+- Two constant rules; `managed_guest_ips` and its element lifecycle are
+  deleted.
 - A refusal from the guest toward a transparent client address is delivered at
   once because the guest sets `net.ipv4.fwmark_reflect=1` (ADR-0150).
 - The preferred-source behaviour of a `local` route is from kernel source,
-  not yet observed (V-12). The steering rules are validation item V-19.
-- The steering, boot order and element lifecycle are checked by the formal
+  not yet observed (V-12). The steering is validation items V-19 and V-26.
+- The steering, boot order and listener lifecycle are checked by the formal
   model of the guest-flow owner (ADR-0168, `specs/quint/guest-flow-owner/`).

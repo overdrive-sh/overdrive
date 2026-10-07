@@ -1,0 +1,82 @@
+# owner-flows-env-guest-misses-host-close: counterexample, 18 state(s) (from the TLC trace)
+
+State 1
+  hf = <<[st |-> "none", gen |-> 0]>>
+  badPaired = FALSE
+  vmUp = FALSE
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  resurrected = FALSE
+  phantom = FALSE
+  alloc = "Absent"
+  vmGen = 0
+  toHostPaired = {}
+  toHostRefused = {}
+  quiesced = FALSE
+  abortDiscarded = {}
+  toGuestAbort = {}
+  gen = 0
+  claim = FALSE
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+  gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [VmStart]
+  vmUp = TRUE
+  vmGen = 1
+
+State 4 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 5 [GuestOpenFlow]
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 6 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 7 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "pending", gen |-> 1]>>
+
+State 8 [HostAcceptSession]
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "live", gen |-> 1]>>
+  claim = TRUE
+
+State 9 [HostAcceptFlow]
+  flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 10 [Activate]
+  alloc = "Active"
+
+State 11 [HostOpenAccept]
+  hf = <<[st |-> "req", gen |-> 1]>>
+
+State 12 [HostAcceptFlow]
+  flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "accepted", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 13 [Quiesce]
+  hf = <<[st |-> "closed", gen |-> 1]>>
+  quiesced = TRUE
+  toGuestAbort = {1}
+  flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 14 [GuestRecvAbort]
+  abortDiscarded = {1}
+  toGuestAbort = {}
+
+State 15 [GuestAcceptV]
+  gf = <<[st |-> "acc", gen |-> 1, c |-> 2]>>
+
+State 16 [GuestPairOrRefuse]
+  phantom = TRUE
+  toHostPaired = {1}
+  gf = <<[st |-> "routed", gen |-> 1, c |-> 2]>>
+
+State 17 [HostAcceptSession]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "live", gen |-> 1]>>
+
+State 18 [Restore]
+  quiesced = FALSE
+
+-> loops back to State 17

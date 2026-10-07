@@ -1,0 +1,56 @@
+# steering-hazard-steering-in-nft: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  verSince = FALSE
+  link = FALSE
+  tamper = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  flowL = TRUE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  estab = FALSE
+  revokeLeft = 0
+  stop = "none"
+  latch = FALSE
+  boot = 0
+  holders = {}
+  lis = {}
+  verified = FALSE
+  gen = 0
+  repLeft = 0
+  alloc = "Absent"
+  up = TRUE
+  rules = FALSE
+  steerLeft = 0
+  att = 0
+  entries = {}
+  route = "absent"
+  lastLS = {}
+  convLeft = 1
+  sess = FALSE
+  bindLeft = 1
+  win = 0
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  boot = 4
+  verified = TRUE
+
+State 6 [BootStep]
+  estab = TRUE
+  boot = 5
+  route = "local"
+
+State 7 [ForeignFlush]
+  link = FALSE
+  rules = FALSE

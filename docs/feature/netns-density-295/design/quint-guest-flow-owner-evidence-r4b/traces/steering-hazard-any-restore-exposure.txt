@@ -1,0 +1,139 @@
+# steering-hazard-any-restore-exposure: counterexample, 27 state(s) (from the TLC trace)
+
+State 1
+  boot = 0
+  entries = {}
+  flowL = TRUE
+  estab = FALSE
+  latch = FALSE
+  att = 0
+  lastLS = {}
+  revokeLeft = 0
+  win = 0
+  verified = FALSE
+  tamper = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  alloc = "Absent"
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  sess = FALSE
+  rules = FALSE
+  holders = {}
+  route = "absent"
+  link = FALSE
+  up = TRUE
+  steerLeft = 0
+  convLeft = 0
+  repLeft = 0
+  lis = {}
+  bindLeft = 0
+  stop = "none"
+  gen = 0
+  verSince = FALSE
+
+State 2 [ListenerTaskExit]
+  flowL = FALSE
+
+State 3 [BootStep]
+  boot = 1
+
+State 4 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 5 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 6 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 7 [BootStep]
+  boot = 0
+  estab = TRUE
+  tamper = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> TRUE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  route = "fence"
+  up = FALSE
+  stop = "refused"
+
+State 8 [Restart]
+  up = TRUE
+  stop = "none"
+
+State 9 [BootStep]
+  boot = 1
+
+State 10 [BootStep]
+  boot = 2
+
+State 11 [BootStep]
+  boot = 3
+  link = TRUE
+
+State 12 [BootStep]
+  boot = 4
+  verified = TRUE
+  verSince = TRUE
+
+State 13 [RootDetach]
+  tamper = TRUE
+  link = FALSE
+
+State 14 [BootStep]
+  boot = 5
+  route = "local"
+
+State 15 [RecQuiesce]
+  latch = TRUE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "held"]
+  holders = {"FlowListeners"}
+
+State 16 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 17 [AuditFind]
+  win = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "held"]
+
+State 18 [RecRepair]
+  flowL = TRUE
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "repaired" ]
+
+State 19 [Teardown]
+  alloc = "Retiring"
+
+State 20 [RecRestore]
+  latch = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  holders = {}
+
+State 21 [Release]
+  alloc = "Absent"
+
+State 22 [AuditFind]
+  win = 2
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+
+State 23 [ListenerTaskExit]
+  flowL = FALSE
+
+State 24 [RecQuiesce]
+  latch = TRUE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "held"]
+  holders = {"FlowListeners"}
+
+State 25 [RecRepair]
+  flowL = TRUE
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "repaired" ]
+
+State 26 [RecRestore]
+  latch = FALSE
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  holders = {}
+
+State 27 [AuditFind]
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+
+-> loops back to State 23

@@ -1,0 +1,560 @@
+State 1: <Initial predicate>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = FALSE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = FALSE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = FALSE
+/\ steer_bugRestoreLiftsFence_steering_boot = 0
+/\ steer_bugRestoreLiftsFence_steering_route = "absent"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = FALSE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 2: <steer_bugRestoreLiftsFence_steering_BootStep line 1279, col 3 to line 1403, col 52 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = FALSE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = FALSE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = FALSE
+/\ steer_bugRestoreLiftsFence_steering_boot = 1
+/\ steer_bugRestoreLiftsFence_steering_route = "absent"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = FALSE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 3: <steer_bugRestoreLiftsFence_steering_BootStep line 1279, col 3 to line 1403, col 52 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = FALSE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = FALSE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = TRUE
+/\ steer_bugRestoreLiftsFence_steering_boot = 2
+/\ steer_bugRestoreLiftsFence_steering_route = "absent"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = FALSE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 4: <steer_bugRestoreLiftsFence_steering_BootStep line 1279, col 3 to line 1403, col 52 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = FALSE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = TRUE
+/\ steer_bugRestoreLiftsFence_steering_verSince = FALSE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = TRUE
+/\ steer_bugRestoreLiftsFence_steering_boot = 3
+/\ steer_bugRestoreLiftsFence_steering_route = "absent"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = FALSE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 5: <steer_bugRestoreLiftsFence_steering_BootStep line 1279, col 3 to line 1403, col 52 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = FALSE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = TRUE
+/\ steer_bugRestoreLiftsFence_steering_verSince = TRUE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = TRUE
+/\ steer_bugRestoreLiftsFence_steering_boot = 4
+/\ steer_bugRestoreLiftsFence_steering_route = "absent"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = TRUE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 6: <steer_bugRestoreLiftsFence_steering_BootStep line 1279, col 3 to line 1403, col 52 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = TRUE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = TRUE
+/\ steer_bugRestoreLiftsFence_steering_verSince = TRUE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = TRUE
+/\ steer_bugRestoreLiftsFence_steering_boot = 5
+/\ steer_bugRestoreLiftsFence_steering_route = "local"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = TRUE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 7: <steer_bugRestoreLiftsFence_steering_ForeignFlush line 1705, col 3 to line 1734, col 46 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = TRUE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = TRUE
+/\ steer_bugRestoreLiftsFence_steering_verSince = TRUE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = FALSE
+/\ steer_bugRestoreLiftsFence_steering_boot = 5
+/\ steer_bugRestoreLiftsFence_steering_route = "local"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = TRUE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 8: <steer_bugRestoreLiftsFence_steering_RootDetach line 1740, col 3 to line 1760, col 46 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = TRUE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = TRUE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = TRUE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = FALSE
+/\ steer_bugRestoreLiftsFence_steering_boot = 5
+/\ steer_bugRestoreLiftsFence_steering_route = "local"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = TRUE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 9: <steer_bugRestoreLiftsFence_steering_RecQuiesce line 2202, col 3 to line 2214, col 52 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = TRUE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = TRUE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = TRUE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = TRUE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "held", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = FALSE
+/\ steer_bugRestoreLiftsFence_steering_boot = 5
+/\ steer_bugRestoreLiftsFence_steering_route = "local"
+/\ steer_bugRestoreLiftsFence_steering_holders = {"IpRules"}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = TRUE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 10: <steer_bugRestoreLiftsFence_steering_AuditFind line 1838, col 3 to line 1862, col 46 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = TRUE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = TRUE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = TRUE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 1
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = TRUE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "held", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = FALSE
+/\ steer_bugRestoreLiftsFence_steering_boot = 5
+/\ steer_bugRestoreLiftsFence_steering_route = "local"
+/\ steer_bugRestoreLiftsFence_steering_holders = {"IpRules"}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = TRUE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 11: <steer_bugRestoreLiftsFence_steering_RecFence line 1868, col 3 to line 1908, col 46 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = TRUE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = TRUE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 2
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = FALSE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "held", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = FALSE
+/\ steer_bugRestoreLiftsFence_steering_boot = 5
+/\ steer_bugRestoreLiftsFence_steering_route = "fence"
+/\ steer_bugRestoreLiftsFence_steering_holders = {"IpRules"}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = FALSE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 12: <steer_bugRestoreLiftsFence_steering_RecRepair line 2220, col 3 to line 2263, col 46 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = TRUE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = TRUE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = FALSE
+/\ steer_bugRestoreLiftsFence_steering_rec = [ IpRules |-> "repaired",
+  GuestPrefixSteering |-> "fenced",
+  FlowListeners |-> "idle" ]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = TRUE
+/\ steer_bugRestoreLiftsFence_steering_boot = 5
+/\ steer_bugRestoreLiftsFence_steering_route = "fence"
+/\ steer_bugRestoreLiftsFence_steering_holders = {"IpRules"}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = FALSE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE
+
+State 13: <steer_bugRestoreLiftsFence_steering_RecRestore line 1105, col 3 to line 1212, col 52 of module steer_bugRestoreLiftsFence>
+/\ steer_bugRestoreLiftsFence_steering_lastLS = {}
+/\ steer_bugRestoreLiftsFence_steering_att = 0
+/\ steer_bugRestoreLiftsFence_steering_flowL = TRUE
+/\ steer_bugRestoreLiftsFence_steering_estab = TRUE
+/\ steer_bugRestoreLiftsFence_steering_entries = {}
+/\ steer_bugRestoreLiftsFence_steering_latch = FALSE
+/\ steer_bugRestoreLiftsFence_steering_sess = FALSE
+/\ steer_bugRestoreLiftsFence_steering_convLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_bindLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_tamper = FALSE
+/\ steer_bugRestoreLiftsFence_steering_revokeLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_win = 0
+/\ steer_bugRestoreLiftsFence_steering_link = FALSE
+/\ steer_bugRestoreLiftsFence_steering_verSince = FALSE
+/\ steer_bugRestoreLiftsFence_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "fenced", FlowListeners |-> "idle"]
+/\ steer_bugRestoreLiftsFence_steering_stop = "none"
+/\ steer_bugRestoreLiftsFence_steering_alloc = "Absent"
+/\ steer_bugRestoreLiftsFence_steering_rules = TRUE
+/\ steer_bugRestoreLiftsFence_steering_boot = 5
+/\ steer_bugRestoreLiftsFence_steering_route = "local"
+/\ steer_bugRestoreLiftsFence_steering_holders = {}
+/\ steer_bugRestoreLiftsFence_steering_lis = {}
+/\ steer_bugRestoreLiftsFence_steering_steerLeft = 0
+/\ steer_bugRestoreLiftsFence_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugRestoreLiftsFence_steering_gen = 0
+/\ steer_bugRestoreLiftsFence_steering_repLeft = 1
+/\ steer_bugRestoreLiftsFence_steering_verified = FALSE
+/\ steer_bugRestoreLiftsFence_steering_up = TRUE

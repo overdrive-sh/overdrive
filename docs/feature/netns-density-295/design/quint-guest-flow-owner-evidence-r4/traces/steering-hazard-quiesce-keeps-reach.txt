@@ -1,0 +1,74 @@
+# steering-hazard-quiesce-keeps-reach: counterexample, 15 state(s) (from the TLC trace)
+
+State 1
+  link = FALSE
+  flowL = TRUE
+  latch = FALSE
+  holders = {}
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  verified = FALSE
+  steerLeft = 0
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  up = TRUE
+  revokeLeft = 0
+  boot = 0
+  lastLS = {}
+  entries = {}
+  alloc = "Absent"
+  lis = {}
+  rules = FALSE
+  convLeft = 1
+  gen = 0
+  route = FALSE
+  bindLeft = 1
+  sess = FALSE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verified = TRUE
+  boot = 4
+
+State 6 [BootStep]
+  boot = 5
+  route = TRUE
+
+State 7 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 8 [SessOpen]
+  sess = TRUE
+
+State 9 [ActivateBegin]
+  alloc = "Activating"
+
+State 10 [ActivateOk]
+  alloc = "Active"
+
+State 11 [ForeignFlush]
+  rules = FALSE
+
+State 12 [RecQuiesce]
+  latch = TRUE
+  holders = {"IpRules"}
+  rec = [IpRules |-> "held", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+
+State 13 [ListenState]
+  lastLS = {1}
+
+State 14 [BindListen]
+  lis = {1}
+
+State 15 [Steer]
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> TRUE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE ]
+  entries = {1}

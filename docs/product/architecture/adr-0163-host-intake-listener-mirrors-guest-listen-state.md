@@ -8,15 +8,11 @@ user 2026-10-06; port scope (the guest reports every listening port, the host
 acts only on declared ports) approved by user 2026-10-06; its correction —
 quiescence closes intake listeners, and each allocation's events are applied
 in one serialized order (independent DESIGN review findings M-7, H-2) —
-confirmed by user 2026-10-06; a listener whose firewall element cannot be
-removed stays bound until it is (D8a-REVOKE, formal model finding 1), and
-activation binds all reported listeners or none (U-6), approved by user
-2026-10-06; a wanted port's element is asserted at the start of every serving
-period and a wanted port never waits on a pending removal, and firewall-rule
-repair runs only inside the repairing recovery's quiescence hold
-(D8a-REASSERT; model findings r2-2 and
-r3 item 3), approved by user 2026-10-06 (direction: correct design over
-simple); pending independent DESIGN review.** GH #295. Recorded in the
+confirmed by user 2026-10-06; activation binds all reported listeners or none
+(U-6), approved by user 2026-10-06; a listener is reachable exactly while it
+is open and steered, and its closing ends its reachability in the same kernel
+step (D8a-LOOKUP, ADR-0171), approved by user 2026-10-07; pending
+independent DESIGN review.** GH #295. Recorded in the
 #295 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
 2026-10-05*.
 
@@ -100,38 +96,23 @@ timeout.
   accepted continue unless the cause also aborts them (quiescence and session
   loss do). On control-session loss it closes every intake listener of that
   allocation, and the allocation's flows are aborted (ADR-0166).
-- **A wanted port's element is asserted at the start of every serving
-  period, and a wanted port never waits on a removal.** Every time a port
-  becomes wanted — at bring-up, after a restore, or while its take-down is
-  pending — the owner asserts its firewall element present: a new listener is
-  admitted; a listener that still holds its admission (its removal was
-  pending) re-asserts it with an idempotent add whose success means the
-  element is present in the kernel now, and its pending removal is dropped. A
-  failed assertion is retried at the audit cadence until it succeeds or the
-  port stops being wanted. Meanwhile the listener pairs every connection it
-  accepts: a connection reaches it only through an element that is present,
-  so pairing it is always correct, and no serving period relies on an element
-  from an earlier one (a foreign table deletion may have removed it).
-  Activation keeps its stronger postcondition (all or nothing, below).
-- **Repair inside the recovery's hold.** Every repair of the shared firewall
-  rules runs while the repairing recovery holds forwarding quiescence
-  (ADR-0169): quiesce, repair, audit, restore. Restore reopens forwarding only
-  when no holder remains, and then brings back, from the last reported state,
-  every listener that should serve, under the rule above.
-- **Reachability follows the listener.** The owner adds the listener's
-  firewall element only after it listens and removes it before closing it
-  (ADR-0152), so a connection reaches a host listener only while one exists.
-  When the element's removal fails, the listener stays bound, resets every
-  connection it accepts, and the removal is retried at the audit cadence; the
-  listener closes only once the element is gone. A bind or admission failure
-  leaves no element and is retried at the audit cadence while the guest still
-  reports listening.
+- **Reachability is the listener.** A connection reaches an intake listener
+  only through its entry in the guest-prefix steering map (ADR-0171). The
+  owner binds, listens and then steers the listener (inserts its entry; `Ok`
+  means present); to take it down the owner closes it, which removes the entry
+  in the same kernel step. So the listener is reachable exactly while it is
+  open and steered, and every connection it accepts may be paired. A bind,
+  listen or steering failure closes the listener, is retried at the audit
+  cadence while the guest still reports listening, and never fails the
+  allocation (activation excepted, below); meanwhile the port is refused.
+- **Restore re-establishes from the last report.** Forwarding reopens only
+  when no quiescence holder remains (ADR-0169); the owner then binds and
+  steers every listener that should serve, from the last reported state.
 - **Activation is all or nothing.** Activation marks the allocation Active
-  together with a bound, admitted listener for every declared port the guest
-  currently reports listening, or returns an error and leaves the allocation
-  Provisioned; the listeners it bound are taken down by the same removal
-  rule. After activation, a listener that fails to come up is retried and never
-  fails the allocation.
+  together with a bound, steered listener for every declared port the guest
+  currently reports listening, or returns an error, closes the listeners it
+  bound and leaves the allocation Provisioned. After activation, a listener
+  that fails to come up is retried and never fails the allocation.
 - **One writer per allocation.** Activation, teardown, quiescence, restore,
   `ListenState` handling and control-session open/loss for one allocation are
   applied by the owner in one serialized order; activation binds from the
@@ -159,19 +140,11 @@ timeout.
   pass while the application is down. Rejected.
 - **Delay the handshake until the guest confirms.** An ordinary listening
   socket cannot defer `SYN-ACK` on a per-connection decision. Rejected.
-- **Let a kept-bound listener serve again on its existing element.** If other
-  software deleted the firewall table meanwhile, the element is gone and
-  nothing re-adds it: the listener serves with no element, and marked clients
-  (leg-S, probes) are reset until teardown (`spike/quint-owner-findings-r2.md`,
-  finding r2-2). Rejected.
-- **Complete the pending removal, then admit again.** Serves only on a fresh
-  element, but ties the wanted port to the unwanted operation: while the
-  removal keeps failing, the port the guest is listening on stays resetting
-  after the restore. The removal is not needed for the port to serve; the
-  idempotent re-assertion is. Rejected.
-- **Let the firewall-rule repair re-derive the elements from the owner's
-  admitted listeners.** A second writer of the elements outside the owner's
-  per-allocation order. Rejected.
+- **Gate reachability by a separate firewall element per listener.** A failed
+  element removal must keep the listener bound (else connections fall through
+  to a wildcard host service), so a port the guest stopped serving accepts
+  connections until a kernel write succeeds (`spike/quint-owner-findings*.md`).
+  ADR-0171 records the comparison. Rejected.
 
 ## Consequences
 
@@ -187,8 +160,6 @@ timeout.
   offsets the programs read pinned to the guest kernel and checked against its
   BTF at load; `net.ipv4.fwmark_reflect=1`.
 - The listen-state path never shares a loop with a blocking call (ADR-0158).
-- A listener kept bound across a quiescence serves again at the restore,
-  whatever the state of its earlier removal; its element is re-asserted and
-  the assertion retried until it succeeds. While an assertion fails, marked
-  clients are reset by the firewall (fail-closed) and nothing else changes.
+- Taking a listener down cannot fail: teardown, quiescence and activation
+  rollback never wait on a kernel write to make a port unreachable.
 - Proven on one VM on 7.0.0-29 only.

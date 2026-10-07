@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — decision D16-CLAIM, approved by user 2026-10-06 (direction:
-correct design over simple); pending independent DESIGN review.** GH #295.
+**Proposed — decision D16-CLAIM approved by user 2026-10-07; pending
+independent DESIGN review.** GH #295.
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN — PROPOSED 2026-10-05*. Depends on ADR-0146 (kernel vhost-vsock
 backend of the vendored Cloud Hypervisor) and ADR-0156 (the CID is derived
@@ -23,10 +23,13 @@ observed both halves: a second VM launched with a held CID exited with
 the CID was free again immediately after the holding VMM exited
 (`spike/ch-vhost-vsock-findings.md`, P5, P7).
 
-Other software on the host can use vhost-vsock (another VMM, a test harness,
-a VM that survived a crashed `serve`). Without a claim of its own, Overdrive
-learns that a leased CID is taken only when Cloud Hypervisor fails at device
-creation and exits before READY. No owner reads CH's diagnostic text, so that
+On the appliance only Overdrive's VMMs use vhost-vsock (ADR-0068), but the
+pool does not know every CID they hold. The pool persists nothing (ADR-0118),
+so after a `serve` crash a VMM that survived it still holds its CID while the
+new process's pool sees that offset free; and a CID is free only at its
+holder's last close. Without a claim of its own, Overdrive learns that a
+leased CID is taken only when Cloud Hypervisor fails at device creation and
+exits before READY. No owner reads CH's diagnostic text, so that
 exit cannot be told apart from any other pre-READY exit. Every rule built on
 that inference — remember which offsets failed, avoid them, fall back when all
 are remembered — guesses at a fact the kernel can state exactly.
@@ -46,12 +49,12 @@ startup probe already opens `/dev/vhost-vsock` and sets a CID from inside the
   claim becomes the lease. The claim and the assignment are one step: no
   lease exists without its claim, and no check is separate from the claim.
 - **`EADDRINUSE` is the only skip.** An offset whose claim fails
-  `EADDRINUSE` is held by another vhost user at that moment; `assign` moves
-  to the next free offset. Nothing about it is remembered: the next `assign`
+  `EADDRINUSE` is held by another device instance at that moment (a VMM the
+  pool does not lease); `assign` moves to the next free offset. Nothing about it is remembered: the next `assign`
   asks the kernel again. Any other claim failure stops `assign` with a typed
   error naming the CID and the cause; it is never treated as "held".
 - **Typed refusal with the true cause.** If every free offset is held by
-  other vhost users, `assign` refuses with its own non-terminal error, not
+  other device instances, `assign` refuses with its own non-terminal error, not
   the pool-exhaustion refusal. The exhaustion refusal still means no free
   offset at all.
 - **The claimed device travels to the VMM, once.** The claim is a move-only
@@ -67,8 +70,8 @@ startup probe already opens `/dev/vhost-vsock` and sets a CID from inside the
 - **Release.** A claim never handed to a VMM (launch not reached, VMM spawn
   failed) is released when the lease releases it or the handle is dropped. A
   handed-off claim is released by the VMM's exit, as today. The CID offset
-  stays leased until cleanup completes (ADR-0133); a CID taken by another
-  vhost user in between is found held at the next claim and skipped.
+  stays leased until cleanup completes (ADR-0133), so no other `assign` claims
+  it in between.
 - **Earned Trust.** At startup a claim probe opens `/dev/vhost-vsock`,
   claims `GUEST_CID_PROBE`, verifies that a second instance claiming the same
   CID fails `EADDRINUSE`, closes the first, verifies that the CID can be
@@ -86,17 +89,19 @@ feature delta (§ *Core vocabulary*, § *VMM backend contract*, § *Composition*
   fallback re-launches onto known-clashing CIDs, and the guarantee resets at
   every `serve` restart. It guesses at a fact the kernel states. Rejected.
 - **Check the CID before launch, then let CH claim it.** A check separate
-  from the act: another vhost user can take the CID between the check and
-  CH's claim. Rejected (`.claude/rules/rust.md` § "Check-and-act must be
-  atomic").
+  from the act: the kernel's answer holds only for the instant of the check
+  (`.claude/rules/rust.md` § "Check-and-act must be atomic"), and CH would
+  still open `/dev/vhost-vsock` itself, needing the Landlock path rule the
+  handoff removes. Rejected.
 - **Read CH's diagnostic text for `EADDRINUSE`.** Makes an unstructured
   string a contract, and the clash still costs a VMM launch. Rejected.
 - **`serve` keeps its copy of the claimed file until the lease is released.**
   The CID would stay Overdrive's through cleanup, but vhost holds the owning
   VMM's address space (`get_task_mm`) until the device's last reference
   closes, so a dead VM's guest memory would stay allocated for as long as its
-  cleanup is pending. Rejected: losing the CID to another vhost user during
-  cleanup is harmless, because the next claim finds it held and skips it.
+  cleanup is pending. Rejected: the offset stays leased through cleanup and
+  only the pool claims CIDs on the appliance, so holding the file buys
+  nothing.
 - **A separate CID allocator.** A second admission authority beside the lease
   (ADR-0156 alternatives). Rejected.
 
@@ -107,9 +112,10 @@ feature delta (§ *Core vocabulary*, § *VMM backend contract*, § *Composition*
 - The guarantee holds across `serve` restarts with no in-memory state: after a
   crash, a VMM that survived still holds its CID, and the new process's
   `assign` skips it.
-- `assign` performs one device open and one ioctl per offset it tries; a
-  pathological host with many foreign-held CIDs in the range costs one ioctl
-  per held offset per `assign`, counted for observability.
+- `assign` performs one device open and one ioctl per offset it tries; while
+  VMMs that survived a `serve` crash still hold CIDs in the range, each held
+  offset costs one ioctl per `assign` until VM reclamation (ADR-0136) ends
+  them, counted for observability.
 - The fork gains an `fd=` mode for its vhost-kernel vsock device (a new fork
   revision, ADR-0161); in that mode CH needs no Landlock access to
   `/dev/vhost-vsock` and does not issue `VHOST_VSOCK_SET_GUEST_CID`. A guest

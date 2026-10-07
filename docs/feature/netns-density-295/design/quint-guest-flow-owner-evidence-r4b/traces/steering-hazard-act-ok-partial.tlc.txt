@@ -1,0 +1,472 @@
+State 1: <Initial predicate>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Absent"
+/\ steer_bugActOkPartial_steering_lastLS = {}
+/\ steer_bugActOkPartial_steering_verSince = FALSE
+/\ steer_bugActOkPartial_steering_rules = FALSE
+/\ steer_bugActOkPartial_steering_route = "absent"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = FALSE
+/\ steer_bugActOkPartial_steering_gen = 0
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = FALSE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = FALSE
+/\ steer_bugActOkPartial_steering_estab = FALSE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 0
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 2: <steer_bugActOkPartial_steering_BootStep line 1247, col 3 to line 1361, col 47 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Absent"
+/\ steer_bugActOkPartial_steering_lastLS = {}
+/\ steer_bugActOkPartial_steering_verSince = FALSE
+/\ steer_bugActOkPartial_steering_rules = FALSE
+/\ steer_bugActOkPartial_steering_route = "absent"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = FALSE
+/\ steer_bugActOkPartial_steering_gen = 0
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = FALSE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = FALSE
+/\ steer_bugActOkPartial_steering_estab = FALSE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 1
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 3: <steer_bugActOkPartial_steering_BootStep line 1247, col 3 to line 1361, col 47 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Absent"
+/\ steer_bugActOkPartial_steering_lastLS = {}
+/\ steer_bugActOkPartial_steering_verSince = FALSE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "absent"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = FALSE
+/\ steer_bugActOkPartial_steering_gen = 0
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = FALSE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = FALSE
+/\ steer_bugActOkPartial_steering_estab = FALSE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 2
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 4: <steer_bugActOkPartial_steering_BootStep line 1247, col 3 to line 1361, col 47 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Absent"
+/\ steer_bugActOkPartial_steering_lastLS = {}
+/\ steer_bugActOkPartial_steering_verSince = FALSE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "absent"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = FALSE
+/\ steer_bugActOkPartial_steering_gen = 0
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = TRUE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = FALSE
+/\ steer_bugActOkPartial_steering_estab = FALSE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 3
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 5: <steer_bugActOkPartial_steering_BootStep line 1247, col 3 to line 1361, col 47 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Absent"
+/\ steer_bugActOkPartial_steering_lastLS = {}
+/\ steer_bugActOkPartial_steering_verSince = TRUE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "absent"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = FALSE
+/\ steer_bugActOkPartial_steering_gen = 0
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = TRUE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = TRUE
+/\ steer_bugActOkPartial_steering_estab = FALSE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 4
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 6: <steer_bugActOkPartial_steering_BootStep line 1247, col 3 to line 1361, col 47 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Absent"
+/\ steer_bugActOkPartial_steering_lastLS = {}
+/\ steer_bugActOkPartial_steering_verSince = TRUE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "local"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = FALSE
+/\ steer_bugActOkPartial_steering_gen = 0
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = TRUE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = TRUE
+/\ steer_bugActOkPartial_steering_estab = TRUE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 5
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 7: <steer_bugActOkPartial_steering_Provision line 1525, col 3 to line 1535, col 76 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Provisioned"
+/\ steer_bugActOkPartial_steering_lastLS = {}
+/\ steer_bugActOkPartial_steering_verSince = TRUE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "local"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = FALSE
+/\ steer_bugActOkPartial_steering_gen = 1
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = TRUE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = TRUE
+/\ steer_bugActOkPartial_steering_estab = TRUE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 5
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 8: <steer_bugActOkPartial_steering_SessOpen line 1541, col 3 to line 1551, col 76 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Provisioned"
+/\ steer_bugActOkPartial_steering_lastLS = {}
+/\ steer_bugActOkPartial_steering_verSince = TRUE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "local"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = TRUE
+/\ steer_bugActOkPartial_steering_gen = 1
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = TRUE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = TRUE
+/\ steer_bugActOkPartial_steering_estab = TRUE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 5
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 9: <steer_bugActOkPartial_steering_ListenState line 1502, col 3 to line 1519, col 76 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Provisioned"
+/\ steer_bugActOkPartial_steering_lastLS = {1}
+/\ steer_bugActOkPartial_steering_verSince = TRUE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "local"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = TRUE
+/\ steer_bugActOkPartial_steering_gen = 1
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = TRUE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = TRUE
+/\ steer_bugActOkPartial_steering_estab = TRUE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 5
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 10: <steer_bugActOkPartial_steering_ActivateBegin line 1572, col 3 to line 1588, col 76 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Activating"
+/\ steer_bugActOkPartial_steering_lastLS = {1}
+/\ steer_bugActOkPartial_steering_verSince = TRUE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "local"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = TRUE
+/\ steer_bugActOkPartial_steering_gen = 1
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = TRUE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = TRUE
+/\ steer_bugActOkPartial_steering_estab = TRUE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 5
+/\ steer_bugActOkPartial_steering_win = 0
+
+State 11: <steer_bugActOkPartial_steering_ActivateOk line 1466, col 3 to line 1495, col 7 of module steer_bugActOkPartial>
+/\ steer_bugActOkPartial_steering_revokeLeft = 0
+/\ steer_bugActOkPartial_steering_up = TRUE
+/\ steer_bugActOkPartial_steering_rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+/\ steer_bugActOkPartial_steering_convLeft = 1
+/\ steer_bugActOkPartial_steering_bindLeft = 1
+/\ steer_bugActOkPartial_steering_alloc = "Active"
+/\ steer_bugActOkPartial_steering_lastLS = {1}
+/\ steer_bugActOkPartial_steering_verSince = TRUE
+/\ steer_bugActOkPartial_steering_rules = TRUE
+/\ steer_bugActOkPartial_steering_route = "local"
+/\ steer_bugActOkPartial_steering_holders = {}
+/\ steer_bugActOkPartial_steering_lis = {}
+/\ steer_bugActOkPartial_steering_sess = TRUE
+/\ steer_bugActOkPartial_steering_gen = 1
+/\ steer_bugActOkPartial_steering_repLeft = 0
+/\ steer_bugActOkPartial_steering_tamper = FALSE
+/\ steer_bugActOkPartial_steering_link = TRUE
+/\ steer_bugActOkPartial_steering_g = [ routeUnverified |-> FALSE,
+  refused |-> FALSE,
+  actPartial |-> TRUE,
+  actResidue |-> FALSE,
+  actErrDone |-> FALSE,
+  relListener |-> FALSE,
+  reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  resteered |-> FALSE,
+  stillQuiesced |-> FALSE,
+  overlapped |-> FALSE,
+  revokeKept |-> FALSE,
+  quiesceWidened |-> FALSE,
+  gpsWidened |-> FALSE ]
+/\ steer_bugActOkPartial_steering_att = 0
+/\ steer_bugActOkPartial_steering_flowL = TRUE
+/\ steer_bugActOkPartial_steering_verified = TRUE
+/\ steer_bugActOkPartial_steering_estab = TRUE
+/\ steer_bugActOkPartial_steering_entries = {}
+/\ steer_bugActOkPartial_steering_stop = "none"
+/\ steer_bugActOkPartial_steering_latch = FALSE
+/\ steer_bugActOkPartial_steering_steerLeft = 0
+/\ steer_bugActOkPartial_steering_boot = 5
+/\ steer_bugActOkPartial_steering_win = 0

@@ -41,6 +41,11 @@ The guest-capture spike showed process loss on each side:
   No guest flow reaches any peer afterwards.
 - Boot never adopts forwarding state. A box reboot ends every VM; forwarding
   is rebuilt as VMs relaunch.
+- Scope: forwarding objects. The guest-prefix steering program, link and map
+  (ADR-0171) forward nothing; they decide local delivery for the guest prefix
+  and are node infrastructure, pinned so that they outlive `serve` as the
+  shared `local` route does (ADR-0152). Their map holds only open listeners,
+  so process exit still fails closed.
 
 ## Alternatives considered
 

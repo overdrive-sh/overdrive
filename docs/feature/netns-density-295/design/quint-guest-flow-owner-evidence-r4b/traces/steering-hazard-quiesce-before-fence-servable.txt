@@ -1,0 +1,66 @@
+# steering-hazard-quiesce-before-fence-servable: counterexample, 9 state(s) (from the TLC trace)
+
+State 1
+  win = 0
+  repLeft = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle"]
+  sess = FALSE
+  flowL = TRUE
+  estab = FALSE
+  steerLeft = 0
+  latch = FALSE
+  convLeft = 1
+  bindLeft = 1
+  link = FALSE
+  entries = {}
+  revokeLeft = 0
+  verSince = FALSE
+  lis = {}
+  stop = "none"
+  lastLS = {}
+  gen = 0
+  boot = 0
+  alloc = "Absent"
+  rules = FALSE
+  att = 0
+  route = "absent"
+  tamper = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE ]
+  verified = FALSE
+  holders = {}
+  up = TRUE
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  verSince = TRUE
+  boot = 4
+  verified = TRUE
+
+State 6 [BootStep]
+  estab = TRUE
+  boot = 5
+  route = "local"
+
+State 7 [RootDetach]
+  link = FALSE
+  tamper = TRUE
+
+State 8 [AuditFind]
+  win = 1
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "found", FlowListeners |-> "idle"]
+
+State 9 [RecQuiesceGps]
+  win = 2
+  rec = [IpRules |-> "idle", GuestPrefixSteering |-> "qheld", FlowListeners |-> "idle"]
+  latch = TRUE
+  holders = {"GuestPrefixSteering"}

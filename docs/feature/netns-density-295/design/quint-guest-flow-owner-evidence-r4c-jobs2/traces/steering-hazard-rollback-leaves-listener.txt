@@ -1,0 +1,91 @@
+# steering-hazard-rollback-leaves-listener: counterexample, 16 state(s) (from the TLC trace)
+
+State 1
+  holders = {}
+  rfn = FALSE
+  repLeft = 0
+  alloc = "Absent"
+  link = FALSE
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> FALSE, actErrDone |-> FALSE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  latch = FALSE
+  sess = FALSE
+  bindLeft = 1
+  boot = 0
+  gen = 0
+  route = "absent"
+  winE = 0
+  winF = 0
+  att = [ IpRules |-> 0, GuestPrefixSteering |-> 0, FlowListeners |-> 0, LocalRoute |-> 0 ]
+  lastLS = {}
+  rmv = FALSE
+  rules = FALSE
+  win = 0
+  flowL = TRUE
+  tamper = FALSE
+  up = TRUE
+  verified = {}
+  convLeft = 0
+  fenceLeft = 0
+  lis = {}
+  estab = FALSE
+  steerLeft = 1
+  verSince = FALSE
+  stop = "none"
+  entries = {}
+  revokeLeft = 0
+  rec = [ IpRules |-> "idle", GuestPrefixSteering |-> "idle", FlowListeners |-> "idle", LocalRoute |-> "idle" ]
+
+State 2 [BootStep]
+  boot = 1
+
+State 3 [BootStep]
+  boot = 2
+  rules = TRUE
+
+State 4 [BootStep]
+  link = TRUE
+  boot = 3
+
+State 5 [BootStep]
+  boot = 4
+  verified = {"boot"}
+  verSince = TRUE
+
+State 6 [BootStep]
+  boot = 5
+  route = "local"
+  estab = TRUE
+
+State 7 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 8 [Teardown]
+  alloc = "Retiring"
+
+State 9 [Release]
+  alloc = "Absent"
+
+State 10 [Provision]
+  alloc = "Provisioned"
+  gen = 2
+
+State 11 [SessOpen]
+  sess = TRUE
+
+State 12 [ListenState]
+  lastLS = {1}
+
+State 13 [ListenState]
+  lastLS = {1, 2}
+
+State 14 [ActivateBegin]
+  alloc = "Activating"
+
+State 15 [BindListen]
+  lis = {2}
+
+State 16 [BindFail]
+  alloc = "Provisioned"
+  g = [ routeUnverified |-> FALSE, refused |-> FALSE, actPartial |-> FALSE, actResidue |-> TRUE, actErrDone |-> TRUE, relListener |-> FALSE, reopenEarly |-> FALSE, repairNoHold |-> FALSE, resteered |-> FALSE, stillQuiesced |-> FALSE, overlapped |-> FALSE, revokeKept |-> FALSE, quiesceWidened |-> FALSE, gpsWidened |-> FALSE, quiesceFenced |-> FALSE, widenClose |-> FALSE, widenRoute |-> FALSE ]
+  bindLeft = 0
