@@ -318,6 +318,87 @@ pub(super) fn await_family_counts(
     }
 }
 
+/// Accepted FD "Teardown converges on absence": an absent endpoint is
+/// already the deletion postcondition, with every other kernel object intact.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+#[allow(
+    clippy::print_stderr,
+    reason = "native regression records the exact adapter result and independent cleanup before its final assertion"
+)]
+fn removing_an_absent_endpoint_preserves_the_real_kernel_complement() {
+    use std::collections::BTreeSet;
+
+    let kernel_ids = || {
+        let mut result = Vec::new();
+        for kind in ["map", "prog", "link"] {
+            let output = Command::new("bpftool")
+                .args(["-j", kind, "show"])
+                .output()
+                .expect("read independent real-kernel BPF inventory");
+            assert!(output.status.success(), "bpftool {kind} show failed: {output:?}");
+            let objects: serde_json::Value =
+                serde_json::from_slice(&output.stdout).expect("kernel BPF inventory JSON");
+            let ids = objects
+                .as_array()
+                .expect("BPF inventory is a list")
+                .iter()
+                .map(|object| object["id"].as_u64().expect("kernel object id"))
+                .collect::<BTreeSet<_>>();
+            result.push((kind, ids));
+        }
+        result
+    };
+    let before = kernel_ids();
+    let planned_root = Path::new(DEFAULT_PIN_DIR)
+        .join(format!("test-gh295-absent-endpoint-delete-{}", std::process::id()));
+    assert!(!planned_root.exists(), "never reclaim a pre-existing test pin root");
+    let pins = PinRoot::create("absent-endpoint-delete");
+    let identity = capture(&pins);
+    let mut program = GuestTcxProgram::load(&identity).expect("real production TCX loader");
+    assert_eq!(
+        program.pin_endpoint_map(&pins.endpoint_map()).expect("pin owned endpoint map"),
+        ENDPOINT_SCHEMA
+    );
+    assert_eq!(
+        program.pin_counter_map(&pins.counter_map()).expect("pin owned counter map"),
+        COUNTER_SCHEMA
+    );
+    let ifindex = std::fs::read_to_string("/sys/class/net/lo/ifindex")
+        .expect("real loopback ifindex")
+        .trim()
+        .parse::<u32>()
+        .expect("ifindex is u32");
+    assert_eq!(program.read_endpoint(ifindex).expect("observe missing real map key"), None);
+    await_family_counts(
+        &identity,
+        [1, 1, 0, 2, 0, 1, 1, 0],
+        "empty production-owned map before delete",
+    );
+
+    // Drive the existing production adapter directly. No fixture performs a
+    // map delete, scripts an error, or implements the proposed errno remedy.
+    let result = remove_endpoint(pins.endpoint_map(), ifindex);
+    eprintln!("[ND295-ABSENT-ENDPOINT] production remove_endpoint({ifindex}) -> {result:?}");
+    assert_eq!(program.read_endpoint(ifindex).expect("read real map after delete"), None);
+    await_family_counts(
+        &identity,
+        [1, 1, 0, 2, 0, 1, 1, 0],
+        "absence delete preserves every owned family",
+    );
+    drop(program);
+    drop(pins);
+    await_family_counts(&identity, CLEAN, "only test-created objects reclaimed before verdict");
+    assert_eq!(kernel_ids(), before, "complete foreign map/program/link identity complement");
+    eprintln!(
+        "[ND295-ABSENT-ENDPOINT] owned cleanup empty; foreign BPF identity complement unchanged"
+    );
+    assert!(
+        result.is_ok(),
+        "an already-absent endpoint must converge successfully, got {result:?}"
+    );
+}
+
 /// A map family whose object a single retained handle can keep alive with
 /// no pin, no loader, no link, and no other family.
 #[derive(Debug, Clone, Copy)]

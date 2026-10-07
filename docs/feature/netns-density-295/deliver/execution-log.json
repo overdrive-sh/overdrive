@@ -1156,6 +1156,69 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-10-04T01:37:43Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: accepted non-EDD raw measurement has no RED acceptance phase",
+      "t": "2026-10-04T01:46:05Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: accepted DISTILL-owned netns_density_benchmark harness is absent from the checkout",
+      "t": "2026-10-04T01:46:24Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: accepted non-EDD receipt step has no scenario_ids",
+      "t": "2026-10-04T02:26:42Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: non-EDD raw-only capture step has no acceptance scenario",
+      "t": "2026-10-04T02:46:42Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-10-04T02:52:18Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE:no_EDD_scenarios",
+      "t": "2026-10-04T04:01:12Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-10-04T04:21:02Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-10-04T05:05:06Z"
+    },
+    {
+      "sid": "08-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-10-04T05:25:05Z"
     }
   ]
 }

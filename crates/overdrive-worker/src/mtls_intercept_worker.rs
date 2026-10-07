@@ -2176,15 +2176,32 @@ impl MtlsInterceptWorker {
         reason = "the exact seven-method worker surface remains async"
     )]
     pub async fn audit_shared_owner(&self) -> Result<(), MtlsSharedOwnerError> {
-        let _element_effects = self.element_effects.lock().await;
-        let state = self.shared_owner.lock();
-        let Some(owner) = state.owner.as_ref() else {
-            return match state.lifecycle {
-                SharedOwnerLifecycle::ShuttingDown => Err(MtlsSharedOwnerError::OwnerShutdown),
-                _ => Err(MtlsSharedOwnerError::NotStarted),
-            };
+        let element_effects = self.element_effects.lock().await;
+        #[cfg(feature = "integration-tests")]
+        let hold_started = std::time::Instant::now();
+        let result = {
+            let state = self.shared_owner.lock();
+            state.owner.as_ref().map_or_else(
+                || match state.lifecycle {
+                    SharedOwnerLifecycle::ShuttingDown => Err(MtlsSharedOwnerError::OwnerShutdown),
+                    _ => Err(MtlsSharedOwnerError::NotStarted),
+                },
+                |owner| self.audit_shared_owner_snapshot(owner),
+            )
         };
-        self.audit_shared_owner_snapshot(owner)
+        drop(element_effects);
+        #[cfg(feature = "integration-tests")]
+        {
+            let hold = hold_started.elapsed();
+            tracing::info!(
+                target: "overdrive::netns_density_benchmark",
+                event = "e18.member_audit_mutex_hold",
+                hold_secs = hold.as_secs(),
+                hold_subsec_nanos = hold.subsec_nanos(),
+                "E18 member audit mutex hold sample"
+            );
+        }
+        result
     }
 
     #[allow(clippy::similar_names)]

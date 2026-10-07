@@ -27,6 +27,13 @@ crate_class = "adapter-host"
 name = "openapi"
 path = "src/bin/openapi.rs"
 
+[[bin]]
+# DISTILL-owned, non-EDD E18 measurement support. This is not an Overdrive
+# operator command and is excluded from the default product build.
+name = "netns_density_benchmark"
+path = "bin/netns_density_benchmark.rs"
+required-features = ["integration-tests"]
+
 [features]
 # Opt-in gate for slow / real-infra tests in this crate. Off by default
 # so `cargo nextest run --workspace` stays under the 60s slow-test

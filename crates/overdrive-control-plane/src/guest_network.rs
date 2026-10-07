@@ -102,6 +102,42 @@ impl GuestNetworkPlan {
     }
 }
 
+/// Feature-gated fixture access for the accepted E18 measurement binary.
+/// These helpers only construct production owners and allocate ordinary pool
+/// inputs; all kernel effects remain on the production owner ports.
+#[doc(hidden)]
+#[cfg(feature = "integration-tests")]
+pub mod e18_test_support {
+    use std::sync::Arc;
+
+    use super::{
+        AllocationId, GuestAddressPool, GuestNetworkPlan, HostSharedGuestNetworkOwner, Result,
+        SharedGuestNetworkOwner,
+    };
+
+    /// Construct exactly the owner used by the production composition root.
+    pub fn host_owner() -> Arc<dyn SharedGuestNetworkOwner> {
+        Arc::new(HostSharedGuestNetworkOwner::new())
+    }
+
+    /// Obtain the allocation's plan through the real pool, without exposing a
+    /// production constructor for the opaque plan.
+    pub fn assign(pool: &GuestAddressPool, alloc: AllocationId) -> Result<GuestNetworkPlan> {
+        pool.assign(alloc)
+    }
+
+    /// Release a benchmark lease only after awaited owner teardown.
+    pub fn release(pool: &GuestAddressPool, alloc: &AllocationId) {
+        pool.release(alloc);
+    }
+
+    /// Drain the production resolve adapter's private watch owner at fixture
+    /// teardown. This does not widen the production resolve port.
+    pub async fn shutdown_resolve(resolve: &crate::mtls_resolve_adapter::ServiceBackendsResolve) {
+        resolve.shutdown().await;
+    }
+}
+
 /// Allocation-scoped awaited network effects.
 #[doc(hidden)]
 #[async_trait::async_trait]
@@ -5217,6 +5253,8 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     /// port directly and never synchronously blocks the task awaiting this
     /// future.
     async fn quiesce_managed_taps(&self) -> Result<TapQuiescence> {
+        #[cfg(feature = "integration-tests")]
+        let e18_started = Instant::now();
         let mut lifecycle = self.allocation_lifecycle.lock().await;
         lifecycle.quiescing = true;
         let active = lifecycle
@@ -5226,6 +5264,10 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             .map(|(alloc, state)| (alloc.clone(), state.clone()))
             .collect::<Vec<_>>();
         let mut quiescence = TapQuiescence::default();
+        #[cfg(feature = "integration-tests")]
+        let mut confirmed_taps = 0_u64;
+        #[cfg(feature = "integration-tests")]
+        let mut last_confirmed = None;
         for (alloc, state) in active {
             let outcome = match self.allocation_io.set_tap_down(&state.plan).await {
                 Err(source) => Err(Self::netlink_error(GuestNetworkOperation::TapSetDown, source)),
@@ -5247,6 +5289,15 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                                 observed: actual,
                             })
                         } else {
+                            #[cfg(feature = "integration-tests")]
+                            {
+                                confirmed_taps += 1;
+                                last_confirmed = Some((
+                                    e18_started.elapsed(),
+                                    alloc.clone(),
+                                    state.plan.assignment().tap.clone(),
+                                ));
+                            }
                             Ok(())
                         }
                     }
@@ -5261,6 +5312,19 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                     }
                 }
             }
+        }
+        #[cfg(feature = "integration-tests")]
+        if let Some((elapsed, last_alloc, last_tap)) = last_confirmed {
+            tracing::info!(
+                target: "overdrive::netns_density_benchmark",
+                event = "e18.quiescence_last_tap_down",
+                confirmed_taps,
+                elapsed_secs = elapsed.as_secs(),
+                elapsed_subsec_nanos = elapsed.subsec_nanos(),
+                last_alloc = %last_alloc,
+                last_tap = %last_tap,
+                "E18 last successful TAP-down read-back sample"
+            );
         }
         Ok(quiescence)
     }

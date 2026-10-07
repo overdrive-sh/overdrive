@@ -1879,10 +1879,11 @@ pub fn remove_endpoint(
         MapData::from_pin(endpoint_map_pin).map_err(|source| GuestTcxError::Map { source })?,
     ))
     .map_err(|source| GuestTcxError::Map { source })?;
-    map.remove(&ifindex).or_else(|error| match error {
-        aya::maps::MapError::KeyNotFound => Ok(()),
-        source => Err(GuestTcxError::Map { source }),
-    })
+    let outcome = map.remove(&ifindex);
+    if crate::maps::is_absent_key(&outcome) {
+        return Ok(());
+    }
+    outcome.map_err(|source| GuestTcxError::Map { source })
 }
 
 /// Read one semantic slot from the pinned counter array.
