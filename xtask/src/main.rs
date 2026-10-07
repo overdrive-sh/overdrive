@@ -272,11 +272,30 @@ enum QuintAction {
         /// Only the check with this name.
         #[arg(long, value_name = "CHECK")]
         name: Option<String>,
-        /// Run up to N checks concurrently (each with its own server port,
-        /// bounded Apalache heap and on-disk TMPDIR). Default: min(CPUs/2, 4),
-        /// further capped by memory.
+        /// Upper bound on concurrent checks. Checks start only when their
+        /// memory/CPU reservation fits the budget (`--mem-budget`,
+        /// `--cpu-budget`). Default: the CPU budget.
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(1..))]
         jobs: Option<u16>,
+        /// Memory all running checks may reserve together, e.g. `12g` or
+        /// `12288` (MiB). Default: total memory minus 2 GiB.
+        #[arg(long, value_name = "SIZE", value_parser = xtask::quint::resources::parse_size_mb)]
+        mem_budget: Option<u64>,
+        /// CPUs all running checks may reserve together. Default: CPU count.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+        cpu_budget: Option<u32>,
+        /// Heap of each TLC JVM (Quint's own default is 8 GiB) for checks
+        /// without `heap_mb`. Default: 2g.
+        #[arg(long, value_name = "SIZE", value_parser = xtask::quint::resources::parse_heap_mb)]
+        tlc_heap: Option<u64>,
+        /// TLC worker threads (= CPUs reserved) for checks without
+        /// `workers`. Default: 4.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+        tlc_workers: Option<u32>,
+        /// Heap of the Apalache server of Apalache checks without `heap_mb`.
+        /// Default: 3g.
+        #[arg(long, value_name = "SIZE", value_parser = xtask::quint::resources::parse_heap_mb)]
+        apalache_heap: Option<u64>,
         /// Per-attempt timeout in seconds, overriding every check's
         /// `timeout_secs` (default 900). The check's whole process group is
         /// killed on expiry and the outcome is `timed-out`.
@@ -411,16 +430,33 @@ fn run() -> Result<()> {
         Task::Hooks { action } => hooks(action),
         Task::Quint { action } => match action {
             QuintAction::Typecheck => xtask::quint::typecheck(),
-            QuintAction::Check { ci, subsystem, name, jobs, timeout, record } => {
-                xtask::quint::check(
-                    &xtask::quint::CheckFilter { ci, subsystem, name },
-                    xtask::quint::CheckOptions {
-                        jobs: jobs.map(usize::from),
-                        timeout_secs: timeout,
-                        record,
+            QuintAction::Check {
+                ci,
+                subsystem,
+                name,
+                jobs,
+                mem_budget,
+                cpu_budget,
+                tlc_heap,
+                tlc_workers,
+                apalache_heap,
+                timeout,
+                record,
+            } => xtask::quint::check(
+                &xtask::quint::CheckFilter { ci, subsystem, name },
+                xtask::quint::CheckOptions {
+                    jobs: jobs.map(usize::from),
+                    resources: xtask::quint::resources::ResourceOverrides {
+                        mem_budget_mb: mem_budget,
+                        cpu_budget,
+                        tlc_heap_mb: tlc_heap,
+                        tlc_workers,
+                        apalache_heap_mb: apalache_heap,
                     },
-                )
-            }
+                    timeout_secs: timeout,
+                    record,
+                },
+            ),
             QuintAction::VerifyEvidence { subsystem } => {
                 xtask::quint::verify_evidence(subsystem.as_deref())
             }

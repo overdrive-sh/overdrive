@@ -15,6 +15,8 @@
 //! expect = "holds"                  # "holds" | "violation"
 //! ci = true                         # run under --ci
 //! timeout_secs = 1800               # optional; default DEFAULT_TIMEOUT_SECS
+//! heap_mb = 4096                    # optional; TLC / Apalache-server heap
+//! workers = 4                       # optional; TLC only
 //! ```
 //!
 //! `expect = "holds"` passes only on a clean result; `expect = "violation"`
@@ -47,12 +49,16 @@
 //!   single retry. A server
 //!   that is merely listening is not progress: the observed hang leaves the
 //!   server up and idle.
-//! - **Parallelism.** `--jobs N` checks run concurrently (default
-//!   [`default_jobs`]), each with a private server port, a bounded Apalache
-//!   server heap ([`JVM_HEAP_MB`]) and a private `TMPDIR` / `java.io.tmpdir`
-//!   (which also holds TLC's state queue) under `target/quint/` — never
-//!   `/tmp`, a RAM disk in the Lima VM. Quint itself launches TLC with a
-//!   fixed `-Xmx8G -workers auto`, which no environment setting overrides.
+//! - **Parallelism.** Checks run concurrently under a memory and CPU budget
+//!   ([`resources`]): each check reserves memory and CPUs by backend — TLC
+//!   its capped heap (passed to Quint through `--tlc-config`) and workers,
+//!   Apalache its server heap plus one CPU for Z3 — and starts only when the
+//!   reservation fits next to the running checks. `--jobs N` is an upper
+//!   bound on the count (default: the CPU count). Each check has a private
+//!   server port and a private `TMPDIR` / `java.io.tmpdir` (which also holds
+//!   TLC's state queue) under `target/quint/` — never `/tmp`, a RAM disk in
+//!   the Lima VM. The peak resident memory of each check's process group is
+//!   sampled and reported beside its reservation.
 //!
 //! Every attempt writes its full checker log to
 //! `target/quint/<subsystem>/<check>/attempt-<n>.log` (attempts are never
@@ -69,7 +75,8 @@
 //!
 //! The pure parts — [`parse_checks`], [`classify`] / [`judge`],
 //! [`started_work`], [`deadline_check`] / [`attempt_verdict`], [`effective_timeout`],
-//! [`default_jobs`], [`estimate_secs`] and [`parse_stat_state`] — are unit-tested here;
+//! [`estimate_secs`] and [`parse_stat_state`] — are unit-tested here (admission
+//! and resource parsing in [`resources`]);
 //! [`typecheck`] and [`check`] shell out to `quint`.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -87,7 +94,10 @@ use color_eyre::eyre::{Context, Result, bail, eyre};
 use serde::{Deserialize, Serialize};
 
 pub mod evidence;
+pub mod resources;
 pub mod trace;
+
+use resources::{Reservation, ResourceConfig, ResourceOverrides, Sizing};
 
 /// Root of the Quint spec tree, relative to the workspace root.
 pub const SPECS_DIR: &str = "specs/quint";
@@ -112,14 +122,8 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = 900;
 /// How long the Apalache server may take to become ready before the attempt
 /// counts as a start-up hang.
 pub const STARTUP_BOUND_SECS: u64 = 120;
-/// Maximum heap of each check's Apalache server JVM (Apalache's own
-/// default). TLC's JVM heap is fixed by Quint's command line.
-pub const JVM_HEAP_MB: u64 = 4096;
-/// Memory budgeted per concurrent check: the JVM heap plus headroom for Z3,
-/// JVM metaspace and Quint itself.
-pub const PER_CHECK_MEM_MB: u64 = JVM_HEAP_MB + 1024;
-/// Upper bound on the default `--jobs`.
-pub const MAX_DEFAULT_JOBS: usize = 4;
+/// How often the peak resident memory of running checks is sampled.
+const RSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 /// Environment variable carrying the run id into every child process, so
 /// leftovers can be found even after re-parenting.
 const RUN_MARKER_ENV: &str = "OVERDRIVE_XTASK_QUINT_RUN";
@@ -220,6 +224,11 @@ pub struct Check {
     pub ci: bool,
     /// Per-attempt wall-clock budget in seconds; `None` uses the default.
     pub timeout_secs: Option<u64>,
+    /// Heap (MiB) of the TLC JVM or the Apalache server; `None` uses the
+    /// run's default for the backend.
+    pub heap_mb: Option<u64>,
+    /// TLC worker threads (TLC only); `None` uses the run's default.
+    pub workers: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,6 +252,8 @@ struct RawCheck {
     #[serde(default)]
     ci: bool,
     timeout_secs: Option<u64>,
+    heap_mb: Option<u64>,
+    workers: Option<u32>,
 }
 
 /// Parse and validate a `checks.toml` body. `path` is used for error
@@ -308,6 +319,21 @@ pub fn parse_checks(path: &Path, body: &str) -> Result<Vec<Check>, ChecksError> 
         if c.timeout_secs == Some(0) {
             return Err(invalid(&c.name, "`timeout_secs` must be at least 1"));
         }
+        if let Some(Err(e)) = c.heap_mb.map(resources::validate_heap_mb) {
+            return Err(invalid(&c.name, &format!("`heap_mb`: {e}")));
+        }
+        match (c.backend, c.workers) {
+            (Backend::Apalache, Some(_)) => {
+                return Err(invalid(
+                    &c.name,
+                    "`workers` applies to backend = \"tlc\" only (Z3 is single-threaded)",
+                ));
+            }
+            (Backend::Tlc, Some(0)) => {
+                return Err(invalid(&c.name, "`workers` must be at least 1"));
+            }
+            _ => {}
+        }
         checks.push(Check {
             name: c.name,
             spec: c.spec,
@@ -318,6 +344,8 @@ pub fn parse_checks(path: &Path, body: &str) -> Result<Vec<Check>, ChecksError> 
             expect: c.expect,
             ci: c.ci,
             timeout_secs: c.timeout_secs,
+            heap_mb: c.heap_mb,
+            workers: c.workers,
         });
     }
     Ok(checks)
@@ -504,8 +532,10 @@ pub struct CheckFilter {
 /// Execution options for [`check`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CheckOptions {
-    /// Concurrent checks; `None` uses [`default_jobs`].
+    /// Upper bound on concurrent checks; `None` uses the CPU budget.
     pub jobs: Option<usize>,
+    /// Budget and per-backend sizing overrides.
+    pub resources: ResourceOverrides,
     /// Per-attempt timeout override in seconds (wins over `timeout_secs`).
     pub timeout_secs: Option<u64>,
     /// Replace the subsystem's `evidence/` with this run's evidence.
@@ -516,18 +546,6 @@ pub struct CheckOptions {
 /// check's `timeout_secs`, else [`DEFAULT_TIMEOUT_SECS`].
 pub fn effective_timeout(cli: Option<u64>, check: Option<u64>) -> Duration {
     Duration::from_secs(cli.or(check).unwrap_or(DEFAULT_TIMEOUT_SECS))
-}
-
-/// Default concurrency for `--jobs`.
-///
-/// Half the CPUs (one JVM keeps about two cores busy), capped at
-/// [`MAX_DEFAULT_JOBS`] and by how many [`PER_CHECK_MEM_MB`] budgets fit in
-/// total memory (when known). Always at least 1.
-pub fn default_jobs(cpus: usize, mem_total_mb: Option<u64>) -> usize {
-    let by_cpu = cpus / 2;
-    let by_mem = mem_total_mb
-        .map_or(usize::MAX, |mb| usize::try_from(mb / PER_CHECK_MEM_MB).unwrap_or(usize::MAX));
-    by_cpu.min(by_mem).clamp(1, MAX_DEFAULT_JOBS)
 }
 
 /// How a running attempt ended.
@@ -990,6 +1008,10 @@ struct Job {
     check: Check,
     out_dir: PathBuf,
     timeout: Duration,
+    /// Heap and workers the check runs with.
+    sizing: Sizing,
+    /// What the check holds while it runs.
+    reservation: Reservation,
 }
 
 /// One attempt in flight.
@@ -1001,6 +1023,8 @@ struct Running {
     started_work: bool,
     log_path: PathBuf,
     group: Group,
+    /// Peak resident memory of the attempt's process group (MiB).
+    peak_rss_mb: u64,
 }
 
 /// Final per-check record (also the `summary.json` row).
@@ -1016,6 +1040,16 @@ struct CheckRecord {
     timeout_secs: u64,
     cause: Option<String>,
     log: PathBuf,
+    /// Heap (MiB) of the TLC JVM or the Apalache server.
+    heap_mb: u64,
+    /// TLC workers (1 for Apalache).
+    workers: u32,
+    /// Reserved memory (MiB).
+    reserved_mem_mb: u64,
+    /// Reserved CPUs.
+    reserved_cpus: u32,
+    /// Peak resident memory of the check's process group over its attempts (MiB).
+    peak_rss_mb: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1025,6 +1059,9 @@ struct Summary<'a> {
     started_unix: f64,
     finished_unix: f64,
     jobs: usize,
+    mem_budget_mb: u64,
+    cpu_budget: u32,
+    peak_system_used_mb: Option<u64>,
     interrupted_by_signal: Option<i32>,
     checks: Vec<&'a CheckRecord>,
 }
@@ -1062,17 +1099,31 @@ fn prior_durations(root: &Path, subsystems: &BTreeSet<&str>) -> BTreeMap<(String
     out
 }
 
-fn mem_total_mb() -> Option<u64> {
-    let info = fs::read_to_string("/proc/meminfo").ok()?;
-    let kb: u64 = info
-        .lines()
-        .find_map(|l| l.strip_prefix("MemTotal:"))?
-        .trim()
-        .trim_end_matches("kB")
-        .trim()
-        .parse()
-        .ok()?;
-    Some(kb / 1024)
+/// `MemTotal` and `MemAvailable` in MiB; `None` where `/proc/meminfo` is
+/// absent (non-Linux hosts) or lacks the field.
+fn meminfo() -> (Option<u64>, Option<u64>) {
+    fs::read_to_string("/proc/meminfo").map_or((None, None), |info| resources::parse_meminfo(&info))
+}
+
+/// Resident memory (MiB) per process group, for the given groups only.
+fn group_rss_mb(pgids: &BTreeSet<i32>) -> BTreeMap<i32, u64> {
+    let mut pages: BTreeMap<i32, u64> = BTreeMap::new();
+    let Ok(entries) = fs::read_dir("/proc") else { return BTreeMap::new() };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_str().is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit())) {
+            continue;
+        }
+        // A process that exits mid-scan is simply not counted.
+        let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else { continue };
+        if let Some((pgrp, rss)) = resources::parse_stat_pgrp_rss(&stat)
+            && pgids.contains(&pgrp)
+        {
+            *pages.entry(pgrp).or_default() += rss;
+        }
+    }
+    // SAFETY: sysconf has no preconditions.
+    let page = u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).unwrap_or(4096);
+    pages.into_iter().map(|(g, p)| (g, p * page / (1024 * 1024))).collect()
 }
 
 fn start_attempt(
@@ -1122,9 +1173,34 @@ fn start_attempt(
     if let Some(steps) = c.max_steps {
         cmd.arg(format!("--max-steps={steps}"));
     }
-    if c.backend == Backend::Apalache {
-        cmd.arg(format!("--out-itf={}", out_dir.join("trace.itf.json").display()));
-    }
+    // The Apalache server's heap: the check's own for Apalache, the
+    // compile-only cap for TLC (Quint keeps it up through the TLC run).
+    let server_heap_mb = match c.backend {
+        Backend::Apalache => {
+            cmd.arg(format!("--out-itf={}", out_dir.join("trace.itf.json").display()));
+            j.sizing.heap_mb
+        }
+        Backend::Tlc => {
+            // Quint launches TLC as `java <maxHeap> -Xss515m … -workers <workers>`,
+            // defaulting to -Xmx8G / auto; `--tlc-config` is its supported
+            // override (quint/src/tlc.ts, TlcRuntimeConfig).
+            let cfg = out_dir.join(format!("tlc-config-{attempt}.json"));
+            let body = serde_json::json!({
+                "maxHeap": format!("-Xmx{}m", j.sizing.heap_mb),
+                "workers": j.sizing.workers,
+            });
+            fs::write(&cfg, body.to_string())
+                .wrap_err_with(|| format!("writing {}", cfg.display()))?;
+            cmd.arg(format!("--tlc-config={}", cfg.display()));
+            resources::COMPILE_HEAP_MB
+        }
+    };
+    // Every JVM in the group sees only the CPUs the check reserved, so its
+    // GC and compiler threads stay within the reservation.
+    let java_tool_options = format!(
+        "-XX:-UsePerfData -XX:ActiveProcessorCount={} -Djava.io.tmpdir={tmp_str}",
+        j.reservation.cpus
+    );
     // Apalache writes `_apalache-out/` into its working directory; its
     // launcher honours JVM_ARGS (heap) and puts `java.io.tmpdir` under
     // TMPDIR; Quint puts TLC's metadir under TMPDIR. JAVA_TOOL_OPTIONS
@@ -1133,8 +1209,8 @@ fn start_attempt(
     // RAM-backed tmpfs in the Lima VM that a large state space can exhaust.
     cmd.current_dir(out_dir)
         .env("TMPDIR", &tmp)
-        .env("JVM_ARGS", format!("-Xmx{JVM_HEAP_MB}m"))
-        .env("JAVA_TOOL_OPTIONS", format!("-XX:-UsePerfData -Djava.io.tmpdir={tmp_str}"))
+        .env("JVM_ARGS", format!("-Xmx{server_heap_mb}m"))
+        .env("JAVA_TOOL_OPTIONS", java_tool_options)
         .env(RUN_MARKER_ENV, run_id)
         .stdin(Stdio::null())
         .stdout(log)
@@ -1143,9 +1219,13 @@ fn start_attempt(
     event(
         out_dir,
         &format!(
-            "attempt {attempt} start pgid={} port={port} timeout={}s log={}",
+            "attempt {attempt} start pgid={} port={port} timeout={}s heap={}MiB workers={} \
+             server_heap={server_heap_mb}MiB reserved={} log={}",
             group.pgid,
             j.timeout.as_secs(),
+            j.sizing.heap_mb,
+            j.sizing.workers,
+            j.reservation,
             log_path.display()
         ),
     )?;
@@ -1157,6 +1237,7 @@ fn start_attempt(
         started_work: false,
         log_path,
         group,
+        peak_rss_mb: 0,
     })
 }
 
@@ -1185,6 +1266,7 @@ fn select_jobs(
     specs: &Path,
     filter: &CheckFilter,
     opts: CheckOptions,
+    res: &ResourceConfig,
 ) -> Result<Vec<Job>> {
     let mut jobs: Vec<Job> = Vec::new();
     for (subsystem, dir) in subsystems(specs, filter.subsystem.as_deref())? {
@@ -1201,6 +1283,8 @@ fn select_jobs(
             jobs.push(Job {
                 out_dir: root.join(OUT_DIR).join(&subsystem).join(&c.name),
                 timeout: effective_timeout(opts.timeout_secs, c.timeout_secs),
+                sizing: res.sizing(&c),
+                reservation: res.reservation(&c),
                 subsystem: subsystem.clone(),
                 dir: dir.clone(),
                 check: c,
@@ -1210,67 +1294,125 @@ fn select_jobs(
     Ok(jobs)
 }
 
-/// Print the run header and the duration estimate.
-fn announce(root: &Path, jobs: &[Job], workers: usize, run_id: &str) {
+/// Previous measured seconds of each job (`None` = no history).
+fn job_history(root: &Path, jobs: &[Job]) -> Vec<Option<f64>> {
     let subsystem_names: BTreeSet<&str> = jobs.iter().map(|j| j.subsystem.as_str()).collect();
     let prior = prior_durations(root, &subsystem_names);
-    let history: Vec<Option<f64>> = jobs
-        .iter()
-        .map(|j| prior.get(&(j.subsystem.clone(), j.check.name.clone())).copied())
-        .collect();
-    let (estimate, no_history) = estimate_secs(&history, workers);
+    jobs.iter().map(|j| prior.get(&(j.subsystem.clone(), j.check.name.clone())).copied()).collect()
+}
+
+/// Print the run header and the duration estimate.
+fn announce(
+    jobs: &[Job],
+    history: &[Option<f64>],
+    res: &ResourceConfig,
+    max_jobs: usize,
+    run_id: &str,
+) {
+    // Typical concurrency: how many average reservations fit the budget.
+    let n = u64::try_from(jobs.len()).unwrap_or(u64::MAX).max(1);
+    let mean_mem = jobs.iter().map(|j| j.reservation.mem_mb).sum::<u64>() / n;
+    let mean_cpus = (jobs.iter().map(|j| u64::from(j.reservation.cpus)).sum::<u64>() / n).max(1);
+    let by_mem = usize::try_from(res.budget.mem_mb / mean_mem.max(1)).unwrap_or(usize::MAX);
+    let by_cpu = usize::try_from(u64::from(res.budget.cpus) / mean_cpus).unwrap_or(usize::MAX);
+    let parallel = max_jobs.min(by_mem).min(by_cpu).max(1);
+    let (estimate, no_history) = estimate_secs(history, parallel);
     let worst_unknown = jobs
         .iter()
-        .zip(&history)
+        .zip(history)
         .filter(|(_, h)| h.is_none())
         .fold(Duration::ZERO, |acc, (j, _)| acc + j.timeout);
     let worst_unknown_min =
-        worst_unknown.as_secs_f64() / 60.0 / f64::from(u32::try_from(workers).unwrap_or(u32::MAX));
+        worst_unknown.as_secs_f64() / 60.0 / f64::from(u32::try_from(parallel).unwrap_or(u32::MAX));
     eprintln!(
-        "xtask quint check: {} check(s), --jobs {workers}, Apalache heap {JVM_HEAP_MB} MiB, \
-         start-up bound {STARTUP_BOUND_SECS}s, run id {run_id}",
-        jobs.len()
+        "xtask quint check: {} check(s), budget {} (--jobs ≤ {max_jobs}), TLC heap {} MiB × {} \
+         workers, Apalache heap {} MiB + 1 CPU, start-up bound {STARTUP_BOUND_SECS}s, run id {run_id}",
+        jobs.len(),
+        res.budget,
+        res.tlc_heap_mb,
+        res.tlc_workers,
+        res.apalache_heap_mb,
     );
+    for j in jobs.iter().filter(|j| !j.reservation.fits(res.budget)) {
+        eprintln!(
+            "xtask quint check: {}/{} reserves {}, more than the budget; it will run alone",
+            j.subsystem, j.check.name, j.reservation
+        );
+    }
     let unknown_note = if no_history == 0 {
         String::new()
     } else {
         format!(
             "; {no_history} check(s) without history (worst case +{worst_unknown_min:.1} min \
-             of timeouts over {workers} job(s))"
+             of timeouts)"
         )
     };
     eprintln!(
-        "xtask quint check: estimate ~{:.1} min from previous durations{unknown_note}",
+        "xtask quint check: estimate ~{:.1} min at ~{parallel} concurrent from previous \
+         durations{unknown_note}",
         estimate / 60.0
     );
 }
 
-/// The supervisor: a single-threaded poll loop over up to `workers`
-/// concurrent attempts.
+/// Run-wide facts for `summary.json` and the evidence.
+struct RunInfo<'a> {
+    run_id: &'a str,
+    started_unix: f64,
+    max_jobs: usize,
+    budget: Reservation,
+    peak_system_used_mb: Option<u64>,
+    interrupted: Option<i32>,
+}
+
+/// The supervisor: a single-threaded poll loop that admits queued attempts
+/// under the resource budget and polls the running ones.
 struct Supervisor<'a> {
     jobs: &'a [Job],
-    workers: usize,
+    res: ResourceConfig,
+    max_jobs: usize,
     run_id: &'a str,
     run_start: Instant,
     ports: BTreeSet<u16>,
+    /// `(job, attempt)` in start order.
     queue: VecDeque<(usize, u32)>,
     running: Vec<Running>,
+    /// Sum of the running checks' reservations.
+    in_use: Reservation,
+    /// The queue head and since when it has been blocked by the budget.
+    head_blocked: Option<(usize, Instant)>,
     records: Vec<Option<CheckRecord>>,
     first_started: Vec<Option<Instant>>,
+    /// Peak resident memory per job over all its attempts (MiB).
+    peak_rss_mb: Vec<u64>,
+    last_sample: Instant,
+    /// Peak of `MemTotal - MemAvailable` during the run (MiB).
+    peak_system_used_mb: Option<u64>,
 }
 
 impl<'a> Supervisor<'a> {
-    fn new(jobs: &'a [Job], workers: usize, run_id: &'a str) -> Self {
+    fn new(
+        jobs: &'a [Job],
+        order: &[usize],
+        res: ResourceConfig,
+        max_jobs: usize,
+        run_id: &'a str,
+    ) -> Self {
         Self {
             jobs,
-            workers,
+            res,
+            max_jobs,
             run_id,
             run_start: Instant::now(),
             ports: BTreeSet::new(),
-            queue: (0..jobs.len()).map(|i| (i, 1)).collect(),
+            queue: order.iter().map(|&i| (i, 1)).collect(),
             running: Vec::new(),
+            in_use: Reservation::default(),
+            head_blocked: None,
             records: vec![None; jobs.len()],
             first_started: vec![None; jobs.len()],
+            peak_rss_mb: vec![0; jobs.len()],
+            last_sample: Instant::now(),
+            peak_system_used_mb: None,
         }
     }
 
@@ -1290,6 +1432,9 @@ impl<'a> Supervisor<'a> {
                 return Ok(None);
             }
             std::thread::sleep(POLL_INTERVAL);
+            if self.last_sample.elapsed() >= RSS_SAMPLE_INTERVAL {
+                self.sample_memory();
+            }
             let mut i = 0;
             while i < self.running.len() {
                 let timeout = self.jobs[self.running[i].job].timeout;
@@ -1303,19 +1448,77 @@ impl<'a> Supervisor<'a> {
         }
     }
 
-    /// Start queued attempts up to the worker limit.
+    /// Record the resident memory of every running group and of the host.
+    fn sample_memory(&mut self) {
+        self.last_sample = Instant::now();
+        let pgids: BTreeSet<i32> = self.running.iter().map(|r| r.group.pgid).collect();
+        let rss = group_rss_mb(&pgids);
+        for r in &mut self.running {
+            if let Some(mb) = rss.get(&r.group.pgid) {
+                r.peak_rss_mb = r.peak_rss_mb.max(*mb);
+            }
+        }
+        if let (Some(total), Some(avail)) = meminfo() {
+            let used = total.saturating_sub(avail);
+            self.peak_system_used_mb = Some(self.peak_system_used_mb.map_or(used, |p| p.max(used)));
+        }
+    }
+
+    /// Start queued attempts while their reservations fit the budget.
     fn fill(&mut self) -> Result<()> {
-        while self.running.len() < self.workers {
-            let Some((job, attempt)) = self.queue.pop_front() else { break };
+        while let Some(&(head, _)) = self.queue.front() {
+            let blocked_for = match self.head_blocked {
+                Some((job, since)) if job == head => since.elapsed(),
+                _ => Duration::ZERO,
+            };
+            let reqs: Vec<Reservation> =
+                self.queue.iter().map(|(job, _)| self.jobs[*job].reservation).collect();
+            let Some(pick) = resources::admit(
+                &reqs,
+                self.in_use,
+                self.running.len(),
+                self.max_jobs,
+                self.res.budget,
+                blocked_for,
+                Duration::from_secs(resources::HEAD_BYPASS_SECS),
+            ) else {
+                // The head waits on the budget (not on --jobs): start its clock.
+                let head_fits = self.in_use.plus(reqs[0]).fits(self.res.budget);
+                if self.running.len() < self.max_jobs
+                    && !head_fits
+                    && self.head_blocked.is_none_or(|(job, _)| job != head)
+                {
+                    self.head_blocked = Some((head, Instant::now()));
+                }
+                break;
+            };
+            let (job, attempt) = self
+                .queue
+                .remove(pick)
+                .unwrap_or_else(|| unreachable!("admit returns an index into the queue"));
+            if pick == 0 {
+                self.head_blocked = None;
+            }
             let r = start_attempt(self.jobs, job, attempt, self.run_id, &mut self.ports)?;
             self.first_started[job].get_or_insert(r.started);
             let j = &self.jobs[job];
+            self.in_use = self.in_use.plus(j.reservation);
+            let sizing = match j.check.backend {
+                Backend::Tlc => {
+                    format!("heap {} MiB, {} workers", j.sizing.heap_mb, j.sizing.workers)
+                }
+                Backend::Apalache => format!("heap {} MiB", j.sizing.heap_mb),
+            };
             eprintln!(
-                "{} start  {}/{} [{}] attempt {attempt} port {} timeout {}s ({} running, {} queued)",
+                "{} start  {}/{} [{}] attempt {attempt} reserves {} ({sizing}); in use {} of {} \
+                 port {} timeout {}s ({} running, {} queued)",
                 self.stamp(r.started),
                 j.subsystem,
                 j.check.name,
                 j.check.backend.as_str(),
+                j.reservation,
+                self.in_use,
+                self.res.budget,
                 r.port,
                 j.timeout.as_secs(),
                 self.running.len() + 1,
@@ -1326,12 +1529,46 @@ impl<'a> Supervisor<'a> {
         Ok(())
     }
 
-    /// Kill an ended attempt's group, judge it, and either requeue (start-up
-    /// hang retry) or record the final verdict.
+    fn record(
+        &self,
+        job: usize,
+        outcome: Outcome,
+        seconds: f64,
+        attempts: u32,
+        cause: Option<String>,
+        log: PathBuf,
+    ) -> CheckRecord {
+        let j = &self.jobs[job];
+        CheckRecord {
+            name: j.check.name.clone(),
+            backend: j.check.backend,
+            expect: j.check.expect,
+            outcome,
+            pass: judge(j.check.expect, outcome),
+            seconds,
+            attempts,
+            timeout_secs: j.timeout.as_secs(),
+            cause,
+            log,
+            heap_mb: j.sizing.heap_mb,
+            workers: j.sizing.workers,
+            reserved_mem_mb: j.reservation.mem_mb,
+            reserved_cpus: j.reservation.cpus,
+            peak_rss_mb: self.peak_rss_mb[job],
+        }
+    }
+
+    /// Kill an ended attempt's group, release its reservation, judge it, and
+    /// either requeue (start-up hang retry) or record the final verdict.
     fn finish_attempt(&mut self, mut r: Running, end: AttemptEnd) -> Result<()> {
         // Always kill the group: Quint may exit while its JVM lingers.
         r.group.terminate()?;
         let j = &self.jobs[r.job];
+        self.in_use = Reservation {
+            mem_mb: self.in_use.mem_mb.saturating_sub(j.reservation.mem_mb),
+            cpus: self.in_use.cpus.saturating_sub(j.reservation.cpus),
+        };
+        self.peak_rss_mb[r.job] = self.peak_rss_mb[r.job].max(r.peak_rss_mb);
         let output =
             fs::read(&r.log_path).wrap_err_with(|| format!("reading {}", r.log_path.display()))?;
         let verdict = attempt_verdict(
@@ -1345,8 +1582,9 @@ impl<'a> Supervisor<'a> {
         event(
             &j.out_dir,
             &format!(
-                "attempt {} end {end:?} after {attempt_secs:.1}s; group {} killed; verdict {verdict:?}",
-                r.attempt, r.group.pgid
+                "attempt {} end {end:?} after {attempt_secs:.1}s; peak rss {} MiB; group {} \
+                 killed; verdict {verdict:?}",
+                r.attempt, r.peak_rss_mb, r.group.pgid
             ),
         )?;
         let now = self.stamp(Instant::now());
@@ -1356,32 +1594,24 @@ impl<'a> Supervisor<'a> {
                 self.queue.push_front((r.job, r.attempt + 1));
             }
             AttemptVerdict::Final { outcome, cause } => {
-                let pass = judge(j.check.expect, outcome);
                 let seconds =
                     self.first_started[r.job].map_or(attempt_secs, |t| t.elapsed().as_secs_f64());
+                let rec = self.record(r.job, outcome, seconds, r.attempt, cause, r.log_path);
                 eprintln!(
-                    "{now} {}   {}/{} expect={} got={outcome} ({seconds:.1}s){}",
-                    if pass { "PASS" } else { "FAIL" },
+                    "{now} {}   {}/{} expect={} got={outcome} ({seconds:.1}s wall, peak {} of {} \
+                     MiB){}",
+                    if rec.pass { "PASS" } else { "FAIL" },
                     j.subsystem,
                     j.check.name,
                     j.check.expect.as_str(),
-                    cause.as_deref().map_or(String::new(), |c| format!(" — {c}")),
+                    rec.peak_rss_mb,
+                    rec.reserved_mem_mb,
+                    rec.cause.as_deref().map_or(String::new(), |c| format!(" — {c}")),
                 );
-                if !pass {
-                    eprintln!("            log: {}", r.log_path.display());
+                if !rec.pass {
+                    eprintln!("            log: {}", rec.log.display());
                 }
-                self.records[r.job] = Some(CheckRecord {
-                    name: j.check.name.clone(),
-                    backend: j.check.backend,
-                    expect: j.check.expect,
-                    outcome,
-                    pass,
-                    seconds,
-                    attempts: r.attempt,
-                    timeout_secs: j.timeout.as_secs(),
-                    cause,
-                    log: r.log_path,
-                });
+                self.records[r.job] = Some(rec);
             }
         }
         Ok(())
@@ -1398,21 +1628,19 @@ impl<'a> Supervisor<'a> {
             r.group.terminate()?;
             let j = &self.jobs[r.job];
             event(&j.out_dir, &format!("attempt {} killed: runner got signal {sig}", r.attempt))?;
+            self.peak_rss_mb[r.job] = self.peak_rss_mb[r.job].max(r.peak_rss_mb);
         }
-        for (i, j) in self.jobs.iter().enumerate() {
+        for i in 0..self.jobs.len() {
             if self.records[i].is_none() {
-                self.records[i] = Some(CheckRecord {
-                    name: j.check.name.clone(),
-                    backend: j.check.backend,
-                    expect: j.check.expect,
-                    outcome: Outcome::Interrupted,
-                    pass: false,
-                    seconds: self.first_started[i].map_or(0.0, |t| t.elapsed().as_secs_f64()),
-                    attempts: self.running.iter().find(|r| r.job == i).map_or(0, |r| r.attempt),
-                    timeout_secs: j.timeout.as_secs(),
-                    cause: Some(format!("runner received signal {sig}")),
-                    log: j.out_dir.clone(),
-                });
+                let rec = self.record(
+                    i,
+                    Outcome::Interrupted,
+                    self.first_started[i].map_or(0.0, |t| t.elapsed().as_secs_f64()),
+                    self.running.iter().find(|r| r.job == i).map_or(0, |r| r.attempt),
+                    Some(format!("runner received signal {sig}")),
+                    self.jobs[i].out_dir.clone(),
+                );
+                self.records[i] = Some(rec);
             }
         }
         Ok(())
@@ -1424,19 +1652,21 @@ fn write_summaries(
     root: &Path,
     jobs: &[Job],
     records: &[CheckRecord],
-    meta: (&str, f64, usize, Option<i32>),
+    info: &RunInfo<'_>,
 ) -> Result<()> {
-    let (run_id, started_unix, workers, interrupted) = meta;
     let finished_unix = unix_now();
     let subsystem_names: BTreeSet<&str> = jobs.iter().map(|j| j.subsystem.as_str()).collect();
     for sub in subsystem_names {
         let summary = Summary {
             subsystem: sub,
-            run_id,
-            started_unix,
+            run_id: info.run_id,
+            started_unix: info.started_unix,
             finished_unix,
-            jobs: workers,
-            interrupted_by_signal: interrupted,
+            jobs: info.max_jobs,
+            mem_budget_mb: info.budget.mem_mb,
+            cpu_budget: info.budget.cpus,
+            peak_system_used_mb: info.peak_system_used_mb,
+            interrupted_by_signal: info.interrupted,
             checks: jobs
                 .iter()
                 .zip(records)
@@ -1485,7 +1715,9 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
         eprintln!("xtask quint check: no {SPECS_DIR}/ directory; nothing to check");
         return Ok(());
     }
-    let jobs = select_jobs(&root, &specs, filter, opts)?;
+    let cpus = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let res = ResourceConfig::resolve(opts.resources, cpus, meminfo().0);
+    let jobs = select_jobs(&root, &specs, filter, opts, &res)?;
     if jobs.is_empty() {
         if let Some(name) = &filter.name {
             bail!("no check named `{name}` matches the selection");
@@ -1496,8 +1728,8 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
 
     let record_inputs = if opts.record { Some(evidence::hash_inputs(&jobs[0].dir)?) } else { None };
 
-    let cpus = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    let workers = opts.jobs.unwrap_or_else(|| default_jobs(cpus, mem_total_mb())).max(1);
+    let max_jobs =
+        opts.jobs.unwrap_or_else(|| usize::try_from(res.budget.cpus).unwrap_or(usize::MAX)).max(1);
     let started_unix = unix_now();
     let run_id = format!("{}-{started_unix:.3}", std::process::id());
 
@@ -1506,14 +1738,17 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
     if swept > 0 {
         eprintln!("xtask quint check: killed {swept} process(es) left by an earlier, dead runner");
     }
-    announce(&root, &jobs, workers, &run_id);
+    let history = job_history(&root, &jobs);
+    announce(&jobs, &history, &res, max_jobs, &run_id);
 
-    let mut sup = Supervisor::new(&jobs, workers, &run_id);
+    let order = resources::longest_first(&history);
+    let mut sup = Supervisor::new(&jobs, &order, res, max_jobs, &run_id);
     let interrupted = sup.run()?;
     if let Some(sig) = interrupted {
         sup.interrupt(sig)?;
     }
     let wall = sup.run_start.elapsed();
+    let peak_system_used_mb = sup.peak_system_used_mb;
     let records: Vec<CheckRecord> = std::mem::take(&mut sup.records)
         .into_iter()
         .map(|r| {
@@ -1523,16 +1758,18 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
     drop(sup);
     verify_no_orphans(&run_id)?;
 
-    write_summaries(&root, &jobs, &records, (&run_id, started_unix, workers, interrupted))?;
-    print_table(&jobs, &records, wall);
+    let info = RunInfo {
+        run_id: &run_id,
+        started_unix,
+        max_jobs,
+        budget: res.budget,
+        peak_system_used_mb,
+        interrupted,
+    };
+    write_summaries(&root, &jobs, &records, &info)?;
+    print_table(&jobs, &records, wall, &info);
     if let Some(inputs) = record_inputs {
-        record_evidence(
-            &root,
-            &jobs,
-            &records,
-            (&run_id, started_unix, workers, interrupted),
-            inputs,
-        )?;
+        record_evidence(&root, &jobs, &records, &info, inputs)?;
     }
 
     let failures: Vec<String> = jobs
@@ -1574,11 +1811,10 @@ fn record_evidence(
     root: &Path,
     jobs: &[Job],
     records: &[CheckRecord],
-    meta: (&str, f64, usize, Option<i32>),
+    info: &RunInfo<'_>,
     inputs: BTreeMap<String, String>,
 ) -> Result<()> {
-    let (run_id, started_unix, workers, interrupted) = meta;
-    if let Some(sig) = interrupted {
+    if let Some(sig) = info.interrupted {
         eprintln!("xtask quint check: interrupted by signal {sig}; evidence not recorded");
         return Ok(());
     }
@@ -1587,10 +1823,10 @@ fn record_evidence(
             root,
             subsystem: &jobs[0].subsystem,
             dir: &jobs[0].dir,
-            run_id,
-            started_unix,
+            run_id: info.run_id,
+            started_unix: info.started_unix,
             finished_unix: unix_now(),
-            jobs: workers,
+            jobs: info.max_jobs,
             inputs,
         },
         jobs,
@@ -1645,26 +1881,34 @@ pub fn verify_evidence(subsystem: Option<&str>) -> Result<()> {
     }
 }
 
-fn print_table(jobs: &[Job], records: &[CheckRecord], wall: Duration) {
+fn print_table(jobs: &[Job], records: &[CheckRecord], wall: Duration, info: &RunInfo<'_>) {
     let width =
         jobs.iter().map(|j| j.subsystem.len() + 1 + j.check.name.len()).max().unwrap_or(5).max(5);
     eprintln!();
     eprintln!(
-        "{:<width$}  {:<9}  {:<11}  {:>8}  {:>3}  RESULT",
-        "CHECK", "EXPECT", "OUTCOME", "SECONDS", "TRY"
+        "{:<width$}  {:<8}  {:<9}  {:<11}  {:>8}  {:>3}  {:>14}  {:>8}  RESULT",
+        "CHECK", "BACKEND", "EXPECT", "OUTCOME", "WALL S", "TRY", "RESERVED", "PEAK MiB"
     );
     for (j, r) in jobs.iter().zip(records) {
         eprintln!(
-            "{:<width$}  {:<9}  {:<11}  {:>8.1}  {:>3}  {}",
+            "{:<width$}  {:<8}  {:<9}  {:<11}  {:>8.1}  {:>3}  {:>14}  {:>8}  {}",
             format!("{}/{}", j.subsystem, r.name),
+            r.backend.as_str(),
             r.expect.as_str(),
             r.outcome.as_str(),
             r.seconds,
             r.attempts,
+            format!("{}M/{}cpu", r.reserved_mem_mb, r.reserved_cpus),
+            r.peak_rss_mb,
             if r.pass { "PASS" } else { "FAIL" },
         );
     }
-    eprintln!("wall clock: {:.1}s", wall.as_secs_f64());
+    eprintln!(
+        "wall clock: {:.1}s; budget {}; peak host memory in use: {}",
+        wall.as_secs_f64(),
+        info.budget,
+        info.peak_system_used_mb.map_or_else(|| "unknown".to_owned(), |m| format!("{m} MiB")),
+    );
 }
 
 #[cfg(test)]
@@ -1709,6 +1953,8 @@ ci = true
                 expect: Expect::Holds,
                 ci: true,
                 timeout_secs: None,
+                heap_mb: None,
+                workers: None,
             }]
         );
     }
@@ -1860,6 +2106,26 @@ expect = "violation"
     }
 
     #[test]
+    fn parses_heap_and_workers_and_rejects_invalid_ones() {
+        let tlc = APALACHE_INV.replace("\"apalache\"", "\"tlc\"").replace("max_steps = 14\n", "");
+        let body = tlc.replace("ci = true", "ci = true\nheap_mb = 6144\nworkers = 4");
+        let c = &parse(&body).expect("valid manifest")[0];
+        assert_eq!((c.heap_mb, c.workers), (Some(6144), Some(4)));
+        let body = APALACHE_INV.replace("ci = true", "ci = true\nheap_mb = 2048");
+        assert_eq!(parse(&body).expect("valid manifest")[0].heap_mb, Some(2048));
+        assert!(
+            reason(&APALACHE_INV.replace("ci = true", "ci = true\nworkers = 2"))
+                .contains("`workers` applies to backend = \"tlc\"")
+        );
+        assert!(reason(&tlc.replace("ci = true", "ci = true\nworkers = 0")).contains("at least 1"));
+        assert!(reason(&tlc.replace("ci = true", "ci = true\nheap_mb = 100")).contains("heap_mb"));
+        assert!(matches!(
+            parse(&tlc.replace("ci = true", "ci = true\nheap_mb = \"4g\"")),
+            Err(ChecksError::Parse { .. })
+        ));
+    }
+
+    #[test]
     fn every_existing_manifest_still_parses() {
         let specs = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(SPECS_DIR);
         let Ok(entries) = fs::read_dir(&specs) else { return };
@@ -1877,16 +2143,6 @@ expect = "violation"
         assert_eq!(effective_timeout(Some(5), Some(60)), Duration::from_secs(5));
         assert_eq!(effective_timeout(None, Some(60)), Duration::from_secs(60));
         assert_eq!(effective_timeout(None, None), Duration::from_secs(DEFAULT_TIMEOUT_SECS));
-    }
-
-    #[test]
-    fn default_jobs_is_bounded_by_cpu_memory_and_cap() {
-        assert_eq!(default_jobs(8, Some(16 * 1024)), 3); // memory-bound: 16 GiB / 5 GiB
-        assert_eq!(default_jobs(8, Some(64 * 1024)), 4); // cpu/2 = 4
-        assert_eq!(default_jobs(32, Some(256 * 1024)), MAX_DEFAULT_JOBS);
-        assert_eq!(default_jobs(4, None), 2);
-        assert_eq!(default_jobs(1, None), 1);
-        assert_eq!(default_jobs(8, Some(1024)), 1); // never zero
     }
 
     const SECS: fn(u64) -> Duration = Duration::from_secs;

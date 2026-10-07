@@ -707,6 +707,8 @@ mod tests {
             expect,
             ci: false,
             timeout_secs: None,
+            heap_mb: None,
+            workers: None,
         }
     }
 
