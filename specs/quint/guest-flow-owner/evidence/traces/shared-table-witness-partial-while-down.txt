@@ -1,4 +1,4 @@
-# shared-table-witness-partial-while-down: counterexample, 6 state(s) (from the TLC trace)
+# shared-table-witness-partial-while-down: counterexample, 5 state(s) (from the TLC trace)
 
 State 1
   route = "absent"
@@ -19,21 +19,15 @@ State 1
 State 2 [BootStep]
   phase = "rules"
 
-State 3 [BootStep]
-  reject = TRUE
+State 3 [RulesPartial]
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
   phase = "steer"
-  divert = TRUE
 
 State 4 [BootStep]
   route = "local"
   link = "pinned"
   phase = "open"
 
-State 5 [MtlsPartial]
-  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
-  reject = FALSE
-  divert = FALSE
-
-State 6 [Crash]
+State 5 [Crash]
   up = FALSE
   phase = "start"

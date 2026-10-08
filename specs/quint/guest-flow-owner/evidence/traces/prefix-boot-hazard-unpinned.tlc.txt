@@ -43,7 +43,7 @@ State 2: <boot_bugUnpinned_prefix_boot_Restart line 275, col 5 to line 286, col 
 /\ boot_bugUnpinned_prefix_boot_up = TRUE
 /\ boot_bugUnpinned_prefix_boot_route = "absent"
 /\ boot_bugUnpinned_prefix_boot_stop = "none"
-/\ boot_bugUnpinned_prefix_boot_bin = "v2"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
 State 3: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col 75 of module boot_bugUnpinned>
@@ -67,7 +67,7 @@ State 3: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col
 /\ boot_bugUnpinned_prefix_boot_up = TRUE
 /\ boot_bugUnpinned_prefix_boot_route = "absent"
 /\ boot_bugUnpinned_prefix_boot_stop = "none"
-/\ boot_bugUnpinned_prefix_boot_bin = "v2"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
 State 4: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col 75 of module boot_bugUnpinned>
@@ -91,7 +91,7 @@ State 4: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col
 /\ boot_bugUnpinned_prefix_boot_up = TRUE
 /\ boot_bugUnpinned_prefix_boot_route = "absent"
 /\ boot_bugUnpinned_prefix_boot_stop = "none"
-/\ boot_bugUnpinned_prefix_boot_bin = "v2"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
 State 5: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col 75 of module boot_bugUnpinned>
@@ -108,14 +108,14 @@ State 5: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col
   swapFailKept |-> FALSE ]
 /\ boot_bugUnpinned_prefix_boot_estab = FALSE
 /\ boot_bugUnpinned_prefix_boot_loaded = TRUE
-/\ boot_bugUnpinned_prefix_boot_prog = "v2"
+/\ boot_bugUnpinned_prefix_boot_prog = "v1"
 /\ boot_bugUnpinned_prefix_boot_phase = "pin"
 /\ boot_bugUnpinned_prefix_boot_link = "attached"
 /\ boot_bugUnpinned_prefix_boot_adopted = FALSE
 /\ boot_bugUnpinned_prefix_boot_up = TRUE
 /\ boot_bugUnpinned_prefix_boot_route = "absent"
 /\ boot_bugUnpinned_prefix_boot_stop = "none"
-/\ boot_bugUnpinned_prefix_boot_bin = "v2"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
 State 6: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col 75 of module boot_bugUnpinned>
@@ -132,14 +132,14 @@ State 6: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col
   swapFailKept |-> FALSE ]
 /\ boot_bugUnpinned_prefix_boot_estab = FALSE
 /\ boot_bugUnpinned_prefix_boot_loaded = TRUE
-/\ boot_bugUnpinned_prefix_boot_prog = "v2"
+/\ boot_bugUnpinned_prefix_boot_prog = "v1"
 /\ boot_bugUnpinned_prefix_boot_phase = "route"
 /\ boot_bugUnpinned_prefix_boot_link = "attached"
 /\ boot_bugUnpinned_prefix_boot_adopted = FALSE
 /\ boot_bugUnpinned_prefix_boot_up = TRUE
 /\ boot_bugUnpinned_prefix_boot_route = "absent"
 /\ boot_bugUnpinned_prefix_boot_stop = "none"
-/\ boot_bugUnpinned_prefix_boot_bin = "v2"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
 State 7: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col 75 of module boot_bugUnpinned>
@@ -156,14 +156,14 @@ State 7: <boot_bugUnpinned_prefix_boot_BootStep line 382, col 3 to line 501, col
   swapFailKept |-> FALSE ]
 /\ boot_bugUnpinned_prefix_boot_estab = TRUE
 /\ boot_bugUnpinned_prefix_boot_loaded = TRUE
-/\ boot_bugUnpinned_prefix_boot_prog = "v2"
+/\ boot_bugUnpinned_prefix_boot_prog = "v1"
 /\ boot_bugUnpinned_prefix_boot_phase = "open"
 /\ boot_bugUnpinned_prefix_boot_link = "attached"
 /\ boot_bugUnpinned_prefix_boot_adopted = FALSE
 /\ boot_bugUnpinned_prefix_boot_up = TRUE
 /\ boot_bugUnpinned_prefix_boot_route = "local"
 /\ boot_bugUnpinned_prefix_boot_stop = "none"
-/\ boot_bugUnpinned_prefix_boot_bin = "v2"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
 State 8: <boot_bugUnpinned_prefix_boot_Crash line 312, col 3 to line 346, col 7 of module boot_bugUnpinned>
@@ -187,5 +187,5 @@ State 8: <boot_bugUnpinned_prefix_boot_Crash line 312, col 3 to line 346, col 7 
 /\ boot_bugUnpinned_prefix_boot_up = FALSE
 /\ boot_bugUnpinned_prefix_boot_route = "local"
 /\ boot_bugUnpinned_prefix_boot_stop = "crash"
-/\ boot_bugUnpinned_prefix_boot_bin = "v2"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1

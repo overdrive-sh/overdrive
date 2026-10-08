@@ -7,3 +7,4 @@
 cc 3c68499e28a3a21e7407da0134bc4662473f4ec356e2b9aeec836c5341fc4812 # shrinks to spec = JobSpecInput { id: "a", replicas: 1, cpu_milli: 1, memory_bytes: 1 }
 cc d51af3eccb90dbf69fe3c38ea2df2937d73d8e9b753ba16dfe9d8a7418ddb465 # shrinks to a VM-backed JobSpecInput with id "f629j47s2vct"
 cc a4fe81c26c468b1c3239b9aa853d8692a055e180fbe6a7519a2a76d516d2c144 # shrinks to spec = JobSpecInput { id: "mdu", replicas: 4, resources: ResourcesInput { cpu_milli: 6289, memory_bytes: 657118249509 }, driver: Vm(VmInput { command: "/bin/true", args: [], kernel: "/kernel", rootfs: "/rootfs" }) }
+cc 826245a21b7979b2486c13f4e3a3b3c3749ae1c9b94d064ac6c0deb105b949c3 # shrinks to spec = JobSpecInput { id: "sem3hg", replicas: 73, resources: ResourcesInput { cpu_milli: 1040, memory_bytes: 898626845596 }, driver: Vm(VmInput { command: "/bin/true", args: [], kernel: "/kernel", rootfs: "/rootfs" }) }

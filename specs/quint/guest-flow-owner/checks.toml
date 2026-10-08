@@ -234,7 +234,7 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
-# round 8: ci = false (148.6 s in round 7; review L-3)
+# ci = true: 67.4 s own time (the two-minute rule applies to own time, not start-up retries)
 [[check]]
 name = "udp-slots-release-liveness"
 spec = "udp_slots.qnt"
@@ -242,7 +242,7 @@ main = "slots_live"
 temporal = "ReleasedSlotBecomesFree"
 backend = "tlc"
 expect = "holds"
-ci = false
+ci = true
 
 [[check]]
 name = "udp-slots-safety-apalache"
@@ -325,7 +325,7 @@ max_steps = 12
 expect = "violation"
 ci = true
 
-# ci = false: measured 133 s in round 6 (over the 2-minute CI bound)
+# ci = true: 108.4 s own time (the two-minute rule applies to own time, not start-up retries)
 [[check]]
 name = "udp-slots-hazard-late-paired-by-slot-data"
 spec = "hazard/udp_slots_hazards.qnt"
@@ -334,7 +334,7 @@ invariant = "ReleasedSlotCarriesNoData"
 backend = "apalache"
 max_steps = 12
 expect = "violation"
-ci = false
+ci = true
 
 # ci = true: 14.1 s own time in round 8 (round 7's 135.8 s included start-up retries)
 [[check]]

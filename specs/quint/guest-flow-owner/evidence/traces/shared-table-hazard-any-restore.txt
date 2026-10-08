@@ -28,12 +28,12 @@ State 4 [BootStep]
   link = "pinned"
   route = "local"
 
-State 5 [ListenerTaskExit]
-  flDmg = TRUE
-
-State 6 [RecQuiesce]
+State 5 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "idle"]
   holders = {"IpRules"}
+
+State 6 [ListenerTaskExit]
+  flDmg = TRUE
 
 State 7 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "held"]
@@ -48,19 +48,19 @@ State 9 [RecRestore]
   holders = {}
   g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> TRUE ]
 
-State 10 [BringUp]
+State 10 [ListenerTaskExit]
+  flDmg = TRUE
+
+State 11 [BringUp]
   entries = {1}
   lis = {1}
   g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> TRUE, reopenEarly |-> TRUE ]
 
-State 11 [ListenerTaskExit]
-  flDmg = TRUE
-
 State 12 [RecQuiesce]
-  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+  rec = [IpRules |-> "idle", FlowListeners |-> "held"]
   entries = {}
   lis = {}
-  holders = {"IpRules"}
+  holders = {"FlowListeners"}
 
 State 13 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "held"]
@@ -74,8 +74,7 @@ State 15 [RecRestore]
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   holders = {}
 
-State 16 [BringUp]
-  entries = {1}
-  lis = {1}
+State 16 [ListenerTaskExit]
+  flDmg = TRUE
 
 -> loops back to State 11

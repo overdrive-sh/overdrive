@@ -13,12 +13,12 @@ State 1
   cursor = 0
   bootLeft = -1
 
-State 2 [OrphanExit]
-  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-
-State 3 [AssignBegin]
+State 2 [AssignBegin]
   todo = {0, 1, 2}
   walker = 1
+
+State 3 [OrphanExit]
+  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
 State 4 [AssignTry]
   al = << [ st |-> "admitted", off |-> 0, loc |-> "slot", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
