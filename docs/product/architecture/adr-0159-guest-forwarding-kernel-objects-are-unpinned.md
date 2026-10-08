@@ -2,9 +2,9 @@
 
 ## Status
 
-**Proposed — approved by user (ruling D19 2026-10-05; no runtime audit of
-the forwarding links, D19-LINKS, 2026-10-08); pending independent DESIGN
-review.** GH #295. Recorded in the #295 feature delta, § *[REF]
+**Accepted — approved by user (ruling D19 2026-10-05; no runtime audit of the
+forwarding links, D19-LINKS, 2026-10-08); independent review r12 answered;
+further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF]
 vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05*. Surviving a
 service restart with flows intact is deferred to **#312**.
 

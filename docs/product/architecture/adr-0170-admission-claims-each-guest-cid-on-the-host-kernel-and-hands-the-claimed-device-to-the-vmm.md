@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — decision D16-CLAIM approved by user 2026-10-07; pending
-independent DESIGN review.** GH #295.
+**Accepted — decision D16-CLAIM approved by user 2026-10-07; independent review r12
+answered; further review waived by user 2026-10-08; handed to DISTILL.** GH #295.
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN — PROPOSED 2026-10-05*. Depends on ADR-0146 (kernel vhost-vsock
 backend of the vendored Cloud Hypervisor) and ADR-0156 (the CID is derived

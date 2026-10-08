@@ -2,9 +2,10 @@
 
 ## Status
 
-**Proposed — decision D2 approved by user 2026-10-05; the launch on a device
-the admission lease already claimed (D16-CLAIM, ADR-0170) approved by user
-2026-10-07; pending independent DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+**Accepted — decision D2 approved by user 2026-10-05; the launch on a device the
+admission lease already claimed (D16-CLAIM, ADR-0170) approved by user
+2026-10-07; independent review r12 answered; further review waived by user
+2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
 
 The VMM path inside this decision is already ruled: **D13 = (a), APPROVED

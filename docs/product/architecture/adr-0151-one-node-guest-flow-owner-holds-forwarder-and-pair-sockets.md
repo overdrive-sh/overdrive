@@ -2,10 +2,10 @@
 
 ## Status
 
-**Proposed — decision D7 approved by user 2026-10-05, with its correction —
-`sock_ops` identifies intake children by listener tag, not port (independent
-DESIGN review finding M-1) — confirmed by user 2026-10-06; pending
-independent DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+**Accepted — decision D7 approved by user 2026-10-05, with its correction — `sock_ops`
+identifies intake children by listener tag, not port (independent DESIGN
+review finding M-1) — confirmed by user 2026-10-06; independent review r12
+answered; further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*. The owner's cgroup
 placement under the service-VIP rewrite is ADR-0164. Object lifetime is
 ADR-0159; stop and restore semantics are ADR-0160.

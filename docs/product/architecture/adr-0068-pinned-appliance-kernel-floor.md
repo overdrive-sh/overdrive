@@ -139,8 +139,9 @@ stages no modules and the load becomes a no-op.
 
 ### 5 — Amendment (2026-10-08, GH #295): the appliance image configures root-namespace interfaces only at boot
 
-Approved by the user 2026-10-08 (decision IMG-IFACE-BOOT of the #295 feature
-delta); pending the independent DESIGN review of #295.
+Accepted — approved by the user 2026-10-08 (decision IMG-IFACE-BOOT of the #295 feature
+delta); independent review r12 of #295 answered; further review waived by the
+user 2026-10-08; #295's DESIGN handed to DISTILL.
 
 The guest-flow forwarder (#295, ADR-0165) attaches its egress unframe program
 to every root-namespace interface present when `overdrive serve` boots, and

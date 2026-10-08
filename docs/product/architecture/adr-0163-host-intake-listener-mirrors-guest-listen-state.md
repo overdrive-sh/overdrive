@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — decision D23 approved by user 2026-10-05 (conditional on V-14,
+**Accepted — decision D23 approved by user 2026-10-05 (conditional on V-14,
 since proven) with its mechanism, the kernel-map listener set, approved by
 user 2026-10-06; port scope (the guest reports every listening port, the host
 acts only on declared ports) approved by user 2026-10-06; its correction —
@@ -13,7 +13,8 @@ confirmed by user 2026-10-06; activation binds all reported listeners or none
 is open and steered, and its closing ends its reachability in the same kernel
 step (D8a-LOOKUP, ADR-0171), approved by user 2026-10-07; only a steering
 failure caused by kernel memory pressure is retried (D8a-CAP, ADR-0176),
-approved by user 2026-10-08; pending independent DESIGN review.** GH #295. Recorded in the
+approved by user 2026-10-08; independent review r12 answered; further review
+waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the
 #295 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
 2026-10-05*.
 

@@ -2,10 +2,11 @@
 
 ## Status
 
-**Proposed — decision D20 approved by user 2026-10-05, with its correction —
+**Accepted — decision D20 approved by user 2026-10-05, with its correction —
 `SO_LINGER{1,0}` extended to the host's remote-side sockets and leg-F's
 remote socket (independent DESIGN review finding H-5) — confirmed by user
-2026-10-06; pending independent DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+2026-10-06; independent review r12 answered; further review waived by user
+2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*. It replaces ADR-0124's
 containment primitive (TAP quiescence); ADR-0124's cadence and fail-stop are
 unchanged.

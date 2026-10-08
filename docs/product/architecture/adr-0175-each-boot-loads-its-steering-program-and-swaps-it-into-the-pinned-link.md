@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — decision D8a-LOAD-SWAP approved by user 2026-10-08; pending
-independent DESIGN review.** GH #295. Recorded in the #295 feature delta,
+**Accepted — decision D8a-LOAD-SWAP approved by user 2026-10-08; independent review r12
+answered; further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta,
 § *[REF] vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05*; the exact
 contract is § *Driven port — guest-prefix steering*. The steering mechanism is
 ADR-0171; the route written after it is ADR-0152.

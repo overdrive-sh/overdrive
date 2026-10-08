@@ -2,12 +2,13 @@
 
 ## Status
 
-**Proposed — carrier sub-decision D18a approved by user 2026-10-05; the
+**Accepted — carrier sub-decision D18a approved by user 2026-10-05; the
 handling of a control message for an unknown or closed flow (U-5) pinned at
 the user's direction on 2026-10-06 and its exact rule (discard and count, no
 reply) confirmed by user 2026-10-06 with its assumption K-A4 and validation
 item V-24 (second model check, `spike/quint-owner-findings-r2.md`, finding
-r2-3); pending independent DESIGN review.** GH #295. Split out of ADR-0158 (out-of-band
+r2-3); independent review r12 answered; further review waived by user
+2026-10-08; handed to DISTILL.** GH #295. Split out of ADR-0158 (out-of-band
 pairing order, D18) so that each ADR records one decision. Recorded in the
 #295 feature delta, § *[REF] Control session (D18a)*.
 

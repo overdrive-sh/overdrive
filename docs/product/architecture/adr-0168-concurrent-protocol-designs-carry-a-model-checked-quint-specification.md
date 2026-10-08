@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — approved by user 2026-10-06; pending independent DESIGN
-review.** Process decision. First applied to GH #295 (the guest-flow owner
+**Accepted — approved by user 2026-10-06; independent review r12 answered; further
+review waived by user 2026-10-08; handed to DISTILL.** Process decision. First applied to GH #295 (the guest-flow owner
 protocol, feature delta § *[REF] vsock Attachment Replacement DESIGN*,
 § *Formal protocol model*).
 

@@ -2,9 +2,10 @@
 
 ## Status
 
-**Proposed — decision D9 approved by user 2026-10-05; VIP recognition in the
-resolution (decision D24a, independent DESIGN review finding H-3) approved by
-user 2026-10-06; pending independent DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+**Accepted — decision D9 approved by user 2026-10-05; VIP recognition in the resolution
+(decision D24a, independent DESIGN review finding H-3) approved by user
+2026-10-06; independent review r12 answered; further review waived by user
+2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
 
 Non-mesh guest egress is ADR-0162, which records ruling **D14 (APPROVED

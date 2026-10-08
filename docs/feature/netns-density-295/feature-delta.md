@@ -16551,15 +16551,21 @@ simulation, cleanup, or process-boundary gate (charter §6).
 
 ## Wave: DESIGN / [REF] vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05
 
-**Status: PROPOSED. Every decision in the index below is APPROVED by the user
-(2026-10-05, 2026-10-06, 2026-10-07 or 2026-10-08, as dated); none is
-Accepted.** Next: an
-independent DESIGN review, then a roadmap reconciliation
-(`.claude/rules/design.md`). DISTILL may start only after both.
+**Status: HANDED TO DISTILL (user decision, 2026-10-08). Every decision in the
+index below is APPROVED by the user (2026-10-05, 2026-10-06, 2026-10-07 or
+2026-10-08, as dated); ADR-0145 to ADR-0176 are Accepted (user approval
+2026-10-08, or the decision's own earlier approval date).** Independent review r12
+(`design/review-design-vsock-replacement-r12.md`, CHANGES_REQUESTED: 0
+blocker, 1 high, 2 medium, 2 low) is answered (§ *Revision 12 decisions*).
+**User decision, 2026-10-08: there is no r13 independent review; the r12
+answers stand and the DESIGN proceeds to DISTILL.** Next: DISTILL. **User
+decision, 2026-10-08: the roadmap reconciliation is a DELIVER activity, not a
+DISTILL precondition; it is the first DELIVER activity.**
 
 - DELIVER stays stopped at 08-04. Roadmap `validation.status` stays `pending`.
   `roadmap.json` is not edited by this revision.
-- The current text is revision 11 of the proposal. Revision 4 recorded the user's
+- The current text is revision 12 of the proposal with the answers to its
+  independent review (r12). Revision 4 recorded the user's
   approvals of 2026-10-05 and 2026-10-06 and folded in the off-host UDP / VIP /
   listen-state spike (`spike/v11-vip-v14-findings.md`). Its independent DESIGN
   review returned CHANGES_REQUESTED
@@ -16589,8 +16595,9 @@ independent DESIGN review, then a roadmap reconciliation
   order and its fallback are deleted), **D8a-HOLD** (named quiescence
   holders; forwarding reopens only when none remains), and validation item
   **V-25** (the kernel facts of the claim; blocks DISTILL of the CID-claim
-  scenarios). All three: Proposed — approved by user 2026-10-07; pending
-  independent DESIGN review. The model check of revision 8 is round 4
+  scenarios). All three: approved by user 2026-10-07; independent review r12
+  answered; further review waived by user 2026-10-08; handed to DISTILL. The
+  model check of revision 8 is round 4
   (`docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r4.md`).
 - Revision 9 (2026-10-07) replaces the element-set steering with
   **D8a-LOOKUP** (ADR-0171; § *Revision 9 decisions — 2026-10-07*): a pinned
@@ -16608,8 +16615,8 @@ independent DESIGN review, then a roadmap reconciliation
   steering and refuses startup, and only a boot that verifies and probes the
   steering puts `local` back. An activation steer failure is carried by
   `GuestNetworkError::IntakeSteer` (U-6). Every revision-8 and revision-9
-  decision: Proposed — approved by user 2026-10-07; pending independent
-  DESIGN review.
+  decision: approved by user 2026-10-07; independent review r12 answered;
+  further review waived by user 2026-10-08; handed to DISTILL.
 - **Appliance threat model (2026-10-07; approved by user 2026-10-07).** Per
   `CLAUDE.md` § "Overdrive runs on its own appliance OS", only Overdrive
   writes the node's kernel objects; software mutating them is not a design
@@ -16629,8 +16636,8 @@ independent DESIGN review, then a roadmap reconciliation
   the program's correctness is a CI property of the pinned image (A-33).
   The boot fence of D8a-FENCE is removed. K-L9 (the atomic swap keeps the
   earlier program on error) joins A-30 and is validated by V-26 (viii).
-  Proposed — approved by user 2026-10-08; pending independent DESIGN
-  review. The seventh model check ran `prefix_boot` against it (§ *Formal
+  Approved by user 2026-10-08; independent review r12 answered; further
+  review waived by user 2026-10-08; handed to DISTILL. The seventh model check ran `prefix_boot` against it (§ *Formal
   protocol model*, round 7).
 - Revision 11 (2026-10-08) answers the independent review of revision 10
   (`design/review-design-vsock-replacement-r10.md`, CHANGES_REQUESTED) with
@@ -16643,10 +16650,26 @@ independent DESIGN review, then a roadmap reconciliation
   cases removed) and
   **D8-PREFIX-CFG** (`PinnedObjectForeign` deleted; the untagged-route
   refusal replaced by a boot configuration check of node addresses inside
-  the guest prefix). Each: Proposed — approved by user 2026-10-08; pending
-  independent DESIGN review. It also splits ADR-0152 and moves D8a-LOAD-SWAP
+  the guest prefix). Each: approved by user 2026-10-08; independent review
+  r12 answered; further review waived by user 2026-10-08; handed to DISTILL.
+  It also splits ADR-0152 and moves D8a-LOAD-SWAP
   out of ADR-0171 (one ADR per decision), records model round 7, and fixes
   the review's MEDIUM and LOW findings (§ *Review remediation*).
+- Its independent review (`design/review-design-vsock-replacement-r11.md`,
+  CHANGES_REQUESTED) is answered by D5a-IFACE-BOOT, D8a-CAP-RETRY,
+  A-MEM-OWNER and D5a-LATE (no unframe attach after boot) (§ *User decisions
+  — 2026-10-08 (independent review of revision 11)*). Revision 12 was
+  reviewed independently (r12: CHANGES_REQUESTED, 0 blocker, 1 high, 2
+  medium, 2 low) and answered by IMG-IFACE-BOOT (ADR-0068 § 5),
+  D5a-SERVE-IFACE and D8-PREFIX-VIP (§ *User decisions — 2026-10-08
+  (independent review of revision 12)*). Each: approved by user 2026-10-08;
+  independent review r12 answered; further review waived by user
+  2026-10-08; handed to DISTILL. The constraint D5a-SERVE-IFACE places on
+  #197 is posted on that issue.
+- The Quint specification `specs/quint/guest-flow-owner/` is recorded
+  against this text: all 132 checks meet their `expect`, `cargo xtask quint
+  verify-evidence` passes, and the checks marked `ci = true` in `checks.toml`
+  run in CI (§ *Formal protocol model*).
 - ADR files: 0145–0176. ADR-0149 (D5) and ADR-0158 (D18) were each split so
   that one ADR records one decision: D5a is ADR-0165, D18a is ADR-0166.
   ADR-0167 records D26. ADR-0168 records the Quint adoption (a process
@@ -16695,26 +16718,26 @@ independent DESIGN review, then a roadmap reconciliation
 | D15-R3 = (b) | A connect to a dead non-mesh destination follows today's kernel retry behaviour (host `tcp_syn_retries`, about 2 min) instead of a 3 s owner bound | 2026-10-06 | ADR-0162; § *D15 re-derivation*, *Wire contracts* (deadlines) |
 | FORMAL | The flow-owner protocol is model-checked with Quint / Apalache before the independent re-review | 2026-10-06 | § *Formal protocol model* |
 | D8a-REVOKE | Replaced 2026-10-07 by D8a-LOOKUP | 2026-10-06 | ADR-0171 |
-| D8a-ROUTE | Boot convergence adds or keeps the shared `local` route only after this boot's steering program has been loaded and attached — swapped into the pinned link, or a first link attached and pinned (`GuestPrefixSteering::load`, `GuestSteeringCandidate::attach`); otherwise startup refuses with `GuestPrefixSteeringConverge { source: GuestSteeringError }` and the route is not written (fail closed: the link keeps the earlier program). Restated for D8a-LOOKUP (2026-10-07) and for D8a-LOAD-SWAP (2026-10-08) | 2026-10-06; restated — Proposed — approved by user 2026-10-07 and 2026-10-08; pending independent DESIGN review | ADR-0152, ADR-0175; § *Owner and provisioner* (`converge_shared`), *mTLS forwarded-outbound port*, *Composition*, error taxonomy, G-V1 |
+| D8a-ROUTE | Boot convergence adds or keeps the shared `local` route only after this boot's steering program has been loaded and attached — swapped into the pinned link, or a first link attached and pinned (`GuestPrefixSteering::load`, `GuestSteeringCandidate::attach`); otherwise startup refuses with `GuestPrefixSteeringConverge { source: GuestSteeringError }` and the route is not written (fail closed: the link keeps the earlier program). Restated for D8a-LOOKUP (2026-10-07) and for D8a-LOAD-SWAP (2026-10-08) | 2026-10-06; restated — Approved by user 2026-10-07 and 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | ADR-0152, ADR-0175; § *Owner and provisioner* (`converge_shared`), *mTLS forwarded-outbound port*, *Composition*, error taxonomy, G-V1 |
 | D25-BIND | An application bind fails `EADDRINUSE` only on ports that hold an intake of that protocol: TCP 61,000; UDP 61,001–62,024 | 2026-10-06 | ADR-0150; § *D15 re-derivation*, *Guest adaptation contract* |
 | U-4 | The shared route and the pinned guest-prefix steering are never removed at shutdown, graceful or not; constant rules, steering and route stay fail-closed while `serve` is down | 2026-10-06 | ADR-0152, ADR-0171; § *Roadmap impact* step 13, ownership table, *Lifecycle* |
 | U-2 | After `Refused`, `Abort` or the pairing deadline of a datagram association whose slot is still owned, the slot's parked frames are discarded and the slot does not re-associate for that association; the next application datagram opens a new one | 2026-10-06 | ADR-0150; § *Per-kind total orders* |
-| U-1, U-6 | Approved by user 2026-10-06: flow admission is one step with flow-table registration, and a step-6 continuation stops for a closed flow (U-1); activation is all or nothing — it ends Active with a steered listener for every reported-listening declared port, or Provisioned with no listener of the CID left; the rollback closes listeners and cannot fail (U-6, restated for D8a-LOOKUP) | 2026-10-06; U-6 restated — Proposed — approved by user 2026-10-07; pending independent DESIGN review |
-| U-6 carrier | An activation steer failure returns `GuestNetworkError::IntakeSteer { alloc: AllocationId, intake: SocketAddrV4, source: GuestSteeringError }` (operation `IntakeSteer`), projected like an intake bind failure | Proposed — approved by user 2026-10-07; pending independent DESIGN review | § *Typed error taxonomy*, G-V3, R5-29 | ADR-0158, ADR-0163; § *Per-kind total orders*, *Owner and provisioner* |
+| U-1, U-6 | Approved by user 2026-10-06: flow admission is one step with flow-table registration, and a step-6 continuation stops for a closed flow (U-1); activation is all or nothing — it ends Active with a steered listener for every reported-listening declared port, or Provisioned with no listener of the CID left; the rollback closes listeners and cannot fail (U-6, restated for D8a-LOOKUP) | 2026-10-06; U-6 restated — Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL |
+| U-6 carrier | An activation steer failure returns `GuestNetworkError::IntakeSteer { alloc: AllocationId, intake: SocketAddrV4, source: GuestSteeringError }` (operation `IntakeSteer`), projected like an intake bind failure | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | § *Typed error taxonomy*, G-V3, R5-29 | ADR-0158, ADR-0163; § *Per-kind total orders*, *Owner and provisioner* |
 | U-5 | A `Paired` / `Refused` (or any other control message) for an unknown or closed flow id is discarded and counted, with no reply — except SLOT-ABORT (a late `Paired` for a released guest UDP slot is answered with `Abort`). Pinned at the user's direction, then **confirmed** with its assumption K-A4 named and validated by V-24 | 2026-10-06 (direction and confirmation) | ADR-0166; § *Per-kind total orders*, *Control session*, R5-28 |
 | V-22, V-23 | Validation items for K-A2 (a dead VM's queued host connections are reset before its CID is reused) and K-D3. V-23 is withdrawn 2026-10-07 by the appliance threat model (APPLIANCE): it measured only other software deleting the shared table | 2026-10-06; V-23 withdrawn 2026-10-07 | § *Validation plan* |
 | QUINT | Designs that add or change a concurrent, ordered or crash-sensitive protocol carry a model-checked Quint specification, kept at `specs/quint/<subsystem>/` and used as the DISTILL conformance oracle through quint-connect | 2026-10-06 | ADR-0168; § *Formal protocol model* |
 | K-A4 / V-24 | Assumption K-A4 — closing the host's socket of an aborted or session-lost `TcpAccept` reliably reaches the guest and tears down the guest-side connection, including one still in the guest's accept queue — with validation item V-24 (blocks DISTILL of the `TcpAccept` abort and session-loss scenarios) | 2026-10-06 | ADR-0166; § *Assumptions* (A-28), *Validation plan*, *Formal protocol model* |
-| D16-CLAIM | The pool's `assign` takes a lease only together with a host-kernel claim of its CID (`VHOST_VSOCK_SET_GUEST_CID` on a new `/dev/vhost-vsock` instance, no owner set): offsets are tried in next-fit order, `EADDRINUSE` skips that offset for this call only, any other claim error is a typed error, every free offset held elsewhere is the typed non-terminal refusal `GuestCidsHeldElsewhere`; the claimed device is a move-only handle the VMM adapter passes to the fork (`fd=`), and `serve` closes its copy once the VMM holds it. Replaces the per-workload exclusion set, its preference order and its fallback, which are deleted | Proposed — approved by user 2026-10-07; pending independent DESIGN review | ADR-0170, ADR-0156, ADR-0146; § *Core vocabulary*, *VMM backend contract*, *Composition*, G-V0, G-V4, R5-19, V-25 |
-| D16-CLAIM wording | `GuestCidsHeldElsewhere` means every free offset's claim returned `InUse` during this call — each CID held by another device instance at the moment its own claim was tried, not necessarily all at once; placement retries; no contract change | Proposed — approved by user 2026-10-07; pending independent DESIGN review | § *Core vocabulary* (`assign`), *Revision 9 decisions* item 5 |
-| D8a-HOLD | Forwarding quiescence is held by named holders (`QuiescenceHolder::Recovery(component)`); `quiesce_forwarding(holder)` returns a move-only `QuiescenceHold`; only `restore_forwarding(hold)` ends that holder's hold, and forwarding reopens only when no holder remains (round-3 item 3) | Proposed — approved by user 2026-10-07; pending independent DESIGN review | ADR-0169; § *Owner and provisioner*, G-V5, R5-32 |
-| V-25 | Validation item for the kernel facts D16-CLAIM rests on; blocks DISTILL of the CID-claim scenarios (R5-19) and DELIVER steps 3 and 15 | Proposed — approved by user 2026-10-07; pending independent DESIGN review | § *Validation plan* |
-| D8a-LOOKUP | Local delivery to the guest prefix (gateway excluded) is decided by an Aya `sk_lookup` program, pinned with its link and socket map under `GUEST_PREFIX_STEERING_PIN_DIR`: a host-local TCP connection is assigned to the open intake listener named by its `(workload_addr, port)` entry; every other lookup to the prefix is dropped (TCP sees a reset). The owner inserts an entry with `GuestPrefixSteering::steer` after the listener listens; closing the listener removes the entry in the same kernel step. While `serve` is down every lookup drops. Replaces the `intake_listeners` set, the marked-reset rule, the admission / revoke surface and D8a-REVOKE | Proposed — approved by user 2026-10-07; pending independent DESIGN review | ADR-0171, ADR-0172, ADR-0163, ADR-0159; § *Driven port — guest-prefix steering*, *Revision 9 decisions* |
-| A-30 / V-26 | Assumption A-30 (kernel facts K-L1–K-L5 of the steering, and K-L9, the atomic link update that keeps the earlier program on error, added 2026-10-08 with D8a-LOAD-SWAP; K-L6, the fence's route fact, removed with the fence 2026-10-08) and its validation item V-26; blocks DISTILL of the steering scenarios R5-1, R5-2, R5-3, R5-22, R5-24, R5-25, R5-34, R5-37 and DELIVER steps 9 and 13. K-L7 (a read-only `verify` observes a foreign link detach) is removed by APPLIANCE | Proposed — approved by user 2026-10-07; pending independent DESIGN review | § *Assumptions*, *Validation plan* |
-| D8a-FENCE | **Replaced 2026-10-08 by D8a-LOAD-SWAP**: the fence covered only the window in which boot had changed the program under a `local` route (model finding r5-1), which exposes nothing when the shipped program is correct (A-33) and a failed swap keeps the earlier program (K-L9). As approved: the guest prefix is locally delivered only behind verified steering: the prefix's Overdrive-tagged route has exactly two forms, `local` and the fence `prohibit <prefix>`, swapped in one route replace. Boot `converge_shared` fences when it cannot converge, verify or probe the steering and startup refuses `GuestPrefixSteeringConverge`; only a boot that has just verified and probed the steering puts `local` back. The fence persists while `serve` is down after a boot refusal. A fenced prefix refuses host-local connects at once and remote packets without forwarding them. At runtime nothing writes the steering program or the route. Adds `GuestNetworkOperation::GuestPrefixFence` and kernel assumption K-L6 (A-30, V-26). The boot fence is kept because it covers Overdrive's own failures: a boot whose steering convergence failed after changing the steering (a program the kernel or the probe rejects), or a crash part-way, must not leave `local` over steering no boot has verified. Its runtime parts — the verify-and-fence in every quiesce and every intake listener close, `repair_guest_prefix`, the `GuestPrefixSteering` shared component, `QuiescenceHolderMismatch`, `GuestPrefixRouteForm` and K-L7 — defended only against a foreign link detach or route write and are removed by APPLIANCE | D8a-FENCE as specified with its runtime parts: Proposed — approved by user 2026-10-07; narrowed the same day by APPLIANCE; pending independent DESIGN review | ADR-0152, ADR-0171; § *Owner and provisioner* (`converge_shared`), *Composition*, *Lifecycle*, error taxonomy, G-V1, R5-24, V-26 |
+| D16-CLAIM | The pool's `assign` takes a lease only together with a host-kernel claim of its CID (`VHOST_VSOCK_SET_GUEST_CID` on a new `/dev/vhost-vsock` instance, no owner set): offsets are tried in next-fit order, `EADDRINUSE` skips that offset for this call only, any other claim error is a typed error, every free offset held elsewhere is the typed non-terminal refusal `GuestCidsHeldElsewhere`; the claimed device is a move-only handle the VMM adapter passes to the fork (`fd=`), and `serve` closes its copy once the VMM holds it. Replaces the per-workload exclusion set, its preference order and its fallback, which are deleted | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | ADR-0170, ADR-0156, ADR-0146; § *Core vocabulary*, *VMM backend contract*, *Composition*, G-V0, G-V4, R5-19, V-25 |
+| D16-CLAIM wording | `GuestCidsHeldElsewhere` means every free offset's claim returned `InUse` during this call — each CID held by another device instance at the moment its own claim was tried, not necessarily all at once; placement retries; no contract change | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | § *Core vocabulary* (`assign`), *Revision 9 decisions* item 5 |
+| D8a-HOLD | Forwarding quiescence is held by named holders (`QuiescenceHolder::Recovery(component)`); `quiesce_forwarding(holder)` returns a move-only `QuiescenceHold`; only `restore_forwarding(hold)` ends that holder's hold, and forwarding reopens only when no holder remains (round-3 item 3) | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | ADR-0169; § *Owner and provisioner*, G-V5, R5-32 |
+| V-25 | Validation item for the kernel facts D16-CLAIM rests on; blocks DISTILL of the CID-claim scenarios (R5-19) and DELIVER steps 3 and 15 | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | § *Validation plan* |
+| D8a-LOOKUP | Local delivery to the guest prefix (gateway excluded) is decided by an Aya `sk_lookup` program, pinned with its link and socket map under `GUEST_PREFIX_STEERING_PIN_DIR`: a host-local TCP connection is assigned to the open intake listener named by its `(workload_addr, port)` entry; every other lookup to the prefix is dropped (TCP sees a reset). The owner inserts an entry with `GuestPrefixSteering::steer` after the listener listens; closing the listener removes the entry in the same kernel step. While `serve` is down every lookup drops. Replaces the `intake_listeners` set, the marked-reset rule, the admission / revoke surface and D8a-REVOKE | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | ADR-0171, ADR-0172, ADR-0163, ADR-0159; § *Driven port — guest-prefix steering*, *Revision 9 decisions* |
+| A-30 / V-26 | Assumption A-30 (kernel facts K-L1–K-L5 of the steering, and K-L9, the atomic link update that keeps the earlier program on error, added 2026-10-08 with D8a-LOAD-SWAP; K-L6, the fence's route fact, removed with the fence 2026-10-08) and its validation item V-26; blocks DISTILL of the steering scenarios R5-1, R5-2, R5-3, R5-22, R5-24, R5-25, R5-34, R5-37 and DELIVER steps 9 and 13. K-L7 (a read-only `verify` observes a foreign link detach) is removed by APPLIANCE | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | § *Assumptions*, *Validation plan* |
+| D8a-FENCE | **Replaced 2026-10-08 by D8a-LOAD-SWAP**: the fence covered only the window in which boot had changed the program under a `local` route (model finding r5-1), which exposes nothing when the shipped program is correct (A-33) and a failed swap keeps the earlier program (K-L9). As approved: the guest prefix is locally delivered only behind verified steering: the prefix's Overdrive-tagged route has exactly two forms, `local` and the fence `prohibit <prefix>`, swapped in one route replace. Boot `converge_shared` fences when it cannot converge, verify or probe the steering and startup refuses `GuestPrefixSteeringConverge`; only a boot that has just verified and probed the steering puts `local` back. The fence persists while `serve` is down after a boot refusal. A fenced prefix refuses host-local connects at once and remote packets without forwarding them. At runtime nothing writes the steering program or the route. Adds `GuestNetworkOperation::GuestPrefixFence` and kernel assumption K-L6 (A-30, V-26). The boot fence is kept because it covers Overdrive's own failures: a boot whose steering convergence failed after changing the steering (a program the kernel or the probe rejects), or a crash part-way, must not leave `local` over steering no boot has verified. Its runtime parts — the verify-and-fence in every quiesce and every intake listener close, `repair_guest_prefix`, the `GuestPrefixSteering` shared component, `QuiescenceHolderMismatch`, `GuestPrefixRouteForm` and K-L7 — defended only against a foreign link detach or route write and are removed by APPLIANCE | D8a-FENCE as specified with its runtime parts: Approved by user 2026-10-07; narrowed the same day by APPLIANCE; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | ADR-0152, ADR-0171; § *Owner and provisioner* (`converge_shared`), *Composition*, *Lifecycle*, error taxonomy, G-V1, R5-24, V-26 |
 | Round-4b/4c pins | Every quiesce and every intake listener close verifies the steering first and fences on failure (F-4b-1, F-4c-1); the steering and the route are one component with one runtime repair (F-4c-2 to F-4c-4); fence, lift and the verify before a lift are serialized (F-4c-5); UP-5 (the audit observes the route form), UP-6 (a repair attempt begins with the fence), UP-7, UP-11, UP-12 | Approved by user 2026-10-07. Removed the same day by APPLIANCE, except UP-7 (a failed post-repair audit is a failed attempt, one budget per component recovery) and UP-12 (another component's fail-stop leaves the route `local` behind verified pinned steering), which concern Overdrive's own recoveries | § *Revision 9 decisions* item 7 |
 | APPLIANCE | Environment faults are narrowed to the appliance threat model (`CLAUDE.md` § "Overdrive runs on its own appliance OS"): only Overdrive writes the node's kernel objects, so software mutating them (detaching the steering link, deleting map entries, removing or fencing the route, deleting the nft table, a firewall reload) is not a design driver, Quint fault, validation item or trust-boundary statement. Kept: crash and restart at every step, Overdrive's own partial state (including one component's failure leaving shared state partial — the mTLS worker and the shared nft table), converge-on-boot, and the audit where it detects Overdrive's own drift. One assumption recorded: A-31 | Approved by user 2026-10-07 | § *Assumptions* (A-31), *Revision 9 decisions* item 7, *Review remediation* |
-| D8a-LOAD-SWAP | Boot steering is three steps: load this binary's program (the kernel verifier checks it; on failure boot refuses, nothing attached, the earlier program stays attached); swap it into the pinned `sk_lookup` link with the atomic `BPF_LINK_UPDATE`, or attach and pin a first link (on failure the earlier program stays attached and boot refuses); then keep or add the tagged `local` route. No runtime probe and no `verify`: the program ships in the pinned image, built from the source the Tier-3 steering tests run in CI on the same pinned kernel (A-33), and `verify` is not load-bearing (model finding r6-1). Each load creates the program's own map, not pinned. Removes the boot fence (D8a-FENCE) | Proposed — approved by user 2026-10-08; pending independent DESIGN review | ADR-0175, ADR-0152; § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, G-V1, R5-24, R5-34, *Revision 10 decisions* |
+| D8a-LOAD-SWAP | Boot steering is three steps: load this binary's program (the kernel verifier checks it; on failure boot refuses, nothing attached, the earlier program stays attached); swap it into the pinned `sk_lookup` link with the atomic `BPF_LINK_UPDATE`, or attach and pin a first link (on failure the earlier program stays attached and boot refuses); then keep or add the tagged `local` route. No runtime probe and no `verify`: the program ships in the pinned image, built from the source the Tier-3 steering tests run in CI on the same pinned kernel (A-33), and `verify` is not load-bearing (model finding r6-1). Each load creates the program's own map, not pinned. Removes the boot fence (D8a-FENCE) | Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | ADR-0175, ADR-0152; § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, G-V1, R5-24, R5-34, *Revision 10 decisions* |
 
 ### User rulings — APPROVED 2026-10-06 (on the architect-pinned choices of revision 4)
 
@@ -16728,8 +16751,9 @@ independent DESIGN review, then a roadmap reconciliation
 
 ### User decisions — 2026-10-08 (independent review of revision 10)
 
-Each: **Proposed — approved by user 2026-10-08; pending independent DESIGN
-review.** They answer findings H-1, H-2, M-1 and M-3 of
+Each: **approved by user 2026-10-08; independent review r12 answered; further
+review waived by user 2026-10-08; handed to DISTILL.** They answer findings
+H-1, H-2, M-1 and M-3 of
 `design/review-design-vsock-replacement-r10.md`.
 
 | ID | Decision | Recorded in |
@@ -16741,8 +16765,9 @@ review.** They answer findings H-1, H-2, M-1 and M-3 of
 
 ### User decisions — 2026-10-08 (independent review of revision 11)
 
-Each: **Proposed — approved by user 2026-10-08; pending independent DESIGN
-review.** They answer findings H-1 and M-2 of
+Each: **approved by user 2026-10-08; independent review r12 answered; further
+review waived by user 2026-10-08; handed to DISTILL.** They answer findings
+H-1 and M-2 of
 `design/review-design-vsock-replacement-r11.md`. The first three are
 consequences of D5a-IFACE and D8a-CAP that the user confirmed explicitly; they
 are not architect-derived additions.
@@ -16752,12 +16777,13 @@ are not architect-derived additions.
 | **D5a-IFACE-BOOT** (H-1 (1)) | Boot refuses (`GuestNetworkError::UnframeAttach`, naming the interface) when the egress unframe program cannot be attached to an interface present at boot, whatever the `UnframeAttachError` variant | ADR-0165; § *Driven port — host forwarder*, *Composition* step 9, G-V1, R5-38 |
 | **D8a-CAP-RETRY** (H-1 (2)) | Only a `GuestSteeringError::KernelMemory` steer failure is retried; every other steer failure is an Overdrive defect, reported (`guest_intake.bind_failed { retried: false }`) and not retried | ADR-0176; § *Driven port — guest-prefix steering*, *Owner and provisioner*, error taxonomy, G-V8, R5-22, R5-37 |
 | **A-MEM-OWNER** (H-1 (3)) | Assumption A-MEM (kernel memory pressure is not permanent) is an environment assumption owned by #261 (node-wide CPU and memory accounting) | § *Formal protocol model* (assumptions table) |
-| **D5a-LATE** (M-2) | **Proposed — approved by user 2026-10-08; pending independent DESIGN review.** On the appliance the image configures root-namespace interfaces only at boot, before `serve` starts. An interface the kernel registers later (a NIC whose driver probes late, a hot-added NIC, or one any component creates after boot) is never given addresses or routes, so it carries no guest traffic and needs no unframe attach. This is part of A-31 (only Overdrive / the image writes the node's kernel objects), discharged by ADR-0068 § 5 (IMG-IFACE-BOOT, 2026-10-08): the image configuration must not configure an interface registered after boot — an image requirement, not a runtime check. Interfaces `serve` itself creates exist before the attach (D5a-SERVE-IFACE). The dev and metal hosts run a catch-all systemd-networkd configuration and are not the appliance image; they are not evidence for or against this rule. Boot is unchanged: every interface present at boot is attached, and a failed attach refuses startup (D5a-IFACE-BOOT). There is no late-interface attach operation, no late-interface configuration path, no link-notification watch, relist or retry for unframe attachments, and no gate for them | ADR-0165; § *Driven port — host forwarder*, *Owner and provisioner*, error taxonomy, G-V1, A-21, A-31, V-17 |
+| **D5a-LATE** (M-2) | **Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL.** On the appliance the image configures root-namespace interfaces only at boot, before `serve` starts. An interface the kernel registers later (a NIC whose driver probes late, a hot-added NIC, or one any component creates after boot) is never given addresses or routes, so it carries no guest traffic and needs no unframe attach. This is part of A-31 (only Overdrive / the image writes the node's kernel objects), discharged by ADR-0068 § 5 (IMG-IFACE-BOOT, 2026-10-08): the image configuration must not configure an interface registered after boot — an image requirement, not a runtime check. Interfaces `serve` itself creates exist before the attach (D5a-SERVE-IFACE). The dev and metal hosts run a catch-all systemd-networkd configuration and are not the appliance image; they are not evidence for or against this rule. Boot is unchanged: every interface present at boot is attached, and a failed attach refuses startup (D5a-IFACE-BOOT). There is no late-interface attach operation, no late-interface configuration path, no link-notification watch, relist or retry for unframe attachments, and no gate for them | ADR-0165; § *Driven port — host forwarder*, *Owner and provisioner*, error taxonomy, G-V1, A-21, A-31, V-17 |
 
 ### User decisions — 2026-10-08 (independent review of revision 12)
 
-Each: **Proposed — approved by user 2026-10-08; pending independent DESIGN
-review.** They answer findings H-1, M-1 and M-2 of
+Each: **approved by user 2026-10-08; independent review r12 answered; further
+review waived by user 2026-10-08; handed to DISTILL.** They answer findings
+H-1, M-1 and M-2 of
 `design/review-design-vsock-replacement-r12.md`.
 
 | ID | Decision | Recorded in |
@@ -16909,8 +16935,9 @@ the table above.
 
 ### Decision index
 
-"APPROVED" = approved by the user on the date shown; every row is still
-pending independent DESIGN review. No item awaits the user. "Open
+"APPROVED" = approved by the user on the date shown; for every row,
+independent review r12 is answered, further review is waived by the user
+2026-10-08, and the DESIGN is handed to DISTILL. No item awaits the user. "Open
 validations" are DELIVER-blocking proof obligations (§ *Validation plan*), not
 conditions on the approval; V-22 also blocks DISTILL of the attribution
 scenarios, V-24 of the `TcpAccept` abort and session-loss scenarios, V-25
@@ -16919,21 +16946,21 @@ of the CID-claim scenarios, and V-26 of the steering scenarios.
 | ID | Decision (one sentence) | Status | ADR | Open validations |
 |---|---|---|---|---|
 | D1 | Guest application traffic crosses the VM's virtio-vsock device and is forwarded only by Aya programs in the guest and host kernels; no guest NIC, TAP, bridge or per-VM netdevice | **APPROVED 2026-10-05** | [0145](../../product/architecture/adr-0145-vsock-kernel-forwarded-guest-transport-replaces-shared-bridge.md) (supersedes 0114; supersedes as moot 0126, 0127, 0130, 0142, 0144) | — |
-| D2 | Every VM's one vsock device uses `backend=vhost-kernel` of the fork on the device its lease claimed (D16-CLAIM), handed over by descriptor; a host whose CH lacks `backend=vhost-kernel` with `fd=` is refused at startup; nothing falls back | **APPROVED 2026-10-05**; claimed-device launch (D16-CLAIM) — Proposed — approved by user 2026-10-07; pending independent DESIGN review | [0146](../../product/architecture/adr-0146-vm-vsock-device-uses-kernel-vhost-backend-with-typed-refusal.md) (supersedes 0128) | V-1(c), V-25 |
+| D2 | Every VM's one vsock device uses `backend=vhost-kernel` of the fork on the device its lease claimed (D16-CLAIM), handed over by descriptor; a host whose CH lacks `backend=vhost-kernel` with `fd=` is refused at startup; nothing falls back | **APPROVED 2026-10-05**; claimed-device launch (D16-CLAIM) — Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0146](../../product/architecture/adr-0146-vm-vsock-device-uses-kernel-vhost-backend-with-typed-refusal.md) (supersedes 0128) | V-1(c), V-25 |
 | D3 | One forwarded socket set per transport flow, never multiplexed; node pair capacity `GUEST_FLOW_MAX_PAIRS = 65,536` (four flows per attachment at the target); per-allocation quota 4,096 as a bulkhead | **APPROVED 2026-10-05** | [0147](../../product/architecture/adr-0147-one-kernel-forwarded-pair-per-transport-flow.md) | V-9 (sizing) |
 | D4 | Datagram associations use STREAM toward the guest and SEQPACKET from the guest; the guest reassembles; the host never writes on SEQPACKET | **APPROVED 2026-10-05** | [0148](../../product/architecture/adr-0148-stream-toward-guest-seqpacket-replies-for-datagram-flows.md) | — |
 | D5 | Every datagram is framed (4-byte magic + BE `u32` length; empty = header alone; bound 59,000 B) only inside the transport; the frame never reaches an application, and reaches a remote peer only through an egress interface missing the unframe attachment (D5a) | **APPROVED 2026-10-05** | [0149](../../product/architecture/adr-0149-length-prefixed-datagram-frame-with-empty-carrier.md) | — |
-| D5a | **Hybrid** removal for guest→host datagrams: the host verdict strips the frame from every non-empty datagram, keeping it only for empty datagrams and payloads that themselves parse as a frame; a fragment-aware, tuple-gated TC egress program on `lo` and every interface of the host root namespace strips a valid frame on a registered tuple and passes everything else; tuples registered from the connected host socket's kernel peer; attached at boot to every interface present (a failure refuses startup), including every interface `serve`'s earlier boot steps created (D5a-SERVE-IFACE), and never after boot: an interface the kernel registers later is never given addresses or routes on the appliance (A-31, ADR-0068 § 5), so it carries no guest datagram | **APPROVED 2026-10-06** (V-11 proven, P-29–P-31; attachment set D5a-SET 2026-10-06); attachment set restated by D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE, IMG-IFACE-BOOT and D5a-SERVE-IFACE — Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0165](../../product/architecture/adr-0165-guest-datagram-frame-removed-by-hybrid-verdict-strip-and-fragment-aware-egress-unframe.md) | V-16, V-17, V-18 |
+| D5a | **Hybrid** removal for guest→host datagrams: the host verdict strips the frame from every non-empty datagram, keeping it only for empty datagrams and payloads that themselves parse as a frame; a fragment-aware, tuple-gated TC egress program on `lo` and every interface of the host root namespace strips a valid frame on a registered tuple and passes everything else; tuples registered from the connected host socket's kernel peer; attached at boot to every interface present (a failure refuses startup), including every interface `serve`'s earlier boot steps created (D5a-SERVE-IFACE), and never after boot: an interface the kernel registers later is never given addresses or routes on the appliance (A-31, ADR-0068 § 5), so it carries no guest datagram | **APPROVED 2026-10-06** (V-11 proven, P-29–P-31; attachment set D5a-SET 2026-10-06); attachment set restated by D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE, IMG-IFACE-BOOT and D5a-SERVE-IFACE — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0165](../../product/architecture/adr-0165-guest-datagram-frame-removed-by-hybrid-verdict-strip-and-fragment-aware-egress-unframe.md) | V-16, V-17, V-18 |
 | D6 | Ordinary guest sockets are captured and paired by guest-kernel Aya programs loaded and controlled by `overdrive-init`, at the size G-MECH approved | **APPROVED 2026-10-05** | [0150](../../product/architecture/adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md) | — |
 | D7 | One node-scoped guest-flow owner exclusively holds the host forwarder (incl. `sock_ops` on its own cgroup and the drain counter), all listeners, control sessions, cells and host pair sockets | **APPROVED 2026-10-05**; `sock_ops` identifies intake children by listener tag, not port (M-1) — correction **APPROVED 2026-10-06** | [0151](../../product/architecture/adr-0151-one-node-guest-flow-owner-holds-forwarder-and-pair-sockets.md) | V-20 |
 | D8 | `workload_addr` is host-local through one shared, Overdrive-tagged `local` route on `lo`, written only by boot behind attached steering and never removed (with D8a-ROUTE, U-4, D8-PREFIX-CFG) | **APPROVED 2026-10-05** | [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md) | — |
 | D8-INTAKE | Inbound TCP terminates at a host intake listener on `workload_addr:port` for a declared port of an Active allocation, installed at establishment and parked; each accepted connection opens one host-initiated `TcpAccept` vsock flow (D8, split out for ADR-0173) | **APPROVED 2026-10-05** (as part of D8) | [0173](../../product/architecture/adr-0173-intake-listeners-open-a-host-initiated-flow-per-accepted-connection.md) | — |
 | D8-PEER | The guest sees the intake connection's real peer; host-local platform clients present the guest gateway, the local route's preferred source (D8, split out for ADR-0174) | **APPROVED 2026-10-05** (as part of D8) | [0174](../../product/architecture/adr-0174-the-guest-sees-the-intake-connections-real-peer.md) | V-12 |
-| D8-PREFIX-CFG | Startup refuses `GuestPrefixOverlapsNodeAddress` when a node interface address lies inside the guest prefix (producer: the operator's node network configuration) and `GuestPrefixOverlapsVipRange` when a range of the configured `vip_range` overlaps it (producer: the operator's `vip_range`, from which `serve`'s boot assigns root-namespace addresses; D8-PREFIX-VIP), both in `probe_startup` before any boot effect; `ForeignGuestPrefixRoute` and `PinnedObjectForeign` are deleted | Proposed — approved by user 2026-10-08 (D8-PREFIX-CFG; D8-PREFIX-VIP); pending independent DESIGN review | [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md) | — |
-| D8a | Only intake listeners serving a declared, guest-listening port are reachable at the guest prefix: local delivery to the prefix is decided by the pinned steering program of D8a-LOOKUP (a host-local TCP connection reaches the open intake listener its entry names; every other lookup is dropped); constant nft rules reject (output) or drop (prerouting) guest-prefix traffic that is neither leg-S-mark-exempt nor diverted to leg-C; `managed_guest_ips` is replaced by the constant prefix; the shared `local` route is kept or added only by boot `converge_shared` after this boot's steering program is loaded and swapped in (else startup refuses `GuestPrefixSteeringConverge` with the route unwritten and the earlier program attached, D8a-LOAD-SWAP) and is never removed at shutdown (U-4); shared-component repair runs only while the repairing recovery holds quiescence, held by named holders, and forwarding reopens only when no holder remains (D8a-HOLD) | **APPROVED 2026-10-06** (findings B-2, H-4); D8a-ROUTE and ruling U-4 (formal model) **APPROVED 2026-10-06**; D8a-HOLD (third model check) — Proposed — approved by user 2026-10-07; pending independent DESIGN review; steering mechanism replaced by D8a-LOOKUP, D8a-ROUTE restated and D8a-FENCE added (revision 9) — Proposed — approved by user 2026-10-07; pending independent DESIGN review; narrowed by APPLIANCE (2026-10-07): no runtime writer, audit or repair of the steering program or the route; D8a-FENCE replaced by D8a-LOAD-SWAP (revision 10) — Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0172](../../product/architecture/adr-0172-only-steered-intake-listeners-are-reachable-at-the-guest-prefix.md), [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md), [0169](../../product/architecture/adr-0169-forwarding-quiescence-is-held-by-named-holders-and-reopens-only-when-none-remains.md), [0171](../../product/architecture/adr-0171-guest-prefix-local-delivery-is-decided-by-a-pinned-socket-lookup-program-over-a-listener-keyed-socket-map.md) | V-19, V-26 |
-| D8a-LOOKUP | Local delivery to the guest prefix (gateway excluded) is decided by an Aya `sk_lookup` program on the host root network namespace, its link pinned under `GUEST_PREFIX_STEERING_PIN_DIR` (keeping the program and its listener-keyed socket map): a host-local TCP connection is assigned to the open intake listener named by its `(workload_addr, port)` entry, every other lookup is dropped (TCP answered with a reset); the owner inserts an entry with `GuestPrefixSteering::steer` after the listener listens and closing the listener removes the entry in the same kernel step; while `serve` is down every lookup drops; the prefix is locally delivered only while a pinned steering link exists (D8a-ROUTE, D8a-LOAD-SWAP) | Proposed — approved by user 2026-10-07; pending independent DESIGN review | [0171](../../product/architecture/adr-0171-guest-prefix-local-delivery-is-decided-by-a-pinned-socket-lookup-program-over-a-listener-keyed-socket-map.md) | V-26, V-19 |
-| D8a-LOAD-SWAP | Boot loads this binary's steering program with its own new map (the kernel verifier checks it), swaps it into the pinned link with the atomic `BPF_LINK_UPDATE` (or attaches and pins a first link), then keeps or adds the route; a failed load or swap leaves the earlier program attached and boot refuses `GuestPrefixSteeringConverge` without writing the route; no runtime probe and no `verify` — the program's correctness is discharged by the Tier-3 steering tests in CI on the pinned kernel (A-33). Replaces D8a-FENCE (the boot fence `prohibit <prefix>`, approved 2026-10-07) | Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0175](../../product/architecture/adr-0175-each-boot-loads-its-steering-program-and-swaps-it-into-the-pinned-link.md) | V-26 (viii) |
-| D8a-CAP | Declared TCP listener ports are reserved with the lease in `GuestAddressPool::assign` against `GUEST_INTAKE_STEERING_MAX = 262,144` (the steering map's `max_entries`); a reservation past it refuses `IntakeCapacityReached` (non-terminal); no capacity-driven steer retry exists; only a `KernelMemory` steer failure is retried (D8a-CAP-RETRY) | Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0176](../../product/architecture/adr-0176-declared-intake-ports-are-admitted-against-the-node-steering-capacity.md) | V-9, V-26 (x) |
+| D8-PREFIX-CFG | Startup refuses `GuestPrefixOverlapsNodeAddress` when a node interface address lies inside the guest prefix (producer: the operator's node network configuration) and `GuestPrefixOverlapsVipRange` when a range of the configured `vip_range` overlaps it (producer: the operator's `vip_range`, from which `serve`'s boot assigns root-namespace addresses; D8-PREFIX-VIP), both in `probe_startup` before any boot effect; `ForeignGuestPrefixRoute` and `PinnedObjectForeign` are deleted | Approved by user 2026-10-08 (D8-PREFIX-CFG; D8-PREFIX-VIP); independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md) | — |
+| D8a | Only intake listeners serving a declared, guest-listening port are reachable at the guest prefix: local delivery to the prefix is decided by the pinned steering program of D8a-LOOKUP (a host-local TCP connection reaches the open intake listener its entry names; every other lookup is dropped); constant nft rules reject (output) or drop (prerouting) guest-prefix traffic that is neither leg-S-mark-exempt nor diverted to leg-C; `managed_guest_ips` is replaced by the constant prefix; the shared `local` route is kept or added only by boot `converge_shared` after this boot's steering program is loaded and swapped in (else startup refuses `GuestPrefixSteeringConverge` with the route unwritten and the earlier program attached, D8a-LOAD-SWAP) and is never removed at shutdown (U-4); shared-component repair runs only while the repairing recovery holds quiescence, held by named holders, and forwarding reopens only when no holder remains (D8a-HOLD) | **APPROVED 2026-10-06** (findings B-2, H-4); D8a-ROUTE and ruling U-4 (formal model) **APPROVED 2026-10-06**; D8a-HOLD (third model check) — Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL; steering mechanism replaced by D8a-LOOKUP, D8a-ROUTE restated and D8a-FENCE added (revision 9) — Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL; narrowed by APPLIANCE (2026-10-07): no runtime writer, audit or repair of the steering program or the route; D8a-FENCE replaced by D8a-LOAD-SWAP (revision 10) — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0172](../../product/architecture/adr-0172-only-steered-intake-listeners-are-reachable-at-the-guest-prefix.md), [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md), [0169](../../product/architecture/adr-0169-forwarding-quiescence-is-held-by-named-holders-and-reopens-only-when-none-remains.md), [0171](../../product/architecture/adr-0171-guest-prefix-local-delivery-is-decided-by-a-pinned-socket-lookup-program-over-a-listener-keyed-socket-map.md) | V-19, V-26 |
+| D8a-LOOKUP | Local delivery to the guest prefix (gateway excluded) is decided by an Aya `sk_lookup` program on the host root network namespace, its link pinned under `GUEST_PREFIX_STEERING_PIN_DIR` (keeping the program and its listener-keyed socket map): a host-local TCP connection is assigned to the open intake listener named by its `(workload_addr, port)` entry, every other lookup is dropped (TCP answered with a reset); the owner inserts an entry with `GuestPrefixSteering::steer` after the listener listens and closing the listener removes the entry in the same kernel step; while `serve` is down every lookup drops; the prefix is locally delivered only while a pinned steering link exists (D8a-ROUTE, D8a-LOAD-SWAP) | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0171](../../product/architecture/adr-0171-guest-prefix-local-delivery-is-decided-by-a-pinned-socket-lookup-program-over-a-listener-keyed-socket-map.md) | V-26, V-19 |
+| D8a-LOAD-SWAP | Boot loads this binary's steering program with its own new map (the kernel verifier checks it), swaps it into the pinned link with the atomic `BPF_LINK_UPDATE` (or attaches and pins a first link), then keeps or adds the route; a failed load or swap leaves the earlier program attached and boot refuses `GuestPrefixSteeringConverge` without writing the route; no runtime probe and no `verify` — the program's correctness is discharged by the Tier-3 steering tests in CI on the pinned kernel (A-33). Replaces D8a-FENCE (the boot fence `prohibit <prefix>`, approved 2026-10-07) | Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0175](../../product/architecture/adr-0175-each-boot-loads-its-steering-program-and-swaps-it-into-the-pinned-link.md) | V-26 (viii) |
+| D8a-CAP | Declared TCP listener ports are reserved with the lease in `GuestAddressPool::assign` against `GUEST_INTAKE_STEERING_MAX = 262,144` (the steering map's `max_entries`); a reservation past it refuses `IntakeCapacityReached` (non-terminal); no capacity-driven steer retry exists; only a `KernelMemory` steer failure is retried (D8a-CAP-RETRY) | Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0176](../../product/architecture/adr-0176-declared-intake-ports-are-admitted-against-the-node-steering-capacity.md) | V-9, V-26 (x) |
 | D9 | Guest TCP to a mesh destination is resolved once at pairing and reaches leg-F only through a registered pair; leg-F does not re-resolve and needs no write gate | **APPROVED 2026-10-05** | [0153](../../product/architecture/adr-0153-vsock-flows-terminate-at-the-accepted-mtls-enforcement-boundary.md) (supersedes 0115, 0139) | — |
 | D10 | Guest DNS keeps today's nameserver (the guest gateway) and travels as an ordinary datagram association to the node `DnsResponder` | **APPROVED 2026-10-05** | [0154](../../product/architecture/adr-0154-guest-dns-reaches-node-responder-as-ordinary-datagram-association.md) | — |
 | D11 | 16,384 stays a measurement target and admission placeholder; the vsock attachment introduces no fixed limit below it; CAP-295-A is redefined and re-captured through `serve` + `deploy` | **APPROVED 2026-10-05** | [0155](../../product/architecture/adr-0155-vsock-attachment-density-target-introduces-no-topology-ceiling.md) (supersedes 0117) | V-9 |
@@ -16943,15 +16970,15 @@ of the CID-claim scenarios, and V-26 of the steering scenarios.
 | D15 | Today's guest network behaviour wherever the kernel allows it | **APPROVED 2026-10-05** (#308–#311) | 0150, 0173, 0174, 0154 | — |
 | D15-R1 | Residual behaviour changes after re-derivation (§ *D15 re-derivation*): a host-local connect before activation is refused at once instead of going unanswered | **APPROVED 2026-10-05** (acknowledged) | 0173 | — |
 | D16 | A VM's CID is `GUEST_CID_BASE + lease_offset`, computed once in `assign`, never persisted; `assign` is next-fit (M-9) | **APPROVED 2026-10-05**; next-fit correction **APPROVED 2026-10-06** | [0156](../../product/architecture/adr-0156-guest-cid-derived-from-admission-lease.md) | — |
-| D16-CLAIM | `assign` takes a lease only together with a host-kernel claim of its CID on a new `/dev/vhost-vsock` instance (atomic in the kernel; `EADDRINUSE` skips the offset for this call only; every free offset held elsewhere → typed non-terminal `GuestCidsHeldElsewhere`); the move-only claimed device is handed to the fork by descriptor and `serve` closes its copy once the VMM holds it; so no launch ever fails on a CID clash, with no per-workload memory and no restart caveat | Proposed — approved by user 2026-10-07; pending independent DESIGN review | [0170](../../product/architecture/adr-0170-admission-claims-each-guest-cid-on-the-host-kernel-and-hands-the-claimed-device-to-the-vmm.md) | V-25 |
+| D16-CLAIM | `assign` takes a lease only together with a host-kernel claim of its CID on a new `/dev/vhost-vsock` instance (atomic in the kernel; `EADDRINUSE` skips the offset for this call only; every free offset held elsewhere → typed non-terminal `GuestCidsHeldElsewhere`); the move-only claimed device is handed to the fork by descriptor and `serve` closes its copy once the VMM holds it; so no launch ever fails on a CID clash, with no per-workload memory and no restart caveat | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0170](../../product/architecture/adr-0170-admission-claims-each-guest-cid-on-the-host-kernel-and-hands-the-claimed-device-to-the-vmm.md) | V-25 |
 | D17 | The beacon is accepted by one node-shared `AF_VSOCK` listener (`VMADDR_CID_ANY`:1234) and attributed by peer CID | **APPROVED 2026-10-05** | [0157](../../product/architecture/adr-0157-beacon-on-node-shared-vsock-listener-keyed-by-peer-cid.md) | V-10 (packet level), V-22 |
 | D18 | Out-of-band pairing with install-at-establishment and kernel parking; the acceptor reads the request before installing its accepted vsock (H-1); admission is one step with flow-table registration and a continuation stops for a closed flow (U-1) | **APPROVED 2026-10-05**; U-1 approved by user 2026-10-06 | [0158](../../product/architecture/adr-0158-flows-are-paired-out-of-band-with-install-at-establishment-and-kernel-parking.md) | — |
 | D18a | The control session is a dedicated per-VM vsock session to host port 1243, owned by the guest-flow owner — not multiplexed on the beacon; one live session per CID by atomic claim; a control message for an unknown or closed flow is discarded and counted, no reply, SLOT-ABORT excepted (U-5), relying on K-A4 for host-opened flows | **APPROVED 2026-10-05**; U-5 pinned 2026-10-06 and **confirmed by the user 2026-10-06** | [0166](../../product/architecture/adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md) | V-22, V-24 |
 | D19 | Unpinned process-owned links; exit fails closed (scope: guest forwarding objects; the guest-prefix steering is pinned node infrastructure, D8a-LOOKUP / ADR-0171) | **APPROVED 2026-10-05** (#312) | [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md) | V-8 |
-| D19-LINKS | The forwarder's process-owned links have no runtime audit, damage recovery or gold-test detach injection; `SockOpsLink`, `DrainCounterLink` and `UnframeLink` are not supervisor components | Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md) | — |
+| D19-LINKS | The forwarder's process-owned links have no runtime audit, damage recovery or gold-test detach injection; `SockOpsLink`, `DrainCounterLink` and `UnframeLink` are not supervisor components | Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md) | — |
 | D20 | Stop aborts flows with reset; half-close waits for the drain signal, else aborts after `FLOW_DRAIN_DEADLINE`; owner-held sockets whose far end is outside the owner carry `SO_LINGER{1,0}` — application side and remote side (H-5: the host's socket toward a non-mesh destination and leg-F's remote socket); restore reopens admission only | **APPROVED 2026-10-05**; remote-side extension **APPROVED 2026-10-06** | [0160](../../product/architecture/adr-0160-forwarding-stop-aborts-flows-and-restore-reopens-admission-only.md) | V-13 |
 | D21 | The fork is built from one pinned SHA, published as a checksummed release per architecture, verified by SHA-256 at provisioning, and capability-checked again by `Vmm::probe` | **APPROVED 2026-10-05** | [0161](../../product/architecture/adr-0161-vendored-cloud-hypervisor-fork-is-built-pinned-and-provisioned-as-a-checksummed-release.md) | — |
-| D23 | A host intake listener exists only while the guest application listens on that port, mirrored from a guest kernel listener map (`fexit` on `inet_csk_listen_start`/`stop` → `cookie → port`; ring buffer as wake only; `ListenState` on change and at session open; seeded from `sock_diag`; closed on session loss; lag ≤ 2 ms); the guest reports every port, the host acts on declared ports | **APPROVED 2026-10-05** (conditional on V-14, proven, P-33); mechanism and port scope **APPROVED 2026-10-06**; quiescence closes intake listeners and per-allocation event serialization (M-7) — correction **APPROVED 2026-10-06**; all-or-nothing activation (U-6) **APPROVED 2026-10-06**; a listener serves once it is steered (`GuestPrefixSteering::steer` after listen) and closing it removes its entry (D8a-LOOKUP, revision 9) — Proposed — approved by user 2026-10-07; pending independent DESIGN review | [0163](../../product/architecture/adr-0163-host-intake-listener-mirrors-guest-listen-state.md), [0171](../../product/architecture/adr-0171-guest-prefix-local-delivery-is-decided-by-a-pinned-socket-lookup-program-over-a-listener-keyed-socket-map.md) | V-9 (lag at density), V-26 |
+| D23 | A host intake listener exists only while the guest application listens on that port, mirrored from a guest kernel listener map (`fexit` on `inet_csk_listen_start`/`stop` → `cookie → port`; ring buffer as wake only; `ListenState` on change and at session open; seeded from `sock_diag`; closed on session loss; lag ≤ 2 ms); the guest reports every port, the host acts on declared ports | **APPROVED 2026-10-05** (conditional on V-14, proven, P-33); mechanism and port scope **APPROVED 2026-10-06**; quiescence closes intake listeners and per-allocation event serialization (M-7) — correction **APPROVED 2026-10-06**; all-or-nothing activation (U-6) **APPROVED 2026-10-06**; a listener serves once it is steered (`GuestPrefixSteering::steer` after listen) and closing it removes its entry (D8a-LOOKUP, revision 9) — Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0163](../../product/architecture/adr-0163-host-intake-listener-mirrors-guest-listen-state.md), [0171](../../product/architecture/adr-0171-guest-prefix-local-delivery-is-decided-by-a-pinned-socket-lookup-program-over-a-listener-keyed-socket-map.md) | V-9 (lag at density), V-26 |
 | D24 | Guest service-VIP access uses the existing ADR-0053 `connect4` rewrite on the guest-flow owner's always-connected host sockets; the owner runs at `overdrive.slice/control-plane.slice` and refuses to start outside the attach subtree; the guest keeps reporting the VIP | **APPROVED 2026-10-06** (P-32; refusal D24-REFUSE 2026-10-06) | [0164](../../product/architecture/adr-0164-guest-service-vip-access-uses-the-existing-connect4-rewrite-on-owner-sockets.md) | V-15 |
 | D24a | Guest TCP to a service VIP is mesh-resolved before classification: the resolution adapter keys each service's `(VIP, port)` like its frontend; a TCP destination in the VIP ranges that matches no service is `MeshUnreachable`; so a mesh VIP is enforced with mTLS or refused, never connected in cleartext. `connect4` then serves datagram VIP flows only | **APPROVED 2026-10-06** (finding H-3; narrows D24 for TCP) | 0164, 0153 | V-6 |
 | D25 | Guest intake model: reserved guest ports `61000` (TCP intake) and `61001–62024` (1,024 UDP slots) bound without address reuse and reserved from ephemeral use — an application bind fails `EADDRINUSE` only on a port holding an intake of that protocol (D25-BIND); intake excluded from listen-state reports; a slot per (application socket, destination); every slot of a released socket released; idle slot release after `GUEST_DATAGRAM_SLOT_IDLE` (120 s); an association ended by `Refused` / `Abort` / pairing deadline discards its parked frames and does not re-associate by itself (U-2); 4,096 guest parking cells; exhaustion → application reset (TCP) / `EPERM` (UDP); a VM spec declaring a listener port in the reserved range is refused at deploy (`ParseError::ListenerPortReserved`; `AggregateError::Validation` at the API ingress) | **APPROVED 2026-10-06** (finding H-2; includes D15-R2); D25-BIND and U-2 **APPROVED 2026-10-06** | 0150, 0163 | V-9 |
@@ -17130,7 +17157,7 @@ receives a status-line pointer to the proposed ADR that amends it:
 | 0068 §4 | Correction: stock CH `--vsock` does not use `/dev/vhost-vsock` — see 0146 |
 | 0082 §D4 | Beacon transport — see 0157 |
 
-**Proposed ADRs of this replacement.** 0145–0176. ADR-0171 (D8a-LOOKUP)
+**ADRs of this replacement.** 0145–0176. ADR-0171 (D8a-LOOKUP)
 records the guest-prefix steering: a pinned Aya `sk_lookup` program over a
 listener-keyed socket map decides local delivery for the guest prefix; it is
 the mechanism of ADR-0172 (D8a, reachability) and of ADR-0163's steering
@@ -17504,8 +17531,9 @@ pub fn guest_reserved_ports() -> std::ops::RangeInclusive<u16>;
 The range lies above the guest kernel's default ephemeral range
 (32,768–60,999).
 
-**Intake steering capacity (D8a-CAP, ADR-0176; Proposed — approved by user
-2026-10-08).** One SSOT, consumed by the pool's admission and by the steering
+**Intake steering capacity (D8a-CAP, ADR-0176; approved by user 2026-10-08;
+independent review r12 answered; further review waived by user 2026-10-08;
+handed to DISTILL).** One SSOT, consumed by the pool's admission and by the steering
 adapter's map creation:
 
 ```rust
@@ -18301,8 +18329,9 @@ Contracts:
   passes every other packet unchanged (`TC_ACT_OK`), never dropping for bad
   magic. Unregistered packets always pass.
 - **Unframe attachment set (D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE,
-  IMG-IFACE-BOOT, D5a-SERVE-IFACE, ADR-0165; Proposed — approved by user
-  2026-10-08).** An interface carries guest datagrams only once it has
+  IMG-IFACE-BOOT, D5a-SERVE-IFACE, ADR-0165; approved by user 2026-10-08;
+  independent review r12 answered; further review waived by user 2026-10-08;
+  handed to DISTILL).** An interface carries guest datagrams only once it has
   addresses and routes. Root-namespace interfaces are configured by two
   producers, both before the boot attach: the appliance image, only at boot
   and before `serve` starts (A-31, ADR-0068 § 5), and `serve`'s own boot
@@ -18355,11 +18384,11 @@ Contracts:
 
 #### [REF] Driven port — guest-prefix steering `overdrive-dataplane::guest_steering` (D8a-LOOKUP, ADR-0171)
 
-Proposed — approved by user 2026-10-07; boot steering load → swap → route
+Approved by user 2026-10-07; boot steering load → swap → route
 (D8a-LOAD-SWAP, ADR-0175), map capacity and the steer failure classes
 (D8a-CAP, ADR-0176) and the removal of `PinnedObjectForeign`
-(D8-PREFIX-CFG) Proposed — approved by user 2026-10-08; pending independent
-DESIGN review. Program in `overdrive-bpf` (Aya `sk_lookup`, Rust).
+(D8-PREFIX-CFG) approved by user 2026-10-08; independent review r12
+answered; further review waived by user 2026-10-08; handed to DISTILL. Program in `overdrive-bpf` (Aya `sk_lookup`, Rust).
 
 Boot steering has two kernel steps (D8a-LOAD-SWAP): `load` (the kernel
 verifier accepts this binary's program, attached nowhere) and `attach` (the
@@ -19720,8 +19749,9 @@ R5-22, R5-23, R5-37 and R5-38 for the revision-11 decisions (D8a-CAP,
 D5a-IFACE, D8-PREFIX-CFG; approved by user 2026-10-08), and R5-22,
 R5-37 and R5-38 for D8a-CAP-RETRY and D5a-IFACE-BOOT (approved
 by user 2026-10-08), and R5-39 and R5-40 for D5a-SERVE-IFACE and
-D8-PREFIX-VIP (approved by user 2026-10-08); all pending independent DESIGN
-review. There is no
+D8-PREFIX-VIP (approved by user 2026-10-08); for all, independent review r12
+is answered, further review is waived by the user 2026-10-08, and the DESIGN
+is handed to DISTILL. There is no
 R5-12: no interface is attached after boot (D5a-LATE), so no scenario
 covers one. R5-33, R5-35 and R5-36 tested foreign deletion
 of steering entries, foreign link detach and foreign route writes; they are
@@ -19738,7 +19768,8 @@ model*).
 
 ### Scope — IP family, UDP, in and out
 
-**In scope** (approved decisions; pending independent DESIGN review):
+**In scope** (approved decisions; independent review r12 answered; further
+review waived by user 2026-10-08; handed to DISTILL):
 
 - IPv4.
 - Outbound guest TCP to any unicast destination except host-internal ones
@@ -20025,11 +20056,13 @@ qualified metal, never Lima, triple recorded before running.
     user before DISTILL pins the steering scenarios; a falsified K-L9 returns
     D8a-LOAD-SWAP to DESIGN.
 
-**What blocks DISTILL:** the independent re-review of revisions 5–12 and of
-D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER, D5a-LATE, IMG-IFACE-BOOT,
-D5a-SERVE-IFACE and D8-PREFIX-VIP (the formal model check of revision 11,
-round 8, has run: § *Formal protocol model*), then the
-roadmap reconciliation, and — only for the control-session and beacon
+**What blocks DISTILL:** no further independent review — revisions 5–12 were
+reviewed through r12, whose findings are answered by D5a-IFACE-BOOT,
+D8a-CAP-RETRY, A-MEM-OWNER, D5a-LATE, IMG-IFACE-BOOT, D5a-SERVE-IFACE and
+D8-PREFIX-VIP, and the user waived a further review on 2026-10-08 (the formal
+model check of revision 11, round 8, has run: § *Formal protocol model*); the
+roadmap reconciliation is not a DISTILL precondition (user decision
+2026-10-08): it is the first DELIVER activity. The DISTILL preconditions are — only for the control-session and beacon
 attribution scenarios — V-22, — only for the `TcpAccept` abort and
 session-loss scenarios — V-24, — only for the CID-claim scenarios (R5-19) —
 V-25, and — only for the steering scenarios (R5-1, R5-2, R5-3, R5-22,
@@ -20686,8 +20719,9 @@ Revision 4's architect-pinned choices (D5a attachment set, D23 port scope, D24
 startup refusal, late `Paired` → `Abort`) were approved by the user on
 2026-10-06 (§ *User rulings — APPROVED 2026-10-06*). The decisions revision 5's
 review remediation needed were surfaced to the user and approved on
-2026-10-06, as listed below. **No decision awaits the user.** Every one is
-still pending independent DESIGN review.
+2026-10-06, as listed below. **No decision awaits the user.** For every one,
+independent review r12 is answered; further review is waived by the user
+2026-10-08; the DESIGN is handed to DISTILL.
 
 **New decisions — APPROVED 2026-10-06:**
 
@@ -20769,7 +20803,8 @@ returned two counterexamples against the design text, one kernel assumption
 with no validation item, one environment fault and seven underspecified
 points (U-1 to U-7). The user ruled on them on 2026-10-06. Every item below is
 approved (U-5's exact rule was confirmed with the round-2 decisions, below);
-all are pending independent DESIGN review.
+for all, independent review r12 is answered, further review is waived by the
+user 2026-10-08, and the DESIGN is handed to DISTILL.
 
 1. **D8a-REVOKE — a failed element removal keeps its listener (finding 1,
    U-3; ADR-0152, ADR-0163).** If revoking an intake listener's
@@ -20826,8 +20861,9 @@ all are pending independent DESIGN review.
 The second model check (`spike/quint-owner-findings-r2.md`, revision 6)
 found two counterexamples against the pinned text (r2-1, r2-2), one unstated
 assumption behind U-5 (r2-3, K-A4) and one unstated ordering (U-r2-4). The
-user decided on 2026-10-06; every item is approved and pending independent
-DESIGN review. **No decision awaits the user.**
+user decided on 2026-10-06; every item is approved; independent review r12
+answered; further review waived by user 2026-10-08; handed to DISTILL. **No
+decision awaits the user.**
 
 1. **U-5 confirmed (ADR-0166; finding r2-3).** A `Paired` / `Refused` (or
    other control message) for an unknown or closed flow id is discarded and
@@ -20848,8 +20884,9 @@ DESIGN review. **No decision awaits the user.**
 
 ### Revision 8 decisions — 2026-10-06
 
-Each decision below is **Proposed — approved by user 2026-10-07; pending
-independent DESIGN review.** They answer the third model check
+Each decision below is **approved by user 2026-10-07; independent review r12
+answered; further review waived by user 2026-10-08; handed to DISTILL.** They
+answer the third model check
 (`spike/quint-owner-findings-r3.md`) by removing the causes it exposed.
 
 1. **D16-CLAIM — the pool claims each CID on the host kernel and hands the
@@ -20891,9 +20928,9 @@ are not part of this design.
 
 ### Revision 9 decisions — 2026-10-07
 
-Each decision below is **Proposed — approved by user 2026-10-07; pending
-independent DESIGN review**; item 7 (APPLIANCE) is approved by user
-2026-10-07.
+Each decision below is **approved by user 2026-10-07; independent review r12
+answered; further review waived by user 2026-10-08; handed to DISTILL**; item
+7 (APPLIANCE) is approved by user 2026-10-07.
 
 1. **D8a-LOOKUP — local delivery to the guest prefix is decided by a pinned
    socket-lookup program over a listener-keyed socket map (ADR-0171;
@@ -21012,8 +21049,8 @@ Answers finding r5-1 of the fifth model check
 sixth (`design/quint-guest-flow-owner-findings-r6.md`).
 
 1. **D8a-LOAD-SWAP — boot steering is load, swap, route (ADR-0175,
-   ADR-0152).** Proposed — approved by user 2026-10-08; pending independent
-   DESIGN review.
+   ADR-0152).** Approved by user 2026-10-08; independent review r12 answered;
+   further review waived by user 2026-10-08; handed to DISTILL.
    *Decision:* boot steering has three steps. (1) **Load** this binary's
    program with its own new, empty map (`GuestPrefixSteering::load`); the
    kernel verifier checks it. On failure boot refuses
@@ -21069,8 +21106,9 @@ sixth (`design/quint-guest-flow-owner-findings-r6.md`).
    rejected by the user. (b) Fence the prefix around the swap — keeps the
    fence, its write and its failure path, and turns every binary upgrade
    into a refused window; rejected.
-2. **D8a-ROUTE (restated for D8a-LOAD-SWAP).** Proposed — approved by user
-   2026-10-08 with D8a-LOAD-SWAP; pending independent DESIGN review. Boot
+2. **D8a-ROUTE (restated for D8a-LOAD-SWAP).** Approved by user 2026-10-08
+   with D8a-LOAD-SWAP; independent review r12 answered; further review waived
+   by user 2026-10-08; handed to DISTILL. Boot
    keeps or adds the `local` route only after this boot's program is loaded
    and attached; otherwise it refuses startup without writing the route.
 3. **Concern-4 progress wording (round 5).** The progress clause names what
@@ -21080,8 +21118,9 @@ sixth (`design/quint-guest-flow-owner-findings-r6.md`).
 ### Revision 11 decisions — 2026-10-08
 
 Answers the independent review of revision 10
-(`design/review-design-vsock-replacement-r10.md`). Items 1–4 are **Proposed —
-approved by user 2026-10-08; pending independent DESIGN review**; the table
+(`design/review-design-vsock-replacement-r10.md`). Items 1–4 are **approved by
+user 2026-10-08; independent review r12 answered; further review waived by
+user 2026-10-08; handed to DISTILL**; the table
 in § *User decisions — 2026-10-08* states each. Item 5 is a mechanical split
 and adds no decision.
 
@@ -21124,8 +21163,9 @@ and adds no decision.
    D8-INTAKE and D8-PEER are the parts of the approved D8 that ADR-0173 and
    ADR-0174 record; their approval is D8's (2026-10-05).
 6. **Answers to the independent review of revision 11**
-   (`design/review-design-vsock-replacement-r11.md`), each **Proposed —
-   approved by user 2026-10-08; pending independent DESIGN review**
+   (`design/review-design-vsock-replacement-r11.md`), each **approved by user
+   2026-10-08; independent review r12 answered; further review waived by
+   user 2026-10-08; handed to DISTILL**
    (§ *User decisions — 2026-10-08 (independent review of revision 11)*):
    - **D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER (H-1)** — the boot
      refusal on any unframe attach failure, the retry of `KernelMemory`
@@ -21161,8 +21201,9 @@ and adds no decision.
 
 ### Revision 12 decisions — 2026-10-08
 
-Answers to `design/review-design-vsock-replacement-r12.md`, each **Proposed —
-approved by user 2026-10-08; pending independent DESIGN review** (§ *User
+Answers to `design/review-design-vsock-replacement-r12.md`, each **approved by
+user 2026-10-08; independent review r12 answered; further review waived by
+user 2026-10-08; handed to DISTILL** (§ *User
 decisions — 2026-10-08 (independent review of revision 12)*):
 
 1. **IMG-IFACE-BOOT (H-1).** *Contract:* ADR-0068 § 5 (amendment,
@@ -21301,8 +21342,11 @@ decisions — 2026-10-08 (independent review of revision 12)*):
 - **Revision 12, answers to its review (2026-10-08)**: IMG-IFACE-BOOT
   (ADR-0068 § 5), D5a-SERVE-IFACE and D8-PREFIX-VIP (approved by user
   2026-10-08); R5-39, R5-40; the formal model section cites the recorded
-  evidence rather than a run id (§ *Revision 12 decisions*). **Not yet
-  re-reviewed.** No decision adds protocol state.
+  evidence rather than a run id (§ *Revision 12 decisions*). No decision adds
+  protocol state. The Quint run is re-recorded against these answers: all 132
+  checks meet `expect` and `verify-evidence` passes.
+- **User decision (2026-10-08):** no r13 independent review. The r12 answers
+  stand, further review is waived, and the DESIGN is handed to DISTILL.
 
 ### Review remediation
 
@@ -21387,9 +21431,9 @@ Revision 9 (D8a-LOOKUP) and the residuals it removes:
 
 | Residual or mechanism | Change | Where |
 |---|---|---|
-| D8a-PROBE residual (a port no longer wanted whose element removal keeps failing keeps its listener bound; a probe sees `connect()` complete, then a reset) | Removed: the steering entry is part of the listener's kernel state and dies with it in one step (K-L3); closing the listener is the whole take-down, so no connect completes on a port that is not served. **Proposed — approved by user 2026-10-07; pending independent DESIGN review** | ADR-0171, ADR-0163; delta § *D15 re-derivation*, G-V8, R5-2, R5-23, V-26 |
-| D8a-REVOKE stuck listener and teardown wait (a failed element removal kept the listener bound and resetting; teardown and lease release waited on the retried kernel write) | Removed: there is no removal write; the kernel removes the entry at close. Teardown and lease release wait on no steering write; activation rollback cannot fail (U-6). **Proposed — approved by user 2026-10-07; pending independent DESIGN review** | ADR-0171, ADR-0163; delta § *Composition*, *Lifecycle*, R5-22, R5-29 |
-| D8a-REASSERT re-assertion (an element asserted at every serving period, retried; a wanted port serving on a kept-bound listener) | Removed: a wanted port gets a new listener, steered after it listens; a `steer` failure closes the listener and is retried while the port stays refused. **Proposed — approved by user 2026-10-07; pending independent DESIGN review** | ADR-0171, ADR-0163; delta § *Owner and provisioner* (intake listener mirroring), G-V5, G-V8, R5-23 |
+| D8a-PROBE residual (a port no longer wanted whose element removal keeps failing keeps its listener bound; a probe sees `connect()` complete, then a reset) | Removed: the steering entry is part of the listener's kernel state and dies with it in one step (K-L3); closing the listener is the whole take-down, so no connect completes on a port that is not served. **Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0171, ADR-0163; delta § *D15 re-derivation*, G-V8, R5-2, R5-23, V-26 |
+| D8a-REVOKE stuck listener and teardown wait (a failed element removal kept the listener bound and resetting; teardown and lease release waited on the retried kernel write) | Removed: there is no removal write; the kernel removes the entry at close. Teardown and lease release wait on no steering write; activation rollback cannot fail (U-6). **Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0171, ADR-0163; delta § *Composition*, *Lifecycle*, R5-22, R5-29 |
+| D8a-REASSERT re-assertion (an element asserted at every serving period, retried; a wanted port serving on a kept-bound listener) | Removed: a wanted port gets a new listener, steered after it listens; a `steer` failure closes the listener and is retried while the port stays refused. **Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0171, ADR-0163; delta § *Owner and provisioner* (intake listener mirroring), G-V5, G-V8, R5-23 |
 
 Appliance threat model (APPLIANCE, approved by user 2026-10-07) and what it
 removes or simplifies:
@@ -21406,7 +21450,7 @@ APPLIANCE) and the change that answers each:
 
 | Finding | Change | Where |
 |---|---|---|
-| r5-1 (D8a-FENCE / D8a-ROUTE; invariant 6: boot swapped a new program into the pinned link under the earlier `local` route before `verify` and `probe`; a failed later step with a failed fence write, or a crash right after the swap, left `serve` down with `local` over an unprobed program; 4 of 124 checks) | The program's correctness is a CI property of the image (A-33), so `local` over a program a boot swapped in exposes nothing; a program the verifier rejects is never attached; a failed swap leaves the earlier program (K-L9); the fence is removed. **D8a-LOAD-SWAP — Proposed — approved by user 2026-10-08; pending independent DESIGN review** | ADR-0175, ADR-0152; delta § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, *Lifecycle*, ownership table, error taxonomy, G-V1, R5-24, R5-34, V-26, *Formal protocol model* (invariant 6, next round) |
+| r5-1 (D8a-FENCE / D8a-ROUTE; invariant 6: boot swapped a new program into the pinned link under the earlier `local` route before `verify` and `probe`; a failed later step with a failed fence write, or a crash right after the swap, left `serve` down with `local` over an unprobed program; 4 of 124 checks) | The program's correctness is a CI property of the image (A-33), so `local` over a program a boot swapped in exposes nothing; a program the verifier rejects is never attached; a failed swap leaves the earlier program (K-L9); the fence is removed. **D8a-LOAD-SWAP — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0175, ADR-0152; delta § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, *Lifecycle*, ownership table, error taxonomy, G-V1, R5-24, R5-34, V-26, *Formal protocol model* (invariant 6, next round) |
 | Concern-4 progress wording (the leg-C bypass ending holds trivially) | The progress clause names the `IpRules` recovery's table repair completing under its own hold (`TableRepaired`) | delta § *Formal protocol model* |
 | Underspecified 1 (order of the swap against the route) | Pinned: load → swap → route | delta § *Composition* step 9 |
 | Underspecified 4 / M-DEF (what a defective program does when attached) | Moot for the design: every shipped program is correct (A-33); M-DEF is not a design assumption | delta § *Formal protocol model* (assumptions) |
@@ -21433,13 +21477,13 @@ answers each:
 
 | Finding | Change | Where |
 |---|---|---|
-| H-1 (steering map caps intake listeners with no admission; a full map retries forever; CAP-295-A changed silently) | Map sized at 262,144 from the admitted bound; declared TCP ports reserved at `assign` with `IntakeCapacityReached`; capacity-driven retry removed; only `KernelMemory` retried; supported `M` stated. **D8a-CAP — Proposed — approved by user 2026-10-08** | ADR-0176, ADR-0171, ADR-0163; delta § *User decisions — 2026-10-08*, *Core vocabulary*, *Driven port — guest-prefix steering*, *Owner and provisioner*, error taxonomy, G-V0, G-V8, R5-22, R5-37, V-9, V-26 (x), *Changed assumptions* |
-| H-2 (link-damage audit and injection defend against an absent actor) | Links not audited, recovered or injected; their components deleted; producers named for what stays. **D19-LINKS — Proposed — approved by user 2026-10-08** | ADR-0159, ADR-0151, ADR-0165; delta forwarder contracts, error taxonomy, *Earned Trust*, V-8, roadmap |
+| H-1 (steering map caps intake listeners with no admission; a full map retries forever; CAP-295-A changed silently) | Map sized at 262,144 from the admitted bound; declared TCP ports reserved at `assign` with `IntakeCapacityReached`; capacity-driven retry removed; only `KernelMemory` retried; supported `M` stated. **D8a-CAP — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0176, ADR-0171, ADR-0163; delta § *User decisions — 2026-10-08*, *Core vocabulary*, *Driven port — guest-prefix steering*, *Owner and provisioner*, error taxonomy, G-V0, G-V8, R5-22, R5-37, V-9, V-26 (x), *Changed assumptions* |
+| H-2 (link-damage audit and injection defend against an absent actor) | Links not audited, recovered or injected; their components deleted; producers named for what stays. **D19-LINKS — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0159, ADR-0151, ADR-0165; delta forwarder contracts, error taxonomy, *Earned Trust*, V-8, roadmap |
 | H-3 (ADR-0152 a bucket; ADR-0171 bundles D8a-LOAD-SWAP) | ADR-0152 keeps the route; ADR-0172 (reachability), ADR-0173 (intake and host-initiated flow), ADR-0174 (client identity), ADR-0175 (D8a-LOAD-SWAP); each ADR carries only its own approval line | ADRs 0152, 0171–0175; cross-references in ADRs 0145, 0151, 0153, 0154, 0159, 0163 and the delta |
 | H-4 (Formal model section stale; README maps K-L9 to V-27) | Round 7 recorded with its run and per-module verdicts; its open points closed; hazard list replaced; status header and review record updated; K-L9 → V-26 (viii) and A-33 named consistently; round 8's README corrections listed | delta § *Formal protocol model* |
-| M-1 (D5a framed for non-appliance actors) | Boot attach to every interface present (refusal on failure); no attach after boot (D5a-LATE); other-software and policy-xfrm cases removed. **D5a-IFACE — Proposed — approved by user 2026-10-08** | ADR-0165; delta forwarder contracts, *Composition*, G-V1, A-21, V-17, R5-38 |
+| M-1 (D5a framed for non-appliance actors) | Boot attach to every interface present (refusal on failure); no attach after boot (D5a-LATE); other-software and policy-xfrm cases removed. **D5a-IFACE — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0165; delta forwarder contracts, *Composition*, G-V1, A-21, V-17, R5-38 |
 | M-2 (spec carries revision-9 terms) | Listed for round 8: `quiescence` route form and hazard, `prefix_boot` error name, "verified, probed" comments | delta § *Formal protocol model*, round 8 |
-| M-3 (two refusals with no appliance producer) | `PinnedObjectForeign` deleted; `ForeignGuestPrefixRoute` replaced by `GuestPrefixOverlapsNodeAddress` (producer: the operator's node network configuration). **D8-PREFIX-CFG — Proposed — approved by user 2026-10-08** | ADR-0152; delta § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, R5-11 |
+| M-3 (two refusals with no appliance producer) | `PinnedObjectForeign` deleted; `ForeignGuestPrefixRoute` replaced by `GuestPrefixOverlapsNodeAddress` (producer: the operator's node network configuration). **D8-PREFIX-CFG — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0152; delta § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, R5-11 |
 | M-4 (claimed vs checked invariant 6) | Invariant 6 stays "`local` only while a **pinned** link exists"; round 8 checks `link == pinned` | delta § *Formal protocol model* |
 | L-1 | "revisions 5–9" → 5–11; Quint `steering` → the split modules; the header's "K-L1–K-L6" corrected | delta header, G-V5, R5-22/23/30/32, *What blocks DISTILL* |
 | L-2 | U-1 stated as approved by user 2026-10-06 | delta approvals table, decision index; ADR-0158 |
@@ -21453,10 +21497,10 @@ answers each:
 
 | Finding | Change | Where |
 |---|---|---|
-| H-1 (three derived consequences recorded as approved) | Surfaced to the user and confirmed as decisions: D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER. **Proposed — approved by user 2026-10-08** | ADR-0165, ADR-0176; delta § *User decisions — 2026-10-08 (independent review of revision 11)*, G-V1, R5-38, assumptions table |
+| H-1 (three derived consequences recorded as approved) | Surfaced to the user and confirmed as decisions: D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER. **Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0165, ADR-0176; delta § *User decisions — 2026-10-08 (independent review of revision 11)*, G-V1, R5-38, assumptions table |
 | H-2 (round 8 not recorded) | Round 8 recorded: run, 132 / 132, per-module verdicts, invariant 12 and `ServingReachable` hold, `noIntakeAdmission` (+`capRetry`) teeth, `ServingReachableNoMemRecovery`, CI flags as in `checks.toml`; status header, review record and *What blocks DISTILL* updated | delta § *Formal protocol model*, *Design review record* |
 | M-1 (A-MEM fairness) | A-MEM: a `steer` retried infinitely often eventually succeeds (strong fairness) | delta § *Formal protocol model* (progress, round 8, assumptions table) |
-| M-2 (runtime-registered-interface exposure unbounded and retried on defects) | On the appliance the image configures root-namespace interfaces only at boot; an interface registered later is never given addresses or routes, carries no guest traffic and is not attached (part of A-31, discharged by the appliance image, ADR-0068). No late-interface attach operation, configuration path, retry, event or gate exists; the exposure, the notification watch, relist and audit-cadence retry removed; `UnframeAttachError` is `{ KernelMemory, Attach }`, boot only. **D5a-LATE — Proposed — approved by user 2026-10-08** | ADR-0165; delta forwarder and owner contracts, A-31, error taxonomy, G-V1, G-V5, A-21, V-17, *Earned Trust* |
+| M-2 (runtime-registered-interface exposure unbounded and retried on defects) | On the appliance the image configures root-namespace interfaces only at boot; an interface registered later is never given addresses or routes, carries no guest traffic and is not attached (part of A-31, discharged by the appliance image, ADR-0068). No late-interface attach operation, configuration path, retry, event or gate exists; the exposure, the notification watch, relist and audit-cadence retry removed; `UnframeAttachError` is `{ KernelMemory, Attach }`, boot only. **D5a-LATE — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0165; delta forwarder and owner contracts, A-31, error taxonomy, G-V1, G-V5, A-21, V-17, *Earned Trust* |
 | L-1 (`ci` flag inconsistent with a runner start-up retry) | The CI rule counts a check's own time, excluding runner start-up retries, once the runner records them apart; the runner change is separate | delta § *Formal protocol model* (*Running it*) |
 | L-2 (`MapLookup`, `Query` without producers) | Producers named: `steer` (existing-entry read; socket cookie / options) and `load` (opening the pinned link) | delta § *Driven port — guest-prefix steering* |
 | L-3 (A-MEM omits the memory cgroup) | A-MEM states the charge to `overdrive.slice/control-plane.slice`, which sets no `memory.max`; a future limit must revisit A-MEM | delta assumptions table |
@@ -21468,8 +21512,8 @@ answers each:
 
 | Finding | Change | Where |
 |---|---|---|
-| H-1 (A-31's D5a-LATE part cites an artifact without the requirement) | ADR-0068 § 5 (amendment, 2026-10-08) states the image requirement; A-31, the assumptions table, D5a-LATE and ADR-0165 cite it. **IMG-IFACE-BOOT — Proposed — approved by user 2026-10-08** | ADR-0068, ADR-0165; delta § *User decisions — 2026-10-08 (independent review of revision 12)*, A-31, assumptions table, forwarder contracts |
-| M-1 (`serve` creates root-namespace interfaces; covered only by an unstated ordering) | Premise corrected; ordering invariant "every interface `serve` creates in the root namespace exists before `converge_shared`" pinned in *Composition* and G-V1; R5-39; #197 constraint recorded. **D5a-SERVE-IFACE — Proposed — approved by user 2026-10-08** | ADR-0165, ADR-0068 § 5; delta forwarder and owner contracts, *Composition* steps 3 and 9, G-V1, R5-39, GitHub context |
-| M-2 (`vip_range` producer unchecked) | `GuestPrefixOverlapsVipRange` refused in `probe_startup` before any boot effect; `vip_range` named a producer in D8-PREFIX-CFG. **D8-PREFIX-VIP — Proposed — approved by user 2026-10-08** | ADR-0152; delta `probe_startup`, `converge_shared`, *Composition* step 1, error taxonomy, G-V1, R5-40, *Earned Trust* |
+| H-1 (A-31's D5a-LATE part cites an artifact without the requirement) | ADR-0068 § 5 (amendment, 2026-10-08) states the image requirement; A-31, the assumptions table, D5a-LATE and ADR-0165 cite it. **IMG-IFACE-BOOT — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0068, ADR-0165; delta § *User decisions — 2026-10-08 (independent review of revision 12)*, A-31, assumptions table, forwarder contracts |
+| M-1 (`serve` creates root-namespace interfaces; covered only by an unstated ordering) | Premise corrected; ordering invariant "every interface `serve` creates in the root namespace exists before `converge_shared`" pinned in *Composition* and G-V1; R5-39; #197 constraint recorded. **D5a-SERVE-IFACE — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0165, ADR-0068 § 5; delta forwarder and owner contracts, *Composition* steps 3 and 9, G-V1, R5-39, GitHub context |
+| M-2 (`vip_range` producer unchecked) | `GuestPrefixOverlapsVipRange` refused in `probe_startup` before any boot effect; `vip_range` named a producer in D8-PREFIX-CFG. **D8-PREFIX-VIP — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0152; delta `probe_startup`, `converge_shared`, *Composition* step 1, error taxonomy, G-V1, R5-40, *Earned Trust* |
 | L-1 (stale run id, retry text, CI flags, "model unchanged") | Formal model section cites the recorded evidence, lists CI flags as in `checks.toml`, drops the retry caveat; the review record states that `checks.toml` changed | delta § *Formal protocol model*, *Design review record* |
 | L-2 (two checks under two minutes with `ci = false`) | `checks.toml` sets both `ci = true` by own time (modeler's change); the delta lists them so | delta § *Formal protocol model* (*Running it*) |

@@ -2,8 +2,9 @@
 
 ## Status
 
-**Proposed — decision D26 (raised by independent DESIGN review finding B-1)
-approved by user 2026-10-06; pending independent DESIGN review.**
+**Accepted — decision D26 (raised by independent DESIGN review finding B-1) approved by
+user 2026-10-06; independent review r12 answered; further review waived by
+user 2026-10-08; handed to DISTILL.**
 GH #295. Recorded in the #295 feature delta, § *[REF] Per-flow policy and the
 host-internal deny set*.
 

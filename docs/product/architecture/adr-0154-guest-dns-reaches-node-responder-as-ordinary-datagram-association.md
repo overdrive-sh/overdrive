@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — decision D10 approved by user 2026-10-05; pending independent
-DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+**Accepted — decision D10 approved by user 2026-10-05; independent review r12 answered;
+further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
 
 ## Context

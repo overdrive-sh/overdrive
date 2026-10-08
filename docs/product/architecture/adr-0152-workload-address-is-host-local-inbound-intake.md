@@ -2,10 +2,10 @@
 
 ## Status
 
-**Proposed — approved by user (D8 2026-10-05; route convergence, D8a-ROUTE
-and U-4 2026-10-06, current wording 2026-10-08; the node-address check
-D8-PREFIX-CFG 2026-10-08; the VIP-range check D8-PREFIX-VIP 2026-10-08);
-pending independent DESIGN review.** GH #295.
+**Accepted — approved by user (D8 2026-10-05; route convergence, D8a-ROUTE and U-4
+2026-10-06, current wording 2026-10-08; the node-address check D8-PREFIX-CFG
+2026-10-08; the VIP-range check D8-PREFIX-VIP 2026-10-08); independent review
+r12 answered; further review waived by user 2026-10-08; handed to DISTILL.** GH #295.
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN — PROPOSED 2026-10-05*.
 

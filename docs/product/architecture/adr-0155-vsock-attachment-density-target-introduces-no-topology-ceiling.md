@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — decision D11 approved by user 2026-10-05; pending independent
-DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+**Accepted — decision D11 approved by user 2026-10-05; independent review r12 answered;
+further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
 
 When accepted, this ADR **supersedes ADR-0117** (initial shared-bridge density

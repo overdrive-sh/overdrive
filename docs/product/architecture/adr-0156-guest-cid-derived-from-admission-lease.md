@@ -2,14 +2,16 @@
 
 ## Status
 
-**Proposed — decision D16 approved by user 2026-10-05, with next-fit
-assignment (independent DESIGN review finding M-9) confirmed by user
-2026-10-06; pending independent DESIGN review.** GH #295.
+**Accepted — decision D16 approved by user 2026-10-05, with next-fit assignment
+(independent DESIGN review finding M-9) confirmed by user 2026-10-06;
+independent review r12 answered; further review waived by user 2026-10-08;
+handed to DISTILL.** GH #295.
 Amends on acceptance: ADR-0118 (assignment order of the address pool).
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN — PROPOSED 2026-10-05*. Depends on ADR-0146. How the derived CID is
 made the lease's own on the host kernel is ADR-0170 (D16-CLAIM, approved by
-user 2026-10-07; pending independent DESIGN review).
+user 2026-10-07; independent review r12 answered; further review waived by
+user 2026-10-08; handed to DISTILL).
 
 ## Context
 

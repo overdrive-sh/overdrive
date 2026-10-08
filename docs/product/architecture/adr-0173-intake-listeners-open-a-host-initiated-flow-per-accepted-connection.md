@@ -2,9 +2,9 @@
 
 ## Status
 
-**Proposed — approved by user (D8 2026-10-05; its residual pre-activation
-difference D15-R1 acknowledged by user 2026-10-05); pending independent
-DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+**Accepted — approved by user (D8 2026-10-05; its residual pre-activation difference
+D15-R1 acknowledged by user 2026-10-05); independent review r12 answered;
+further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*. When a listener exists
 while the guest does or does not listen is ADR-0163; how it becomes reachable
 is ADR-0171 / ADR-0172. Inbound UDP service to VMs is deferred to **#310**

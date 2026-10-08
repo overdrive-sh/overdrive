@@ -2,13 +2,14 @@
 
 ## Status
 
-**Proposed — decision D6 approved by user 2026-10-05; decision D25, the guest
+**Accepted — decision D6 approved by user 2026-10-05; decision D25, the guest
 intake model (independent DESIGN review finding H-2: reserved ports, slot
 identity and release, pool sizes, exhaustion outcomes, deploy refusal of a
 reserved port) with its residual D15 differences D15-R2, approved by user
 2026-10-06; the exact bind-refusal scope (D25-BIND) and the end of an
 unpaired or aborted datagram association (U-2), approved by user 2026-10-06;
-pending independent DESIGN review.** GH #295. Recorded in the #295
+independent review r12 answered; further review waived by user 2026-10-08;
+handed to DISTILL.** GH #295. Recorded in the #295
 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
 2026-10-05*, § *[REF] Guest adaptation contract* and § *[REF] Core
 vocabulary* (intake constants and the deploy refusal's typed error).

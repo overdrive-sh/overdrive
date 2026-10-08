@@ -2,11 +2,12 @@
 
 ## Status
 
-**Proposed — ruling D14 approved by user 2026-10-05; the connect bound
-D15-R3 = (b) (independent DESIGN review finding L-5) approved by user
-2026-10-06; pending independent DESIGN review.** GH #295. Recorded in the #295
+**Accepted — ruling D14 approved by user 2026-10-05; the connect bound D15-R3 = (b)
+(independent DESIGN review finding L-5) approved by user 2026-10-06;
+independent review r12 answered; further review waived by user 2026-10-08;
+handed to DISTILL.** GH #295. Recorded in the #295
 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
-2026-10-05*. The ADR becomes Accepted with the D1 transport it depends on. Its
+2026-10-05*. The ADR is Accepted with the D1 transport it depends on. Its
 destination set is limited by ADR-0167 (host-internal destinations refused;
 decision D26, approved by user 2026-10-06).
 

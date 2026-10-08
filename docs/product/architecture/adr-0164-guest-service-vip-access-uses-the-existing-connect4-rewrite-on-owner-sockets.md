@@ -2,11 +2,12 @@
 
 ## Status
 
-**Proposed — decision D24 approved by user 2026-10-06; its startup refusal
+**Accepted — decision D24 approved by user 2026-10-06; its startup refusal
 outside the `connect4` attach point approved by user 2026-10-06; decision
 D24a — TCP to a VIP is resolved as mesh, narrowing D24 to datagrams
-(independent DESIGN review finding H-3) — approved by user 2026-10-06; pending
-independent DESIGN review.** GH #295. Recorded in the
+(independent DESIGN review finding H-3) — approved by user 2026-10-06;
+independent review r12 answered; further review waived by user 2026-10-08;
+handed to DISTILL.** GH #295. Recorded in the
 #295 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
 2026-10-05*. Depends on ADR-0151 (the owner), ADR-0153 (mesh flows), ADR-0162
 (direct non-mesh forwarding) and ADR-0165 (tuple registration).

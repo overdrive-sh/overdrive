@@ -2,13 +2,14 @@
 
 ## Status
 
-**Proposed — approved by user (D5a = hybrid 2026-10-06; its attachment set,
+**Accepted — approved by user (D5a = hybrid 2026-10-06; its attachment set,
 current wording D5a-IFACE, 2026-10-08; the boot refusal on any attach
 failure, D5a-IFACE-BOOT, and no attach after boot because the appliance
 configures no interface registered after boot, D5a-LATE, 2026-10-08; that
 image requirement recorded in ADR-0068 § 5, IMG-IFACE-BOOT, and `serve`'s own
 boot-created interfaces ordered before the attach, D5a-SERVE-IFACE,
-2026-10-08); pending independent DESIGN review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
+2026-10-08); independent review r12 answered; further review waived by user
+2026-10-08; handed to DISTILL.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
 records one decision. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*, which holds the
 forwarder contract.

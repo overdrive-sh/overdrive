@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — decision D8a-LOOKUP approved by user 2026-10-07; pending
-independent DESIGN review.** GH #295. Recorded in the #295 feature delta,
+**Accepted — decision D8a-LOOKUP approved by user 2026-10-07; independent review r12
+answered; further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta,
 § *[REF] vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05*. It is the
 mechanism of ADR-0172 (only steered intake listeners are reachable at the
 guest prefix). How each boot replaces the program is ADR-0175; how admission
