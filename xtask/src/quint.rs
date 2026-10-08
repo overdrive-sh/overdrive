@@ -57,15 +57,18 @@
 //!   bound on the count (default: the CPU count). Each check has a private
 //!   server port and a private `TMPDIR` / `java.io.tmpdir` (which also holds
 //!   TLC's state queue) under `target/quint/` — never `/tmp`, a RAM disk in
-//!   the Lima VM. The peak resident memory of each check's process group is
-//!   sampled and reported beside its reservation.
+//!   the Lima VM — removed when the attempt ends. The peak resident memory of
+//!   each check's process group is sampled and reported beside its
+//!   reservation.
 //!
-//! Every attempt writes its full checker log to
-//! `target/quint/<subsystem>/<check>/attempt-<n>.log` (attempts are never
-//! overwritten within a run), an append-only `events.log` records each
-//! attempt's start, end, kill and verdict, and an Apalache counterexample's
-//! ITF trace lands beside them. Each subsystem gets a
-//! `target/quint/<subsystem>/summary.json`.
+//! Output is run-scoped, so no run overwrites another's logs: every attempt
+//! writes its full checker log to
+//! `target/quint/<subsystem>/<run-id>/<check>/attempt-<n>.log` (attempts are
+//! never overwritten within a run), an append-only `events.log` records each
+//! attempt's start, end, kill, scratch cleanup and verdict, and an Apalache
+//! counterexample's ITF trace lands beside them. Each subsystem gets a
+//! `target/quint/<subsystem>/<run-id>/summary.json`; only the duration
+//! history (`target/quint/<subsystem>/durations.json`) spans runs.
 //!
 //! `--record` (one full subsystem only) additionally replaces
 //! `specs/quint/<subsystem>/evidence/` with the evidence of this run — see
@@ -1001,6 +1004,22 @@ fn event(out_dir: &Path, line: &str) -> Result<()> {
     writeln!(f, "{:.3} {line}", unix_now()).wrap_err_with(|| format!("writing {}", path.display()))
 }
 
+/// Remove an ended attempt's scratch `tmp-<n>/` (TLC's state queue,
+/// Quint's TLA+ translation, JVM temp files) and log it. Logs, the ITF trace
+/// and `events.log` stay. A failed removal is logged and reported, never
+/// fatal: it costs disk, not evidence.
+fn remove_scratch(out_dir: &Path, attempt: u32) -> Result<()> {
+    let tmp = out_dir.join(format!("tmp-{attempt}"));
+    match fs::remove_dir_all(&tmp) {
+        Ok(()) => event(out_dir, &format!("attempt {attempt} scratch {} removed", tmp.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => {
+            eprintln!("xtask quint check: could not remove {}: {e}", tmp.display());
+            event(out_dir, &format!("attempt {attempt} scratch {} NOT removed: {e}", tmp.display()))
+        }
+    }
+}
+
 /// One selected check.
 struct Job {
     subsystem: String,
@@ -1136,13 +1155,15 @@ fn start_attempt(
     let j = &jobs[job];
     let out_dir = &j.out_dir;
     if attempt == 1 {
-        // Fresh output dir so a stale trace or log is never mistaken for
-        // this run's. Later attempts keep earlier attempts' files.
-        if out_dir.exists() {
-            fs::remove_dir_all(out_dir)
-                .wrap_err_with(|| format!("clearing {}", out_dir.display()))?;
+        // The output dir is run-scoped and new: creating it (not reusing an
+        // existing one) guarantees no earlier run's trace or log is mistaken
+        // for this run's, and none is overwritten. Later attempts keep
+        // earlier attempts' files.
+        if let Some(parent) = out_dir.parent() {
+            fs::create_dir_all(parent)
+                .wrap_err_with(|| format!("creating {}", parent.display()))?;
         }
-        fs::create_dir_all(out_dir).wrap_err_with(|| format!("creating {}", out_dir.display()))?;
+        fs::create_dir(out_dir).wrap_err_with(|| format!("creating {}", out_dir.display()))?;
     }
     let tmp = out_dir.join(format!("tmp-{attempt}"));
     fs::create_dir_all(&tmp).wrap_err_with(|| format!("creating {}", tmp.display()))?;
@@ -1267,6 +1288,7 @@ fn select_jobs(
     filter: &CheckFilter,
     opts: CheckOptions,
     res: &ResourceConfig,
+    run_id: &str,
 ) -> Result<Vec<Job>> {
     let mut jobs: Vec<Job> = Vec::new();
     for (subsystem, dir) in subsystems(specs, filter.subsystem.as_deref())? {
@@ -1281,7 +1303,7 @@ fn select_jobs(
                 continue;
             }
             jobs.push(Job {
-                out_dir: root.join(OUT_DIR).join(&subsystem).join(&c.name),
+                out_dir: run_dir(root, &subsystem, run_id).join(&c.name),
                 timeout: effective_timeout(opts.timeout_secs, c.timeout_secs),
                 sizing: res.sizing(&c),
                 reservation: res.reservation(&c),
@@ -1292,6 +1314,12 @@ fn select_jobs(
         }
     }
     Ok(jobs)
+}
+
+/// `target/quint/<subsystem>/<run-id>/`: everything one run writes for one
+/// subsystem.
+fn run_dir(root: &Path, subsystem: &str, run_id: &str) -> PathBuf {
+    root.join(OUT_DIR).join(subsystem).join(run_id)
 }
 
 /// Previous measured seconds of each job (`None` = no history).
@@ -1587,6 +1615,7 @@ impl<'a> Supervisor<'a> {
                 r.attempt, r.peak_rss_mb, r.group.pgid
             ),
         )?;
+        remove_scratch(&j.out_dir, r.attempt)?;
         let now = self.stamp(Instant::now());
         match verdict {
             AttemptVerdict::Retry { cause } => {
@@ -1628,6 +1657,7 @@ impl<'a> Supervisor<'a> {
             r.group.terminate()?;
             let j = &self.jobs[r.job];
             event(&j.out_dir, &format!("attempt {} killed: runner got signal {sig}", r.attempt))?;
+            remove_scratch(&j.out_dir, r.attempt)?;
             self.peak_rss_mb[r.job] = self.peak_rss_mb[r.job].max(r.peak_rss_mb);
         }
         for i in 0..self.jobs.len() {
@@ -1674,7 +1704,7 @@ fn write_summaries(
                 .map(|(_, r)| r)
                 .collect(),
         };
-        let path = root.join(OUT_DIR).join(sub).join("summary.json");
+        let path = run_dir(root, sub, info.run_id).join("summary.json");
         let body = serde_json::to_string_pretty(&summary).wrap_err("encoding summary.json")?;
         fs::write(&path, body).wrap_err_with(|| format!("writing {}", path.display()))?;
         eprintln!("xtask quint check: wrote {}", path.display());
@@ -1717,7 +1747,9 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
     }
     let cpus = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let res = ResourceConfig::resolve(opts.resources, cpus, meminfo().0);
-    let jobs = select_jobs(&root, &specs, filter, opts, &res)?;
+    let started_unix = unix_now();
+    let run_id = format!("{}-{started_unix:.3}", std::process::id());
+    let jobs = select_jobs(&root, &specs, filter, opts, &res, &run_id)?;
     if jobs.is_empty() {
         if let Some(name) = &filter.name {
             bail!("no check named `{name}` matches the selection");
@@ -1730,8 +1762,6 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
 
     let max_jobs =
         opts.jobs.unwrap_or_else(|| usize::try_from(res.budget.cpus).unwrap_or(usize::MAX)).max(1);
-    let started_unix = unix_now();
-    let run_id = format!("{}-{started_unix:.3}", std::process::id());
 
     install_signal_handlers()?;
     let swept = sweep_stale(&run_id)?;
@@ -1767,10 +1797,24 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
         interrupted,
     };
     write_summaries(&root, &jobs, &records, &info)?;
-    print_table(&jobs, &records, wall, &info);
-    if let Some(inputs) = record_inputs {
-        record_evidence(&root, &jobs, &records, &info, inputs)?;
+    // Record before printing the table, so the table can show which
+    // counterexamples lost their trace. A recording failure is kept, not
+    // returned, so the table and every other failure are still reported.
+    let recorded = record_inputs
+        .and_then(|inputs| record_evidence(&root, &jobs, &records, &info, inputs).transpose());
+    let trace_errors: BTreeMap<&str, &evidence::TraceRecordError> = match &recorded {
+        Some(Ok(report)) => {
+            report.trace_errors.iter().map(|(name, err, _)| (name.as_str(), err)).collect()
+        }
+        _ => BTreeMap::new(),
+    };
+    print_table(&jobs, &records, wall, &info, &trace_errors);
+    let subsystem_names: BTreeSet<&str> = jobs.iter().map(|j| j.subsystem.as_str()).collect();
+    for sub in subsystem_names {
+        eprintln!("logs: {}", run_dir(&root, sub, &run_id).display());
     }
+    // End of run: what went wrong with the evidence, last, where it is seen.
+    let evidence_failures = report_evidence(recorded.as_ref());
 
     let failures: Vec<String> = jobs
         .iter()
@@ -1793,30 +1837,74 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
             jobs.len()
         );
     }
-    if failures.is_empty() {
+    if failures.is_empty() && evidence_failures.is_empty() {
         eprintln!("xtask quint check: {} check(s) passed", jobs.len());
-        Ok(())
-    } else {
-        bail!(
-            "{} of {} Quint check(s) failed:\n  {}",
-            failures.len(),
-            jobs.len(),
-            failures.join("\n  ")
-        )
+        return Ok(());
     }
+    bail!(final_message(&failures, jobs.len(), &evidence_failures))
 }
 
-/// `--record`: replace the subsystem's `evidence/` after a completed run.
+/// Print what `--record` did — the evidence directory, or why nothing was
+/// recorded, and every counterexample recorded without its trace — and
+/// return those problems for the final error.
+fn report_evidence(recorded: Option<&Result<evidence::RecordReport>>) -> Vec<String> {
+    let mut problems = Vec::new();
+    match recorded {
+        None => {}
+        Some(Err(err)) => {
+            eprintln!("xtask quint check: evidence NOT recorded: {err:#}");
+            problems.push(format!("evidence not recorded: {err:#}"));
+        }
+        Some(Ok(report)) => {
+            eprintln!(
+                "xtask quint check: recorded {} check(s) into {}",
+                report.checks,
+                report.evidence_dir.display()
+            );
+            for (name, err, log) in &report.trace_errors {
+                let line = format!(
+                    "{name}: counterexample recorded WITHOUT its trace — {err}{}",
+                    log.as_deref().map_or(String::new(), |l| format!(
+                        " (full log: {})",
+                        report.evidence_dir.join(l).display()
+                    ))
+                );
+                eprintln!("xtask quint check: {line}");
+                problems.push(line);
+            }
+        }
+    }
+    problems
+}
+
+/// The run's final error: missed `expect`s, then evidence problems.
+fn final_message(failures: &[String], total: usize, evidence_failures: &[String]) -> String {
+    let mut parts = Vec::with_capacity(2);
+    if !failures.is_empty() {
+        parts.push(format!(
+            "{} of {total} Quint check(s) failed:\n  {}",
+            failures.len(),
+            failures.join("\n  ")
+        ));
+    }
+    if !evidence_failures.is_empty() {
+        parts.push(format!("evidence problems:\n  {}", evidence_failures.join("\n  ")));
+    }
+    parts.join("\n")
+}
+
+/// `--record`: replace the subsystem's `evidence/` after a completed run
+/// (`None` when the run was interrupted and nothing was recorded).
 fn record_evidence(
     root: &Path,
     jobs: &[Job],
     records: &[CheckRecord],
     info: &RunInfo<'_>,
     inputs: BTreeMap<String, String>,
-) -> Result<()> {
+) -> Result<Option<evidence::RecordReport>> {
     if let Some(sig) = info.interrupted {
         eprintln!("xtask quint check: interrupted by signal {sig}; evidence not recorded");
-        return Ok(());
+        return Ok(None);
     }
     evidence::record(
         &evidence::RunMeta {
@@ -1832,6 +1920,7 @@ fn record_evidence(
         jobs,
         records,
     )
+    .map(Some)
 }
 
 /// `cargo xtask quint verify-evidence` — fail unless recorded evidence is current and passing.
@@ -1881,7 +1970,13 @@ pub fn verify_evidence(subsystem: Option<&str>) -> Result<()> {
     }
 }
 
-fn print_table(jobs: &[Job], records: &[CheckRecord], wall: Duration, info: &RunInfo<'_>) {
+fn print_table(
+    jobs: &[Job],
+    records: &[CheckRecord],
+    wall: Duration,
+    info: &RunInfo<'_>,
+    trace_errors: &BTreeMap<&str, &evidence::TraceRecordError>,
+) {
     let width =
         jobs.iter().map(|j| j.subsystem.len() + 1 + j.check.name.len()).max().unwrap_or(5).max(5);
     eprintln!();
@@ -1900,7 +1995,12 @@ fn print_table(jobs: &[Job], records: &[CheckRecord], wall: Duration, info: &Run
             r.attempts,
             format!("{}M/{}cpu", r.reserved_mem_mb, r.reserved_cpus),
             r.peak_rss_mb,
-            if r.pass { "PASS" } else { "FAIL" },
+            match (r.pass, trace_errors.get(r.name.as_str())) {
+                (true, None) => "PASS".to_owned(),
+                (false, None) => "FAIL".to_owned(),
+                (pass, Some(err)) =>
+                    format!("{} — NO TRACE: {err}", if pass { "PASS" } else { "FAIL" }),
+            },
         );
     }
     eprintln!(

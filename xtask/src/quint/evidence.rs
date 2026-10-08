@@ -4,7 +4,10 @@
 //! `cargo xtask quint check --subsystem <dir> --record` is the only writer.
 //! At the end of a completed run (whatever the verdicts) it builds the new
 //! evidence in a hidden staging directory beside `evidence/` and swaps it in,
-//! so `evidence/` never holds a mix of two runs:
+//! so `evidence/` never holds a mix of two runs. A counterexample whose trace
+//! cannot be read, parsed or staged does not stop the recording: the check is
+//! recorded with its outcome and a typed [`TraceRecordError`], its full log
+//! goes to `failures/`, and every other check's evidence is still swapped in.
 //!
 //! ```text
 //! evidence/
@@ -18,14 +21,16 @@
 //!                             0.32 writes no ITF for the TLC backend)
 //!   traces/<check>.txt        condensed state sequence of either
 //!   failures/<check>.log      every attempt's full log + events.log, only
-//!                             for checks whose outcome missed `expect`
+//!                             for checks whose outcome missed `expect` or
+//!                             whose counterexample trace was not recorded
 //! ```
 //!
 //! Full logs of passing checks stay under `target/quint/` only. Earlier runs
 //! live in git history, not beside the current one.
 //!
 //! `cargo xtask quint verify-evidence` recomputes the input hashes and fails
-//! when `summary.json` is stale or any recorded outcome misses its `expect`.
+//! when `summary.json` is stale, any recorded outcome misses its `expect`, or
+//! a counterexample was recorded without its trace.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -169,6 +174,40 @@ pub struct CheckEvidence {
     pub condensed: Option<String>,
     /// Full logs of a failed check (relative to `evidence/`).
     pub failure_log: Option<String>,
+    /// Why the counterexample's trace was not recorded (`trace` and
+    /// `condensed` are then `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_error: Option<TraceRecordError>,
+}
+
+/// Why a counterexample's trace was not recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TraceRecordError {
+    /// The checker's trace output (Apalache ITF file, TLC log) could not be read.
+    #[error("cannot read {file}: {error}")]
+    Unreadable {
+        /// The file.
+        file: String,
+        /// The I/O error.
+        error: String,
+    },
+    /// The output holds no counterexample this runner can parse.
+    #[error("no parsable counterexample in {file}: {error}")]
+    Unparsable {
+        /// The file.
+        file: String,
+        /// The parse error.
+        error: String,
+    },
+    /// The trace could not be written into the staged evidence.
+    #[error("cannot write {file} into the staged evidence: {error}")]
+    Unwritable {
+        /// Path relative to `evidence/`.
+        file: String,
+        /// The I/O error.
+        error: String,
+    },
 }
 
 /// sha256 (hex) of `checks.toml` and every `.qnt` under `dir` (skipping
@@ -213,6 +252,8 @@ fn cell(s: &str) -> String {
 pub fn render_md(s: &EvidenceSummary) -> String {
     let mut out = String::new();
     let passed = s.checks.iter().filter(|c| c.pass).count();
+    let untraced: Vec<&CheckEvidence> =
+        s.checks.iter().filter(|c| c.trace_error.is_some()).collect();
     let _ = writeln!(out, "# Quint evidence — `{}`\n", s.subsystem);
     let _ = writeln!(
         out,
@@ -221,7 +262,16 @@ pub fn render_md(s: &EvidenceSummary) -> String {
         s.subsystem, s.subsystem
     );
     let _ = writeln!(out, "| | |\n|---|---|");
-    let _ = writeln!(out, "| Result | {passed} of {} check(s) matched `expect` |", s.checks.len());
+    let _ = writeln!(
+        out,
+        "| Result | {passed} of {} check(s) matched `expect`{} |",
+        s.checks.len(),
+        if untraced.is_empty() {
+            String::new()
+        } else {
+            format!("; **{} counterexample(s) without a recorded trace**", untraced.len())
+        }
+    );
     let _ = writeln!(out, "| Run | `{}`, {} → {} |", s.run_id, s.started, s.finished);
     let _ = writeln!(out, "| Jobs | {} |", s.jobs);
     let _ = writeln!(
@@ -242,6 +292,9 @@ pub fn render_md(s: &EvidenceSummary) -> String {
     let _ = writeln!(out, "|---|---|---|---|---|---|---|---|---|---:|---:|---|");
     for c in &s.checks {
         let mut files: Vec<String> = Vec::new();
+        if c.trace_error.is_some() {
+            files.push("**no trace**".to_owned());
+        }
         for f in [&c.condensed, &c.trace, &c.failure_log].into_iter().flatten() {
             files.push(format!("[{f}]({f})"));
         }
@@ -274,6 +327,20 @@ pub fn render_md(s: &EvidenceSummary) -> String {
                 c.expect.as_str(),
                 c.outcome.as_str(),
                 c.cause.as_deref().map_or(String::new(), |cause| format!(" — {cause}"))
+            );
+        }
+    }
+    if !untraced.is_empty() {
+        let _ = writeln!(out, "\n## Counterexamples without a recorded trace\n");
+        for c in untraced {
+            let _ = writeln!(
+                out,
+                "- `{}`: {}{}",
+                c.name,
+                c.trace_error.as_ref().map_or(String::new(), |e| cell(&e.to_string())),
+                c.failure_log
+                    .as_deref()
+                    .map_or(String::new(), |f| format!(" — full log: [{f}]({f})"))
             );
         }
     }
@@ -333,11 +400,22 @@ pub enum EvidenceProblem {
         /// Outcome label.
         outcome: &'static str,
     },
-    /// A recorded counterexample has no trace.
+    /// A recorded counterexample has no trace and no recorded reason.
     #[error("check `{name}`: counterexample recorded without a trace")]
     MissingTrace {
         /// Check name.
         name: String,
+    },
+    /// The recording run could not record a counterexample's trace.
+    #[error(
+        "check `{name}`: counterexample trace NOT recorded — {cause}; a reviewer cannot \
+         inspect this counterexample (fix the cause, then re-record)"
+    )]
+    TraceNotRecorded {
+        /// Check name.
+        name: String,
+        /// The recorded [`TraceRecordError`].
+        cause: String,
     },
     /// A file the summary references is absent.
     #[error("`{file}` is referenced by summary.json but missing")]
@@ -389,7 +467,12 @@ pub fn verify_summary(
                 outcome: c.outcome.as_str(),
             });
         }
-        if c.outcome == Outcome::Violation && (c.trace.is_none() || c.condensed.is_none()) {
+        if let Some(err) = &c.trace_error {
+            problems.push(EvidenceProblem::TraceNotRecorded {
+                name: c.name.clone(),
+                cause: err.to_string(),
+            });
+        } else if c.outcome == Outcome::Violation && (c.trace.is_none() || c.condensed.is_none()) {
             problems.push(EvidenceProblem::MissingTrace { name: c.name.clone() });
         }
         for f in [&c.trace, &c.condensed, &c.failure_log].into_iter().flatten() {
@@ -504,21 +587,26 @@ pub(super) struct RunMeta<'a> {
     pub inputs: BTreeMap<String, String>,
 }
 
-/// One file of the new evidence, relative to the evidence dir.
-type Staged = Vec<(String, Vec<u8>)>;
-
-fn attempt_logs(job: &Job, attempts: u32) -> Result<Vec<u8>> {
+/// The full logs of a check: every attempt's log, then `events.log`. A log
+/// that cannot be read is named in the output with its error, so the copy
+/// still carries whatever survived.
+fn attempt_logs(job: &Job, attempts: u32) -> Vec<u8> {
     let mut out = Vec::new();
-    for n in 1..=attempts {
-        let path = job.out_dir.join(format!("attempt-{n}.log"));
-        let _ = writeln!(Fmt(&mut out), "===== attempt {n}: {} =====", path.display());
-        out.extend(fs::read(&path).wrap_err_with(|| format!("reading {}", path.display()))?);
+    let mut append = |label: &str, path: &Path| {
+        let _ = writeln!(Fmt(&mut out), "===== {label}: {} =====", path.display());
+        match fs::read(path) {
+            Ok(bytes) => out.extend(bytes),
+            Err(e) => {
+                let _ = writeln!(Fmt(&mut out), "(could not read {}: {e})", path.display());
+            }
+        }
         out.push(b'\n');
+    };
+    for n in 1..=attempts {
+        append(&format!("attempt {n}"), &job.out_dir.join(format!("attempt-{n}.log")));
     }
-    let events = job.out_dir.join("events.log");
-    let _ = writeln!(Fmt(&mut out), "===== {} =====", events.display());
-    out.extend(fs::read(&events).wrap_err_with(|| format!("reading {}", events.display()))?);
-    Ok(out)
+    append("events", &job.out_dir.join("events.log"));
+    out
 }
 
 /// `fmt::Write` over a byte buffer.
@@ -531,7 +619,144 @@ impl std::fmt::Write for Fmt<'_> {
     }
 }
 
-fn check_evidence(job: &Job, rec: &CheckRecord, staged: &mut Staged) -> Result<CheckEvidence> {
+/// A hidden staging directory beside `<dir>/evidence/` that the new evidence
+/// is written into and then swapped in. Removed on drop unless installed.
+struct Stage {
+    dir: PathBuf,
+    old: PathBuf,
+    target: PathBuf,
+    installed: bool,
+}
+
+impl Stage {
+    fn create(dir: &Path, run_id: &str) -> Result<Self> {
+        let tag: String =
+            run_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        let stage = Self {
+            dir: dir.join(format!(".evidence.new-{tag}")),
+            old: dir.join(format!(".evidence.old-{tag}")),
+            target: dir.join(EVIDENCE_DIR),
+            installed: false,
+        };
+        if stage.dir.exists() {
+            fs::remove_dir_all(&stage.dir)
+                .wrap_err_with(|| format!("clearing {}", stage.dir.display()))?;
+        }
+        fs::create_dir_all(&stage.dir)
+            .wrap_err_with(|| format!("creating {}", stage.dir.display()))?;
+        Ok(stage)
+    }
+
+    /// Write one file (path relative to `evidence/`).
+    fn write(&self, rel: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let path = self.dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, bytes)
+    }
+
+    /// Write one file; a failure ends the recording.
+    fn write_or_fail(&self, rel: &str, bytes: &[u8]) -> Result<()> {
+        self.write(rel, bytes).wrap_err_with(|| format!("writing {}", self.dir.join(rel).display()))
+    }
+
+    /// Remove one staged file written before a later write of the same check
+    /// failed. An absent file is fine (it was never written).
+    fn unwrite(&self, rel: &str) -> std::io::Result<()> {
+        match fs::remove_file(self.dir.join(rel)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+
+    /// Swap the staged directory in place of `evidence/`.
+    fn install(mut self) -> Result<()> {
+        if self.target.exists() {
+            fs::rename(&self.target, &self.old)
+                .wrap_err_with(|| format!("moving {} aside", self.target.display()))?;
+            if let Err(err) = fs::rename(&self.dir, &self.target) {
+                fs::rename(&self.old, &self.target).wrap_err_with(|| {
+                    format!("restoring {} after a failed swap ({err})", self.target.display())
+                })?;
+                return Err(eyre!("installing {}: {err}", self.target.display()));
+            }
+            self.installed = true;
+            fs::remove_dir_all(&self.old)
+                .wrap_err_with(|| format!("removing {}", self.old.display()))?;
+        } else {
+            fs::rename(&self.dir, &self.target)
+                .wrap_err_with(|| format!("installing {}", self.target.display()))?;
+            self.installed = true;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Stage {
+    fn drop(&mut self) {
+        if !self.installed
+            && let Err(e) = fs::remove_dir_all(&self.dir)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!(
+                "xtask quint check: could not remove the staging dir {}: {e}",
+                self.dir.display()
+            );
+        }
+    }
+}
+
+/// Read, parse and stage one counterexample's raw and condensed trace.
+/// Returns `(raw, condensed)` paths relative to `evidence/`.
+fn stage_trace(
+    job: &Job,
+    rec: &CheckRecord,
+    stage: &Stage,
+) -> Result<(String, String), TraceRecordError> {
+    let c = &job.check;
+    let read = |path: &Path| {
+        fs::read_to_string(path).map_err(|e| TraceRecordError::Unreadable {
+            file: path.display().to_string(),
+            error: e.to_string(),
+        })
+    };
+    let unparsable = |path: &Path, e: trace::TraceError| TraceRecordError::Unparsable {
+        file: path.display().to_string(),
+        error: e.to_string(),
+    };
+    let (raw_name, raw, parsed, source) = match c.backend {
+        Backend::Apalache => {
+            let itf = job.out_dir.join("trace.itf.json");
+            let body = read(&itf)?;
+            let parsed = trace::parse_itf(&body).map_err(|e| unparsable(&itf, e))?;
+            (format!("traces/{}.itf.json", c.name), body, parsed, "ITF")
+        }
+        Backend::Tlc => {
+            let log = read(&rec.log)?;
+            let text = trace::extract_tlc_trace(&log).map_err(|e| unparsable(&rec.log, e))?;
+            let parsed = trace::parse_tlc(&text).map_err(|e| unparsable(&rec.log, e))?;
+            (format!("traces/{}.tlc.txt", c.name), text, parsed, "TLC")
+        }
+    };
+    let condensed_name = format!("traces/{}.txt", c.name);
+    let condensed = trace::condense(&c.name, source, &parsed);
+    for (rel, bytes) in [(&condensed_name, condensed.as_bytes()), (&raw_name, raw.as_bytes())] {
+        if let Err(e) = stage.write(rel, bytes) {
+            let mut error = e.to_string();
+            // Leave no half-staged trace behind; say so if even that fails.
+            for done in [&condensed_name, &raw_name] {
+                if let Err(e) = stage.unwrite(done) {
+                    let _ = write!(error, "; and could not remove staged {done}: {e}");
+                }
+            }
+            return Err(TraceRecordError::Unwritable { file: rel.clone(), error });
+        }
+    }
+    Ok((raw_name, condensed_name))
+}
+
+fn check_evidence(job: &Job, rec: &CheckRecord, stage: &Stage) -> Result<CheckEvidence> {
     let c = &job.check;
     let (property_kind, property) = match &c.property {
         Property::Invariant(p) => ("invariant", p.clone()),
@@ -560,46 +785,61 @@ fn check_evidence(job: &Job, rec: &CheckRecord, staged: &mut Staged) -> Result<C
         trace: None,
         condensed: None,
         failure_log: None,
+        trace_error: None,
     };
     if rec.outcome == Outcome::Violation {
-        let (raw_name, raw, parsed, source) = match c.backend {
-            Backend::Apalache => {
-                let itf = job.out_dir.join("trace.itf.json");
-                let body = fs::read_to_string(&itf).wrap_err_with(|| {
-                    format!("check `{}`: counterexample without {}", c.name, itf.display())
-                })?;
-                let parsed = trace::parse_itf(&body)
-                    .wrap_err_with(|| format!("check `{}`: {}", c.name, itf.display()))?;
-                (format!("traces/{}.itf.json", c.name), body, parsed, "ITF")
+        match stage_trace(job, rec, stage) {
+            Ok((raw, condensed)) => {
+                ev.trace = Some(raw);
+                ev.condensed = Some(condensed);
             }
-            Backend::Tlc => {
-                let log = fs::read_to_string(&rec.log)
-                    .wrap_err_with(|| format!("reading {}", rec.log.display()))?;
-                let text = trace::extract_tlc_trace(&log).ok_or_else(|| {
-                    eyre!("check `{}`: no TLC counterexample in {}", c.name, rec.log.display())
-                })?;
-                let parsed = trace::parse_tlc(&text)
-                    .wrap_err_with(|| format!("check `{}`: {}", c.name, rec.log.display()))?;
-                (format!("traces/{}.tlc.txt", c.name), text, parsed, "TLC")
-            }
-        };
-        let condensed_name = format!("traces/{}.txt", c.name);
-        staged.push((condensed_name.clone(), trace::condense(&c.name, source, &parsed).into()));
-        staged.push((raw_name.clone(), raw.into_bytes()));
-        ev.trace = Some(raw_name);
-        ev.condensed = Some(condensed_name);
+            Err(err) => ev.trace_error = Some(err),
+        }
     }
-    if !rec.pass {
+    if !rec.pass || ev.trace_error.is_some() {
         let name = format!("failures/{}.log", c.name);
-        staged.push((name.clone(), attempt_logs(job, rec.attempts)?));
+        stage.write_or_fail(&name, &attempt_logs(job, rec.attempts))?;
         ev.failure_log = Some(name);
     }
     Ok(ev)
 }
 
+/// One [`CheckEvidence`] per check, staging its trace and failure log. A
+/// trace that cannot be recorded becomes that check's `trace_error`; only a
+/// failure to stage a failure log is an `Err`.
+fn stage_checks(
+    jobs: &[Job],
+    records: &[CheckRecord],
+    stage: &Stage,
+) -> Result<Vec<CheckEvidence>> {
+    jobs.iter().zip(records).map(|(job, rec)| check_evidence(job, rec, stage)).collect()
+}
+
+/// What [`record`] did.
+#[derive(Debug)]
+pub(super) struct RecordReport {
+    /// The installed `evidence/` directory.
+    pub evidence_dir: PathBuf,
+    /// Checks recorded.
+    pub checks: usize,
+    /// `(check, error, failure log relative to evidence/)` for every
+    /// counterexample recorded without its trace.
+    pub trace_errors: Vec<(String, TraceRecordError, Option<String>)>,
+}
+
 /// Build the evidence of a completed run and swap it into
 /// `<dir>/evidence/`.
-pub(super) fn record(meta: &RunMeta<'_>, jobs: &[Job], records: &[CheckRecord]) -> Result<()> {
+///
+/// A per-check trace failure is recorded in that check's
+/// [`CheckEvidence::trace_error`] and reported in the returned
+/// [`RecordReport`]; only a failure that affects the whole evidence (inputs
+/// changed, tool versions unavailable, the staging dir or `summary.json`
+/// unwritable, the swap) is an `Err`.
+pub(super) fn record(
+    meta: &RunMeta<'_>,
+    jobs: &[Job],
+    records: &[CheckRecord],
+) -> Result<RecordReport> {
     let after = hash_inputs(meta.dir)?;
     if after != meta.inputs {
         bail!(
@@ -607,15 +847,18 @@ pub(super) fn record(meta: &RunMeta<'_>, jobs: &[Job], records: &[CheckRecord]) 
             meta.dir.display()
         );
     }
-    let mut staged: Staged = Vec::new();
-    let mut checks = Vec::with_capacity(jobs.len());
+    let stage = Stage::create(meta.dir, meta.run_id)?;
+    let checks = stage_checks(jobs, records, &stage)?;
     let mut apalache = None;
-    for (job, rec) in jobs.iter().zip(records) {
-        checks.push(check_evidence(job, rec, &mut staged)?);
+    for rec in records {
         if apalache.is_none() {
-            let log = fs::read_to_string(&rec.log)
-                .wrap_err_with(|| format!("reading {}", rec.log.display()))?;
-            apalache = apalache_version(&log);
+            match fs::read_to_string(&rec.log) {
+                Ok(log) => apalache = apalache_version(&log),
+                Err(e) => eprintln!(
+                    "xtask quint check: reading {} for the Apalache version: {e}",
+                    rec.log.display()
+                ),
+            }
         }
     }
     let quint =
@@ -640,60 +883,23 @@ pub(super) fn record(meta: &RunMeta<'_>, jobs: &[Job], records: &[CheckRecord]) 
         checks,
     };
     let json = serde_json::to_string_pretty(&summary).wrap_err("encoding summary.json")? + "\n";
-    staged.push((SUMMARY_JSON.to_owned(), json.into_bytes()));
-    staged.push((SUMMARY_MD.to_owned(), render_md(&summary).into_bytes()));
-    install(meta.dir, meta.run_id, &staged)?;
-    eprintln!(
-        "xtask quint check: recorded {} check(s) into {}",
-        summary.checks.len(),
-        meta.dir.join(EVIDENCE_DIR).display()
-    );
-    Ok(())
-}
-
-/// Write `files` into a hidden staging dir beside `<dir>/evidence/`, then
-/// swap it in place of the old evidence.
-fn install(dir: &Path, run_id: &str, files: &Staged) -> Result<()> {
-    let tag: String =
-        run_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    let stage = dir.join(format!(".evidence.new-{tag}"));
-    let old = dir.join(format!(".evidence.old-{tag}"));
-    let target = dir.join(EVIDENCE_DIR);
-    if stage.exists() {
-        fs::remove_dir_all(&stage).wrap_err_with(|| format!("clearing {}", stage.display()))?;
-    }
-    let written = (|| -> Result<()> {
-        for (rel, bytes) in files {
-            let path: PathBuf = stage.join(rel);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .wrap_err_with(|| format!("creating {}", parent.display()))?;
-            }
-            fs::write(&path, bytes).wrap_err_with(|| format!("writing {}", path.display()))?;
-        }
-        Ok(())
-    })();
-    if let Err(err) = written {
-        let _ = fs::remove_dir_all(&stage);
-        return Err(err);
-    }
-    if target.exists() {
-        fs::rename(&target, &old).wrap_err_with(|| format!("moving {} aside", target.display()))?;
-        if let Err(err) = fs::rename(&stage, &target) {
-            fs::rename(&old, &target).wrap_err_with(|| {
-                format!("restoring {} after a failed swap ({err})", target.display())
-            })?;
-            return Err(eyre!("installing {}: {err}", target.display()));
-        }
-        fs::remove_dir_all(&old).wrap_err_with(|| format!("removing {}", old.display()))?;
-    } else {
-        fs::rename(&stage, &target).wrap_err_with(|| format!("installing {}", target.display()))?;
-    }
-    Ok(())
+    stage.write_or_fail(SUMMARY_JSON, json.as_bytes())?;
+    stage.write_or_fail(SUMMARY_MD, render_md(&summary).as_bytes())?;
+    stage.install()?;
+    Ok(RecordReport {
+        evidence_dir: meta.dir.join(EVIDENCE_DIR),
+        checks: summary.checks.len(),
+        trace_errors: summary
+            .checks
+            .into_iter()
+            .filter_map(|c| c.trace_error.map(|e| (c.name, e, c.failure_log)))
+            .collect(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::resources::Reservation;
     use super::*;
 
     fn check(name: &str, expect: Expect) -> Check {
@@ -733,6 +939,7 @@ mod tests {
             trace: violation.then(|| format!("traces/{name}.itf.json")),
             condensed: violation.then(|| format!("traces/{name}.txt")),
             failure_log: (!pass).then(|| format!("failures/{name}.log")),
+            trace_error: None,
         }
     }
 
@@ -927,15 +1134,187 @@ mod tests {
         assert_eq!(apalache_version("no banner\n"), None);
     }
 
+    fn job(dir: &Path, name: &str, backend: Backend) -> Job {
+        Job {
+            subsystem: "sub".into(),
+            dir: dir.to_path_buf(),
+            check: Check { backend, max_steps: None, ..check(name, Expect::Violation) },
+            out_dir: dir.join("runs").join(name),
+            timeout: std::time::Duration::from_secs(900),
+            sizing: super::super::resources::Sizing { heap_mb: 1024, workers: 1 },
+            reservation: Reservation { mem_mb: 1024, cpus: 1 },
+        }
+    }
+
+    fn check_record(j: &Job, outcome: Outcome) -> CheckRecord {
+        CheckRecord {
+            name: j.check.name.clone(),
+            backend: j.check.backend,
+            expect: j.check.expect,
+            outcome,
+            pass: judge(j.check.expect, outcome),
+            seconds: 1.0,
+            attempts: 1,
+            timeout_secs: 900,
+            cause: None,
+            log: j.out_dir.join("attempt-1.log"),
+            heap_mb: 1024,
+            workers: 1,
+            reserved_mem_mb: 1024,
+            reserved_cpus: 1,
+            peak_rss_mb: 0,
+        }
+    }
+
+    /// One check's log as the runner leaves it: attempt log + events.log.
+    fn write_logs(j: &Job, log: &str) {
+        fs::create_dir_all(&j.out_dir).expect("mkdir");
+        fs::write(j.out_dir.join("attempt-1.log"), log).expect("write");
+        fs::write(j.out_dir.join("events.log"), "1.000 attempt 1 start\n").expect("write");
+    }
+
+    #[test]
+    fn a_trace_that_cannot_be_recorded_spares_every_other_check() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        // An initial-state TLC violation (the shape that once lost a whole
+        // run) is recorded like any other counterexample.
+        let init = job(dir, "init", Backend::Tlc);
+        write_logs(&init, include_str!("testdata/tlc/init-inv.log"));
+        // A TLC violation whose log holds no counterexample text.
+        let garbled = job(dir, "garbled", Backend::Tlc);
+        write_logs(&garbled, "[violation] Found an issue (1ms).\nerror: found a counterexample\n");
+        // An Apalache violation whose ITF file is missing.
+        let no_itf = job(dir, "no-itf", Backend::Apalache);
+        write_logs(&no_itf, "error: found a counterexample\n");
+        // A trace the stage cannot write (its path is taken by a directory).
+        let blocked = job(dir, "blocked", Backend::Tlc);
+        write_logs(&blocked, include_str!("testdata/tlc/multi-inv.log"));
+        let jobs = [init, garbled, no_itf, blocked];
+        let records: Vec<CheckRecord> =
+            jobs.iter().map(|j| check_record(j, Outcome::Violation)).collect();
+
+        let stage = Stage::create(dir, "7-1.0").expect("stage");
+        fs::create_dir_all(stage.dir.join("traces/blocked.txt")).expect("block the path");
+        let checks = stage_checks(&jobs, &records, &stage).expect("staging never fails per trace");
+        fs::remove_dir_all(stage.dir.join("traces/blocked.txt")).expect("unblock");
+
+        assert_eq!(checks[0].trace.as_deref(), Some("traces/init.tlc.txt"));
+        assert_eq!(checks[0].condensed.as_deref(), Some("traces/init.txt"));
+        assert_eq!((checks[0].trace_error.as_ref(), checks[0].failure_log.as_ref()), (None, None));
+
+        assert!(matches!(
+            &checks[1].trace_error,
+            Some(TraceRecordError::Unparsable { file, error })
+                if file.ends_with("garbled/attempt-1.log") && error.contains("no TLC counterexample")
+        ));
+        assert!(matches!(
+            &checks[2].trace_error,
+            Some(TraceRecordError::Unreadable { file, .. }) if file.ends_with("no-itf/trace.itf.json")
+        ));
+        assert!(matches!(
+            &checks[3].trace_error,
+            Some(TraceRecordError::Unwritable { file, .. }) if file == "traces/blocked.txt"
+        ));
+        for c in &checks[1..] {
+            // Outcome and verdict stand; the trace does not; the full log is kept.
+            assert_eq!(
+                (c.outcome, c.pass, &c.trace, &c.condensed),
+                (Outcome::Violation, true, &None, &None)
+            );
+            assert_eq!(c.failure_log, Some(format!("failures/{}.log", c.name)));
+        }
+
+        let s = summary(checks);
+        stage.write_or_fail(SUMMARY_MD, render_md(&s).as_bytes()).expect("md");
+        stage.install().expect("install");
+        let ev = dir.join(EVIDENCE_DIR);
+        let present = list_files(&ev).expect("list");
+        assert_eq!(
+            present,
+            BTreeSet::from(
+                [
+                    SUMMARY_MD,
+                    "traces/init.tlc.txt",
+                    "traces/init.txt",
+                    "failures/garbled.log",
+                    "failures/no-itf.log",
+                    "failures/blocked.log",
+                ]
+                .map(str::to_owned)
+            ),
+            "no half-written trace of `blocked` survives"
+        );
+        let garbled_log = fs::read_to_string(ev.join("failures/garbled.log")).expect("log");
+        assert!(garbled_log.contains("error: found a counterexample"), "{garbled_log}");
+        assert!(garbled_log.contains("attempt 1 start"), "{garbled_log}");
+        assert_eq!(
+            fs::read_to_string(ev.join("traces/init.txt")).expect("trace"),
+            "# init: counterexample, 1 state(s) (from the TLC trace)\n\nState 1\n  x = 0\n"
+        );
+
+        let md = render_md(&s);
+        assert!(md.contains("3 counterexample(s) without a recorded trace"), "{md}");
+        assert!(md.contains("## Counterexamples without a recorded trace"), "{md}");
+        assert!(md.contains("- `garbled`: no parsable counterexample in "), "{md}");
+        assert!(md.contains("| **no trace** [failures/no-itf.log](failures/no-itf.log) |"), "{md}");
+
+        // verify-evidence names each untraced counterexample.
+        let checks: Vec<Check> =
+            s.checks.iter().map(|c| check(&c.name, Expect::Violation)).collect();
+        let problems = verify_summary(&s, &s.inputs.clone(), &checks, &present);
+        let untraced: Vec<&str> = problems
+            .iter()
+            .filter_map(|p| match p {
+                EvidenceProblem::TraceNotRecorded { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(untraced, ["garbled", "no-itf", "blocked"]);
+        assert!(!problems.iter().any(|p| matches!(p, EvidenceProblem::MissingTrace { .. })));
+        assert!(
+            problems[0].to_string().contains("counterexample trace NOT recorded"),
+            "{}",
+            problems[0]
+        );
+    }
+
+    #[test]
+    fn trace_error_roundtrips_and_is_omitted_when_absent() {
+        let mut c = rec("w", Expect::Violation, Outcome::Violation);
+        let plain = serde_json::to_value(&c).expect("encode");
+        assert!(plain.get("trace_error").is_none(), "{plain}");
+        c.trace = None;
+        c.condensed = None;
+        c.trace_error = Some(TraceRecordError::Unparsable {
+            file: "a.log".into(),
+            error: "no TLC counterexample".into(),
+        });
+        let v = serde_json::to_value(&c).expect("encode");
+        assert_eq!(v["trace_error"]["kind"], "unparsable");
+        assert_eq!(serde_json::from_value::<CheckEvidence>(v).expect("decode"), c);
+    }
+
+    #[test]
+    fn missing_logs_are_named_in_the_failure_log_copy() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let j = job(tmp.path(), "gone", Backend::Tlc);
+        let copy = String::from_utf8(attempt_logs(&j, 1)).expect("utf8");
+        assert!(copy.contains("===== attempt 1: "), "{copy}");
+        assert!(copy.contains("(could not read "), "{copy}");
+        assert!(copy.contains("===== events: "), "{copy}");
+    }
+
     #[test]
     fn install_replaces_the_whole_evidence_dir() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let ev = tmp.path().join(EVIDENCE_DIR);
         fs::create_dir_all(ev.join("round-2")).expect("mkdir");
         fs::write(ev.join("round-2/copied.sh"), "#!/bin/sh").expect("write");
-        let files: Staged =
-            vec![(SUMMARY_JSON.into(), b"{}".to_vec()), ("traces/w.txt".into(), b"trace".to_vec())];
-        install(tmp.path(), "12-3.4", &files).expect("install");
+        let stage = Stage::create(tmp.path(), "12-3.4").expect("stage");
+        stage.write_or_fail(SUMMARY_JSON, b"{}").expect("write");
+        stage.write_or_fail("traces/w.txt", b"trace").expect("write");
+        stage.install().expect("install");
         assert_eq!(
             list_files(&ev).expect("list"),
             BTreeSet::from([SUMMARY_JSON.to_owned(), "traces/w.txt".to_owned()])

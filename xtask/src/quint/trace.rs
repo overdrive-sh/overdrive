@@ -18,6 +18,9 @@ pub struct Trace {
     /// For a lasso (liveness counterexample): the 1-based state the last
     /// state loops back to.
     pub loop_back: Option<usize>,
+    /// For a liveness counterexample that ends by stuttering (TLC's
+    /// `State N: Stuttering`): the last state repeats forever.
+    pub stutters: bool,
 }
 
 /// One state of a [`Trace`].
@@ -38,9 +41,19 @@ pub enum TraceError {
     /// The JSON does not have the ITF shape.
     #[error("ITF trace: {0}")]
     Shape(&'static str),
-    /// The log holds no TLC state sequence.
-    #[error("no TLC counterexample (`State 1:` …) found in the log")]
+    /// The log holds neither a TLC state sequence (`State 1:` …) nor an
+    /// initial-state violation (`Error: … is violated by the initial state:`).
+    #[error(
+        "no TLC counterexample in the log: neither `State 1:` nor \
+         `Error: … is violated by the initial state:` found"
+    )]
     NoTlcTrace,
+    /// A variable assignment appears before any state header.
+    #[error("TLC trace: assignment before any state header: `{line}`")]
+    AssignmentOutsideState {
+        /// The offending line.
+        line: String,
+    },
 }
 
 /// Parse an ITF trace (Apalache `--out-itf`).
@@ -64,6 +77,7 @@ pub fn parse_itf(body: &str) -> Result<Trace, TraceError> {
             .and_then(Value::as_u64)
             .and_then(|l| usize::try_from(l).ok())
             .map(|l| l + 1),
+        stutters: false,
     };
     for state in states {
         let obj = state.as_object().ok_or(TraceError::Shape("state is not an object"))?;
@@ -128,16 +142,39 @@ fn join(parts: impl Iterator<Item = String>) -> String {
     parts.collect::<Vec<_>>().join(", ")
 }
 
-/// Extract TLC's counterexample text (from `State 1:` to the end of the
-/// state sequence) from a `quint verify --backend tlc --verbosity=3` log.
-pub fn extract_tlc_trace(log: &str) -> Option<String> {
-    let mut lines = log.lines().skip_while(|l| !is_state_header(l)).peekable();
-    lines.peek()?;
-    let mut out = String::new();
+/// Extract TLC's counterexample text from a `quint verify --backend tlc
+/// --verbosity=3` log: from the first state header to the end of the state
+/// sequence, in TLC's own words.
+///
+/// TLC 2.19 (via Quint 0.32) prints a counterexample in one of these shapes
+/// (fixtures under `testdata/tlc/`, captured from real runs):
+///
+/// - **multi-state** (invariant violated after ≥1 step):
+///   `Error: The behavior up to this point is:` then `State 1: <Initial
+///   predicate>`, `State 2: <action …>`, …;
+/// - **lasso** (temporal property): the same, ending in `Back to state N: …`;
+/// - **stuttering** (temporal property): the same, ending in `State N:
+///   Stuttering`;
+/// - **initial state** (invariant — or an `always(P)` temporal property,
+///   which TLC checks as an invariant — violated by an initial state):
+///   `Error: Invariant <name> is violated by the initial state:` followed
+///   directly by the state's variables, with no `State 1:` header.
+///
+/// Variables are printed as `/\ name = value` when the spec has several
+/// and as a bare `name = value` when it has one; long values wrap onto
+/// indented continuation lines. Quint runs TLC without deadlock checking,
+/// so a deadlock is never reported as a counterexample (`testdata/tlc/
+/// deadlock.log`: a reachable state with no successor, `[ok]`).
+pub fn extract_tlc_trace(log: &str) -> Result<String, TraceError> {
+    let mut lines = log.lines().skip_while(|l| !is_state_header(l) && !is_initial_violation(l));
+    let first = lines.next().ok_or(TraceError::NoTlcTrace)?;
+    let mut out = String::from(first);
+    out.push('\n');
     for line in lines {
         let keep = line.is_empty()
             || is_state_header(line)
             || line.starts_with("/\\ ")
+            || bare_assignment(line).is_some()
             || line.starts_with(char::is_whitespace)
             || line.starts_with("Back to state");
         if !keep {
@@ -146,7 +183,7 @@ pub fn extract_tlc_trace(log: &str) -> Option<String> {
         out.push_str(line);
         out.push('\n');
     }
-    Some(out.trim_end().to_owned() + "\n")
+    Ok(out.trim_end().to_owned() + "\n")
 }
 
 fn is_state_header(line: &str) -> bool {
@@ -155,14 +192,35 @@ fn is_state_header(line: &str) -> bool {
         .is_some_and(|(n, _)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// `Error: Invariant <name> is violated by the initial state:`.
+fn is_initial_violation(line: &str) -> bool {
+    line.starts_with("Error: ") && line.trim_end().ends_with("is violated by the initial state:")
+}
+
+/// A single-variable spec's `name = value` line (TLC drops the `/\` when
+/// there is only one variable): `(name, value)`.
+fn bare_assignment(line: &str) -> Option<(&str, &str)> {
+    let (name, value) = line.split_once(" = ")?;
+    let ident = !name.is_empty()
+        && !name.starts_with(|c: char| c.is_ascii_digit())
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    ident.then_some((name, value))
+}
+
 /// Parse TLC's counterexample text (see [`extract_tlc_trace`]).
 pub fn parse_tlc(text: &str) -> Result<Trace, TraceError> {
     let mut trace = Trace::default();
     for line in text.lines() {
-        if is_state_header(line) {
+        if is_initial_violation(line) {
+            trace.states.push(TraceState::default());
+        } else if is_state_header(line) {
             let rest = line.split_once(':').map_or("", |(_, r)| r).trim();
             if let Some(n) = back_to(rest) {
                 trace.loop_back = Some(n);
+                continue;
+            }
+            if rest == "Stuttering" {
+                trace.stutters = true;
                 continue;
             }
             let action = rest
@@ -180,9 +238,15 @@ pub fn parse_tlc(text: &str) -> Result<Trace, TraceError> {
             });
         } else if let Some(n) = back_to(line) {
             trace.loop_back = Some(n);
-        } else if let Some(assign) = line.strip_prefix("/\\ ") {
-            let state = trace.states.last_mut().ok_or(TraceError::NoTlcTrace)?;
-            let (name, value) = assign.split_once(" = ").unwrap_or((assign, ""));
+        } else if let Some((name, value)) = line
+            .strip_prefix("/\\ ")
+            .map(|a| a.split_once(" = ").unwrap_or((a, "")))
+            .or_else(|| bare_assignment(line))
+        {
+            let state = trace
+                .states
+                .last_mut()
+                .ok_or_else(|| TraceError::AssignmentOutsideState { line: line.to_owned() })?;
             state.vars.push((name.trim().to_owned(), value.trim().to_owned()));
         } else if line.starts_with(char::is_whitespace) && !line.trim().is_empty() {
             // TLC wraps long values onto indented continuation lines.
@@ -265,6 +329,9 @@ pub fn condense(check: &str, source: &str, trace: &Trace) -> String {
     }
     if let Some(n) = trace.loop_back {
         let _ = writeln!(out, "\n-> loops back to State {n}");
+    }
+    if trace.stutters {
+        let _ = writeln!(out, "\n-> stutters forever in State {}", trace.states.len());
     }
     out
 }
@@ -363,8 +430,129 @@ Back to state 2: <lt_cid_lease_Tick line 9, col 3 to line 9, col 9 of module lt>
 
     #[test]
     fn tlc_without_trace_is_an_error() {
-        assert!(extract_tlc_trace("[ok] No violation found (1ms).\n").is_none());
+        assert!(matches!(
+            extract_tlc_trace("[ok] No violation found (1ms).\n"),
+            Err(TraceError::NoTlcTrace)
+        ));
         assert!(matches!(parse_tlc("nothing here\n"), Err(TraceError::NoTlcTrace)));
+    }
+
+    /// A real `quint verify --backend tlc --verbosity=3` log, captured in the
+    /// Lima VM (Quint 0.32.0, TLC 2.19) from the specs beside it in
+    /// `testdata/tlc/` (`shapes.qnt`: one variable; `multi.qnt`: two, one of
+    /// them a set long enough for TLC to wrap).
+    fn fixture(name: &str) -> &'static str {
+        match name {
+            "init-inv" => include_str!("testdata/tlc/init-inv.log"),
+            "init-temporal" => include_str!("testdata/tlc/init-temporal.log"),
+            "multi-inv" => include_str!("testdata/tlc/multi-inv.log"),
+            "lasso" => include_str!("testdata/tlc/lasso.log"),
+            "stutter" => include_str!("testdata/tlc/stutter.log"),
+            "deadlock" => include_str!("testdata/tlc/deadlock.log"),
+            "multivar-init-inv" => include_str!("testdata/tlc/multivar-init-inv.log"),
+            "multivar-multi-inv" => include_str!("testdata/tlc/multivar-multi-inv.log"),
+            "multivar-lasso" => include_str!("testdata/tlc/multivar-lasso.log"),
+            other => unreachable!("no fixture {other}"),
+        }
+    }
+
+    fn condensed(name: &str) -> String {
+        let text = extract_tlc_trace(fixture(name)).expect("trace present");
+        condense("c", "TLC", &parse_tlc(&text).expect("parses"))
+    }
+
+    const BIG: &str = "{ [name |-> \"allocation-number\", offset |-> 0, state |-> \"waiting-for-device\"], \
+        [name |-> \"allocation-number\", offset |-> 1, state |-> \"waiting-for-device\"], \
+        [name |-> \"allocation-number\", offset |-> 2, state |-> \"waiting-for-device\"], \
+        [name |-> \"allocation-number\", offset |-> 3, state |-> \"waiting-for-device\"], \
+        [name |-> \"allocation-number\", offset |-> 4, state |-> \"waiting-for-device\"], \
+        [name |-> \"allocation-number\", offset |-> 5, state |-> \"waiting-for-device\"], \
+        [name |-> \"allocation-number\", offset |-> 6, state |-> \"waiting-for-device\"] }";
+
+    #[test]
+    fn tlc_initial_state_violation_is_a_one_state_trace() {
+        // No `State 1:` header: TLC names the violated invariant and prints
+        // the initial state's variables directly beneath it.
+        let text = extract_tlc_trace(fixture("init-inv")).expect("trace present");
+        assert_eq!(text, "Error: Invariant q_inv is violated by the initial state:\nx = 0\n");
+        assert_eq!(
+            condensed("init-inv"),
+            "# c: counterexample, 1 state(s) (from the TLC trace)\n\nState 1\n  x = 0\n"
+        );
+    }
+
+    #[test]
+    fn tlc_always_property_violated_initially_is_a_one_state_trace() {
+        // TLC checks `always(P)` as an invariant, so a `temporal` check can
+        // end in the initial-state shape too.
+        assert_eq!(
+            condensed("init-temporal"),
+            "# c: counterexample, 1 state(s) (from the TLC trace)\n\nState 1\n  x = 0\n"
+        );
+    }
+
+    #[test]
+    fn tlc_multi_variable_initial_state_violation_keeps_wrapped_values() {
+        assert_eq!(
+            condensed("multivar-init-inv"),
+            format!(
+                "# c: counterexample, 1 state(s) (from the TLC trace)\n\nState 1\n  x = 0\n  \
+                 big = {BIG}\n"
+            )
+        );
+    }
+
+    #[test]
+    fn tlc_multi_state_violation_lists_every_state() {
+        assert_eq!(
+            condensed("multi-inv"),
+            "# c: counterexample, 3 state(s) (from the TLC trace)\n\
+             \nState 1\n  x = 0\n\nState 2 [:=]\n  x = 1\n\nState 3 [:=]\n  x = 2\n"
+        );
+        assert_eq!(
+            condensed("multivar-multi-inv"),
+            format!(
+                "# c: counterexample, 3 state(s) (from the TLC trace)\n\
+                 \nState 1\n  x = 0\n  big = {BIG}\n\nState 2 [step]\n  x = 1\n\
+                 \nState 3 [step]\n  x = 2\n"
+            )
+        );
+    }
+
+    #[test]
+    fn tlc_lasso_records_the_loop_back() {
+        let lasso = "# c: counterexample, 3 state(s) (from the TLC trace)\n\
+             \nState 1\n  x = 0\n\nState 2 [:=]\n  x = 1\n\nState 3 [:=]\n  x = 2\n\
+             \n-> loops back to State 1\n";
+        assert_eq!(condensed("lasso"), lasso);
+        assert!(condensed("multivar-lasso").ends_with("\n-> loops back to State 1\n"));
+    }
+
+    #[test]
+    fn tlc_stuttering_ends_the_trace_without_a_fake_state() {
+        assert_eq!(
+            condensed("stutter"),
+            "# c: counterexample, 2 state(s) (from the TLC trace)\n\
+             \nState 1\n  x = 0\n\nState 2 [:=]\n  x = 1\n\
+             \n-> stutters forever in State 2\n"
+        );
+    }
+
+    #[test]
+    fn tlc_deadlock_is_not_reported_by_quint() {
+        // Quint runs TLC without deadlock checking: `dl` reaches `x = 2`,
+        // which has no successor, and the run still ends `[ok]`.
+        let log = fixture("deadlock");
+        assert!(log.contains("[ok] No violation found"), "{log}");
+        assert!(matches!(extract_tlc_trace(log), Err(TraceError::NoTlcTrace)));
+    }
+
+    #[test]
+    fn tlc_assignment_without_a_state_is_an_error() {
+        assert!(matches!(
+            parse_tlc("/\\ x = 1\n"),
+            Err(TraceError::AssignmentOutsideState { line }) if line == "/\\ x = 1"
+        ));
     }
 
     #[test]
