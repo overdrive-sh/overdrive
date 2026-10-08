@@ -160,13 +160,13 @@ pub struct CheckEvidence {
     pub outcome: Outcome,
     /// Whether `outcome` matched `expect`.
     pub pass: bool,
-    /// Attempts made (a start-up failure is retried once).
+    /// Attempts made (a stall is retried once).
     pub attempts: u32,
     /// The check's own time: run seconds of the final attempt. Evidence
     /// recorded without `retry_seconds` holds the wall time from the first
     /// attempt's start here instead.
     pub seconds: f64,
-    /// Run seconds of the attempts abandoned to start-up retries.
+    /// Run seconds of the attempts abandoned to stall retries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_seconds: Option<f64>,
     /// Seconds from the first attempt's start to the verdict, including any

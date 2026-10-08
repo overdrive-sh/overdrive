@@ -30,7 +30,7 @@
 //!
 //! - **Process groups.** Each check runs in its own process group (Quint
 //!   plus the Apalache / TLC JVM it starts). The group is killed when the
-//!   check ends on any path — clean exit, timeout, start-up hang, runner
+//!   check ends on any path — clean exit, timeout, stall, runner
 //!   error, or SIGINT / SIGTERM / SIGHUP of xtask. After the run the runner
 //!   verifies that no process tagged with this run's id (an inherited
 //!   environment marker) remains, and at start it
@@ -56,8 +56,18 @@
 //!   the server's start line even with three checks per CPU, so the second
 //!   bound frees a hung attempt early instead of holding its reservation for
 //!   the full start-up bound.
+//! - **Completion stalls.** The same client fault can strike after the work:
+//!   the server prints its outcome line (`The outcome is: …`) but Quint never
+//!   takes the result and never prints its verdict, so the attempt would sit
+//!   idle until its timeout. Once the outcome line is in the attempt's log,
+//!   Quint must exit within [`COMPLETION_BOUND_SECS`]; otherwise the attempt
+//!   is killed and retried once on a fresh port, and a second stall is a tool
+//!   error. The verdict is never read from the server's log — only Quint's
+//!   own result and ITF trace count. A check is retried at most once,
+//!   whichever stage (start-up, first pass, after completion) stalled, and
+//!   the retry message names the stage.
 //! - **Timing.** Each check records its own time (`seconds`, the final
-//!   attempt's run time), the run time of the attempts abandoned to start-up
+//!   attempt's run time), the run time of the attempts abandoned to stall
 //!   retries (`retry_seconds`), and the wall time from its first attempt's
 //!   start to its verdict (`wall_seconds`, which also includes any wait for
 //!   the budget between attempts). The `ci = true` two-minute rule applies to
@@ -92,7 +102,7 @@
 //! Nothing else writes `evidence/`.
 //!
 //! The pure parts — [`parse_checks`], [`classify`] / [`judge`],
-//! [`started_work`], [`deadline_check`] / [`attempt_verdict`], [`effective_timeout`],
+//! [`started_work`], [`LogScan`], [`deadline_check`] / [`attempt_verdict`], [`effective_timeout`],
 //! [`estimate_secs`] and [`parse_stat_state`] — are unit-tested here (admission
 //! and resource parsing in [`resources`]);
 //! [`typecheck`] and [`check`] shell out to `quint`.
@@ -100,7 +110,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write as _;
+use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::net::TcpListener;
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
@@ -133,6 +143,10 @@ const SERVER_START_MARKER: &str = "Starting checker server on port";
 /// Prefix of the line Apalache prints when it begins its first pass on a
 /// check — the earliest evidence the server received and started the job.
 const FIRST_PASS_MARKER: &str = "PASS #0:";
+/// Prefix of the line the Apalache server prints when it has finished a
+/// check (`The outcome is: NoError` / `Error` / …). Quint's own verdict
+/// follows within a fraction of a second on a healthy attempt.
+const OUTCOME_MARKER: &str = "The outcome is: ";
 
 /// Per-attempt wall-clock budget when neither `--timeout` nor the check's
 /// `timeout_secs` sets one.
@@ -144,6 +158,10 @@ pub const STARTUP_BOUND_SECS: u64 = 120;
 /// first pass before the attempt counts as a start-up hang. The longest
 /// healthy gap measured was 19.5 s, with 24 checks on 8 CPUs.
 pub const FIRST_PASS_BOUND_SECS: u64 = 45;
+/// How long after the server's outcome line Quint may take to print its
+/// verdict before the attempt counts as a completion stall. A healthy client
+/// prints it within a second.
+pub const COMPLETION_BOUND_SECS: u64 = 60;
 /// The own time above which a `ci = true` check draws a warning.
 pub const CI_BUDGET_SECS: f64 = 120.0;
 /// How often the peak resident memory of running checks is sampled.
@@ -384,7 +402,7 @@ pub enum Outcome {
     /// The checker reported a counterexample.
     Violation,
     /// Anything else — a parse/type/name error, a checker crash, output
-    /// the runner does not recognise, or a repeated server start-up hang.
+    /// the runner does not recognise, or a repeated stall.
     ToolError,
     /// The attempt exceeded its wall-clock budget and was killed.
     TimedOut,
@@ -582,36 +600,94 @@ pub enum AttemptEnd {
     },
     /// The attempt exceeded its wall-clock budget and was killed.
     TimedOut,
-    /// Apalache did not begin its first pass in time; the attempt was killed.
-    StartupHang(StartupStall),
+    /// The Quint client / Apalache server pair stopped making progress at
+    /// one of its stages; the attempt was killed.
+    Stalled(Stall),
 }
 
-/// Where a start-up hang stalled.
+/// Where an attempt stalled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StartupStall {
+pub enum Stall {
     /// The Apalache server did not print its start line within the start-up
     /// bound.
     ServerNotUp,
     /// The server started, but no first pass followed within the first-pass
     /// bound: Quint never handed it the job.
     NoFirstPass,
+    /// The server printed its outcome line, but Quint printed no verdict
+    /// within the completion bound: the client never took the result.
+    NoClientResult,
 }
 
-/// The two start-up bounds of an attempt.
+impl Stall {
+    /// The stage the attempt stalled at, as shown in retry messages.
+    pub const fn stage(self) -> &'static str {
+        match self {
+            Self::ServerNotUp => "start-up",
+            Self::NoFirstPass => "first pass",
+            Self::NoClientResult => "after completion",
+        }
+    }
+}
+
+/// The stall bounds of an attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StartupBounds {
+pub struct StallBounds {
     /// From the attempt's start to the server's start line.
     pub server: Duration,
     /// From the server's start line to the first pass.
     pub first_pass: Duration,
+    /// From the server's outcome line to Quint's exit with its verdict.
+    pub completion: Duration,
 }
 
-impl StartupBounds {
-    /// The runner's bounds: [`STARTUP_BOUND_SECS`] and [`FIRST_PASS_BOUND_SECS`].
+impl StallBounds {
+    /// The runner's bounds: [`STARTUP_BOUND_SECS`], [`FIRST_PASS_BOUND_SECS`]
+    /// and [`COMPLETION_BOUND_SECS`].
     pub const RUNNER: Self = Self {
         server: Duration::from_secs(STARTUP_BOUND_SECS),
         first_pass: Duration::from_secs(FIRST_PASS_BOUND_SECS),
+        completion: Duration::from_secs(COMPLETION_BOUND_SECS),
     };
+}
+
+/// Incremental scan of an attempt's log for its progress markers.
+///
+/// The markers are the server's start line, its first pass and its outcome
+/// line. Only complete lines are classified, so a line split across two
+/// reads is seen once, whole.
+#[derive(Debug, Default)]
+pub struct LogScan {
+    /// Bytes of the log consumed so far.
+    fed: u64,
+    /// The trailing incomplete line.
+    partial: Vec<u8>,
+    /// The server's start line was seen.
+    pub server_up: bool,
+    /// The first pass was seen.
+    pub started: bool,
+    /// The server's outcome line was seen.
+    pub finished: bool,
+}
+
+impl LogScan {
+    /// Bytes of the log consumed so far: where the next read starts.
+    pub const fn fed(&self) -> u64 {
+        self.fed
+    }
+
+    /// Consume the next bytes of the log.
+    pub fn feed(&mut self, bytes: &[u8]) {
+        self.fed += bytes.len() as u64;
+        self.partial.extend_from_slice(bytes);
+        let Some(last_nl) = self.partial.iter().rposition(|&b| b == b'\n') else { return };
+        let complete: Vec<u8> = self.partial.drain(..=last_nl).collect();
+        for line in String::from_utf8_lossy(&complete).lines() {
+            self.server_up |= line.contains(SERVER_START_MARKER);
+            self.started |= line.starts_with(FIRST_PASS_MARKER);
+            self.finished |= line.starts_with(OUTCOME_MARKER);
+        }
+    }
 }
 
 /// Whether a check's output shows the Apalache server started.
@@ -627,27 +703,33 @@ pub fn started_work(output: &str) -> bool {
 /// Decide whether a still-running attempt must be killed.
 ///
 /// `elapsed` runs from the attempt's start; `since_server_up` from when the
-/// server's start line was first seen (`None` = not yet). The overall timeout
-/// takes precedence over the start-up bounds, and an attempt Apalache has
-/// started (`started`) is never a start-up hang.
+/// server's start line was first seen and `since_server_done` from when its
+/// outcome line was first seen (`None` = not yet). The overall timeout takes
+/// precedence over every stall bound. Once the server has finished, only the
+/// completion bound applies; before that, an attempt Apalache has started
+/// (`started`) is never a start-up stall.
 pub fn deadline_check(
     elapsed: Duration,
     started: bool,
     since_server_up: Option<Duration>,
+    since_server_done: Option<Duration>,
     timeout: Duration,
-    bounds: StartupBounds,
+    bounds: StallBounds,
 ) -> Option<AttemptEnd> {
     if elapsed >= timeout {
         return Some(AttemptEnd::TimedOut);
+    }
+    if let Some(done) = since_server_done {
+        return (done >= bounds.completion).then_some(AttemptEnd::Stalled(Stall::NoClientResult));
     }
     if started {
         return None;
     }
     let stall = since_server_up.map_or_else(
-        || (elapsed >= bounds.server).then_some(StartupStall::ServerNotUp),
-        |up| (up >= bounds.first_pass).then_some(StartupStall::NoFirstPass),
+        || (elapsed >= bounds.server).then_some(Stall::ServerNotUp),
+        |up| (up >= bounds.first_pass).then_some(Stall::NoFirstPass),
     );
-    stall.map(AttemptEnd::StartupHang)
+    stall.map(AttemptEnd::Stalled)
 }
 
 /// What to do after an attempt ended.
@@ -662,6 +744,8 @@ pub enum AttemptVerdict {
     },
     /// Retry the check on a fresh server port.
     Retry {
+        /// The stage the attempt stalled at ([`Stall::stage`]).
+        stage: &'static str,
         /// Why the attempt was abandoned.
         cause: String,
     },
@@ -669,14 +753,18 @@ pub enum AttemptVerdict {
 
 /// Turn an ended attempt (1-based `attempt`) into a verdict.
 ///
-/// A start-up failure — a hang, or Quint exiting after starting its server but before
-/// the first pass — is retried exactly once; a second one is a tool error.
+/// A stall — at start-up, before the first pass, or after the server finished
+/// while Quint never printed its verdict — and Quint exiting after starting
+/// its server but before the first pass are retried exactly once; a second
+/// one is a tool error. A verdict is never read from the server's log: only
+/// Quint's own result (and ITF trace) counts, so a completion stall is
+/// retried, not classified.
 pub fn attempt_verdict(
     attempt: u32,
     end: AttemptEnd,
     output: &str,
     timeout: Duration,
-    bounds: StartupBounds,
+    bounds: StallBounds,
 ) -> AttemptVerdict {
     match end {
         AttemptEnd::Exited { success } => {
@@ -688,6 +776,7 @@ pub fn attempt_verdict(
             if outcome == Outcome::ToolError && server_started(output) && !started_work(output) {
                 return if attempt <= 1 {
                     AttemptVerdict::Retry {
+                        stage: Stall::NoFirstPass.stage(),
                         cause: "Apalache server started but Quint failed before the first pass; \
                                 retrying on a fresh port"
                             .to_owned(),
@@ -717,26 +806,33 @@ pub fn attempt_verdict(
                 timeout.as_secs()
             )),
         },
-        AttemptEnd::StartupHang(stall) => {
+        AttemptEnd::Stalled(stall) => {
             let what = match stall {
-                StartupStall::ServerNotUp => {
+                Stall::ServerNotUp => {
                     format!("Apalache server did not start within {}s", bounds.server.as_secs())
                 }
-                StartupStall::NoFirstPass => format!(
+                Stall::NoFirstPass => format!(
                     "Apalache server started but Quint never handed it the job (no first pass \
                      within {}s of the server's start)",
                     bounds.first_pass.as_secs()
                 ),
+                Stall::NoClientResult => format!(
+                    "Quint client did not return after the server finished (no verdict within \
+                     {}s of the server's outcome line)",
+                    bounds.completion.as_secs()
+                ),
             };
+            let stage = stall.stage();
             if attempt <= 1 {
                 AttemptVerdict::Retry {
+                    stage,
                     cause: format!("{what}; process group killed, retrying on a fresh port"),
                 }
             } else {
                 AttemptVerdict::Final {
                     outcome: Outcome::ToolError,
                     cause: Some(format!(
-                        "start-up hang on {attempt} attempts (fresh port each); last: {what}"
+                        "stalled ({stage}) on {attempt} attempts (fresh port each); last: {what}"
                     )),
                 }
             }
@@ -749,7 +845,7 @@ pub fn attempt_verdict(
 pub struct CheckTiming {
     /// The check's own time: the final attempt's run time.
     pub seconds: f64,
-    /// Run time of the earlier attempts, abandoned to start-up retries.
+    /// Run time of the earlier attempts, abandoned to stall retries.
     pub retry_seconds: f64,
     /// From the first attempt's start to the verdict, including any wait for
     /// the budget between attempts.
@@ -1150,9 +1246,12 @@ struct Running {
     attempt: u32,
     port: u16,
     started: Instant,
+    /// Progress markers read from the log so far.
+    scan: LogScan,
     /// When the server's start line was first seen in the log.
     server_up: Option<Instant>,
-    started_work: bool,
+    /// When the server's outcome line was first seen in the log.
+    server_done: Option<Instant>,
     log_path: PathBuf,
     group: Group,
     /// Peak resident memory of the attempt's process group (MiB).
@@ -1169,7 +1268,7 @@ struct CheckRecord {
     pass: bool,
     /// The check's own time: the final attempt's run time.
     seconds: f64,
-    /// Run time of the attempts abandoned to start-up retries.
+    /// Run time of the attempts abandoned to stall retries.
     retry_seconds: f64,
     /// From the first attempt's start to the verdict.
     wall_seconds: f64,
@@ -1373,8 +1472,9 @@ fn start_attempt(
         attempt,
         port,
         started: Instant::now(),
+        scan: LogScan::default(),
         server_up: None,
-        started_work: false,
+        server_done: None,
         log_path,
         group,
         peak_rss_mb: 0,
@@ -1382,26 +1482,45 @@ fn start_attempt(
 }
 
 /// Poll one attempt; `Some(end)` once it has ended (and been killed).
-fn poll_attempt(r: &mut Running, timeout: Duration) -> Result<Option<AttemptEnd>> {
+/// Reads only the log bytes appended since the last poll, and stops reading
+/// once the server's outcome line is seen.
+fn poll_attempt(r: &mut Running, timeout: Duration, out_dir: &Path) -> Result<Option<AttemptEnd>> {
     if let Some(status) = r.group.child.try_wait().wrap_err("polling quint")? {
         r.group.reaped = true;
         return Ok(Some(AttemptEnd::Exited { success: status.success() }));
     }
-    if !r.started_work {
-        let log =
-            fs::read(&r.log_path).wrap_err_with(|| format!("reading {}", r.log_path.display()))?;
-        let log = String::from_utf8_lossy(&log);
-        r.started_work = started_work(&log);
-        if r.server_up.is_none() && server_started(&log) {
+    if !r.scan.finished {
+        let mut log = File::open(&r.log_path)
+            .wrap_err_with(|| format!("opening {}", r.log_path.display()))?;
+        log.seek(SeekFrom::Start(r.scan.fed()))
+            .wrap_err_with(|| format!("seeking {}", r.log_path.display()))?;
+        let mut fresh = Vec::new();
+        log.read_to_end(&mut fresh)
+            .wrap_err_with(|| format!("reading {}", r.log_path.display()))?;
+        r.scan.feed(&fresh);
+        if r.server_up.is_none() && r.scan.server_up {
             r.server_up = Some(Instant::now());
+        }
+        if r.server_done.is_none() && r.scan.finished {
+            r.server_done = Some(Instant::now());
+            event(
+                out_dir,
+                &format!(
+                    "attempt {} server outcome line seen after {:.1}s; awaiting Quint's verdict \
+                     (bound {COMPLETION_BOUND_SECS}s)",
+                    r.attempt,
+                    r.started.elapsed().as_secs_f64()
+                ),
+            )?;
         }
     }
     Ok(deadline_check(
         r.started.elapsed(),
-        r.started_work,
+        r.scan.started,
         r.server_up.map(|t| t.elapsed()),
+        r.server_done.map(|t| t.elapsed()),
         timeout,
-        StartupBounds::RUNNER,
+        StallBounds::RUNNER,
     ))
 }
 
@@ -1479,7 +1598,8 @@ fn announce(
     eprintln!(
         "xtask quint check: {} check(s), budget {} (--jobs ≤ {max_jobs}), TLC heap {} MiB × {} \
          workers, Apalache heap {} MiB + 1 CPU, start-up bounds {STARTUP_BOUND_SECS}s to the server, {FIRST_PASS_BOUND_SECS}s \
-         from it to the first pass, run id {run_id}",
+         from it to the first pass, {COMPLETION_BOUND_SECS}s from its outcome to Quint's verdict, run \
+         id {run_id}",
         jobs.len(),
         res.budget,
         res.tlc_heap_mb,
@@ -1593,8 +1713,8 @@ impl<'a> Supervisor<'a> {
             }
             let mut i = 0;
             while i < self.running.len() {
-                let timeout = self.jobs[self.running[i].job].timeout;
-                if let Some(end) = poll_attempt(&mut self.running[i], timeout)? {
+                let j = &self.jobs[self.running[i].job];
+                if let Some(end) = poll_attempt(&mut self.running[i], j.timeout, &j.out_dir)? {
                     let r = self.running.remove(i);
                     self.finish_attempt(r, end)?;
                 } else {
@@ -1718,7 +1838,7 @@ impl<'a> Supervisor<'a> {
     }
 
     /// Kill an ended attempt's group, release its reservation, judge it, and
-    /// either requeue (start-up hang retry) or record the final verdict.
+    /// either requeue (stall retry) or record the final verdict.
     fn finish_attempt(&mut self, mut r: Running, end: AttemptEnd) -> Result<()> {
         // Always kill the group: Quint may exit while its JVM lingers.
         r.group.terminate()?;
@@ -1735,7 +1855,7 @@ impl<'a> Supervisor<'a> {
             end,
             &String::from_utf8_lossy(&output),
             j.timeout,
-            StartupBounds::RUNNER,
+            StallBounds::RUNNER,
         );
         let attempt_secs = r.started.elapsed().as_secs_f64();
         self.attempt_secs[r.job].push(attempt_secs);
@@ -1750,15 +1870,18 @@ impl<'a> Supervisor<'a> {
         remove_scratch(&j.out_dir, r.attempt)?;
         let now = self.stamp(Instant::now());
         match verdict {
-            AttemptVerdict::Retry { cause } => {
-                eprintln!("{now} retry  {}/{}: {cause}", j.subsystem, j.check.name);
+            AttemptVerdict::Retry { stage, cause } => {
+                eprintln!(
+                    "{now} retry  {}/{} (stalled: {stage}): {cause}",
+                    j.subsystem, j.check.name
+                );
                 self.queue.push_front((r.job, r.attempt + 1));
             }
             AttemptVerdict::Final { outcome, cause } => {
                 let rec = self.record(r.job, outcome, r.attempt, cause, r.log_path);
                 let retries = if r.attempt > 1 {
                     format!(
-                        " + {:.1}s in {} start-up retr{}, {:.1}s wall",
+                        " + {:.1}s in {} stall retr{}, {:.1}s wall",
                         rec.retry_seconds,
                         r.attempt - 1,
                         if r.attempt == 2 { "y" } else { "ies" },
@@ -2424,36 +2547,40 @@ expect = "violation"
 
     const SECS: fn(u64) -> Duration = Duration::from_secs;
 
-    const BOUNDS: StartupBounds =
-        StartupBounds { server: Duration::from_secs(120), first_pass: Duration::from_secs(45) };
-    const NOT_UP: AttemptEnd = AttemptEnd::StartupHang(StartupStall::ServerNotUp);
-    const NO_PASS: AttemptEnd = AttemptEnd::StartupHang(StartupStall::NoFirstPass);
+    const BOUNDS: StallBounds = StallBounds {
+        server: Duration::from_secs(120),
+        first_pass: Duration::from_secs(45),
+        completion: Duration::from_secs(60),
+    };
+    const NOT_UP: AttemptEnd = AttemptEnd::Stalled(Stall::ServerNotUp);
+    const NO_PASS: AttemptEnd = AttemptEnd::Stalled(Stall::NoFirstPass);
+    const NO_RESULT: AttemptEnd = AttemptEnd::Stalled(Stall::NoClientResult);
 
     #[test]
     fn deadline_check_orders_timeout_before_startup_hang() {
         let t = SECS(900);
         // Server not up yet: the server bound runs from the attempt's start.
-        assert_eq!(deadline_check(SECS(10), false, None, t, BOUNDS), None);
-        assert_eq!(deadline_check(SECS(119), false, None, t, BOUNDS), None);
-        assert_eq!(deadline_check(SECS(120), false, None, t, BOUNDS), Some(NOT_UP));
+        assert_eq!(deadline_check(SECS(10), false, None, None, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(119), false, None, None, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(120), false, None, None, t, BOUNDS), Some(NOT_UP));
         // Server up: the first-pass bound runs from the server's start line,
         // and the server bound no longer applies.
-        assert_eq!(deadline_check(SECS(150), false, Some(SECS(44)), t, BOUNDS), None);
-        assert_eq!(deadline_check(SECS(50), false, Some(SECS(45)), t, BOUNDS), Some(NO_PASS));
+        assert_eq!(deadline_check(SECS(150), false, Some(SECS(44)), None, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(50), false, Some(SECS(45)), None, t, BOUNDS), Some(NO_PASS));
         // A check Apalache has started is never a start-up hang.
-        assert_eq!(deadline_check(SECS(800), true, Some(SECS(790)), t, BOUNDS), None);
-        assert_eq!(deadline_check(SECS(800), true, None, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(800), true, Some(SECS(790)), None, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(800), true, None, None, t, BOUNDS), None);
         assert_eq!(
-            deadline_check(SECS(900), true, Some(SECS(890)), t, BOUNDS),
+            deadline_check(SECS(900), true, Some(SECS(890)), None, t, BOUNDS),
             Some(AttemptEnd::TimedOut)
         );
         // A timeout shorter than either bound fires as a timeout.
         assert_eq!(
-            deadline_check(SECS(5), false, None, SECS(5), BOUNDS),
+            deadline_check(SECS(5), false, None, None, SECS(5), BOUNDS),
             Some(AttemptEnd::TimedOut)
         );
         assert_eq!(
-            deadline_check(SECS(60), false, Some(SECS(50)), SECS(60), BOUNDS),
+            deadline_check(SECS(60), false, Some(SECS(50)), None, SECS(60), BOUNDS),
             Some(AttemptEnd::TimedOut)
         );
     }
@@ -2543,11 +2670,15 @@ expect = "violation"
             other => panic!("expected timed-out, got {other:?}"),
         }
         match attempt_verdict(1, NOT_UP, "", t, s) {
-            AttemptVerdict::Retry { cause } => assert!(cause.contains("did not start"), "{cause}"),
+            AttemptVerdict::Retry { stage, cause } => {
+                assert_eq!(stage, "start-up");
+                assert!(cause.contains("did not start"), "{cause}");
+            }
             other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
         }
         match attempt_verdict(1, NO_PASS, "", t, s) {
-            AttemptVerdict::Retry { cause } => {
+            AttemptVerdict::Retry { stage, cause } => {
+                assert_eq!(stage, "first pass");
                 assert!(
                     cause.contains("never handed it the job") && cause.contains("45s"),
                     "{cause}"
@@ -2588,10 +2719,132 @@ expect = "violation"
         ));
         match attempt_verdict(2, NO_PASS, "", t, s) {
             AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(c) } => {
-                assert!(c.contains("start-up hang on 2 attempts"), "{c}");
+                assert!(c.contains("stalled (first pass) on 2 attempts"), "{c}");
             }
             other => panic!("expected tool error, got {other:?}"),
         }
+    }
+
+    /// Lines of the attempt log of `owner-flows-safety-apalache-deep` in run
+    /// `guest-flow-owner/754432-1791487082.104`: the server finished at
+    /// ~585 s (`The outcome is: NoError`), Quint never printed its verdict,
+    /// and the attempt sat idle until its 1800 s timeout. The log ends here.
+    const COMPLETION_STALL_LOG: &str = "\
+Output directory: /w/target/quint/guest-flow-owner/754432-1791487082.104/owner-flows-safety-apalache-deep/_apalache-out/server/2026-10-08T21-18-04_15848072029784814273
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@21:18:04.059
+Starting checker server on port 35017...                          I@21:18:04.067
+The Apalache server is running on port 35017. Press Ctrl-C to stop.
+PASS #0: SanyParser                                               I@21:18:06.719
+PASS #1: TypeCheckerSnowcat                                       I@21:18:07.396
+State 14: state invariant 2 holds.                                I@21:27:44.635
+State 14: state invariant 6 holds.                                I@21:27:49.454
+Step 14: picking a transition out of 30 transition(s)             I@21:27:49.460
+The outcome is: NoError                                           I@21:27:49.547
+";
+
+    #[test]
+    fn log_scan_sees_the_server_finish_in_the_captured_stalled_log() {
+        // Fed in uneven chunks, splitting lines (and the outcome line itself)
+        // across reads, as the poll loop does.
+        let bytes = COMPLETION_STALL_LOG.as_bytes();
+        let outcome_at = COMPLETION_STALL_LOG.find("The outcome is").expect("fixture has it");
+        let mut scan = LogScan::default();
+        let mut at = 0;
+        for chunk in bytes[..outcome_at + 7].chunks(37) {
+            scan.feed(chunk);
+            at += chunk.len();
+        }
+        assert!(scan.server_up && scan.started, "{scan:?}");
+        assert!(!scan.finished, "a partial outcome line must not count: {scan:?}");
+        scan.feed(&bytes[at..]);
+        assert!(scan.finished, "{scan:?}");
+        assert_eq!(scan.fed(), bytes.len() as u64);
+
+        // Before the outcome line nothing has finished.
+        let mut early = LogScan::default();
+        early.feed(&bytes[..outcome_at]);
+        assert!(early.started && !early.finished, "{early:?}");
+        // A TLC log (no Apalache outcome line) never finishes the scan.
+        let mut tlc = LogScan::default();
+        tlc.feed(b"[TLC] Compiling to TLA+ (via Apalache)...\nModel checking completed.\n");
+        assert!(!tlc.finished, "{tlc:?}");
+        // A line merely mentioning the outcome is not the server's line.
+        let mut quoted = LogScan::default();
+        quoted.feed(b"note: The outcome is: NoError\n");
+        assert!(!quoted.finished, "{quoted:?}");
+    }
+
+    #[test]
+    fn deadline_check_bounds_the_wait_for_quint_after_the_server_finished() {
+        let t = SECS(1800);
+        // The captured case: started, server up for ~583 s, finished.
+        assert_eq!(
+            deadline_check(SECS(586), true, Some(SECS(583)), Some(SECS(0)), t, BOUNDS),
+            None
+        );
+        assert_eq!(
+            deadline_check(SECS(645), true, Some(SECS(642)), Some(SECS(59)), t, BOUNDS),
+            None
+        );
+        assert_eq!(
+            deadline_check(SECS(646), true, Some(SECS(643)), Some(SECS(60)), t, BOUNDS),
+            Some(NO_RESULT)
+        );
+        // The overall timeout still wins.
+        assert_eq!(
+            deadline_check(SECS(1800), true, Some(SECS(1797)), Some(SECS(30)), t, BOUNDS),
+            Some(AttemptEnd::TimedOut)
+        );
+    }
+
+    #[test]
+    fn completion_stall_is_retried_once_and_never_read_as_a_verdict() {
+        let (t, s) = (SECS(1800), BOUNDS);
+        // First stall: retry on a fresh port, naming the stage — not `holds`,
+        // although the server log says `NoError`.
+        match attempt_verdict(1, NO_RESULT, COMPLETION_STALL_LOG, t, s) {
+            AttemptVerdict::Retry { stage, cause } => {
+                assert_eq!(stage, "after completion");
+                assert!(
+                    cause.contains("Quint client did not return after the server finished")
+                        && cause.contains("60s"),
+                    "{cause}"
+                );
+            }
+            other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
+        }
+        // Second stall: a tool error naming the cause.
+        match attempt_verdict(2, NO_RESULT, COMPLETION_STALL_LOG, t, s) {
+            AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(c) } => {
+                assert!(
+                    c.contains("stalled (after completion) on 2 attempts")
+                        && c.contains("Quint client did not return after the server finished"),
+                    "{c}"
+                );
+            }
+            other => panic!("expected tool error, got {other:?}"),
+        }
+        // When Quint does print its verdict, that verdict is the result.
+        let healthy = format!(
+            "{COMPLETION_STALL_LOG}[ok] No violation found (585753ms).\nYou may increase --max-steps.\n"
+        );
+        assert_eq!(
+            attempt_verdict(1, AttemptEnd::Exited { success: true }, &healthy, t, s),
+            AttemptVerdict::Final { outcome: Outcome::Holds, cause: None }
+        );
+        // Quint exiting without a verdict after the server finished is a
+        // tool error, never `holds` from the server's line.
+        assert!(matches!(
+            attempt_verdict(1, AttemptEnd::Exited { success: true }, COMPLETION_STALL_LOG, t, s),
+            AttemptVerdict::Final { outcome: Outcome::ToolError, .. }
+        ));
+    }
+
+    #[test]
+    fn stall_stages_are_named() {
+        assert_eq!(Stall::ServerNotUp.stage(), "start-up");
+        assert_eq!(Stall::NoFirstPass.stage(), "first pass");
+        assert_eq!(Stall::NoClientResult.stage(), "after completion");
     }
 
     #[test]
