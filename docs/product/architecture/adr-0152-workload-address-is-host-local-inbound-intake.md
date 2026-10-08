@@ -7,12 +7,13 @@ pre-activation difference D15-R1 acknowledged by user 2026-10-05; decision
 D8a — only bound intake listeners are reachable at the guest prefix, and the
 boot convergence of the shared route (independent DESIGN review findings B-2,
 H-4) — approved by user 2026-10-06; boot keeps or adds the route only behind
-verified steering (D8a-ROUTE) and the route is never removed at shutdown
+attached steering (D8a-ROUTE) and the route is never removed at shutdown
 (U-4), approved by user 2026-10-06, D8a-ROUTE restated for the steering
 mechanism and approved by user 2026-10-07; the steering mechanism — a pinned
 socket-lookup program over a listener-keyed socket map (D8a-LOOKUP,
-ADR-0171) — and the boot fence of the prefix when that steering cannot be
-verified (D8a-FENCE) approved by user 2026-10-07; pending independent DESIGN
+ADR-0171) — approved by user 2026-10-07; the steering program loaded and
+swapped in, with the route written only after (D8a-LOAD-SWAP, D8a-ROUTE
+restated), approved by user 2026-10-08; pending independent DESIGN
 review.** GH #295.
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN — PROPOSED 2026-10-05*. Whether an intake listener exists while no
@@ -68,24 +69,24 @@ the client writing immediately.
 
 ## Decision
 
-1. **Shared local route, converged on boot, only behind verified steering.**
+1. **Shared local route, converged on boot, only behind attached steering.**
    The guest prefix is host-local through one shared `local` route on `lo`
    whose preferred source is the node's guest gateway address, tagged with
    Overdrive's route protocol identifier. There is no per-allocation route or
-   netdevice. Every boot first converges and verifies the guest-prefix
-   steering of point 2 (ADR-0171). Only then does it observe the routes
-   covering the prefix and converge: an identical route is kept; an
-   Overdrive-tagged route for the prefix with different attributes is
-   replaced; a missing route is added; a route not tagged by Overdrive that
-   overlaps the prefix refuses startup with a typed error naming it. If the
-   steering cannot be verified, boot fences the prefix — the tagged route
-   becomes a `prohibit` route for the prefix, in one route replace — and
-   refuses startup with a typed error: the prefix is never locally
-   deliverable without verified steering, and fenced traffic is refused
-   rather than routed elsewhere (ADR-0171). The tagged route has exactly
-   these two forms, `local` and the fence (D8a-FENCE), and only a boot
-   convergence that has just verified and probed the steering puts `local`
-   back. Boot is the only writer of the route and of the steering program:
+   netdevice. Every boot first loads this binary's steering program (the
+   kernel verifier checks it) and swaps it into the pinned link (point 2,
+   ADR-0171). Only then does it observe the routes covering the prefix and
+   converge: an identical route is kept; an Overdrive-tagged route for the
+   prefix with different attributes is replaced; a missing route is added; a
+   route not tagged by Overdrive that overlaps the prefix refuses startup
+   with a typed error naming it. If the steering cannot be loaded or
+   attached, boot refuses startup with a typed error and does not write the
+   route: the link still runs the program an earlier boot attached, so a
+   `local` route left by that boot stands only over that steering, and
+   before the first successful boot there is no route. The prefix is never
+   locally deliverable without a steering program deciding every lookup;
+   that program's correctness is established by its Tier-3 tests in CI on
+   the pinned kernel, not at boot (ADR-0171). Boot is the only writer of the route and of the steering program:
    on the appliance only Overdrive writes these kernel objects (ADR-0068), and
    at runtime the owner changes the steering only by inserting entries and by
    closing listeners, both of which report their outcome to the owner, so
@@ -159,13 +160,19 @@ the client writing immediately.
   listener to stay bound (a probe sees `connect()` complete on a port no
   longer served; teardown and lease release wait). ADR-0171 records the
   comparison. Rejected.
-- **Converge the route at boot without verifying the steering.** A boot whose
-  steering convergence failed — a program the kernel rejects, or a crash
-  part-way — would leave the prefix locally delivered with no verified
-  decision. Rejected.
-- **Remove the route when the steering cannot be verified.** The prefix is
+- **Converge the route at boot before the steering is attached.** On a first
+  boot whose steering convergence fails — a program the verifier rejects, a
+  refused attach, or a crash part-way — the prefix would be locally
+  delivered with no lookup decision. Rejected.
+- **Remove the route when the steering cannot be converged.** The prefix is
   then not local: host-local connects and arriving packets follow the default
-  route and leave the host instead of being refused. Rejected for the fence.
+  route and leave the host instead of being refused. Rejected.
+- **Fence the prefix with a tagged `prohibit` route when the steering
+  convergence fails.** A failed boot leaves the earlier program and its
+  route, which already refuse every lookup while `serve` is down, and a
+  crash right after a swap leaves `local` over this binary's program, which
+  its CI tests establish (ADR-0171); the fence would add a write — and a
+  failing write — that covers no exposed state. Rejected.
 - **Audit and repair the steering and the route at runtime.** On the
   appliance nothing but the owner writes them, and every runtime write (an
   entry insert, a listener close) reports its outcome to the owner, so a
@@ -193,9 +200,9 @@ the client writing immediately.
   user acknowledged on 2026-10-05.
 - While `overdrive serve` is down the pinned steering keeps the prefix
   fail-closed: every listener closed with the process, so every lookup for the
-  prefix drops; after a boot refusal the fence keeps it refused. The next
-  boot converges the steering, verifies and probes it, and only then
-  re-converges the route to `local`.
+  prefix drops, and the same holds after a boot refusal, which leaves the
+  earlier program attached. The next boot loads its own program, swaps it
+  in, and only then re-converges the route to `local`.
 - Closing an intake listener ends its reachability in the same kernel step, so
   a port the guest stopped serving refuses at once; teardown, quiescence and
   lease release never wait on a steering write (ADR-0171).
