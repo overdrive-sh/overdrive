@@ -137,6 +137,39 @@ DWD-21). Built-in is the **production** answer; the module-load is the
 **stock-kernel test** answer; they coexist because a vsock=y kernel simply
 stages no modules and the load becomes a no-op.
 
+### 5 — Amendment (2026-10-08, GH #295): the appliance image configures root-namespace interfaces only at boot
+
+Approved by the user 2026-10-08 (decision IMG-IFACE-BOOT of the #295 feature
+delta); pending the independent DESIGN review of #295.
+
+The guest-flow forwarder (#295, ADR-0165) attaches its egress unframe program
+to every root-namespace interface present when `overdrive serve` boots, and
+attaches nothing afterwards. An interface that gains addresses or routes after
+that point would carry guest datagrams without the program. Interface
+configuration is a surface of the appliance image, and this ADR is the image's
+SSOT, so the requirement is pinned here:
+
+**The appliance image MUST configure root-namespace network interfaces
+(addresses, routes, link up) only at boot, before `overdrive serve` starts,
+and MUST NOT configure an interface the kernel registers after boot** (a NIC
+whose driver probes late, a hot-added NIC, or one any component creates). The
+image carries no network configuration that matches interfaces generically and
+so would configure a later one — for example a systemd-networkd `[Match]
+Name=*` file, or a DHCP client started on every new link.
+
+Interfaces that `overdrive serve` creates and configures during its own boot
+(ADR-0061's load-balancer veth pair) are Overdrive's, not the image's; the #295
+feature delta orders them before the unframe attach (D5a-SERVE-IFACE).
+
+This is a requirement on the image build, not a runtime check: the image's
+network configuration is reviewed against this section when the image is built
+and whenever it changes, in the same "image change is a tested change"
+discipline as §1. No new work item is minted by recording it.
+
+**Corollary — the dev and metal hosts are not the appliance image.** They run
+a catch-all systemd-networkd configuration that configures later interfaces;
+they are evidence neither for nor against this requirement.
+
 ## Consequences
 
 ### Positive
@@ -350,6 +383,10 @@ this decision:
 - ADR-0053 (same-host backend delivery via `cgroup_sock_addr`) — floor
   back-reference updated.
 - ADR-0059 (exec-probe cgroup placement) — floor back-reference updated.
+- ADR-0165 (guest datagram frame removal; boot-only unframe attachment set)
+  — consumer of § 5.
+- ADR-0061 (single-node load-balancer veth pair) — `serve`-created
+  interfaces, outside § 5.
 - [#26](https://github.com/overdrive-sh/overdrive/issues/26) — transparent
   kernel mTLS (host-socket sockops + kTLS path).
 - [#222](https://github.com/overdrive-sh/overdrive/issues/222) — guest-stack

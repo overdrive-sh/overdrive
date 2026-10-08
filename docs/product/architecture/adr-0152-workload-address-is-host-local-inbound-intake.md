@@ -4,7 +4,8 @@
 
 **Proposed — approved by user (D8 2026-10-05; route convergence, D8a-ROUTE
 and U-4 2026-10-06, current wording 2026-10-08; the node-address check
-D8-PREFIX-CFG 2026-10-08); pending independent DESIGN review.** GH #295.
+D8-PREFIX-CFG 2026-10-08; the VIP-range check D8-PREFIX-VIP 2026-10-08);
+pending independent DESIGN review.** GH #295.
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN — PROPOSED 2026-10-05*.
 
@@ -33,8 +34,12 @@ When an address is assigned to an interface, the kernel adds a `local` route
 for it (protocol `kernel`). A node address inside the guest prefix — set by
 the node's network configuration, which the operator owns — would therefore
 put an untagged route inside the prefix and make that address both a node
-address and a possible `workload_addr`. On the appliance nothing else writes
-routes (ADR-0068).
+address and a possible `workload_addr`. The configured service VIP range is a
+second producer: `serve`'s own boot assigns gateway addresses from it and
+routes it on-link (ADR-0061), and the mesh resolver treats every address in it
+as a VIP (ADR-0164), so a VIP range overlapping the prefix would make a
+workload address an unknown VIP and a gateway address a node address inside
+the prefix. On the appliance nothing else writes routes (ADR-0068).
 
 ## Decision
 
@@ -42,10 +47,13 @@ routes (ADR-0068).
    `local` route on `lo` whose preferred source is the node's guest gateway
    address (ADR-0174), tagged with Overdrive's route protocol identifier.
    There is no per-allocation route or netdevice.
-2. **The prefix holds no node address.** Before any boot effect, startup
-   refuses with a typed configuration error when an address configured on a
-   node interface lies inside the guest prefix, naming the address and the
-   interface.
+2. **The prefix holds no node address and no VIP.** Before any boot effect,
+   startup refuses with a typed configuration error when an address
+   configured on a node interface lies inside the guest prefix, naming the
+   address and the interface, and when any range of the configured service
+   VIP range overlaps the guest prefix, naming the range. Every address
+   `serve`'s own boot later assigns in the root namespace is drawn from the
+   VIP range, so it is checked by the second refusal.
 3. **Written at boot, only behind attached steering.** Boot keeps an
    identical tagged route, replaces a tagged route for the prefix whose
    attributes differ, or adds a missing one — and does so only after this
@@ -95,7 +103,9 @@ routes (ADR-0068).
 
 - Observation rows, backend identity and probe targets are unchanged.
 - A node whose network configuration places an address inside the guest
-  prefix does not start; the refusal names the address and interface.
+  prefix does not start; the refusal names the address and interface. A node
+  configured with a VIP range overlapping the prefix does not start; the
+  refusal names the range.
 - The prefix is never locally deliverable without a steering program
   deciding every lookup, at any boot step, after any crash, and while `serve`
   is down.

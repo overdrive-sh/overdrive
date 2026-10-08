@@ -5,8 +5,10 @@
 **Proposed — approved by user (D5a = hybrid 2026-10-06; its attachment set,
 current wording D5a-IFACE, 2026-10-08; the boot refusal on any attach
 failure, D5a-IFACE-BOOT, and no attach after boot because the appliance
-configures no interface registered after boot, D5a-LATE, 2026-10-08);
-pending independent DESIGN review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
+configures no interface registered after boot, D5a-LATE, 2026-10-08; that
+image requirement recorded in ADR-0068 § 5, IMG-IFACE-BOOT, and `serve`'s own
+boot-created interfaces ordered before the attach, D5a-SERVE-IFACE,
+2026-10-08); pending independent DESIGN review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
 records one decision. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*, which holds the
 forwarder contract.
@@ -64,21 +66,23 @@ removal points:
   host socket's kernel-reported local address and peer (after any `connect4`
   rewrite), never from the requested destination.
 - **Attachment set.** An interface carries guest datagrams only once it has
-  addresses and routes. On the appliance (ADR-0068) the image configures
-  root-namespace interfaces only at boot, before `serve` starts, so:
-  - **at boot, the program is attached to every interface present** — `lo`
-    and the image's NICs. Any failed attachment refuses startup with the
-    interface named, before forwarding opens;
+  addresses and routes. Root-namespace interfaces are configured by two
+  producers, both before the attach: the appliance image at boot, before
+  `serve` starts (ADR-0068 § 5), and `serve`'s own boot steps before the
+  attach step (ADR-0061's load-balancer veth pair). So:
+  - **at boot, the program is attached to every interface present** — `lo`,
+    the image's NICs and every interface `serve`'s earlier boot steps
+    created. Any failed attachment refuses startup with the interface named,
+    before forwarding opens;
   - **after boot, nothing is attached.** An interface the kernel registers
     later (a NIC whose driver probes late, a hot-added NIC, or one any
     component creates) is never given addresses or routes, so it carries no
-    guest traffic and needs no attach. This rule is part of the assumption
-    that only Overdrive and the image write the node's kernel objects, and
-    is discharged by the appliance image: its configuration must not
-    configure an interface registered after boot. That is an image
-    requirement, not a runtime check. The dev and metal hosts run a
-    catch-all systemd-networkd configuration and are not the appliance
-    image.
+    guest traffic and needs no attach. For the image this is ADR-0068 § 5;
+    for `serve`, no step after the attach creates or configures a
+    root-namespace interface, and a future runtime owner of such an
+    interface must attach the program before giving it addresses or routes.
+    Neither is a runtime check. The dev and metal hosts run a catch-all
+    systemd-networkd configuration and are not the appliance image.
 
   No attach outcome quiesces forwarding or counts as audit damage. The links
   are process-owned and not audited at runtime (ADR-0159). A TCX link of an

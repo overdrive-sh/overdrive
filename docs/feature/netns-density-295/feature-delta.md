@@ -16736,8 +16736,8 @@ review.** They answer findings H-1, H-2, M-1 and M-3 of
 |---|---|---|
 | **D8a-CAP** (H-1) | The guest-prefix steering map is sized from the admitted bound with headroom: `GUEST_INTAKE_STEERING_MAX = 262,144` entries (16 declared TCP listener ports per attachment at the 16,384 placeholder; about 64 B per entry at insert and 16 B per hash bucket at creation — about 4 MiB at creation, 20 MiB full). `GuestAddressPool::assign` reserves an allocation's declared TCP listener ports with its lease and refuses `GuestNetworkError::IntakeCapacityReached` (non-terminal, projected like `AdmissionCapReached`) when the node's reservations would exceed the capacity; Retiring leases keep their reservation until release. So no listener fails to steer for lack of space, and the capacity-driven steer retry is removed. The one remaining retried steer failure is `GuestSteeringError::KernelMemory` (producer: the kernel's entry or psock allocation under memory pressure); any other steer failure is an Overdrive defect, reported and not retried (confirmed by the user as D8a-CAP-RETRY, below). A node supports `M ≤ 262,144` declared VM TCP listener ports (this replaces CAP-295-A's "any valid `M > 65,536` remains supported", § *Changed assumptions*) | ADR-0176, ADR-0171, ADR-0163; § *Core vocabulary*, *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, G-V0, G-V8, R5-22, R5-37, V-9, V-26 (x) |
 | **D19-LINKS** (H-2) | The forwarder's process-owned links (`lo` unframe, non-`lo` unframe, `sock_ops`, drain counter) have no runtime audit, damage recovery or gold-test detach injection: while `serve` holds them only an explicit detach removes them, and on the appliance only Overdrive could issue one (A-31). `SharedGuestNetworkComponent::{SockOpsLink, DrainCounterLink, UnframeLink}` are deleted. Kept, with their producers: the startup probe's `LinksAttached` stage (the kernel refusing an attach at load); a TCX link leaving with an interface the kernel removes (kernel); the `Forwarder` component audit of pair and cell bookkeeping (Overdrive's own) | ADR-0159, ADR-0151, ADR-0165; § *Driven port — host forwarder*, error taxonomy, *Earned Trust*, V-8, roadmap 08-03 / 10-02 |
-| **D5a-IFACE** (M-1) | The egress unframe program is attached at boot to every interface present in the host root namespace (`lo` and the image's NICs) — a failed attach refuses startup (`GuestNetworkError::UnframeAttach`) — and to no interface after boot: this design creates no root-namespace interface, and an interface the kernel registers after boot is never configured, so it carries no guest datagram (D5a-LATE, below). The other-software interface cases (container bridge, WireGuard / tunnel, foreign TCX program, policy-based xfrm) are removed from V-17, A-21 and ADR-0165. The boot refusal is confirmed by the user as D5a-IFACE-BOOT (below) | ADR-0165; § *Driven port — host forwarder*, *Composition* step 9, G-V1, A-21, V-17, R5-38 |
-| **D8-PREFIX-CFG** (M-3) | `GuestSteeringError::PinnedObjectForeign` is deleted. `GuestNetworkError::ForeignGuestPrefixRoute` is replaced by the configuration-validation refusal `GuestNetworkError::GuestPrefixOverlapsNodeAddress { prefix, interface, address }`, checked in `probe_startup` before any boot effect. Producer: the operator's node network configuration placing a node address inside the guest prefix (the kernel then adds an untagged `local` route for it). Route convergence keeps, replaces or adds only the tagged route | ADR-0152; § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, G-V1, R5-11, *Earned Trust* |
+| **D5a-IFACE** (M-1) | The egress unframe program is attached at boot to every interface present in the host root namespace (`lo` and the image's NICs) — a failed attach refuses startup (`GuestNetworkError::UnframeAttach`) — and to no interface after boot: every root-namespace interface is configured before the attach — by the image at boot (IMG-IFACE-BOOT) or by `serve`'s own earlier boot steps (D5a-SERVE-IFACE) — and an interface the kernel registers after boot is never configured, so it carries no guest datagram (D5a-LATE, below). The other-software interface cases (container bridge, WireGuard / tunnel, foreign TCX program, policy-based xfrm) are removed from V-17, A-21 and ADR-0165. The boot refusal is confirmed by the user as D5a-IFACE-BOOT (below) | ADR-0165; § *Driven port — host forwarder*, *Composition* step 9, G-V1, A-21, V-17, R5-38 |
+| **D8-PREFIX-CFG** (M-3) | `GuestSteeringError::PinnedObjectForeign` is deleted. `GuestNetworkError::ForeignGuestPrefixRoute` is replaced by the configuration-validation refusal `GuestNetworkError::GuestPrefixOverlapsNodeAddress { prefix, interface, address }`, checked in `probe_startup` before any boot effect. Producer: the operator's node network configuration placing a node address inside the guest prefix (the kernel then adds an untagged `local` route for it); the configured `vip_range`, from which `serve`'s own boot assigns root-namespace addresses, is the second producer, refused by D8-PREFIX-VIP (2026-10-08). Route convergence keeps, replaces or adds only the tagged route | ADR-0152; § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, G-V1, R5-11, *Earned Trust* |
 
 ### User decisions — 2026-10-08 (independent review of revision 11)
 
@@ -16752,7 +16752,34 @@ are not architect-derived additions.
 | **D5a-IFACE-BOOT** (H-1 (1)) | Boot refuses (`GuestNetworkError::UnframeAttach`, naming the interface) when the egress unframe program cannot be attached to an interface present at boot, whatever the `UnframeAttachError` variant | ADR-0165; § *Driven port — host forwarder*, *Composition* step 9, G-V1, R5-38 |
 | **D8a-CAP-RETRY** (H-1 (2)) | Only a `GuestSteeringError::KernelMemory` steer failure is retried; every other steer failure is an Overdrive defect, reported (`guest_intake.bind_failed { retried: false }`) and not retried | ADR-0176; § *Driven port — guest-prefix steering*, *Owner and provisioner*, error taxonomy, G-V8, R5-22, R5-37 |
 | **A-MEM-OWNER** (H-1 (3)) | Assumption A-MEM (kernel memory pressure is not permanent) is an environment assumption owned by #261 (node-wide CPU and memory accounting) | § *Formal protocol model* (assumptions table) |
-| **D5a-LATE** (M-2) | **Proposed — approved by user 2026-10-08; pending independent DESIGN review.** On the appliance the image configures root-namespace interfaces only at boot, before `serve` starts. An interface the kernel registers later (a NIC whose driver probes late, a hot-added NIC, or one any component creates after boot) is never given addresses or routes, so it carries no guest traffic and needs no unframe attach. This is part of A-31 (only Overdrive / the image writes the node's kernel objects), discharged by the appliance image (ADR-0068): the image configuration must not configure an interface registered after boot — an image requirement, not a runtime check. The dev and metal hosts run a catch-all systemd-networkd configuration and are not the appliance image; they are not evidence for or against this rule. Boot is unchanged: every interface present at boot is attached, and a failed attach refuses startup (D5a-IFACE-BOOT). There is no late-interface attach operation, no late-interface configuration path, no link-notification watch, relist or retry for unframe attachments, and no gate for them | ADR-0165; § *Driven port — host forwarder*, *Owner and provisioner*, error taxonomy, G-V1, A-21, A-31, V-17 |
+| **D5a-LATE** (M-2) | **Proposed — approved by user 2026-10-08; pending independent DESIGN review.** On the appliance the image configures root-namespace interfaces only at boot, before `serve` starts. An interface the kernel registers later (a NIC whose driver probes late, a hot-added NIC, or one any component creates after boot) is never given addresses or routes, so it carries no guest traffic and needs no unframe attach. This is part of A-31 (only Overdrive / the image writes the node's kernel objects), discharged by ADR-0068 § 5 (IMG-IFACE-BOOT, 2026-10-08): the image configuration must not configure an interface registered after boot — an image requirement, not a runtime check. Interfaces `serve` itself creates exist before the attach (D5a-SERVE-IFACE). The dev and metal hosts run a catch-all systemd-networkd configuration and are not the appliance image; they are not evidence for or against this rule. Boot is unchanged: every interface present at boot is attached, and a failed attach refuses startup (D5a-IFACE-BOOT). There is no late-interface attach operation, no late-interface configuration path, no link-notification watch, relist or retry for unframe attachments, and no gate for them | ADR-0165; § *Driven port — host forwarder*, *Owner and provisioner*, error taxonomy, G-V1, A-21, A-31, V-17 |
+
+### User decisions — 2026-10-08 (independent review of revision 12)
+
+Each: **Proposed — approved by user 2026-10-08; pending independent DESIGN
+review.** They answer findings H-1, M-1 and M-2 of
+`design/review-design-vsock-replacement-r12.md`.
+
+| ID | Decision | Recorded in |
+|---|---|---|
+| **IMG-IFACE-BOOT** (H-1) | ADR-0068 gains § 5 (amendment, 2026-10-08): the appliance image configures root-namespace network interfaces only at boot, before `serve` starts, and never configures an interface the kernel registers after boot; it carries no catch-all network configuration that matches later interfaces. ADR-0068 § 5 is the artifact that discharges the D5a-LATE part of A-31 | ADR-0068 § 5, ADR-0165; § *Assumptions* (A-31), *Formal protocol model* (assumptions table), D5a-LATE |
+| **D5a-SERVE-IFACE** (M-1) | Root-namespace interfaces have two producers, both before the unframe attach: the image at boot (IMG-IFACE-BOOT) and `serve`'s own boot steps — ADR-0061's load-balancer veth pair `ovd-veth-cli` / `ovd-veth-bk`, created, addressed and routed in *Composition* step 3. Ordering invariant: **every interface `serve` creates in the root namespace exists before `converge_shared` (step 9)**, so the boot attach covers it; no `serve` step after step 9 creates or configures a root-namespace interface. Scenario R5-39. A later runtime owner of the pair (#197) must attach the unframe program before giving a recreated pair addresses or routes, or must not recreate it after boot (§ *GitHub context*, below) | ADR-0165; § *Driven port — host forwarder*, *Composition* steps 3 and 9, G-V1, R5-39 |
+| **D8-PREFIX-VIP** (M-2) | A configured service VIP range (`config.vip_range`, every range of the `VipRange`) that overlaps the guest prefix is refused by `SharedGuestNetworkOwner::probe_startup` with `GuestNetworkError::GuestPrefixOverlapsVipRange { prefix: Ipv4Net, vip_range: Ipv4Net }` before any boot effect (*Composition* step 1, `health.startup.refused`, reason `guest_network.probe`). The owner is composed with the same `VipRange` value the service VIP allocator and `ServiceBackendsResolve::new` receive (one SSOT, mandatory, no default). `vip_range` is named a producer beside the operator's interface addresses in D8-PREFIX-CFG: every address `serve`'s own boot assigns in the root namespace (step 3's gateways) lies in it. Scenario R5-40 | ADR-0152; § *Owner and provisioner* (`probe_startup`), *Composition* step 1, error taxonomy, G-V1, R5-40 |
+
+**GitHub context (recorded; DESIGN takes no GitHub action; the orchestrator
+posts the constraint on #197).** [GH #197](https://github.com/overdrive-sh/overdrive/issues/197)
+(promote the ADR-0061 veth pair to a runtime network reconciler) must honour
+D5a-SERVE-IFACE:
+
+> #295 (ADR-0165, D5a-SERVE-IFACE) attaches the guest egress unframe program
+> to every root-namespace interface present when `serve` boots, and attaches
+> nothing after boot. The load-balancer veth pair `ovd-veth-cli` /
+> `ovd-veth-bk` is covered only because `serve` creates it before that attach.
+> A reconciler that recreates the pair at runtime must attach the unframe
+> program to both ends before giving them addresses or routes (a failed
+> attach leaves them unconfigured), or must not recreate the pair after boot;
+> otherwise empty and frame-shaped guest datagrams to the VIP range leave
+> through it still framed.
 
 Issue numbers #93 and #308–#312: verified 2026-10-06 with
 `gh issue view <N> --comments` (saved at
@@ -16860,9 +16887,13 @@ daemon, and no network manager that removes routes it did not create) — not
 by a runtime validation item. Part of A-31 (D5a-LATE, approved 2026-10-08):
 the image configures root-namespace interfaces only at boot, before `serve`
 starts; an interface the kernel registers later is never given addresses or
-routes, so it carries no guest traffic and needs no unframe attach. The image
-configuration must not configure an interface registered after boot — an
-image requirement, not a runtime check. The dev and metal hosts use a
+routes, so it carries no guest traffic and needs no unframe attach. This part
+is discharged by ADR-0068 § 5 (IMG-IFACE-BOOT, approved 2026-10-08), which
+requires the image configuration not to configure an interface registered
+after boot — an image requirement, not a runtime check. Root-namespace
+interfaces `serve` itself creates (ADR-0061's veth pair) are not covered by
+A-31: they exist before the boot attach by the ordering invariant
+D5a-SERVE-IFACE (*Composition*, G-V1, R5-39). The dev and metal hosts use a
 catch-all systemd-networkd configuration and are not the appliance image.
 A-31 is not in the table above, which lists assumptions needing focused
 validation.
@@ -16892,13 +16923,13 @@ of the CID-claim scenarios, and V-26 of the steering scenarios.
 | D3 | One forwarded socket set per transport flow, never multiplexed; node pair capacity `GUEST_FLOW_MAX_PAIRS = 65,536` (four flows per attachment at the target); per-allocation quota 4,096 as a bulkhead | **APPROVED 2026-10-05** | [0147](../../product/architecture/adr-0147-one-kernel-forwarded-pair-per-transport-flow.md) | V-9 (sizing) |
 | D4 | Datagram associations use STREAM toward the guest and SEQPACKET from the guest; the guest reassembles; the host never writes on SEQPACKET | **APPROVED 2026-10-05** | [0148](../../product/architecture/adr-0148-stream-toward-guest-seqpacket-replies-for-datagram-flows.md) | — |
 | D5 | Every datagram is framed (4-byte magic + BE `u32` length; empty = header alone; bound 59,000 B) only inside the transport; the frame never reaches an application, and reaches a remote peer only through an egress interface missing the unframe attachment (D5a) | **APPROVED 2026-10-05** | [0149](../../product/architecture/adr-0149-length-prefixed-datagram-frame-with-empty-carrier.md) | — |
-| D5a | **Hybrid** removal for guest→host datagrams: the host verdict strips the frame from every non-empty datagram, keeping it only for empty datagrams and payloads that themselves parse as a frame; a fragment-aware, tuple-gated TC egress program on `lo` and every interface of the host root namespace strips a valid frame on a registered tuple and passes everything else; tuples registered from the connected host socket's kernel peer; attached at boot to every interface present (a failure refuses startup) and never after boot: an interface the kernel registers later is never given addresses or routes on the appliance (A-31), so it carries no guest datagram | **APPROVED 2026-10-06** (V-11 proven, P-29–P-31; attachment set D5a-SET 2026-10-06); attachment set restated by D5a-IFACE, D5a-IFACE-BOOT and D5a-LATE — Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0165](../../product/architecture/adr-0165-guest-datagram-frame-removed-by-hybrid-verdict-strip-and-fragment-aware-egress-unframe.md) | V-16, V-17, V-18 |
+| D5a | **Hybrid** removal for guest→host datagrams: the host verdict strips the frame from every non-empty datagram, keeping it only for empty datagrams and payloads that themselves parse as a frame; a fragment-aware, tuple-gated TC egress program on `lo` and every interface of the host root namespace strips a valid frame on a registered tuple and passes everything else; tuples registered from the connected host socket's kernel peer; attached at boot to every interface present (a failure refuses startup), including every interface `serve`'s earlier boot steps created (D5a-SERVE-IFACE), and never after boot: an interface the kernel registers later is never given addresses or routes on the appliance (A-31, ADR-0068 § 5), so it carries no guest datagram | **APPROVED 2026-10-06** (V-11 proven, P-29–P-31; attachment set D5a-SET 2026-10-06); attachment set restated by D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE, IMG-IFACE-BOOT and D5a-SERVE-IFACE — Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0165](../../product/architecture/adr-0165-guest-datagram-frame-removed-by-hybrid-verdict-strip-and-fragment-aware-egress-unframe.md) | V-16, V-17, V-18 |
 | D6 | Ordinary guest sockets are captured and paired by guest-kernel Aya programs loaded and controlled by `overdrive-init`, at the size G-MECH approved | **APPROVED 2026-10-05** | [0150](../../product/architecture/adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md) | — |
 | D7 | One node-scoped guest-flow owner exclusively holds the host forwarder (incl. `sock_ops` on its own cgroup and the drain counter), all listeners, control sessions, cells and host pair sockets | **APPROVED 2026-10-05**; `sock_ops` identifies intake children by listener tag, not port (M-1) — correction **APPROVED 2026-10-06** | [0151](../../product/architecture/adr-0151-one-node-guest-flow-owner-holds-forwarder-and-pair-sockets.md) | V-20 |
 | D8 | `workload_addr` is host-local through one shared, Overdrive-tagged `local` route on `lo`, written only by boot behind attached steering and never removed (with D8a-ROUTE, U-4, D8-PREFIX-CFG) | **APPROVED 2026-10-05** | [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md) | — |
 | D8-INTAKE | Inbound TCP terminates at a host intake listener on `workload_addr:port` for a declared port of an Active allocation, installed at establishment and parked; each accepted connection opens one host-initiated `TcpAccept` vsock flow (D8, split out for ADR-0173) | **APPROVED 2026-10-05** (as part of D8) | [0173](../../product/architecture/adr-0173-intake-listeners-open-a-host-initiated-flow-per-accepted-connection.md) | — |
 | D8-PEER | The guest sees the intake connection's real peer; host-local platform clients present the guest gateway, the local route's preferred source (D8, split out for ADR-0174) | **APPROVED 2026-10-05** (as part of D8) | [0174](../../product/architecture/adr-0174-the-guest-sees-the-intake-connections-real-peer.md) | V-12 |
-| D8-PREFIX-CFG | Startup refuses `GuestPrefixOverlapsNodeAddress` when a node interface address lies inside the guest prefix (producer: the operator's node network configuration); `ForeignGuestPrefixRoute` and `PinnedObjectForeign` are deleted | Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md) | — |
+| D8-PREFIX-CFG | Startup refuses `GuestPrefixOverlapsNodeAddress` when a node interface address lies inside the guest prefix (producer: the operator's node network configuration) and `GuestPrefixOverlapsVipRange` when a range of the configured `vip_range` overlaps it (producer: the operator's `vip_range`, from which `serve`'s boot assigns root-namespace addresses; D8-PREFIX-VIP), both in `probe_startup` before any boot effect; `ForeignGuestPrefixRoute` and `PinnedObjectForeign` are deleted | Proposed — approved by user 2026-10-08 (D8-PREFIX-CFG; D8-PREFIX-VIP); pending independent DESIGN review | [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md) | — |
 | D8a | Only intake listeners serving a declared, guest-listening port are reachable at the guest prefix: local delivery to the prefix is decided by the pinned steering program of D8a-LOOKUP (a host-local TCP connection reaches the open intake listener its entry names; every other lookup is dropped); constant nft rules reject (output) or drop (prerouting) guest-prefix traffic that is neither leg-S-mark-exempt nor diverted to leg-C; `managed_guest_ips` is replaced by the constant prefix; the shared `local` route is kept or added only by boot `converge_shared` after this boot's steering program is loaded and swapped in (else startup refuses `GuestPrefixSteeringConverge` with the route unwritten and the earlier program attached, D8a-LOAD-SWAP) and is never removed at shutdown (U-4); shared-component repair runs only while the repairing recovery holds quiescence, held by named holders, and forwarding reopens only when no holder remains (D8a-HOLD) | **APPROVED 2026-10-06** (findings B-2, H-4); D8a-ROUTE and ruling U-4 (formal model) **APPROVED 2026-10-06**; D8a-HOLD (third model check) — Proposed — approved by user 2026-10-07; pending independent DESIGN review; steering mechanism replaced by D8a-LOOKUP, D8a-ROUTE restated and D8a-FENCE added (revision 9) — Proposed — approved by user 2026-10-07; pending independent DESIGN review; narrowed by APPLIANCE (2026-10-07): no runtime writer, audit or repair of the steering program or the route; D8a-FENCE replaced by D8a-LOAD-SWAP (revision 10) — Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0172](../../product/architecture/adr-0172-only-steered-intake-listeners-are-reachable-at-the-guest-prefix.md), [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md), [0169](../../product/architecture/adr-0169-forwarding-quiescence-is-held-by-named-holders-and-reopens-only-when-none-remains.md), [0171](../../product/architecture/adr-0171-guest-prefix-local-delivery-is-decided-by-a-pinned-socket-lookup-program-over-a-listener-keyed-socket-map.md) | V-19, V-26 |
 | D8a-LOOKUP | Local delivery to the guest prefix (gateway excluded) is decided by an Aya `sk_lookup` program on the host root network namespace, its link pinned under `GUEST_PREFIX_STEERING_PIN_DIR` (keeping the program and its listener-keyed socket map): a host-local TCP connection is assigned to the open intake listener named by its `(workload_addr, port)` entry, every other lookup is dropped (TCP answered with a reset); the owner inserts an entry with `GuestPrefixSteering::steer` after the listener listens and closing the listener removes the entry in the same kernel step; while `serve` is down every lookup drops; the prefix is locally delivered only while a pinned steering link exists (D8a-ROUTE, D8a-LOAD-SWAP) | Proposed — approved by user 2026-10-07; pending independent DESIGN review | [0171](../../product/architecture/adr-0171-guest-prefix-local-delivery-is-decided-by-a-pinned-socket-lookup-program-over-a-listener-keyed-socket-map.md) | V-26, V-19 |
 | D8a-LOAD-SWAP | Boot loads this binary's steering program with its own new map (the kernel verifier checks it), swaps it into the pinned link with the atomic `BPF_LINK_UPDATE` (or attaches and pins a first link), then keeps or adds the route; a failed load or swap leaves the earlier program attached and boot refuses `GuestPrefixSteeringConverge` without writing the route; no runtime probe and no `verify` — the program's correctness is discharged by the Tier-3 steering tests in CI on the pinned kernel (A-33). Replaces D8a-FENCE (the boot fence `prohibit <prefix>`, approved 2026-10-07) | Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0175](../../product/architecture/adr-0175-each-boot-loads-its-steering-program-and-swaps-it-into-the-pinned-link.md) | V-26 (viii) |
@@ -17237,7 +17268,9 @@ New steps are needed for (DELIVER owns IDs and order after approval):
     audited (APPLIANCE); the route and the pinned steering are **never
     removed at shutdown**, graceful or not (U-4) (D8a, H-4); V-26 (K-L9);
     and the `probe_startup` check that no node interface address lies inside
-    the guest prefix (`GuestPrefixOverlapsNodeAddress`, D8-PREFIX-CFG);
+    the guest prefix (`GuestPrefixOverlapsNodeAddress`, D8-PREFIX-CFG) and no
+    range of `vip_range` overlaps it (`GuestPrefixOverlapsVipRange`,
+    D8-PREFIX-VIP);
 14. host-internal deny set: the owner's static and local-delivery checks, the
     `HostInternal` refusal, the owner egress socket mark and the constant
     output reject rule (D26);
@@ -18094,9 +18127,10 @@ impl GuestFlowForwarder {
     /// in exactly one of `attached` / `failed`, a failure keeping its cause
     /// (`UnframeAttachError`); a failure never stops the others. Never
     /// detaches anything. `Err` only when the call cannot run at all (the
-    /// program is not loaded). The only unframe attach after `load`: no
-    /// interface registered after boot is configured (D5a-LATE), so none is
-    /// attached later.
+    /// program is not loaded). The only unframe attach after `load`: every
+    /// interface `serve` creates exists before it (D5a-SERVE-IFACE) and no
+    /// interface registered after boot is configured (D5a-LATE, ADR-0068
+    /// § 5), so none is attached later.
     pub fn converge_unframe_interfaces(&self, interfaces: &std::collections::BTreeSet<InterfaceIndex>) -> Result<UnframeConvergence, GuestFlowError>;
 
     // --- inbound (TcpAccept, host opener) ---
@@ -18266,11 +18300,14 @@ Contracts:
   datagram, moving the later fragments' offsets back by one 8-byte unit) and
   passes every other packet unchanged (`TC_ACT_OK`), never dropping for bad
   magic. Unregistered packets always pass.
-- **Unframe attachment set (D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE, ADR-0165;
-  Proposed — approved by user 2026-10-08).** An interface carries guest
-  datagrams only once it has addresses and routes. On the appliance the image
-  configures root-namespace interfaces only at boot, before `serve` starts
-  (A-31, ADR-0068):
+- **Unframe attachment set (D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE,
+  IMG-IFACE-BOOT, D5a-SERVE-IFACE, ADR-0165; Proposed — approved by user
+  2026-10-08).** An interface carries guest datagrams only once it has
+  addresses and routes. Root-namespace interfaces are configured by two
+  producers, both before the boot attach: the appliance image, only at boot
+  and before `serve` starts (A-31, ADR-0068 § 5), and `serve`'s own boot
+  steps before `converge_shared` — ADR-0061's load-balancer veth pair
+  `ovd-veth-cli` / `ovd-veth-bk` (*Composition* step 3, D5a-SERVE-IFACE):
   - *Boot (D5a-IFACE-BOOT):* `load` attaches `lo`; boot `converge_shared`
     calls `converge_unframe_interfaces` with every other interface present,
     and any entry in `failed`, whatever its variant, refuses startup with
@@ -18280,10 +18317,14 @@ Contracts:
     whose driver probes late, a hot-added NIC, or one any component creates
     — is never given addresses or routes, so it carries no guest datagram
     and is not attached. The image configuration must not configure such an
-    interface; that is an image requirement under A-31, not a runtime check.
-    This design creates no root-namespace interface. The dev and metal hosts
-    run a catch-all systemd-networkd configuration and are not the
-    appliance image.
+    interface (ADR-0068 § 5, IMG-IFACE-BOOT); that is an image requirement
+    under A-31, not a runtime check. `serve` creates and configures
+    root-namespace interfaces only in its boot steps before
+    `converge_shared` (the ADR-0061 pair, step 3) and in no step after it
+    (D5a-SERVE-IFACE); a future runtime owner of the pair (#197) attaches the
+    program before configuring a recreated pair or does not recreate it.
+    The dev and metal hosts run a catch-all systemd-networkd configuration
+    and are not the appliance image.
   - No interface carries guest datagrams without the program, so no unframe
     gap exists at runtime: there is no attach after boot, and the owner
     keeps no link-notification watch, relist or retry for unframe
@@ -18523,9 +18564,16 @@ pub enum ForwardingActivation {
 
 pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner {
     /// Owner placement (D24), forwarder probe, fd budget, and the guest
-    /// prefix configuration check (D8-PREFIX-CFG): an address configured on
-    /// any root-namespace interface inside the guest prefix →
-    /// `GuestNetworkError::GuestPrefixOverlapsNodeAddress`. Changes nothing.
+    /// prefix configuration checks (D8-PREFIX-CFG, D8-PREFIX-VIP): an address
+    /// configured on any root-namespace interface inside the guest prefix →
+    /// `GuestNetworkError::GuestPrefixOverlapsNodeAddress`; any range of the
+    /// configured service VIP range overlapping the guest prefix →
+    /// `GuestNetworkError::GuestPrefixOverlapsVipRange` (checked first, so a
+    /// node that would fail both names the VIP range). The production owner
+    /// is constructed with the configured `VipRange` as a mandatory
+    /// parameter — the same `config.vip_range` value the service VIP
+    /// allocator and `ServiceBackendsResolve::new` receive; no default.
+    /// Runs before any boot effect (*Composition* step 1). Changes nothing.
     async fn probe_startup(&self) -> Result<()>;
     /// Verifies no process-scoped owner object (listener, link, map, socket)
     /// survives from a previous run. It does NOT inspect node-global objects
@@ -18547,8 +18595,10 @@ pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner {
     /// Both pass → keep an identical `local <prefix> dev lo src <gateway>`
     /// route carrying Overdrive's route protocol tag; replace a tagged route
     /// for the prefix whose attributes differ; add a missing one. No untagged
-    /// route lies in the prefix: its only producer, a node address inside
-    /// the prefix, refused at `probe_startup` (D8-PREFIX-CFG). Idempotent:
+    /// route lies in the prefix: its producers — a node address inside the
+    /// prefix, and a gateway `serve` assigns from a `vip_range` overlapping
+    /// it — are refused at `probe_startup` (D8-PREFIX-CFG, D8-PREFIX-VIP).
+    /// Idempotent:
     /// re-running after a crash at any point reaches the same state. Nothing
     /// removes the route at shutdown (U-4).
     /// When a runtime recovery calls it as its repair, it converges only that
@@ -18972,12 +19022,19 @@ the VIP branch with per-arm mutation coverage.
 **Boot** (`run_server` → `run_server_with_obs_and_drivers`):
 
 1. `shared_guest_network.probe_startup()` — owner cgroup placement (D24),
-   forwarder probe, fd budget, no node interface address inside the guest
-   prefix (D8-PREFIX-CFG).
+   forwarder probe, fd budget, no range of `vip_range` overlapping the guest
+   prefix (D8-PREFIX-VIP) and no node interface address inside it
+   (D8-PREFIX-CFG). It runs before any boot effect: nothing has been
+   written yet.
    Refusal: `health.startup.refused`, reason `guest_network.probe`.
 2. `compose_vm_driver`: `Vmm::probe` (incl. the fork's `backend=vhost-kernel`
    with `fd=`), then the beacon listener bind.
-3. CA, identity, dataplane probe (as today).
+3. CA, identity, dataplane probe (as today). With the default interface
+   names, the dataplane block provisions ADR-0061's load-balancer veth pair
+   `ovd-veth-cli` / `ovd-veth-bk` in the root namespace: gateways from
+   `vip_range` (disjoint from the guest prefix by step 1) and the route
+   `<vip_range> dev ovd-veth-cli`. This is the only `serve` step that
+   creates or configures a root-namespace interface (D5a-SERVE-IFACE).
 4. `guest_cid_claim.probe()` (`VhostVsockCidClaim`, D16-CLAIM: claim,
    second claim refused `InUse`, reclaim after release; under the `serve`
    identity); refusal: `health.startup.refused`, reason
@@ -18992,9 +19049,15 @@ the VIP branch with per-arm mutation coverage.
    mark-exempt nor diverted to leg-C, D8a); the host-internal reject rule
    (D26) — with `inbound_destinations` converged to empty.
 9. `converge_shared()`: forwarder, egress unframe attachments on every
-   interface present (a failure refuses `UnframeAttach`, D5a-IFACE), flow
-   and control listeners, then the guest-prefix steering and the shared
-   local route (D8a-LOAD-SWAP):
+   interface present (a failure refuses `UnframeAttach`, D5a-IFACE) — the
+   image's NICs and the step-3 veth pair included — flow and control
+   listeners, then the guest-prefix steering and the shared local route
+   (D8a-LOAD-SWAP).
+
+   **Ordering invariant (D5a-SERVE-IFACE):** every interface `serve`
+   creates in the root namespace exists before `converge_shared`, and no
+   step after it creates or configures one; so the boot attach covers every
+   interface that can carry a guest datagram (R5-39). Steps:
    1. **Load** — `GuestPrefixSteering::load`: this binary's program with a
       new, empty map, checked by the kernel verifier; a pinned link left by
       an earlier `serve` is opened, not changed; nothing attached;
@@ -19133,6 +19196,10 @@ the prefix drops (D8a-LOAD-SWAP).
   configuration, which the operator owns, places an interface address
   inside the guest prefix; checked by `probe_startup` before any boot
   effect; startup refuses, naming the address and the interface),
+  `GuestPrefixOverlapsVipRange { prefix: Ipv4Net, vip_range: Ipv4Net }`
+  (D8-PREFIX-VIP: a range of the configured service VIP range, which the
+  operator owns, overlaps the guest prefix; checked by `probe_startup`
+  before any boot effect; startup refuses, naming the range),
   `UnframeAttach { source: UnframeAttachError }` (D5a-IFACE-BOOT: at boot
   the egress unframe program could not be attached to an interface present,
   any variant — `KernelMemory` or `Attach`; startup refuses, naming it; the
@@ -19184,7 +19251,7 @@ Deleted: `Bridge`, `TcxLink`, `EndpointMap`, `CounterMap`, `BpffsPin`,
 
 | Failure | Typed form | Who branches | Projection |
 |---|---|---|---|
-| Forwarder probe / fd budget / owner placement / node address inside the guest prefix / unframe attach to an interface present at boot / guest-prefix steering not loaded or attached at boot | `GuestNetworkError::Flow{StartupProbe, …}`, `FdBudget`, `OwnerCgroupPlacement`, `GuestPrefixOverlapsNodeAddress`, `UnframeAttach`, `GuestPrefixSteeringConverge` | `run_server` | `health.startup.refused` (for the last, with the route unwritten and the earlier program, if any, still attached, D8a-LOAD-SWAP) |
+| Forwarder probe / fd budget / owner placement / node address inside the guest prefix / VIP range overlapping the guest prefix / unframe attach to an interface present at boot / guest-prefix steering not loaded or attached at boot | `GuestNetworkError::Flow{StartupProbe, …}`, `FdBudget`, `OwnerCgroupPlacement`, `GuestPrefixOverlapsNodeAddress`, `GuestPrefixOverlapsVipRange`, `UnframeAttach`, `GuestPrefixSteeringConverge` | `run_server` | `health.startup.refused` (for the last, with the route unwritten and the earlier program, if any, still attached, D8a-LOAD-SWAP) |
 | The kernel verifier rejects the steering program at boot | `GuestSteeringError::Load` as the source of `GuestPrefixSteeringConverge` | `run_server` | `health.startup.refused`; nothing is attached |
 | The program's swap fails at boot | `GuestSteeringError::Attach` as the source of `GuestPrefixSteeringConverge` | `run_server` | `health.startup.refused`; the link still runs the earlier program (K-L9) |
 | `Paired` / `Refused` / `Abort` for an unknown or closed flow (U-5) | `guest_flow.control_discarded` | owner / `overdrive-init` | Discarded; no reply (SLOT-ABORT excepted) |
@@ -19311,10 +19378,12 @@ intercept-live or Service `Stable`.
   and convergence, including the guest-prefix steering
   (`GuestPrefixSteering`); the mTLS worker for the constant rules.
 - **Promise:** owner placed at or below the `connect4` attach point (D24);
-  no node interface address inside the guest prefix (D8-PREFIX-CFG);
-  forwarder loaded and probed; the `sock_ops` and drain-counter links
-  attached and the egress unframe program attached to `lo` and every other
-  interface present (D5a-IFACE, D5a-IFACE-BOOT: any failure refuses); flow and
+  no node interface address inside the guest prefix (D8-PREFIX-CFG) and no
+  `vip_range` range overlapping it (D8-PREFIX-VIP); forwarder loaded and
+  probed; the `sock_ops` and drain-counter links attached and the egress
+  unframe program attached to `lo` and every other interface present —
+  the image's NICs and every interface `serve` created earlier in boot
+  (D5a-IFACE, D5a-IFACE-BOOT: any failure refuses; D5a-SERVE-IFACE); flow and
   control listeners bound; the constant rules (D8a, D26) converged; this
   binary's guest-prefix steering program loaded (verifier-accepted) and
   swapped into the pinned link before the shared route is kept or added as
@@ -19324,7 +19393,7 @@ intercept-live or Service `Stable`.
   `open_after_boot()`.
 - **Failure projection:** `health.startup.refused`, reason
   `guest_network.probe` (probe, fd budget, placement, root cgroup, node
-  address inside the guest prefix) or `guest_network.converge` (guest-prefix
+  address inside the guest prefix, VIP range overlapping it) or `guest_network.converge` (guest-prefix
   steering not loaded / attached — the route unwritten and the earlier
   program, if any, still attached —, listener bind, link attach, unframe
   attach to an interface present); typed as `GuestNetworkError` variants
@@ -19333,12 +19402,17 @@ intercept-live or Service `Stable`.
   (ADR-0136) — boot refusal neither reclaims nor adopts; interfaces the
   kernel registers after boot (never configured on the appliance, never
   attached, never gating boot, forwarding or an allocation — D5a-LATE,
-  A-31);
+  A-31, ADR-0068 § 5);
   allocation READY / Running / intercept-live states, which no allocation can
   reach before boot opens.
-- **Ordering:** `probe_startup` before `compose_vm_driver`; VM reclamation,
+- **Ordering:** `probe_startup` (the `vip_range` and node-address checks)
+  before any boot effect, and so before `compose_vm_driver` and the step-3
+  veth pair; every root-namespace interface `serve` creates (the ADR-0061
+  pair, step 3) before `converge_shared`, and none created or configured
+  after it (D5a-SERVE-IFACE); VM reclamation,
   then `sweep_stale`, then `start_shared_owner` (rules), then
-  `converge_shared` (steering `load` → `attach`, then the route; a steering
+  `converge_shared` (unframe attach to every interface present; steering
+  `load` → `attach`, then the route; a steering
   failure refuses with the route unwritten), then
   DNS, supervisor, `open_after_boot`.
   Budget: no new deadline — the existing boot sequence's; V-9 measures the
@@ -19350,10 +19424,19 @@ intercept-live or Service `Stable`.
   wildcard host service; detaching a pinned link left by a crashed `serve`
   to replace it opens the same route-before-steering window (R5-34); booting
   with an image NIC whose unframe attach failed lets empty guest datagrams
-  through it reach their peers framed for as long as the attach fails.
+  through it reach their peers framed for as long as the attach fails;
+  moving the veth-pair provisioning after `converge_shared` (or recreating
+  the pair at runtime, #197) leaves `ovd-veth-cli` routing `vip_range` with
+  no unframe link, so empty guest datagrams to a VIP leave framed; checking
+  only interface addresses at step 1 passes a `vip_range` inside the prefix,
+  after which step 3 assigns a gateway in it, a leased `workload_addr` in
+  that range is classified an unknown VIP (`MeshUnreachable`), and
+  host-local connects to the gateway hit the steering drop instead of a
+  refusal at boot.
 - **Evidence lane:** native Tier-3 gold test with injected lies; the Tier-3
   steering scenarios in CI on the pinned kernel (A-33); seeded sim boot
-  refusal and boot ordering (structural boot-order test); V-26.
+  refusal and boot ordering (structural boot-order test, incl. veth pair
+  before `converge_shared`); R5-39, R5-40; V-26.
 
 #### Gate G-V2 — guest command release (restates G-295-2)
 
@@ -19622,6 +19705,8 @@ effects Tier-3, ordering seeded sim):
 | R5-21 | `overdrive deploy` of a spec declaring listener port 61,000, 61,500 or 62,024 (TCP or UDP) is refused with `ListenerPortReserved` naming the range; 60,999 and 62,025 are accepted; the API ingress refuses the same specs with `AggregateError::Validation` (D25) | — (deploy validation) | unit + proptest (range boundaries) |
 | R5-37 | Intake capacity (D8a-CAP): deploys whose declared TCP ports reach exactly `GUEST_INTAKE_STEERING_MAX` across held leases are admitted; the next `assign` whose ports would exceed it returns `IntakeCapacityReached { reserved, requested, capacity }` with no state change and no CID claimed; a Retiring lease's ports still count; after its `release` the same deploy is admitted. With every admitted VM's guest listening on every declared port, every listener is steered and no `steer` returns a capacity failure; a listener closed and re-opened on the same port is steered again at once (its slot freed in the close step, K-L3). Proptest: for any admitted sequence, reserved ports ≤ capacity and open intake listeners ≤ reserved ports | G-V0, G-V8 | unit + proptest (pool) + seeded sim (production owner path, sim steering with capacity) + Quint (`intake`) + Tier-3 (V-26 (x)) |
 | R5-38 | Boot attach of the egress unframe program (D5a-IFACE, D5a-IFACE-BOOT): every interface present at boot carries the program when boot opens; an attach to one of them refused by the kernel with each `UnframeAttachError` variant (scripted in sim; Tier-3: an injected attach failure) refuses startup `UnframeAttach` naming the interface; the errno classification (`ENOMEM` → `KernelMemory`, any other → `Attach`) holds for every errno (unit); an empty guest datagram leaving through any interface present at boot reaches its peer as 0 bytes | G-V1 | unit + seeded sim + Tier-3 (V-17) |
+| R5-39 | `serve`-created interfaces (D5a-SERVE-IFACE): `overdrive serve` booted with the default dataplane interface names creates `ovd-veth-cli` and `ovd-veth-bk`, and when boot opens both carry the egress unframe TCX link (observed by a kernel link query such as `bpftool net`, not through the owner), so R5-38's datagram property holds for them as for every interface present at boot; the structural boot-order test fails if the veth provisioning runs after `converge_shared`; a scripted attach failure on `ovd-veth-bk` refuses startup `UnframeAttach` naming it. Booted with operator-named NICs, no pair is created and the NICs carry the link as in R5-38 | G-V1 | seeded sim (boot order, scripted attach) + Tier-3 (production `run_server`) |
+| R5-40 | `vip_range` overlapping the guest prefix (D8-PREFIX-VIP): boot with `[dataplane.vip_allocator]` set to a range inside or straddling `100.95.0.0/16` (e.g. `100.95.255.0/24`, `100.94.0.0/15`) refuses `GuestPrefixOverlapsVipRange` naming the prefix and the range, with `health.startup.refused` reason `guest_network.probe`, before any boot effect: no veth pair, no address, no route, no nft table, no steering link; a range adjacent to but disjoint from the prefix (`100.96.0.0/16`) and the default `10.96.0.0/16` boot. Proptest: refusal iff some range of the `VipRange` intersects the prefix | G-V1 | unit + proptest (overlap predicate) + seeded sim (no effect before refusal) |
 
 R5 scenarios touching D8a, D24a, D25, D26 and D15-R3 are DISTILL obligations:
 the user approved those decisions on 2026-10-06. R5-19 and R5-22 to R5-31
@@ -19634,7 +19719,9 @@ D8a-LOAD-SWAP (revision 10; approved by user 2026-10-08); R5-11,
 R5-22, R5-23, R5-37 and R5-38 for the revision-11 decisions (D8a-CAP,
 D5a-IFACE, D8-PREFIX-CFG; approved by user 2026-10-08), and R5-22,
 R5-37 and R5-38 for D8a-CAP-RETRY and D5a-IFACE-BOOT (approved
-by user 2026-10-08); all pending independent DESIGN review. There is no
+by user 2026-10-08), and R5-39 and R5-40 for D5a-SERVE-IFACE and
+D8-PREFIX-VIP (approved by user 2026-10-08); all pending independent DESIGN
+review. There is no
 R5-12: no interface is attached after boot (D5a-LATE), so no scenario
 covers one. R5-33, R5-35 and R5-36 tested foreign deletion
 of steering entries, foreign link detach and foreign route writes; they are
@@ -19938,9 +20025,10 @@ qualified metal, never Lima, triple recorded before running.
     user before DISTILL pins the steering scenarios; a falsified K-L9 returns
     D8a-LOAD-SWAP to DESIGN.
 
-**What blocks DISTILL:** the independent re-review of revisions 5–11 and of
-D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER and D5a-LATE (the formal model
-check of revision 11, round 8, has run: § *Formal protocol model*), then the
+**What blocks DISTILL:** the independent re-review of revisions 5–12 and of
+D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER, D5a-LATE, IMG-IFACE-BOOT,
+D5a-SERVE-IFACE and D8-PREFIX-VIP (the formal model check of revision 11,
+round 8, has run: § *Formal protocol model*), then the
 roadmap reconciliation, and — only for the control-session and beacon
 attribution scenarios — V-22, — only for the `TcpAccept` abort and
 session-loss scenarios — V-24, — only for the CID-claim scenarios (R5-19) —
@@ -19949,8 +20037,8 @@ R5-24, R5-25, R5-34, R5-37) — V-26. The user approved D8a, D24a, D25, D26 and
 D15-R3 and the rulings of the first two model-check rounds on 2026-10-06,
 the revision-8 and revision-9 decisions and the appliance threat model
 (APPLIANCE) on 2026-10-07, and D8a-LOAD-SWAP, D8a-CAP, D19-LINKS,
-D5a-IFACE, D8-PREFIX-CFG, D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER and
-D5a-LATE on 2026-10-08.
+D5a-IFACE, D8-PREFIX-CFG, D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER,
+D5a-LATE, IMG-IFACE-BOOT, D5a-SERVE-IFACE and D8-PREFIX-VIP on 2026-10-08.
 Every other open item blocks only the DELIVER step named in its row; no
 kernel version is a gate (KVER).
 
@@ -19968,13 +20056,14 @@ environment is the appliance (APPLIANCE, A-31): only Overdrive writes the
 kernel objects the model covers, so no fault action stands for other
 software mutating them.
 
-**Status.** The latest recorded run is round 8 (run `704554-1791465879.649`,
-revision 11): 132 of 132 checks matched `expect`, and `cargo xtask quint
-verify-evidence` reports that the evidence matches the specs. It models
-D8a-CAP with D8a-CAP-RETRY (invariant 12 holds; `ServingReachable` holds) and
-the r10 M-2 / M-4 fixes. D19-LINKS, D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE and
-D8-PREFIX-CFG add no protocol state and are outside the model (the "Not
-modelled" list below); no model result is claimed for them.
+**Status.** The latest recorded run is round 8 (revision 11; the run recorded
+in `specs/quint/guest-flow-owner/evidence/summary.md`): 132 of 132 checks
+matched `expect`, and `cargo xtask quint verify-evidence` reports that the
+evidence matches the specs. It models D8a-CAP with D8a-CAP-RETRY (invariant 12
+holds; `ServingReachable` holds) and the r10 M-2 / M-4 fixes. D19-LINKS,
+D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE, IMG-IFACE-BOOT, D5a-SERVE-IFACE,
+D8-PREFIX-CFG and D8-PREFIX-VIP add no protocol state and are outside the
+model (the "Not modelled" list below); no model result is claimed for them.
 
 - **Location:** `specs/quint/guest-flow-owner/` — permanent, not a spike and
   not archived at FINALIZE (ADR-0168): the specs below, one `hazard/` file
@@ -20168,16 +20257,15 @@ modelled" list below); no model result is claimed for them.
   that is not load-bearing there, a design finding.
 - **Running it:** inside Lima (`cargo xtask lima run --`):
   `cargo xtask quint typecheck` and `cargo xtask quint check --subsystem
-  guest-flow-owner` (the README lists the direct scripts). Checks that finish
-  in under two minutes carry `ci = true`. In `checks.toml` as recorded in
-  round 8, `udp-slots-release-liveness`, `udp-slots-hazard-ignore-late-paired`
-  and `intake-safety-apalache` (198.5 s in the recorded run) are
-  `ci = false`. A check's time for this rule is its own time, excluding the
-  runner's start-up retries, once the runner records the two apart (review
-  r11 L-1); until then a figure inflated by a start-up retry — as
-  `udp-slots-witness-late-paired`'s 138.1 s in round 8 (attempt 2: 18 s) and
-  `udp-slots-hazard-ignore-late-paired`'s in round 7 — is not the check's
-  own time. A tool error fails the check.
+  guest-flow-owner` (the README lists the direct scripts). Checks whose own
+  time — the runner records it apart from start-up retries — is under two
+  minutes carry `ci = true`. In `checks.toml`, the `ci = false` checks are
+  `owner-flows-safety-apalache`, `owner-flows-safety-apalache-deep`,
+  `owner-flows-hazard-paired-no-recheck`, `udp-slots-safety-apalache` and
+  `intake-safety-apalache`; every other check, including
+  `udp-slots-release-liveness`, `udp-slots-hazard-late-paired-by-slot-data`
+  and `udp-slots-hazard-ignore-late-paired`, is `ci = true`. Times are those
+  recorded in `evidence/summary.md`. A tool error fails the check.
 - **Round 1:** `spike/quint-owner-findings.md` (Quint 0.32.0, Apalache 0.56.1,
   TLC 2.19; revision 5's text). Findings 1 (revoke failure leaves a stale
   element), 2 (next-fit does not keep a retry off the failed CID), 3 (K-A2 had
@@ -20262,8 +20350,9 @@ modelled" list below); no model result is claimed for them.
   - *The shipped-program assumption.* It is A-33 (the README's "A-PROG" is
     renamed in round 8), discharged by the Tier-3 steering scenarios R5-1,
     R5-2, R5-3 and R5-25 in CI on the pinned kernel — not by V-26.
-  - *`ci = true` over two minutes.* `udp-slots-release-liveness` becomes
-    `ci = false` (L-3); the other overrun is the runner's start-up retry.
+  - *`ci = true` over two minutes.* Answered by the runner separating a
+    check's own time from start-up retries; the CI flags follow
+    `checks.toml` (*Running it*).
   - *K-D3 partial re-convergence (open since round 5).* Not load-bearing:
     invariant 11 holds with the table complete, partial or absent, because
     the steering does not depend on the table; the model's generous
@@ -20277,9 +20366,9 @@ modelled" list below); no model result is claimed for them.
     round 8.
 - **Round 8 (revision 11, D8a-CAP):**
   `docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r8.md`.
-  Recorded run `704554-1791465879.649` (40.4 min): **132 of 132 checks
-  matched `expect`**; `cargo xtask quint verify-evidence` reports the
-  evidence matches the specs. Per module (holds / expected violations):
+  The run recorded in `specs/quint/guest-flow-owner/evidence/summary.md`:
+  **132 of 132 checks matched `expect`**; `cargo xtask quint
+  verify-evidence` reports the evidence matches the specs. Per module (holds / expected violations):
   `owner_flows` 4 / 17, `udp_slots` 3 / 11, `cid_lease` 4 / 13,
   `prefix_boot` 9 / 12, `intake` 10 / 20, `quiescence` 7 / 9,
   `shared_table` 5 / 8 (42 / 90). The TLC instances of `intake`,
@@ -20318,12 +20407,11 @@ modelled" list below); no model result is claimed for them.
     `quiescence-hazard-fail-stop-after-runtime-prefix-write`.
   - **README:** K-L9 → V-26 (viii); K-L3 → V-26 (iii), (x); A-33 and A-MEM
     named; D8a-CAP in the `intake` rows.
-  - **`checks.toml`:** `udp-slots-release-liveness`,
-    `udp-slots-hazard-ignore-late-paired` and `intake-safety-apalache` are
-    `ci = false`; 12 checks are new.
-  - No design finding and no unexpected result. The run recorded
-    `udp-slots-witness-late-paired` (`ci = true`) at 138.1 s, including a
-    runner start-up retry (attempt 2: 18 s); see *Running it*.
+  - **`checks.toml`:** 12 checks are new; the CI flags are those listed
+    in *Running it* (`checks.toml` changed after the first round-8 run: the
+    flags were re-set from each check's own time, and the run was
+    re-recorded).
+  - No design finding and no unexpected result.
 - **Conformance (DISTILL):** the specification is the DISTILL conformance
   oracle through quint-connect, driving the owner's flow state machine at its
   private effect seam (§ *Driven port — host forwarder*, simulation seam) and
@@ -20360,15 +20448,17 @@ fact the model assumes rather than checks:
 | K-L9 | `BPF_LINK_UPDATE` swaps the link's program atomically, and on error the link still runs the earlier program | V-26 (viii) |
 | A-MEM | Memory pressure is not permanent: a `steer` retried infinitely often eventually succeeds (strong fairness on a successful steer; each failed attempt closes the listener, so the steer is only intermittently enabled). The steering map's entries and the listeners' psocks are charged to the memory cgroup of `serve` (`overdrive.slice/control-plane.slice`), which sets no `memory.max`, so only node-wide pressure produces `KernelMemory`; a limit placed on that slice would make a self-inflicted, persistent `KernelMemory` possible and must revisit A-MEM | Environment, not a kernel unknown; owned by #261 (node-wide CPU and memory accounting; A-MEM-OWNER, confirmed by the user 2026-10-08). The exposure while pressure lasts — that port refused, the event `guest_intake.bind_failed { retried: true }` each attempt — is observable; V-9 reports any occurrence at density |
 | A-33 | The steering program the image ships decides as specified (§ *Driven port — guest-prefix steering*, Decision) | The Tier-3 steering scenarios R5-1, R5-2, R5-3 and R5-25, run in CI on the pinned kernel (ADR-0068) for the source the image is built from; not checked at runtime |
-| A-31 | Only Overdrive writes the node's kernel objects: nft tables, routes, BPF programs, maps and links, cgroups, network namespaces, vsock CIDs (APPLIANCE); the image configures root-namespace interfaces only at boot, so an interface registered later has no addresses or routes and carries no guest traffic (D5a-LATE) | The appliance image configuration (ADR-0068); not a runtime validation item |
+| A-31 | Only Overdrive writes the node's kernel objects: nft tables, routes, BPF programs, maps and links, cgroups, network namespaces, vsock CIDs (APPLIANCE); the image configures root-namespace interfaces only at boot, so an interface registered later has no addresses or routes and carries no guest traffic (D5a-LATE) | The appliance image configuration (ADR-0068); the D5a-LATE part by ADR-0068 § 5 (IMG-IFACE-BOOT, 2026-10-08). Interfaces `serve` creates are Overdrive's and ordered before the attach (D5a-SERVE-IFACE, R5-39), not part of A-31. Not a runtime validation item |
 
 Not modelled, so the model gives no evidence on them: D26 / V-21, V-20
 (intake-child tag identity), D5 / D5a framing and unframe with its
 attachment set (D5a-IFACE, D5a-IFACE-BOOT: a boot step that shares no
 state with the modelled protocol; D5a-LATE adds no step — an interface
-registered after boot is never configured, part of A-31), the forwarder's
+registered after boot is never configured, part of A-31, ADR-0068 § 5;
+D5a-SERVE-IFACE is a boot-step ordering checked by the structural boot-order
+test, R5-39), the forwarder's
 links (D19-LINKS), the prefix
-configuration check (D8-PREFIX-CFG), D24 / D24a VIP resolution, K2
+configuration checks (D8-PREFIX-CFG, D8-PREFIX-VIP), D24 / D24a VIP resolution, K2
 half-close drain, the 2 ms listen-state lag, D15-R3 deadlines, the beacon
 beyond its shared claim discipline.
 
@@ -20453,7 +20543,9 @@ beyond its shared claim discipline.
   each `UnframeAttachError` variant, R5-38); a datagram above the egress MTU (fragment
   shift); guest image without `inet_diag` (guest exits before READY with
   `ListenerSeed`); a node interface address inside the guest prefix (the
-  probe refuses `GuestPrefixOverlapsNodeAddress`, R5-11); a stale tagged
+  probe refuses `GuestPrefixOverlapsNodeAddress`, R5-11); a `vip_range`
+  overlapping the guest prefix (the probe refuses
+  `GuestPrefixOverlapsVipRange`, R5-40); a stale tagged
   route left by a killed run (boot converges); a steering program the
   verifier rejects at load and a refused
   `BPF_LINK_UPDATE` (boot refuses `GuestPrefixSteeringConverge` with the
@@ -21042,7 +21134,8 @@ and adds no decision.
      root-namespace interfaces only at boot, before `serve` starts; an
      interface the kernel registers later is never given addresses or
      routes, so it carries no guest traffic and needs no attach. Part of
-     A-31, discharged by the appliance image (ADR-0068); the image
+     A-31, discharged by the appliance image (ADR-0068 § 5, added by
+     IMG-IFACE-BOOT in revision 12); the image
      configuration must not configure an interface registered after boot
      (an image requirement, not a runtime check). The dev and metal hosts'
      catch-all systemd-networkd configuration is not the appliance image.
@@ -21065,6 +21158,41 @@ and adds no decision.
      stated as strong fairness; producers of `GuestSteeringError::MapLookup`
      and `Query` named; A-MEM's memory-cgroup charging stated; § *Changed
      assumptions* limited to operative contracts.
+
+### Revision 12 decisions — 2026-10-08
+
+Answers to `design/review-design-vsock-replacement-r12.md`, each **Proposed —
+approved by user 2026-10-08; pending independent DESIGN review** (§ *User
+decisions — 2026-10-08 (independent review of revision 12)*):
+
+1. **IMG-IFACE-BOOT (H-1).** *Contract:* ADR-0068 § 5 (amendment,
+   2026-10-08) requires the appliance image to configure root-namespace
+   interfaces only at boot, before `serve` starts, never an interface
+   registered after boot, with no catch-all network configuration. It is the
+   discharging artifact of A-31's D5a-LATE part (A-31, assumptions table,
+   D5a-LATE, ADR-0165).
+2. **D5a-SERVE-IFACE (M-1).** *Contract:* `serve` creates and configures
+   root-namespace interfaces only in *Composition* step 3 (ADR-0061's
+   `ovd-veth-cli` / `ovd-veth-bk`), before `converge_shared`; the boot attach
+   therefore covers them (R5-39), and no later step creates or configures one.
+   *Corrected premise:* "this design creates no root-namespace interface" is
+   replaced everywhere. *Constraint for #197:* recorded in § *GitHub
+   context* (revision-12 user decisions).
+3. **D8-PREFIX-VIP (M-2).** *Contract:* `probe_startup` refuses
+   `GuestNetworkError::GuestPrefixOverlapsVipRange { prefix: Ipv4Net,
+   vip_range: Ipv4Net }` before any boot effect when a range of the
+   configured `VipRange` overlaps the guest prefix; the owner is composed with
+   that `VipRange` (mandatory, the same value as the VIP allocator and
+   `ServiceBackendsResolve::new`). R5-40. *Rejected alternative:* re-checking
+   the node addresses after every address-writing boot step — it reports the
+   gateway address instead of the configuration that produced it, and only
+   after step 3 has already written into the prefix.
+4. **Mechanical (L-1, L-2).** The formal model section cites the run recorded
+   in `specs/quint/guest-flow-owner/evidence/summary.md`; CI flags are listed
+   as in `checks.toml` (`udp-slots-release-liveness`,
+   `udp-slots-hazard-late-paired-by-slot-data` and
+   `udp-slots-hazard-ignore-late-paired` are `ci = true` by their own time);
+   the retry-time caveat is removed.
 
 ### Design review record
 
@@ -21153,9 +21281,9 @@ and adds no decision.
   and ADR-0172–0174, D8a-LOAD-SWAP moved to ADR-0175; round 7 recorded and
   its open points closed; R5-37, R5-38; V-26 (x).
 - **Eighth formal model check, of revision 11 (2026-10-08)**
-  (`design/quint-guest-flow-owner-findings-r8.md`, run
-  `704554-1791465879.649`): 132 of 132 checks matched; invariant 12 and
-  `ServingReachable` hold; no design finding.
+  (`design/quint-guest-flow-owner-findings-r8.md`; the run recorded in
+  `specs/quint/guest-flow-owner/evidence/summary.md`): 132 of 132 checks
+  matched; invariant 12 and `ServingReachable` hold; no design finding.
 - **Independent review of revision 11 (2026-10-08)**,
   `nw-solution-architect-reviewer` on opus: **CHANGES_REQUESTED** — 0
   blocker, 2 high, 2 medium, 4 low
@@ -21163,8 +21291,18 @@ and adds no decision.
 - **Revision 11, answers to its review (2026-10-08)**: D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER
   and D5a-LATE (approved by user 2026-10-08); round 8 recorded; V-17, A-21
   and A-31 stated for boot-only attachment (§ *Revision 11 decisions* item
-  6). **Not yet re-reviewed.** The model is unchanged: D5a-LATE adds no
-  protocol state.
+  6). The specs are unchanged by these answers: D5a-LATE adds no protocol
+  state; `checks.toml`'s CI flags were re-set from each check's own time and
+  the run re-recorded.
+- **Independent review of revision 12 (2026-10-08)**,
+  `nw-solution-architect-reviewer` on opus: **CHANGES_REQUESTED** — 0
+  blocker, 1 high, 2 medium, 2 low
+  (`design/review-design-vsock-replacement-r12.md`).
+- **Revision 12, answers to its review (2026-10-08)**: IMG-IFACE-BOOT
+  (ADR-0068 § 5), D5a-SERVE-IFACE and D8-PREFIX-VIP (approved by user
+  2026-10-08); R5-39, R5-40; the formal model section cites the recorded
+  evidence rather than a run id (§ *Revision 12 decisions*). **Not yet
+  re-reviewed.** No decision adds protocol state.
 
 ### Review remediation
 
@@ -21323,3 +21461,15 @@ answers each:
 | L-2 (`MapLookup`, `Query` without producers) | Producers named: `steer` (existing-entry read; socket cookie / options) and `load` (opening the pinned link) | delta § *Driven port — guest-prefix steering* |
 | L-3 (A-MEM omits the memory cgroup) | A-MEM states the charge to `overdrive.slice/control-plane.slice`, which sets no `memory.max`; a future limit must revisit A-MEM | delta assumptions table |
 | L-4 (*Changed assumptions* quotes superseded drafts) | Limited to operative contracts; draft history left to git and this record | delta § *Changed assumptions* |
+
+Findings of the independent review of revision 12
+(`design/review-design-vsock-replacement-r12.md`) and the change that
+answers each:
+
+| Finding | Change | Where |
+|---|---|---|
+| H-1 (A-31's D5a-LATE part cites an artifact without the requirement) | ADR-0068 § 5 (amendment, 2026-10-08) states the image requirement; A-31, the assumptions table, D5a-LATE and ADR-0165 cite it. **IMG-IFACE-BOOT — Proposed — approved by user 2026-10-08** | ADR-0068, ADR-0165; delta § *User decisions — 2026-10-08 (independent review of revision 12)*, A-31, assumptions table, forwarder contracts |
+| M-1 (`serve` creates root-namespace interfaces; covered only by an unstated ordering) | Premise corrected; ordering invariant "every interface `serve` creates in the root namespace exists before `converge_shared`" pinned in *Composition* and G-V1; R5-39; #197 constraint recorded. **D5a-SERVE-IFACE — Proposed — approved by user 2026-10-08** | ADR-0165, ADR-0068 § 5; delta forwarder and owner contracts, *Composition* steps 3 and 9, G-V1, R5-39, GitHub context |
+| M-2 (`vip_range` producer unchecked) | `GuestPrefixOverlapsVipRange` refused in `probe_startup` before any boot effect; `vip_range` named a producer in D8-PREFIX-CFG. **D8-PREFIX-VIP — Proposed — approved by user 2026-10-08** | ADR-0152; delta `probe_startup`, `converge_shared`, *Composition* step 1, error taxonomy, G-V1, R5-40, *Earned Trust* |
+| L-1 (stale run id, retry text, CI flags, "model unchanged") | Formal model section cites the recorded evidence, lists CI flags as in `checks.toml`, drops the retry caveat; the review record states that `checks.toml` changed | delta § *Formal protocol model*, *Design review record* |
+| L-2 (two checks under two minutes with `ci = false`) | `checks.toml` sets both `ci = true` by own time (modeler's change); the delta lists them so | delta § *Formal protocol model* (*Running it*) |
