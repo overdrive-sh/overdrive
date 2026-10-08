@@ -1,4 +1,4 @@
-# owner-flows-alt-tombstone-misses-close: counterexample, 13 state(s) (from the TLC trace)
+# owner-flows-alt-tombstone-misses-close: counterexample, 17 state(s) (from the TLC trace)
 
 State 1
   alloc = "Absent"
@@ -23,43 +23,58 @@ State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [Teardown]
+State 3 [VmStart]
+  vmGen = 1
+  vmUp = TRUE
+
+State 4 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 5 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+
+State 6 [Teardown]
   alloc = "Retiring"
 
-State 4 [Release]
+State 7 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 8 [VmStop]
+  vmUp = FALSE
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 9 [Release]
   alloc = "Absent"
 
-State 5 [Provision]
+State 10 [Provision]
   alloc = "Provisioned"
   gen = 2
 
-State 6 [VmStart]
+State 11 [VmStart]
   vmGen = 2
   vmUp = TRUE
 
-State 7 [GuestOpenFlow]
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+State 12 [GuestOpenSession]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 2]>>
 
-State 8 [GuestOpenSession]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
-
-State 9 [HostAcceptSession]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
+State 13 [HostAcceptSession]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "live", gen |-> 2]>>
   claim = TRUE
 
-State 10 [Activate]
+State 14 [Activate]
   alloc = "Active"
 
-State 11 [HostOpenAccept]
+State 15 [HostOpenAccept]
   hf = <<[st |-> "req", gen |-> 2]>>
 
-State 12 [Teardown]
+State 16 [Teardown]
   alloc = "Retiring"
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 2]>>
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 2]>>
   claim = FALSE
   hf = <<[st |-> "closed", gen |-> 2]>>
 
-State 13 [GuestOpenFlow]
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+State 17 [Quiesce]
+  quiesced = TRUE
 
--> stutters forever in State 13
+-> stutters forever in State 17

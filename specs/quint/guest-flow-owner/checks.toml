@@ -336,7 +336,7 @@ max_steps = 12
 expect = "violation"
 ci = false
 
-# round 8: ci = false (135.8 s in round 7, start-up retry included)
+# ci = true: 14.1 s own time in round 8 (round 7's 135.8 s included start-up retries)
 [[check]]
 name = "udp-slots-hazard-ignore-late-paired"
 spec = "hazard/udp_slots_hazards.qnt"
@@ -345,7 +345,7 @@ invariant = "LatePairedAborted"
 backend = "apalache"
 max_steps = 12
 expect = "violation"
-ci = false
+ci = true
 
 [[check]]
 name = "udp-slots-hazard-keep-frames-on-end"

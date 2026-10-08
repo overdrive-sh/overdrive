@@ -14,13 +14,13 @@ State 1
   holders = {}
 
 State 2 [Damage]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
+  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
 
 State 3 [RecQuiesce]
-  rec = [IpRules |-> "idle", FlowListeners |-> "held"]
+  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
   latch = TRUE
   lis = FALSE
-  holders = {"FlowListeners"}
+  holders = {"IpRules"}
 
 State 4 [Damage]
   dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]

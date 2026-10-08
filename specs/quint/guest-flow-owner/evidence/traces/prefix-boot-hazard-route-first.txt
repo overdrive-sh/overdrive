@@ -19,7 +19,7 @@ State 1
 State 2 [Restart]
   stop = "none"
   up = TRUE
-  bin = "v2"
+  bin = "v1"
 
 State 3 [BootStep]
   phase = "route"

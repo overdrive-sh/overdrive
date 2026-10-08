@@ -41,6 +41,7 @@ State 7
   hf = Map(1 -> { gen: 1, st: "req" })
 
 State 8
+  quiesced = true
   hf = Map(1 -> { gen: 1, st: "closed" })
   toGuestAbort = Set(1)
 

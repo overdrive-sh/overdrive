@@ -28,13 +28,13 @@ State 3
   vmUp = true
 
 State 4
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
+  alloc = "Retiring"
 
 State 5
-  vmUp = false
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
 
 State 6
-  alloc = "Retiring"
+  vmUp = false
 
 State 7
   alloc = "Absent"

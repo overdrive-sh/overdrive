@@ -1,4 +1,4 @@
-# quiescence-hazard-any-restore-preempts-repair: counterexample, 11 state(s) (from the TLC trace)
+# quiescence-hazard-any-restore-preempts-repair: counterexample, 12 state(s) (from the TLC trace)
 
 State 1
   up = TRUE
@@ -14,7 +14,7 @@ State 1
   holders = {}
 
 State 2 [Damage]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 
 State 3 [Damage]
   dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
@@ -40,19 +40,23 @@ State 7 [RecRestore]
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   holders = {}
 
-State 8 [RecQuiesce]
+State 8 [BringUp]
+  lis = TRUE
+
+State 9 [RecQuiesce]
+  lis = FALSE
   latch = TRUE
   rec = [IpRules |-> "held", FlowListeners |-> "idle"]
   holders = {"IpRules"}
 
-State 9 [Damage]
+State 10 [Damage]
   dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 
-State 10 [RecQuiesce]
+State 11 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "held"]
   holders = {"IpRules", "FlowListeners"}
 
-State 11 [RecRepair]
+State 12 [RecRepair]
   dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
   rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
 

@@ -1,4 +1,4 @@
-# intake-steer-forever-unreachable: counterexample, 15 state(s) (from the TLC trace)
+# intake-steer-forever-unreachable: counterexample, 14 state(s) (from the TLC trace)
 
 State 1
   bindLeft = 1
@@ -19,15 +19,14 @@ State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [OtherAdmit]
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
+State 3 [Teardown]
+  alloc = "Retiring"
 
-State 4 [Crash]
+State 4 [OtherAdmit]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> TRUE, defected |-> FALSE ]
+
+State 5 [Release]
   alloc = "Absent"
-  up = FALSE
-
-State 5 [Restart]
-  up = TRUE
 
 State 6 [Provision]
   alloc = "Provisioned"
@@ -48,17 +47,14 @@ State 10 [ListenState]
 State 11 [BindListen]
   lis = {1}
 
-State 12 [ListenState]
-  lastLS = {1, 2}
-
-State 13 [SteerMemFail]
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
+State 12 [SteerMemFail]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> TRUE, defected |-> FALSE ]
   lis = {}
 
-State 14 [BindFail]
+State 13 [BindFail]
   bindLeft = 0
 
-State 15 [BindListen]
+State 14 [BindListen]
   lis = {1}
 
--> loops back to State 14
+-> loops back to State 13

@@ -404,8 +404,37 @@ State 14: <lease_live_bugRemember_cid_lease_AssignTry line 843, col 3 to line 96
 /\ lease_live_bugRemember_cid_lease_errsLeft = 0
 /\ lease_live_bugRemember_cid_lease_walker = 2
 
-State 15: <lease_live_bugRemember_cid_lease_AssignTry line 843, col 3 to line 962, col 52 of module lease_live_bugRemember>
-/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> -2 @@ 2 :> 2)
+State 15: <lease_live_bugRemember_cid_lease_OrphanExit line 712, col 3 to line 730, col 80 of module lease_live_bugRemember>
+/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_live_bugRemember_cid_lease_todo = {2}
+/\ lease_live_bugRemember_cid_lease_cursor = 0
+/\ lease_live_bugRemember_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> TRUE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> TRUE,
+  refusedUnasked |-> FALSE ]
+/\ lease_live_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_live_bugRemember_cid_lease_bootLeft = 0
+/\ lease_live_bugRemember_cid_lease_exitsLeft = 2
+/\ lease_live_bugRemember_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {0, 1} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {0, 1} ] >>
+/\ lease_live_bugRemember_cid_lease_pend = {}
+/\ lease_live_bugRemember_cid_lease_errsLeft = 0
+/\ lease_live_bugRemember_cid_lease_walker = 2
+
+State 16: <lease_live_bugRemember_cid_lease_AssignTry line 843, col 3 to line 962, col 52 of module lease_live_bugRemember>
+/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
 /\ lease_live_bugRemember_cid_lease_todo = {}
 /\ lease_live_bugRemember_cid_lease_cursor = 0
 /\ lease_live_bugRemember_cid_lease_g = [ clash |-> FALSE,
@@ -433,65 +462,7 @@ State 15: <lease_live_bugRemember_cid_lease_AssignTry line 843, col 3 to line 96
 /\ lease_live_bugRemember_cid_lease_errsLeft = 0
 /\ lease_live_bugRemember_cid_lease_walker = 0
 
-State 16: <lease_live_bugRemember_cid_lease_Stop line 577, col 3 to line 621, col 80 of module lease_live_bugRemember>
-/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> -2 @@ 2 :> 2)
-/\ lease_live_bugRemember_cid_lease_todo = {}
-/\ lease_live_bugRemember_cid_lease_cursor = 0
-/\ lease_live_bugRemember_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
-  skipped |-> TRUE,
-  skipOrphan |-> TRUE,
-  refusedHeld |-> FALSE,
-  refusedClaimable |-> FALSE,
-  claimErr |-> TRUE,
-  refusedUnasked |-> FALSE ]
-/\ lease_live_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
-/\ lease_live_bugRemember_cid_lease_bootLeft = 0
-/\ lease_live_bugRemember_cid_lease_exitsLeft = 2
-/\ lease_live_bugRemember_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {0, 1} ],
-   [ st |-> "retiring",
-     off |-> 2,
-     loc |-> "slot",
-     retry |-> FALSE,
-     remembered |-> {0, 1} ] >>
-/\ lease_live_bugRemember_cid_lease_pend = {}
-/\ lease_live_bugRemember_cid_lease_errsLeft = 0
-/\ lease_live_bugRemember_cid_lease_walker = 0
-
 State 17: <lease_live_bugRemember_cid_lease_AssignBegin line 757, col 3 to line 837, col 52 of module lease_live_bugRemember>
-/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> -2 @@ 2 :> 2)
-/\ lease_live_bugRemember_cid_lease_todo = {}
-/\ lease_live_bugRemember_cid_lease_cursor = 0
-/\ lease_live_bugRemember_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> TRUE,
-  skipped |-> TRUE,
-  skipOrphan |-> TRUE,
-  refusedHeld |-> TRUE,
-  refusedClaimable |-> TRUE,
-  claimErr |-> TRUE,
-  refusedUnasked |-> TRUE ]
-/\ lease_live_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
-/\ lease_live_bugRemember_cid_lease_bootLeft = 0
-/\ lease_live_bugRemember_cid_lease_exitsLeft = 2
-/\ lease_live_bugRemember_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {0, 1} ],
-   [ st |-> "retiring",
-     off |-> 2,
-     loc |-> "slot",
-     retry |-> FALSE,
-     remembered |-> {0, 1} ] >>
-/\ lease_live_bugRemember_cid_lease_pend = {}
-/\ lease_live_bugRemember_cid_lease_errsLeft = 0
-/\ lease_live_bugRemember_cid_lease_walker = 0
-
-State 18: <lease_live_bugRemember_cid_lease_OrphanExit line 712, col 3 to line 730, col 80 of module lease_live_bugRemember>
 /\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
 /\ lease_live_bugRemember_cid_lease_todo = {}
 /\ lease_live_bugRemember_cid_lease_cursor = 0
@@ -511,7 +482,7 @@ State 18: <lease_live_bugRemember_cid_lease_OrphanExit line 712, col 3 to line 7
      loc |-> "none",
      retry |-> FALSE,
      remembered |-> {0, 1} ],
-   [ st |-> "retiring",
+   [ st |-> "admitted",
      off |-> 2,
      loc |-> "slot",
      retry |-> FALSE,
@@ -520,4 +491,62 @@ State 18: <lease_live_bugRemember_cid_lease_OrphanExit line 712, col 3 to line 7
 /\ lease_live_bugRemember_cid_lease_errsLeft = 0
 /\ lease_live_bugRemember_cid_lease_walker = 0
 
-State 19: Stuttering
+State 18: <lease_live_bugRemember_cid_lease_LaunchBegin line 450, col 3 to line 494, col 80 of module lease_live_bugRemember>
+/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
+/\ lease_live_bugRemember_cid_lease_todo = {}
+/\ lease_live_bugRemember_cid_lease_cursor = 0
+/\ lease_live_bugRemember_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> TRUE,
+  skipped |-> TRUE,
+  skipOrphan |-> TRUE,
+  refusedHeld |-> TRUE,
+  refusedClaimable |-> TRUE,
+  claimErr |-> TRUE,
+  refusedUnasked |-> TRUE ]
+/\ lease_live_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
+/\ lease_live_bugRemember_cid_lease_bootLeft = 0
+/\ lease_live_bugRemember_cid_lease_exitsLeft = 2
+/\ lease_live_bugRemember_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {0, 1} ],
+   [ st |-> "launching",
+     off |-> 2,
+     loc |-> "taken",
+     retry |-> FALSE,
+     remembered |-> {0, 1} ] >>
+/\ lease_live_bugRemember_cid_lease_pend = {}
+/\ lease_live_bugRemember_cid_lease_errsLeft = 0
+/\ lease_live_bugRemember_cid_lease_walker = 0
+
+State 19: <lease_live_bugRemember_cid_lease_CreateErr line 228, col 3 to line 275, col 80 of module lease_live_bugRemember>
+/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_live_bugRemember_cid_lease_todo = {}
+/\ lease_live_bugRemember_cid_lease_cursor = 0
+/\ lease_live_bugRemember_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> TRUE,
+  skipped |-> TRUE,
+  skipOrphan |-> TRUE,
+  refusedHeld |-> TRUE,
+  refusedClaimable |-> TRUE,
+  claimErr |-> TRUE,
+  refusedUnasked |-> TRUE ]
+/\ lease_live_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
+/\ lease_live_bugRemember_cid_lease_bootLeft = 0
+/\ lease_live_bugRemember_cid_lease_exitsLeft = 1
+/\ lease_live_bugRemember_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {0, 1} ],
+   [ st |-> "retiring",
+     off |-> 2,
+     loc |-> "none",
+     retry |-> TRUE,
+     remembered |-> {0, 1} ] >>
+/\ lease_live_bugRemember_cid_lease_pend = {}
+/\ lease_live_bugRemember_cid_lease_errsLeft = 0
+/\ lease_live_bugRemember_cid_lease_walker = 0
+
+State 20: Stuttering

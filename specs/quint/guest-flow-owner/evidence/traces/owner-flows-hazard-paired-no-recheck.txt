@@ -56,7 +56,9 @@ State 12
   flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: true, req: 2, st: "connecting" })
 
 State 13
-  quiesced = true
+  alloc = "Retiring"
+  claim = false
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "closed" })
   flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: true, req: 2, st: "closed" })
 
 State 14
