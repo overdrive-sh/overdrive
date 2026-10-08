@@ -2,9 +2,8 @@
 
 ## Status
 
-**Proposed — decision D5a (= hybrid) approved by user 2026-10-06; its
-attachment-set detail approved by user 2026-10-06; pending independent DESIGN
-review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
+**Proposed — approved by user (D5a = hybrid 2026-10-06; its attachment set,
+current wording D5a-IFACE, 2026-10-08); pending independent DESIGN review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
 records one decision. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*, which holds the
 forwarder contract.
@@ -61,13 +60,22 @@ removal points:
 - **Tuples come from the kernel.** A tuple is registered from the connected
   host socket's kernel-reported local address and peer (after any `connect4`
   rewrite), never from the requested destination.
-- **Attachment set (user ruling 2026-10-06).** The program is installed on
-  every interface in the host root network namespace. The set is refreshed at
-  forwarder start, on each link-appearance notification, and at the audit
-  cadence. A failed attachment is counted with its cause and retried at the
-  next refresh; it never quiesces forwarding and is never classified as audit
-  damage. Only the `lo` attachment gates startup and counts as damage when
-  missing.
+- **Attachment set.** On the appliance the host root namespace holds `lo`,
+  the image's NICs and the interfaces Overdrive creates (ADR-0068). The
+  program is attached:
+  - **at boot, to every interface present** — `lo` and the image's NICs. A
+    failed attachment refuses startup with the interface named;
+  - **before Overdrive brings up any interface it creates,** as a
+    precondition of setting it up. This design creates none; the rule binds
+    any component that does;
+  - **to an interface the kernel registers after boot** (a NIC whose driver
+    probes late, or a hot-added NIC), on its link notification; a lost
+    notification (the kernel's netlink overrun) triggers a full relist, and
+    a failed attach is counted with its cause and retried at the audit
+    cadence. These never quiesce forwarding and are never audit damage.
+
+  The links are process-owned and not audited at runtime (ADR-0159). A TCX
+  link of an interface the kernel removes goes with the interface.
 
 ## Alternatives considered
 
@@ -78,23 +86,28 @@ removal points:
   which confines that failure to empty and frame-shaped datagrams.
 - **Removal in the host verdict only, empties dropped.** Drops every empty
   datagram (a D15 regression). Rejected.
-- **Treat a failed non-`lo` attachment as audit damage.** Would quiesce every
-  flow on the node for a gap that affects only empty and frame-shaped
-  datagrams through one interface. Rejected.
+- **Boot proceeds with a NIC that failed to attach, counted and retried.**
+  Leaves empty and frame-shaped datagrams through that NIC reaching their
+  peers framed for as long as the attach keeps failing, an exposure a boot
+  precondition removes. Rejected.
+- **Treat a failed attachment to a runtime-registered interface as audit
+  damage.** Would quiesce every flow on the node for a gap that affects only
+  empty and frame-shaped datagrams through one interface. Rejected.
 
 ## Consequences
 
 - Non-empty datagrams leave the host independent of routing, interface set and
   MTU; only empty and frame-shaped datagrams depend on the egress program.
-- On an interface not yet carrying the program, an empty datagram reaches its
-  peer as 8 bytes and a frame-shaped payload in its framed form. Counters, the
-  failure record and the audit's interface fact make the gap observable.
-- A datagram encrypted by policy-based IPsec (xfrm without an interface)
-  never crosses a TC egress hook in clear; the same gap applies to it. This is
-  a validation item, not an observed fact.
+- Every interface present at boot and every interface Overdrive creates
+  carries the program before any guest datagram can leave through it.
+- One bounded exposure remains, for an interface the kernel registers after
+  boot: from its registration until its attach (the notification latency, or
+  the relist that follows a lost notification), and while the kernel
+  keeps refusing the attach, an empty datagram leaving through it reaches its
+  peer as 8 bytes and a frame-shaped payload in its framed form. Counters,
+  the failure record and the audit's interface fact make it observable.
 - The host carries one TC egress program per root-namespace interface plus a
   fragment-tracking map; it is a no-op for unregistered tuples.
 - Untested, and therefore validation items in the feature delta: NICs with UDP
-  segmentation offload, several egress interfaces, policy routing, runtime
-  interfaces, interfaces owned by other software, xfrm paths, and a
-  frame-shaped payload above the MTU.
+  segmentation offload, several egress interfaces with policy routing, an
+  interface registered after boot, and a frame-shaped payload above the MTU.

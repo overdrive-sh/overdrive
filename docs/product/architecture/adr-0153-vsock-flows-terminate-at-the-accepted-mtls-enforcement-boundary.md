@@ -62,7 +62,7 @@ needs no write gate.
 4. **No unregistered mesh path.** If leg-F is unavailable or the allocation is
    not intercept-live, a mesh flow is refused.
 5. **Inbound is unchanged as far as leg-S.** Leg-S's plaintext then ends at the
-   ADR-0152 intake.
+   ADR-0173 intake.
 6. **This ADR does not decide #303.**
 
 ## Alternatives considered

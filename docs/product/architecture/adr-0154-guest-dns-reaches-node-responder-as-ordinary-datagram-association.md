@@ -41,7 +41,7 @@ The gateway lies inside the guest prefix, and the prefix is host-local
   removed as ADR-0165 decides (in the host verdict, or for an empty datagram
   on `lo` egress), and is delivered to the `DnsResponder`. `gateway:53` is the
   one host-local destination the host-internal deny set admits (ADR-0167);
-  the gateway is excluded from the guest-prefix steering rules (ADR-0152).
+  the gateway is excluded from the guest-prefix steering rules (ADR-0172).
 - The responder's resolution semantics and bind rule are unchanged
   (ADR-0116). The gateway address it falls back to is the same address; it is
   now local through the `lo` route instead of on the bridge.

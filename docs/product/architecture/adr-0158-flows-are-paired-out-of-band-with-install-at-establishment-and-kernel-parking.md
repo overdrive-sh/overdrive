@@ -6,7 +6,7 @@
 wait bounds follow D15-R3 = (b), approved by user 2026-10-06; the atomic
 admission-and-registration step and the stop of a continuation for a closed
 flow (U-1, formal model teeth `flows_bugAdmitSplit`,
-`flows_bugPairedNoRecheck`) pinned at the user's direction 2026-10-06;
+`flows_bugPairedNoRecheck`) approved by user 2026-10-06;
 pending independent DESIGN review.** GH #295. Recorded in the #295 feature delta,
 § *[REF] vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05*, which
 holds the byte layouts and the per-kind total orders.

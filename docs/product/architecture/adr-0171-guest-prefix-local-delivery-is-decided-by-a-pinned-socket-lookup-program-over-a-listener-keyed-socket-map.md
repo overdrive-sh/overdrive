@@ -2,13 +2,13 @@
 
 ## Status
 
-**Proposed — decision D8a-LOOKUP approved by user 2026-10-07; its boot
-order, load then swap (D8a-LOAD-SWAP), approved by user 2026-10-08;
-pending independent DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
-Attachment Replacement DESIGN — PROPOSED 2026-10-05*. It is the mechanism of
-ADR-0152's point 2 (only bound intake listeners are reachable at the guest
-prefix). The exact contract is pinned in the feature delta (§ *Driven port —
-guest-prefix steering*).
+**Proposed — decision D8a-LOOKUP approved by user 2026-10-07; pending
+independent DESIGN review.** GH #295. Recorded in the #295 feature delta,
+§ *[REF] vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05*. It is the
+mechanism of ADR-0172 (only steered intake listeners are reachable at the
+guest prefix). How each boot replaces the program is ADR-0175; how admission
+keeps room for every entry is ADR-0176. The exact contract is pinned in the
+feature delta (§ *Driven port — guest-prefix steering*).
 
 ## Context
 
@@ -59,35 +59,23 @@ reach it.
 - **An entry exists only while its listener is open.** The owner inserts the
   entry after the listener listens; the insertion's success means the entry is
   present. The owner never deletes an entry: closing the listener removes it in
-  the kernel, in the same step. A failed insertion leaves the listener
-  unreachable (connections to the port are refused) and is retried.
+  the kernel, in the same step. Admission keeps room in the map for every
+  listener's entry (ADR-0176); an insertion that fails leaves the listener
+  unreachable (connections to the port are refused).
 - **Node infrastructure, pinned.** The link is pinned under
   `/sys/fs/bpf/overdrive/guest_prefix_steering/` and is never detached or
   unpinned by Overdrive: it outlives `serve` exactly as the `local` route
-  does (ADR-0152, U-4), and keeps its program and that program's map alive;
-  the map itself is not pinned. When `serve` exits, its listeners close, the
-  map holds no live socket, and every lookup for the prefix drops — the
-  prefix is fail-closed while `serve` is down without any firewall rule.
-- **Loaded, swapped in, then the route (D8a-LOAD-SWAP).** Every boot loads
-  the program of the current binary for the configured prefix with its own
-  new, empty map; the kernel verifier checks it, and a rejection refuses
-  startup with nothing attached. Boot then swaps it into the pinned link
-  with the atomic `BPF_LINK_UPDATE` (with no pinned link, a new link is
-  attached and pinned); a failed or interrupted swap leaves the earlier
-  program attached and boot refuses. Only then does boot keep or add the
-  `local` route (ADR-0152). Boot neither probes the program nor reads the
-  link back: the program ships in the pinned image, built from the source
-  whose Tier-3 steering tests run in CI on the same pinned kernel
-  (ADR-0068), so its correctness is a property of the build, not of the
-  node; and after a successful update the link runs the new program by the
-  kernel's own guarantee.
-- **Converged at boot only.** On the appliance only Overdrive writes the
-  steering (ADR-0068). At runtime the owner changes it only by `steer` (whose
-  `Ok` means the entry is present) and by closing listeners (whose entries
-  the kernel removes in the same step); both outcomes reach the owner
-  directly. There is therefore no runtime audit, re-steer or repair of the
-  steering: there is no drift for one to find. Overdrive's own crashes are
-  covered by boot convergence.
+  does (ADR-0152), and keeps its program and that program's map alive. When
+  `serve` exits, its listeners close, the map holds no live socket, and every
+  lookup for the prefix drops — the prefix is fail-closed while `serve` is
+  down without any firewall rule.
+- **No runtime audit.** On the appliance only Overdrive writes the steering
+  (ADR-0068). At runtime the owner changes it only by `steer` (whose `Ok`
+  means the entry is present) and by closing listeners (whose entries the
+  kernel removes in the same step); both outcomes reach the owner directly.
+  There is therefore no runtime audit, re-steer or repair of the steering:
+  there is no drift for one to find. The program in the link changes only at
+  boot (ADR-0175).
 
 ## Alternatives considered
 
@@ -115,23 +103,10 @@ reach it.
 - **One node-shared intake listener for all addresses, assigned by the
   program.** Would collapse D23's per-port listener mirroring and D7's
   listener-tag identity of intake children. Rejected.
-- **Probe the loaded program at every boot before the swap
-  (`BPF_PROG_TEST_RUN`, or a link in a private namespace with real
-  connects) and read the link back after it.** Rechecks on the node a
-  property CI establishes for the same source on the same pinned kernel,
-  and adds a kernel assumption of its own (that a test run decides as the
-  attached program would). The read-back is not load-bearing: after a
-  successful update the link runs the new program (formal model, finding
-  r6-1). Rejected.
-- **Fence the prefix with a `prohibit` route around the swap.** Keeps the
-  fence, its write and its failure path, and turns every binary upgrade
-  into a refused window, to cover a state — `local` over the newly swapped
-  program — that exposes nothing when the shipped program is correct.
-  Rejected.
-- **Pin the map and reuse it across boots.** Binds every binary's program to
-  the previous binary's map layout and leaves a second pinned object to
-  converge; the earlier map holds no live socket at boot, so reusing it
-  gains nothing. Rejected.
+- **Audit the link and its entries at runtime and repair them.** On the
+  appliance nothing but the owner writes them, and every runtime write
+  reports its outcome to the owner; an audit could detect only software that
+  does not exist on the appliance. Rejected.
 
 ## Consequences
 
@@ -146,7 +121,7 @@ reach it.
   release never waits on it.
 - The firewall carries no per-listener state. Its constant output reject and
   prerouting drop of prefix traffic that is neither exempt nor diverted
-  (ADR-0152) keep an unmarked host-local client on leg-C or refused, never
+  (ADR-0172) keep an unmarked host-local client on leg-C or refused, never
   handed an intake directly.
 - Pinned objects are an exception to ADR-0159, which governs forwarding
   objects; the steering program forwards nothing and must outlive `serve` for
@@ -163,15 +138,14 @@ reach it.
 - New kernel facts are assumed and validated (feature delta V-26): the
   lookup runs for loopback connections to a `local`-route address before the
   wildcard lookup; a drop yields a reset; a TPROXY-assigned packet bypasses
-  it; a closing listener leaves the map in the same step; a pinned link keeps
-  running with no process; a link update is atomic and leaves the earlier
-  program attached on error (all V-26). The program's own correctness is
-  assumed at runtime and established by the Tier-3 steering tests in CI on
-  the pinned kernel (feature delta A-33); a defect there is a failed build,
-  not a boot refusal. The steering rules are checked by the formal model
-  (ADR-0168, `specs/quint/guest-flow-owner/`, modules `prefix_boot`,
-  `intake`, `quiescence`, `shared_table` over the shared `prefix_landing`
-  predicate).
-- Every binary upgrade replaces the steering program atomically, with no
-  refused window, and a boot refused at the steering leaves the node as the
-  earlier boot left it.
+  it; a closing listener leaves the map, and frees its slot, in the same
+  step; a pinned link keeps running with no process. The program's own
+  correctness is established by the Tier-3 steering tests in CI on the
+  pinned kernel (feature delta A-33). The steering rules are checked by the
+  formal model (ADR-0168, `specs/quint/guest-flow-owner/`, modules
+  `prefix_boot`, `intake`, `quiescence`, `shared_table` over the shared
+  `prefix_landing` predicate).
+- The program runs for every TCP SYN and UDP datagram in the host root
+  namespace whose receiving socket is looked up, not only for the prefix; it
+  passes a non-prefix destination after one comparison. V-9 measures that
+  per-lookup cost at density.

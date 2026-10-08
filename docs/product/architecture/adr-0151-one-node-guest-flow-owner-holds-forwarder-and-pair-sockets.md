@@ -44,7 +44,7 @@ half-close of 10,000.
     egress unframe program on `lo` and every root-namespace interface
     (ADR-0165), `sock_ops`, drain counter);
   - the host `AF_VSOCK` flow listeners and the per-VM control sessions;
-  - the per-allocation intake listeners (ADR-0152);
+  - the per-allocation intake listeners (ADR-0173);
   - the host parking cells;
   - every host-side pair socket.
 - **No other writer** inserts into or removes from the forwarding maps.
@@ -96,9 +96,11 @@ half-close of 10,000.
 ## Consequences
 
 - Supervisor components change: bridge, TAP TCX, pins and bridge guard are
-  removed; forwarder, `sock_ops` link, drain counter, flow and control
-  listeners, intake listeners, the egress unframe links and the local route
-  are added.
+  removed; the forwarder, flow and control listeners and intake listeners are
+  added. The forwarder's links (`sock_ops`, drain counter, egress unframe) are
+  not components: they are held by the owner and not audited (ADR-0159). The
+  local route and the guest-prefix steering are written at boot only
+  (ADR-0152, ADR-0175).
 - Fail-stop and EXEC-gate semantics are unchanged. The 1 s audit and 5 s bound
   are re-measured (V-9).
 - The owner's per-flow state machine is tested through a private effect seam

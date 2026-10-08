@@ -2,8 +2,9 @@
 
 ## Status
 
-**Proposed — ruling D19 approved by user 2026-10-05; pending independent
-DESIGN review.** GH #295. Recorded in the #295 feature delta, § *[REF]
+**Proposed — approved by user (ruling D19 2026-10-05; no runtime audit of
+the forwarding links, D19-LINKS, 2026-10-08); pending independent DESIGN
+review.** GH #295. Recorded in the #295 feature delta, § *[REF]
 vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05*. Surviving a
 service restart with flows intact is deferred to **#312**.
 
@@ -41,6 +42,14 @@ The guest-capture spike showed process loss on each side:
   No guest flow reaches any peer afterwards.
 - Boot never adopts forwarding state. A box reboot ends every VM; forwarding
   is rebuilt as VMs relaunch.
+- **No runtime audit of the links (D19-LINKS).** While the owner holds a
+  link's descriptor, only an explicit detach removes the link, and on the
+  appliance only Overdrive writes these objects (ADR-0068). The `lo` unframe,
+  `sock_ops` and drain-counter links are therefore not supervisor components:
+  no audit reports them damaged and no recovery quiesces forwarding for them.
+  The one kernel producer of a link's disappearance — the kernel removing the
+  interface a TCX link is attached to — removes that interface's traffic
+  with it (ADR-0165).
 - Scope: forwarding objects. The guest-prefix steering program, link and map
   (ADR-0171) forward nothing; they decide local delivery for the guest prefix
   and are node infrastructure, pinned so that they outlive `serve` as the
@@ -55,11 +64,18 @@ The guest-capture spike showed process loss on each side:
   keeping. Rejected.
 - **Legacy cgroup attach.** Would leave hooks running after the owner exits,
   steering traffic to sockets that no longer exist. Rejected.
+- **Audit the links at runtime and recover a missing one under quiescence.**
+  No producer of a missing link exists on the appliance while the owner
+  holds it; the recovery would be reached only by a test that detaches a
+  link itself, and would cost quiescence machinery for every flow on the
+  node. Rejected.
 
 ## Consequences
 
 - Owner-process loss fails closed by construction (V-8 shows it in the
   production composition).
 - `sweep_stale` reduces to verifying that no residue exists.
+- The startup probe still checks that every link attached at load (Earned
+  Trust); after that, link presence is a property of the owner holding them.
 - A control-plane restart closes every guest flow; VMs keep running and open
   new flows once the owner returns.

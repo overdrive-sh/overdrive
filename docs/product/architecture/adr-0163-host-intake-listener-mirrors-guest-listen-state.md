@@ -11,8 +11,9 @@ in one serialized order (independent DESIGN review findings M-7, H-2) —
 confirmed by user 2026-10-06; activation binds all reported listeners or none
 (U-6), approved by user 2026-10-06; a listener is reachable exactly while it
 is open and steered, and its closing ends its reachability in the same kernel
-step (D8a-LOOKUP, ADR-0171), approved by user 2026-10-07; pending
-independent DESIGN review.** GH #295. Recorded in the
+step (D8a-LOOKUP, ADR-0171), approved by user 2026-10-07; only a steering
+failure caused by kernel memory pressure is retried (D8a-CAP, ADR-0176),
+approved by user 2026-10-08; pending independent DESIGN review.** GH #295. Recorded in the
 #295 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
 2026-10-05*.
 
@@ -21,7 +22,7 @@ network behaviour wherever the kernel allows it.
 
 ## Context
 
-Under ADR-0152 the host terminates every host-local TCP connection to
+Under ADR-0173 the host terminates every host-local TCP connection to
 `workload_addr:port`: the host kernel completes the handshake on the intake
 listener, and only then does the owner ask the guest to connect to the
 application. If the guest application is not listening, the guest refuses and
@@ -101,10 +102,13 @@ timeout.
   owner binds, listens and then steers the listener (inserts its entry; `Ok`
   means present); to take it down the owner closes it, which removes the entry
   in the same kernel step. So the listener is reachable exactly while it is
-  open and steered, and every connection it accepts may be paired. A bind,
-  listen or steering failure closes the listener, is retried at the audit
-  cadence while the guest still reports listening, and never fails the
-  allocation (activation excepted, below); meanwhile the port is refused.
+  open and steered, and every connection it accepts may be paired. The
+  steering map always has room for the listener (ADR-0176). A bind or listen
+  failure, or a steering failure caused by kernel memory pressure, closes the
+  listener and is retried at the audit cadence while the guest still reports
+  listening; any other steering failure is an Overdrive defect, reported and
+  not retried. None fails the allocation (activation excepted, below);
+  meanwhile the port is refused.
 - **Restore re-establishes from the last report.** Forwarding reopens only
   when no quiescence holder remains (ADR-0169); the owner then binds and
   steers every listener that should serve, from the last reported state.

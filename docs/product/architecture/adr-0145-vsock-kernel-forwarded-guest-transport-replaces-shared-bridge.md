@@ -84,8 +84,9 @@ The parts that could be decided differently are separate ADRs: VMM backend
 (0146), fork provisioning (0161), CID (0156), beacon (0157), pair model
 (0147), pairing order (0158), socket types per direction (0148), datagram
 frame (0149), guest adaptation (0150), ownership (0151), unpinned lifetime
-(0159), stop semantics (0160), inbound intake (0152), host-intake listen
-state (0163), mTLS boundary (0153), non-mesh egress (0162), DNS (0154) and
+(0159), stop semantics (0160), host-local workload address (0152), inbound
+intake (0173), client identity (0174), guest-prefix reachability (0172) and
+its steering (0171, 0175, 0176), host-intake listen state (0163), mTLS boundary (0153), non-mesh egress (0162), DNS (0154) and
 the density target (0155).
 
 ## Alternatives considered
