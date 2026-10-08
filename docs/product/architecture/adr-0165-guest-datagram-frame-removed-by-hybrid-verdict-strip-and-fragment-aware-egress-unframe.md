@@ -4,9 +4,9 @@
 
 **Proposed — approved by user (D5a = hybrid 2026-10-06; its attachment set,
 current wording D5a-IFACE, 2026-10-08; the boot refusal on any attach
-failure, D5a-IFACE-BOOT, and the attach as a precondition of configuring an
-interface registered after boot, D5a-LATE, 2026-10-08); pending independent
-DESIGN review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
+failure, D5a-IFACE-BOOT, and no attach after boot because the appliance
+configures no interface registered after boot, D5a-LATE, 2026-10-08);
+pending independent DESIGN review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
 records one decision. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*, which holds the
 forwarder contract.
@@ -63,24 +63,22 @@ removal points:
 - **Tuples come from the kernel.** A tuple is registered from the connected
   host socket's kernel-reported local address and peer (after any `connect4`
   rewrite), never from the requested destination.
-- **Attachment set.** On the appliance the host root namespace holds `lo`,
-  the image's NICs and the interfaces Overdrive creates (ADR-0068). An
-  interface carries guest datagrams only once it has addresses and routes,
-  and every interface gets the program before it can carry one:
-  - **at boot, to every interface present** — `lo` and the image's NICs,
-    configured by the image before `serve` starts. Any failed attachment
-    refuses startup with the interface named, before forwarding opens;
-  - **to an interface the kernel registers after boot** (a NIC whose driver
-    probes late, or a hot-added NIC), as a precondition of configuring it.
-    The image configures no such interface; the node network configuration
-    path, its only configurer, gives it addresses and routes only after the
-    attach succeeds. A failed attach leaves the interface unconfigured and is
-    classified like a steer failure: kernel memory pressure is retried, a
-    removed interface ends the attempt, and any other failure is an
-    Overdrive defect, reported and not retried;
-  - **before Overdrive brings up any interface it creates,** by the same
-    precondition. This design creates none; the rule binds any component
-    that does.
+- **Attachment set.** An interface carries guest datagrams only once it has
+  addresses and routes. On the appliance (ADR-0068) the image configures
+  root-namespace interfaces only at boot, before `serve` starts, so:
+  - **at boot, the program is attached to every interface present** — `lo`
+    and the image's NICs. Any failed attachment refuses startup with the
+    interface named, before forwarding opens;
+  - **after boot, nothing is attached.** An interface the kernel registers
+    later (a NIC whose driver probes late, a hot-added NIC, or one any
+    component creates) is never given addresses or routes, so it carries no
+    guest traffic and needs no attach. This rule is part of the assumption
+    that only Overdrive and the image write the node's kernel objects, and
+    is discharged by the appliance image: its configuration must not
+    configure an interface registered after boot. That is an image
+    requirement, not a runtime check. The dev and metal hosts run a
+    catch-all systemd-networkd configuration and are not the appliance
+    image.
 
   No attach outcome quiesces forwarding or counts as audit damage. The links
   are process-owned and not audited at runtime (ADR-0159). A TCX link of an
@@ -103,24 +101,28 @@ removal points:
   configured independently, retrying failures.** Leaves a window from
   registration to attach — unbounded while the attach keeps failing, and
   retried even when the failure is a defect — in which empty and
-  frame-shaped datagrams leave through it framed. Making the attach a
-  precondition of configuration removes the window. Rejected.
-- **Treat a failed attachment to an interface registered after boot as
-  audit damage.** Would quiesce every flow on the node for an interface that
-  carries no guest datagram while unconfigured. Rejected.
+  frame-shaped datagrams leave through it framed. Rejected.
+- **Attach an interface registered after boot as a precondition of
+  configuring it, through a late-interface configuration path.** Closes the
+  window, but adds an attach operation, a failure classification, a retry
+  and a lifecycle gate for a configuration the appliance never performs.
+  Rejected in favour of never configuring such an interface.
 
 ## Consequences
 
 - Non-empty datagrams leave the host independent of routing, interface set and
   MTU; only empty and frame-shaped datagrams depend on the egress program.
-- Every interface — present at boot, registered later, or created by
-  Overdrive — carries the program before any guest datagram can leave
-  through it; no runtime exposure remains.
-- An interface registered after boot whose attach fails stays unconfigured
-  until a retried attach succeeds (kernel memory pressure) or for good (a
-  defect, reported).
+- Every interface that can carry a guest datagram carries the program from
+  boot; no runtime exposure remains, and the forwarder has no attach
+  operation after boot.
+- An interface registered after boot is unusable for guest traffic on the
+  appliance. A design that needs one configured must revisit this decision.
+- On a host whose network configuration configures interfaces registered
+  after boot (the dev and metal hosts), empty and frame-shaped datagrams
+  leaving through such an interface reach their peers framed. That host is
+  not the appliance.
 - The host carries one TC egress program per root-namespace interface plus a
   fragment-tracking map; it is a no-op for unregistered tuples.
 - Untested, and therefore validation items in the feature delta: NICs with UDP
-  segmentation offload, several egress interfaces with policy routing, an
-  interface registered after boot, and a frame-shaped payload above the MTU.
+  segmentation offload, several egress interfaces with policy routing, and a
+  frame-shaped payload above the MTU.

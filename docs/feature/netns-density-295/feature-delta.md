@@ -16639,8 +16639,8 @@ independent DESIGN review, then a roadmap reconciliation
   capacity, sized at 262,144; the capacity-driven steer retry is removed),
   **D19-LINKS** (no runtime audit, damage recovery or gold-test injection for
   the forwarder's process-owned links), **D5a-IFACE** (the unframe program is
-  attached at boot to every interface present and before Overdrive brings up
-  an interface it creates; other-software interface cases removed) and
+  attached at boot to every interface present; other-software interface
+  cases removed) and
   **D8-PREFIX-CFG** (`PinnedObjectForeign` deleted; the untagged-route
   refusal replaced by a boot configuration check of node addresses inside
   the guest prefix). Each: Proposed — approved by user 2026-10-08; pending
@@ -16720,7 +16720,7 @@ independent DESIGN review, then a roadmap reconciliation
 
 | ID | Ruling | Recorded in |
 |---|---|---|
-| D5a-SET | The unframe program is installed on every interface in the host root network namespace; a failed attach on an interface that appears at runtime is counted and retried and never quiesces forwarding (finding M-2). When and on which interfaces it is attached is restated by D5a-IFACE (2026-10-08) | ADR-0165; § *Driven port — host forwarder* |
+| D5a-SET | The unframe program is installed on every interface in the host root network namespace; a failed attach on an interface that appears at runtime is counted and retried and never quiesces forwarding (finding M-2). When and on which interfaces it is attached is restated by D5a-IFACE and D5a-LATE (2026-10-08): only at boot, to every interface present; no interface registered later is configured, so none needs an attach | ADR-0165; § *Driven port — host forwarder* |
 | D23-SCOPE | The guest reports every listening port; the host acts only on declared ports | ADR-0163 |
 | D24-REFUSE | Startup refuses if the guest-flow owner's cgroup is outside the `connect4` attach point (`overdrive.slice`) | ADR-0164 |
 | SLOT-ABORT | A late `Paired` for a released UDP slot is answered with `Abort` | ADR-0150; § *Per-kind total orders* |
@@ -16736,7 +16736,7 @@ review.** They answer findings H-1, H-2, M-1 and M-3 of
 |---|---|---|
 | **D8a-CAP** (H-1) | The guest-prefix steering map is sized from the admitted bound with headroom: `GUEST_INTAKE_STEERING_MAX = 262,144` entries (16 declared TCP listener ports per attachment at the 16,384 placeholder; about 64 B per entry at insert and 16 B per hash bucket at creation — about 4 MiB at creation, 20 MiB full). `GuestAddressPool::assign` reserves an allocation's declared TCP listener ports with its lease and refuses `GuestNetworkError::IntakeCapacityReached` (non-terminal, projected like `AdmissionCapReached`) when the node's reservations would exceed the capacity; Retiring leases keep their reservation until release. So no listener fails to steer for lack of space, and the capacity-driven steer retry is removed. The one remaining retried steer failure is `GuestSteeringError::KernelMemory` (producer: the kernel's entry or psock allocation under memory pressure); any other steer failure is an Overdrive defect, reported and not retried (confirmed by the user as D8a-CAP-RETRY, below). A node supports `M ≤ 262,144` declared VM TCP listener ports (this replaces CAP-295-A's "any valid `M > 65,536` remains supported", § *Changed assumptions*) | ADR-0176, ADR-0171, ADR-0163; § *Core vocabulary*, *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, G-V0, G-V8, R5-22, R5-37, V-9, V-26 (x) |
 | **D19-LINKS** (H-2) | The forwarder's process-owned links (`lo` unframe, non-`lo` unframe, `sock_ops`, drain counter) have no runtime audit, damage recovery or gold-test detach injection: while `serve` holds them only an explicit detach removes them, and on the appliance only Overdrive could issue one (A-31). `SharedGuestNetworkComponent::{SockOpsLink, DrainCounterLink, UnframeLink}` are deleted. Kept, with their producers: the startup probe's `LinksAttached` stage (the kernel refusing an attach at load); a TCX link leaving with an interface the kernel removes (kernel); the `Forwarder` component audit of pair and cell bookkeeping (Overdrive's own) | ADR-0159, ADR-0151, ADR-0165; § *Driven port — host forwarder*, error taxonomy, *Earned Trust*, V-8, roadmap 08-03 / 10-02 |
-| **D5a-IFACE** (M-1) | The egress unframe program is attached at boot to every interface present in the host root namespace (`lo` and the image's NICs) — a failed attach refuses startup (`GuestNetworkError::UnframeAttach`) — and as a precondition of Overdrive bringing up any interface it creates (this design creates none). An interface the kernel registers after boot is configured only after its attach (D5a-LATE, below). The other-software interface cases (container bridge, WireGuard / tunnel, foreign TCX program, policy-based xfrm) are removed from V-17, A-21 and ADR-0165. The boot refusal is confirmed by the user as D5a-IFACE-BOOT (below) | ADR-0165; § *Driven port — host forwarder*, *Composition* step 9, G-V1, A-21, V-17, R5-12, R5-38 |
+| **D5a-IFACE** (M-1) | The egress unframe program is attached at boot to every interface present in the host root namespace (`lo` and the image's NICs) — a failed attach refuses startup (`GuestNetworkError::UnframeAttach`) — and to no interface after boot: this design creates no root-namespace interface, and an interface the kernel registers after boot is never configured, so it carries no guest datagram (D5a-LATE, below). The other-software interface cases (container bridge, WireGuard / tunnel, foreign TCX program, policy-based xfrm) are removed from V-17, A-21 and ADR-0165. The boot refusal is confirmed by the user as D5a-IFACE-BOOT (below) | ADR-0165; § *Driven port — host forwarder*, *Composition* step 9, G-V1, A-21, V-17, R5-38 |
 | **D8-PREFIX-CFG** (M-3) | `GuestSteeringError::PinnedObjectForeign` is deleted. `GuestNetworkError::ForeignGuestPrefixRoute` is replaced by the configuration-validation refusal `GuestNetworkError::GuestPrefixOverlapsNodeAddress { prefix, interface, address }`, checked in `probe_startup` before any boot effect. Producer: the operator's node network configuration placing a node address inside the guest prefix (the kernel then adds an untagged `local` route for it). Route convergence keeps, replaces or adds only the tagged route | ADR-0152; § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, G-V1, R5-11, *Earned Trust* |
 
 ### User decisions — 2026-10-08 (independent review of revision 11)
@@ -16752,7 +16752,7 @@ are not architect-derived additions.
 | **D5a-IFACE-BOOT** (H-1 (1)) | Boot refuses (`GuestNetworkError::UnframeAttach`, naming the interface) when the egress unframe program cannot be attached to an interface present at boot, whatever the `UnframeAttachError` variant | ADR-0165; § *Driven port — host forwarder*, *Composition* step 9, G-V1, R5-38 |
 | **D8a-CAP-RETRY** (H-1 (2)) | Only a `GuestSteeringError::KernelMemory` steer failure is retried; every other steer failure is an Overdrive defect, reported (`guest_intake.bind_failed { retried: false }`) and not retried | ADR-0176; § *Driven port — guest-prefix steering*, *Owner and provisioner*, error taxonomy, G-V8, R5-22, R5-37 |
 | **A-MEM-OWNER** (H-1 (3)) | Assumption A-MEM (kernel memory pressure is not permanent) is an environment assumption owned by #261 (node-wide CPU and memory accounting) | § *Formal protocol model* (assumptions table) |
-| **D5a-LATE** (M-2) | An interface the kernel registers after boot gets no addresses or routes until the egress unframe program is attached to it: the attach is a precondition of configuring the interface, as at boot it is a precondition of opening forwarding. The owner of that configuration is the **node network configuration path** — the one component allowed to configure a root-namespace interface after boot (the appliance image configures root-namespace interfaces at boot only, A-31). It calls `SharedGuestNetworkOwner::attach_unframe_interface(ifindex)` and configures the interface only on `Ok`. On `Err` the interface stays unconfigured: `UnframeAttachError::KernelMemory` is retried by the path; `InterfaceAbsent` ends the attempt (the interface is gone); `Attach` is an Overdrive defect, reported and not retried. The owner keeps no link-notification watch, relist or audit-cadence retry for unframe attachments, and no exposure window remains for late interfaces | ADR-0165; § *Driven port — host forwarder*, *Owner and provisioner*, error taxonomy, G-V1, A-21, V-17, R5-12 |
+| **D5a-LATE** (M-2) | **Proposed — approved by user 2026-10-08; pending independent DESIGN review.** On the appliance the image configures root-namespace interfaces only at boot, before `serve` starts. An interface the kernel registers later (a NIC whose driver probes late, a hot-added NIC, or one any component creates after boot) is never given addresses or routes, so it carries no guest traffic and needs no unframe attach. This is part of A-31 (only Overdrive / the image writes the node's kernel objects), discharged by the appliance image (ADR-0068): the image configuration must not configure an interface registered after boot — an image requirement, not a runtime check. The dev and metal hosts run a catch-all systemd-networkd configuration and are not the appliance image; they are not evidence for or against this rule. Boot is unchanged: every interface present at boot is attached, and a failed attach refuses startup (D5a-IFACE-BOOT). There is no late-interface attach operation, no late-interface configuration path, no link-notification watch, relist or retry for unframe attachments, and no gate for them | ADR-0165; § *Driven port — host forwarder*, *Owner and provisioner*, error taxonomy, G-V1, A-21, A-31, V-17 |
 
 Issue numbers #93 and #308–#312: verified 2026-10-06 with
 `gh issue view <N> --comments` (saved at
@@ -16835,7 +16835,7 @@ impact* numbering). Only A-26 (V-22), A-28 (V-24), A-29 (V-25) and A-30
 | A-18 | A connected guest UDP socket whose association the host aborted re-associates on its next datagram | V-5(c) | DELIVER new step 5 |
 | A-19 | The ADR-0053 `connect4` program attached at `overdrive.slice` is effective for sockets of `overdrive.slice/control-plane.slice` (ancestor inheritance; already production behaviour for workload cgroups) | V-15 (inside V-6) | DELIVER new step 11 |
 | A-20 | Hybrid unframe holds on a NIC with UDP segmentation offload | V-16 | DELIVER new step 4 |
-| A-21 | Hybrid unframe holds on a host with several egress interfaces and policy routing; an attach to an interface the kernel registered after boot (`attach_unframe_interface`) unframes on that interface once it is configured, and the kernel's refusals map to the `UnframeAttachError` variants (`ENOMEM` → `KernelMemory`, `ENODEV` → `InterfaceAbsent`) (D5a-LATE) | V-17 | DELIVER new step 4 |
+| A-21 | Hybrid unframe holds on a host with several egress interfaces and policy routing, each attached at boot | V-17 | DELIVER new step 4 |
 | A-22 | A frame-shaped application payload above the egress MTU (an escaped, fragmented frame) is unframed byte-exact under hybrid | V-18 | DELIVER new step 4 |
 | A-23 | The guest-prefix steering (D8a, D8a-LOOKUP) together with the constant nft rules stops every connection to `workload_addr:port` from reaching a wildcard-bound host service unless an open intake listener is steered for it, for marked, unmarked and remote clients, and stays fail-closed while `serve` is down | V-19, V-26 | DELIVER new step 9 |
 | A-24 | A clone-flagged socket-local storage entry on an intake listener is present on every accepted child at `PASSIVE_ESTABLISHED`, and absent on leg-C's transparent children | V-20 | DELIVER new step 4 |
@@ -16857,12 +16857,15 @@ programs, maps and links, cgroups, network namespaces and vsock CIDs this
 design relies on are written only by Overdrive. Discharged by the appliance
 image configuration (ADR-0068: no SSH, no operator shell, no third-party
 daemon, and no network manager that removes routes it did not create) — not
-by a runtime validation item. The image applies its network configuration to
-the root-namespace interfaces present at boot, before `serve` starts, and
-configures no interface the kernel registers later: after boot only the node
-network configuration path configures one, after its unframe attach
-(D5a-LATE). It is not in the table above, which lists
-assumptions needing focused validation.
+by a runtime validation item. Part of A-31 (D5a-LATE, approved 2026-10-08):
+the image configures root-namespace interfaces only at boot, before `serve`
+starts; an interface the kernel registers later is never given addresses or
+routes, so it carries no guest traffic and needs no unframe attach. The image
+configuration must not configure an interface registered after boot — an
+image requirement, not a runtime check. The dev and metal hosts use a
+catch-all systemd-networkd configuration and are not the appliance image.
+A-31 is not in the table above, which lists assumptions needing focused
+validation.
 
 **A-33 — the shipped steering program is correct (D8a-LOAD-SWAP, approved
 2026-10-08).** The guest-prefix steering program decides as § *Driven port —
@@ -16889,7 +16892,7 @@ of the CID-claim scenarios, and V-26 of the steering scenarios.
 | D3 | One forwarded socket set per transport flow, never multiplexed; node pair capacity `GUEST_FLOW_MAX_PAIRS = 65,536` (four flows per attachment at the target); per-allocation quota 4,096 as a bulkhead | **APPROVED 2026-10-05** | [0147](../../product/architecture/adr-0147-one-kernel-forwarded-pair-per-transport-flow.md) | V-9 (sizing) |
 | D4 | Datagram associations use STREAM toward the guest and SEQPACKET from the guest; the guest reassembles; the host never writes on SEQPACKET | **APPROVED 2026-10-05** | [0148](../../product/architecture/adr-0148-stream-toward-guest-seqpacket-replies-for-datagram-flows.md) | — |
 | D5 | Every datagram is framed (4-byte magic + BE `u32` length; empty = header alone; bound 59,000 B) only inside the transport; the frame never reaches an application, and reaches a remote peer only through an egress interface missing the unframe attachment (D5a) | **APPROVED 2026-10-05** | [0149](../../product/architecture/adr-0149-length-prefixed-datagram-frame-with-empty-carrier.md) | — |
-| D5a | **Hybrid** removal for guest→host datagrams: the host verdict strips the frame from every non-empty datagram, keeping it only for empty datagrams and payloads that themselves parse as a frame; a fragment-aware, tuple-gated TC egress program on `lo` and every interface of the host root namespace strips a valid frame on a registered tuple and passes everything else; tuples registered from the connected host socket's kernel peer; attached at boot to every interface present (a failure refuses startup) and before Overdrive brings up an interface it creates; an interface the kernel registers later is configured by the node network configuration path only after its attach succeeds (kernel memory retried, any other failure a reported defect) | **APPROVED 2026-10-06** (V-11 proven, P-29–P-31; attachment set D5a-SET 2026-10-06); attachment set restated by D5a-IFACE, D5a-IFACE-BOOT and D5a-LATE — Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0165](../../product/architecture/adr-0165-guest-datagram-frame-removed-by-hybrid-verdict-strip-and-fragment-aware-egress-unframe.md) | V-16, V-17, V-18 |
+| D5a | **Hybrid** removal for guest→host datagrams: the host verdict strips the frame from every non-empty datagram, keeping it only for empty datagrams and payloads that themselves parse as a frame; a fragment-aware, tuple-gated TC egress program on `lo` and every interface of the host root namespace strips a valid frame on a registered tuple and passes everything else; tuples registered from the connected host socket's kernel peer; attached at boot to every interface present (a failure refuses startup) and never after boot: an interface the kernel registers later is never given addresses or routes on the appliance (A-31), so it carries no guest datagram | **APPROVED 2026-10-06** (V-11 proven, P-29–P-31; attachment set D5a-SET 2026-10-06); attachment set restated by D5a-IFACE, D5a-IFACE-BOOT and D5a-LATE — Proposed — approved by user 2026-10-08; pending independent DESIGN review | [0165](../../product/architecture/adr-0165-guest-datagram-frame-removed-by-hybrid-verdict-strip-and-fragment-aware-egress-unframe.md) | V-16, V-17, V-18 |
 | D6 | Ordinary guest sockets are captured and paired by guest-kernel Aya programs loaded and controlled by `overdrive-init`, at the size G-MECH approved | **APPROVED 2026-10-05** | [0150](../../product/architecture/adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md) | — |
 | D7 | One node-scoped guest-flow owner exclusively holds the host forwarder (incl. `sock_ops` on its own cgroup and the drain counter), all listeners, control sessions, cells and host pair sockets | **APPROVED 2026-10-05**; `sock_ops` identifies intake children by listener tag, not port (M-1) — correction **APPROVED 2026-10-06** | [0151](../../product/architecture/adr-0151-one-node-guest-flow-owner-holds-forwarder-and-pair-sockets.md) | V-20 |
 | D8 | `workload_addr` is host-local through one shared, Overdrive-tagged `local` route on `lo`, written only by boot behind attached steering and never removed (with D8a-ROUTE, U-4, D8-PREFIX-CFG) | **APPROVED 2026-10-05** | [0152](../../product/architecture/adr-0152-workload-address-is-host-local-inbound-intake.md) | — |
@@ -17170,7 +17173,7 @@ production path; the replacement steps delete it with its tests.
 | 07-04 CleanupPending status | **Retain** | — |
 | 08-01 R18 guard + native E14 | **Replace** | Guard deleted with its tests; E14 receipts kept as artifacts; V-8 replaces |
 | 08-02 boot member convergence | **Revalidate** | Inbound members; forwarder empty by construction |
-| 08-03 member / policy-route / guard audit | **Rework** | Guard removed; forwarder bookkeeping, listeners and control sessions audited; the forwarder's links are not audited (D19-LINKS), and no unframe attachment is audited (D5a-LATE); the route and the pinned steering are converged at boot and not audited at runtime (APPLIANCE) |
+| 08-03 member / policy-route / guard audit | **Rework** | Guard removed; forwarder bookkeeping, listeners and control sessions audited; the forwarder's links are not audited (D19-LINKS), and no unframe attachment is audited (D5a-IFACE, D5a-LATE: attached only at boot); the route and the pinned steering are converged at boot and not audited at runtime (APPLIANCE) |
 | 08-04 E18 density measurement | **Replace** | V-9 through `serve` + `deploy` |
 | 09-01 complete supervisor | **Rework** | Component set and containment primitive replaced |
 | 09-02 serve-lifetime evidence | **Retain** | — |
@@ -17192,8 +17195,8 @@ New steps are needed for (DELIVER owns IDs and order after approval):
 4. host forwarder in `overdrive-dataplane` + host programs in `overdrive-bpf`,
    including the hybrid verdict strip with the escape rule, the
    fragment-aware tuple-gated egress unframe, its attachment to `lo` and
-   every interface present at boot (a failure refuses boot, D5a-IFACE), the
-   classified `UnframeAttachError` (D5a-LATE), and tuple registration from
+   every interface present at boot (a failure refuses boot with the
+   classified `UnframeAttachError`, D5a-IFACE-BOOT), and tuple registration from
    the socket's kernel peer (D5a);
 5. guest programs in `overdrive-bpf` + guest adaptation in `overdrive-init`
    (cmdline token, dummy device, rule, `fwmark_reflect`, programs, inbound
@@ -18085,20 +18088,16 @@ impl GuestFlowForwarder {
     /// Earned-Trust probe (§ Earned Trust).
     pub fn probe(&self) -> Result<(), GuestFlowError>;
 
-    /// D5a, D5a-IFACE: at boot, attaches the egress unframe program to every
-    /// non-`lo` interface in `interfaces` (every interface present in the
-    /// host's root network namespace). Each interface is attached as by
-    /// `attach_unframe_interface` and lands in exactly one of `attached` /
-    /// `failed`; a failure never stops the others. `Err` only when the call
-    /// cannot run at all (the program is not loaded).
+    /// D5a, D5a-IFACE: at boot, attaches the egress unframe program (TCX
+    /// egress) to every non-`lo` interface in `interfaces` (every interface
+    /// present in the host's root network namespace). Each interface lands
+    /// in exactly one of `attached` / `failed`, a failure keeping its cause
+    /// (`UnframeAttachError`); a failure never stops the others. Never
+    /// detaches anything. `Err` only when the call cannot run at all (the
+    /// program is not loaded). The only unframe attach after `load`: no
+    /// interface registered after boot is configured (D5a-LATE), so none is
+    /// attached later.
     pub fn converge_unframe_interfaces(&self, interfaces: &std::collections::BTreeSet<InterfaceIndex>) -> Result<UnframeConvergence, GuestFlowError>;
-    /// D5a-LATE: attaches the egress unframe program to `ifindex` (TCX
-    /// egress). `Ok`: the link is attached now; repeating it for an interface
-    /// that already carries this forwarder's link is `Ok` with no change.
-    /// `Err`: no link of this forwarder is attached to `ifindex`, and the
-    /// variant classifies the cause (`UnframeAttachError`). Never detaches
-    /// anything and never touches another interface.
-    pub fn attach_unframe_interface(&self, ifindex: InterfaceIndex) -> Result<(), UnframeAttachError>;
 
     // --- inbound (TcpAccept, host opener) ---
     /// Tags `listener` with a clone-flagged socket-local storage entry, so
@@ -18166,21 +18165,19 @@ pub struct UnframeConvergence {
     pub attached: std::collections::BTreeSet<InterfaceIndex>,
     pub failed: std::collections::BTreeMap<InterfaceIndex, UnframeAttachError>,
 }
-/// D5a-LATE: why the egress unframe program could not be attached to an
-/// interface. Classified like a steer failure (D8a-CAP-RETRY).
+/// D5a-IFACE-BOOT: why the egress unframe program could not be attached to
+/// an interface present at boot. Every variant refuses startup
+/// (`GuestNetworkError::UnframeAttach`); the variant names the cause for the
+/// operator, and nothing retries it.
 #[derive(Debug, thiserror::Error)]
 pub enum UnframeAttachError {
-    /// The kernel could not allocate the TCX link (`ENOMEM`). Transient
-    /// (A-MEM): a caller configuring a late interface retries it.
+    /// The kernel could not allocate the TCX link (`ENOMEM`): node memory
+    /// pressure at boot.
     #[error("the kernel could not allocate the egress unframe link on interface {ifindex}")]
     KernelMemory { ifindex: InterfaceIndex, #[source] source: aya::programs::ProgramError },
-    /// The kernel has no interface `ifindex` (`ENODEV`): it was removed
-    /// before the attach. Nothing remains to configure; not retried.
-    #[error("interface {ifindex} no longer exists")]
-    InterfaceAbsent { ifindex: InterfaceIndex },
     /// Any other failure. On the appliance nothing but Overdrive attaches to
-    /// these interfaces (A-31), so it is an Overdrive defect: reported with
-    /// its cause, not retried.
+    /// these interfaces (A-31), so it is an Overdrive defect, reported with
+    /// its cause.
     #[error("attaching the egress unframe program to interface {ifindex} failed")]
     Attach { ifindex: InterfaceIndex, #[source] source: aya::programs::ProgramError },
 }
@@ -18270,32 +18267,28 @@ Contracts:
   passes every other packet unchanged (`TC_ACT_OK`), never dropping for bad
   magic. Unregistered packets always pass.
 - **Unframe attachment set (D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE, ADR-0165;
-  Proposed — approved by user 2026-10-08).** On the appliance the root
-  namespace holds `lo`, the image's NICs and the interfaces Overdrive creates
-  (A-31). An interface carries guest datagrams only once it has addresses and
-  routes, and every path that gives it them runs after its attach:
+  Proposed — approved by user 2026-10-08).** An interface carries guest
+  datagrams only once it has addresses and routes. On the appliance the image
+  configures root-namespace interfaces only at boot, before `serve` starts
+  (A-31, ADR-0068):
   - *Boot (D5a-IFACE-BOOT):* `load` attaches `lo`; boot `converge_shared`
     calls `converge_unframe_interfaces` with every other interface present,
     and any entry in `failed`, whatever its variant, refuses startup with
     `GuestNetworkError::UnframeAttach { source: UnframeAttachError }` before
     forwarding opens.
-  - *Interface the kernel registers after boot (D5a-LATE)* — a NIC whose
-    driver probes late, or a hot-added NIC: the image does not configure it
-    (A-31). Its configuration owner, the node network configuration path,
-    calls `SharedGuestNetworkOwner::attach_unframe_interface(ifindex)` first
-    and gives the interface addresses and routes only after `Ok`. On `Err`
-    the interface stays unconfigured and carries no guest datagram:
-    `KernelMemory` → emitted (`retried: true`) and retried by the path while
-    it still wants the interface configured; `InterfaceAbsent` → nothing to configure; `Attach` → an
-    Overdrive defect, emitted (`guest_flow.unframe_attach_failed
-    { retried: false }`) and not retried.
-  - *Overdrive-created interface:* the same call, before the creating
-    component brings it up; an `Err` fails that creation. This design
-    creates no root-namespace interface.
-  - No interface carries guest datagrams before its attach, so no unframe
-    gap exists at runtime: the owner keeps no link-notification watch,
-    relist or retry for unframe attachments, never quiesces forwarding for
-    them, and the audit reports no unframe damage.
+  - *After boot (D5a-LATE):* an interface the kernel registers later — a NIC
+    whose driver probes late, a hot-added NIC, or one any component creates
+    — is never given addresses or routes, so it carries no guest datagram
+    and is not attached. The image configuration must not configure such an
+    interface; that is an image requirement under A-31, not a runtime check.
+    This design creates no root-namespace interface. The dev and metal hosts
+    run a catch-all systemd-networkd configuration and are not the
+    appliance image.
+  - No interface carries guest datagrams without the program, so no unframe
+    gap exists at runtime: there is no attach after boot, and the owner
+    keeps no link-notification watch, relist or retry for unframe
+    attachments, never quiesces forwarding for them, and the audit reports
+    no unframe damage.
 - **`sock_ops`** acts only on sockets the owner armed (by socket cookie) and
   on children of registered intake listeners (by the listener's clone-flagged
   storage tag). The owner's cgroup is shared with the whole `serve` process;
@@ -18562,21 +18555,6 @@ pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner {
     /// recovery's component and never writes the guest-prefix steering
     /// program or the prefix route: those are written at boot only (A-31).
     async fn converge_shared(&self) -> Result<()>;
-    /// D5a-LATE (ADR-0165). The precondition of configuring a root-namespace
-    /// interface after boot, and of bringing up one Overdrive creates:
-    /// attaches the egress unframe program to `ifindex` through the
-    /// forwarder (`GuestFlowForwarder::attach_unframe_interface`, same
-    /// postconditions). `Ok`: the interface carries the link now and may be
-    /// configured. `Err`: it carries no link and must stay unconfigured;
-    /// the variant tells the caller whether to retry (`KernelMemory`), stop
-    /// (`InterfaceAbsent`) or report a defect (`Attach`); `KernelMemory` and
-    /// `Attach` are also emitted as `guest_flow.unframe_attach_failed`
-    /// (`retried` true / false). Never quiesces
-    /// forwarding and changes nothing else. Caller: the node network
-    /// configuration path (and any component creating a root-namespace
-    /// interface). This feature has no such caller; the method lands with
-    /// the first one.
-    async fn attach_unframe_interface(&self, ifindex: InterfaceIndex) -> std::result::Result<(), UnframeAttachError>;
     /// Non-repairing. Reports damage of the process-owned shared components
     /// and of the shared firewall state. Not audited: the guest-prefix
     /// steering program and the prefix route (only boot writes them) and the
@@ -18687,7 +18665,6 @@ progress reports the current holders.
 | `quiesce_forwarding` | Holder set; admission latch; every flow on the node; every intake listener and steering entry | `+holder`. First holder only: latch `Quiesced`; all flows aborted; all intake listeners closed and their entries gone. CID table, control sessions, the steering program and the route unchanged. Busy holder: no change |
 | `restore_forwarding` | Holder set; admission latch; intake listeners and steering entries | `−holder`. Others remain: nothing else. None remains: latch cleared; for every port whose last `ListenState` says listening, a steered listener, or none while a failure's retry is pending (the port refused) |
 | `converge_shared` | At boot: forwarder, links (unframe on every interface present), flow / control listeners, the pinned guest-prefix steering, the prefix's tagged route. At runtime (the repair of another recovery): only that recovery's component | Boot, this boot's program loaded and attached: route `local` and as pinned. Boot, an unframe attach failure: `UnframeAttach` (startup refuses). Boot, a `load` / `attach` failure: `GuestPrefixSteeringConverge` (startup refuses), route unchanged, the link running the earlier program (or absent). A program the verifier rejects is never attached; the steering link is updated or attached, never detached. Runtime: the steering and the route unchanged |
-| `attach_unframe_interface` | The egress unframe link of `ifindex` | `Ok`: the link present (unchanged if already present). `Err`: no link of the forwarder on `ifindex`; nothing else changed |
 | `sweep_stale` | none (observation of process-scoped objects) | — |
 
 **Remote-side linger (H-5).** The host peer D a non-mesh TCP flow connects
@@ -18729,7 +18706,6 @@ vsock flow connections are read only for their fixed-length messages.
 | `guest_flow.refused` | `alloc?`, `cid`, `kind`, `refusal` (`FlowRefusal::as_str`), `cause?` (`MtlsInterceptInstallError` variant name, or connect `io::ErrorKind`) |
 | `guest_flow.closed` | `alloc`, `cid`, `kind`, `cause` (`FlowCloseCause::as_str`) |
 | `guest_intake.bind_failed` | `alloc`, `port`, `error_kind` (bind / listen `io::ErrorKind`, or the `GuestSteeringError` variant of a steering failure), `retried` (`true` for bind, listen and `KernelMemory`; `false` for every other steering variant, an Overdrive defect, D8a-CAP) |
-| `guest_flow.unframe_attach_failed` | `ifindex`, `ifname`, `error` (the `UnframeAttachError` variant and source chain), `retried` (`true` for `KernelMemory`; `false` otherwise, D5a-LATE) |
 | `guest_flow.connection_closed_unattributed` | `cid`, `cause` (`NoControlSession`) |
 | `guest_flow.control_discarded` | `cid`, `message` (`Paired` / `Refused` / `Abort`), `flow` (U-5) |
 | `guest_cid.held_elsewhere` | `cid` (an offset skipped by `assign` because its claim returned `InUse`, D16-CLAIM) |
@@ -19100,7 +19076,7 @@ the prefix drops (D8a-LOAD-SWAP).
 | Flow listeners (1240, 1241), control listener (1243), control sessions | owner `converge_shared` | owner | owner shutdown; teardown | `overdrive-control-plane` (adapter-host) |
 | Intake listeners (`workload_addr:port`) | owner (G-V8) | owner | owner | `overdrive-control-plane` |
 | Host pair sockets, parking cells | owner | owner (`PairedSocket`; cells in the forwarder pool) | owner, after `remove_pair` | `overdrive-control-plane` / `overdrive-dataplane` |
-| Host programs, maps, links (egress unframe TCX on `lo` and every root-namespace interface, `sock_ops` on owner cgroup, `fexit`) | `GuestFlowForwarder::load`; non-`lo` unframe links by `converge_unframe_interfaces` at boot (D5a-IFACE) and `attach_unframe_interface` after it (D5a-LATE) | owner (unpinned links; not audited, D19-LINKS) | drop / process exit; a TCX link also with its interface, when the kernel removes it | `overdrive-dataplane`; programs in `overdrive-bpf` |
+| Host programs, maps, links (egress unframe TCX on `lo` and every root-namespace interface present at boot, `sock_ops` on owner cgroup, `fexit`) | `GuestFlowForwarder::load`; non-`lo` unframe links by `converge_unframe_interfaces` at boot only (D5a-IFACE; none after boot, D5a-LATE) | owner (unpinned links; not audited, D19-LINKS) | drop / process exit; a TCX link also with its interface, when the kernel removes it | `overdrive-dataplane`; programs in `overdrive-bpf` |
 | Local route on `lo` (Overdrive-tagged `local`) | owner boot `converge_shared` only (written only after this boot's steering program is loaded and attached, D8a-ROUTE, D8a-LOAD-SWAP) | kernel (node infrastructure; persists across `serve` restarts) | never removed, at shutdown (graceful or not, U-4) or otherwise; never written at runtime; converged at every boot (H-4) | via `overdrive-netlink` |
 | Guest-prefix steering: `sk_lookup` program, its root-netns link and its socket map; the link pinned under `GUEST_PREFIX_STEERING_PIN_DIR`, the map not pinned (D8a-LOOKUP) | owner boot `converge_shared` through `GuestPrefixSteering::load` → `GuestSteeringCandidate::attach` (program and a new map loaded; then swapped into the pinned link with `BPF_LINK_UPDATE`, or a first link attached and pinned) | kernel through the link pin (node infrastructure; persists across `serve` restarts; the link keeps the program, the program keeps its map); the owner holds a `GuestPrefixSteering` handle | never: no method detaches, unpins or clears it; never removed at shutdown (U-4); a later boot swaps in its own program, and the earlier program and map are freed when the link drops them | `overdrive-dataplane` (adapter-host); program in `overdrive-bpf` |
 | Steering entries `(workload_addr, port) → listener` | owner, `GuestPrefixSteering::steer` after the intake listener listens (its only writer) | kernel socket map | the kernel, when the listener closes (same step, K-L3); no removal method exists | `overdrive-dataplane` |
@@ -19159,7 +19135,9 @@ the prefix drops (D8a-LOAD-SWAP).
   effect; startup refuses, naming the address and the interface),
   `UnframeAttach { source: UnframeAttachError }` (D5a-IFACE-BOOT: at boot
   the egress unframe program could not be attached to an interface present,
-  any variant; startup refuses, naming it),
+  any variant — `KernelMemory` or `Attach`; startup refuses, naming it; the
+  only producer of `UnframeAttachError`, since nothing attaches after boot,
+  D5a-LATE),
   `GuestPrefixSteeringConverge { source: GuestSteeringError }`
   (D8a-ROUTE, D8a-LOOKUP, D8a-LOAD-SWAP: at boot this binary's steering
   program could not be loaded or attached — `source` is `Load`, `Query`,
@@ -19210,7 +19188,6 @@ Deleted: `Bridge`, `TcxLink`, `EndpointMap`, `CounterMap`, `BpffsPin`,
 | The kernel verifier rejects the steering program at boot | `GuestSteeringError::Load` as the source of `GuestPrefixSteeringConverge` | `run_server` | `health.startup.refused`; nothing is attached |
 | The program's swap fails at boot | `GuestSteeringError::Attach` as the source of `GuestPrefixSteeringConverge` | `run_server` | `health.startup.refused`; the link still runs the earlier program (K-L9) |
 | `Paired` / `Refused` / `Abort` for an unknown or closed flow (U-5) | `guest_flow.control_discarded` | owner / `overdrive-init` | Discarded; no reply (SLOT-ABORT excepted) |
-| Egress unframe attach fails on an interface the kernel registered after boot (D5a-LATE) | `attach_unframe_interface` → `Err(UnframeAttachError)`; `guest_flow.unframe_attach_failed` for `KernelMemory` / `Attach` | the node network configuration path | The interface stays unconfigured and carries no guest datagram. `KernelMemory`: retried by the path; `InterfaceAbsent`: the attempt ends; `Attach`: an Overdrive defect, reported, not retried. Never quiesces; never audit damage |
 | Declared TCP ports would exceed the node's steering capacity (D8a-CAP) | `GuestNetworkError::IntakeCapacityReached` | shim | Like `AdmissionCapReached`: non-terminal, no allocation row, before any effect; placement retries |
 | Intake steer fails with `KernelMemory` (operation `IntakeSteer`) | in activation `GuestNetworkError::IntakeSteer { alloc, intake, source }` (the `activate` `Err`, U-6); after activation `guest_intake.bind_failed { retried: true }` | shim / owner | Activation-failure projection, the rollback closes every listener of the CID / the listener is closed and a new one is bound and steered at the audit cadence while the port is wanted; the port is refused meanwhile and never reaches a host service |
 | Intake steer fails with any other variant (an Overdrive defect) | in activation as above; after activation `guest_intake.bind_failed { retried: false }` | shim / owner | Activation-failure projection / the listener is closed and not retried; the port is refused until wanted anew; never reaches a host service |
@@ -19297,7 +19274,6 @@ intercept-live or Service `Stable`.
 | Flow Paired | The flow's acceptor | The acceptor's peer socket is installed and routed; the opener may release its parking | Active, policy, resolution, peer reachability, capacity, deadlines | Every allocation state |
 | Service Stable / backend eligibility | `ServiceLifecycle` | Probes healthy | Probes (through intake → pair) | — |
 | Operator CleanupPending | `alloc_status` handler | Network cleanup unfinished | Live lease | Nothing |
-| Root-namespace interface registered after boot configured (addresses, routes) | Node network configuration path (D5a-LATE) | The interface carries the egress unframe link before it can carry any guest datagram | The unframe attach (`attach_unframe_interface`) | Boot, forwarding quiescence, every allocation state, every other interface |
 
 #### Gate G-V0 — node attachment admission (restates G-295-0)
 
@@ -19355,9 +19331,9 @@ intercept-live or Service `Stable`.
   (§ *Typed error taxonomy*).
 - **Explicitly unaffected:** leases, Running rows and VM reclamation
   (ADR-0136) — boot refusal neither reclaims nor adopts; interfaces the
-  kernel registers after boot (their attach gates only their own
-  configuration, by the node network configuration path, D5a-LATE — never
-  boot, forwarding or an allocation);
+  kernel registers after boot (never configured on the appliance, never
+  attached, never gating boot, forwarding or an allocation — D5a-LATE,
+  A-31);
   allocation READY / Running / intercept-live states, which no allocation can
   reach before boot opens.
 - **Ordering:** `probe_startup` before `compose_vm_driver`; VM reclamation,
@@ -19464,8 +19440,8 @@ intercept-live or Service `Stable`.
   set.
 - **Promise:** flow admission reopens only when no holder remains, and each
   holder restores only after its own repair and a clean audit; the audit
-  reports no unframe damage (no interface carries guest datagrams before its
-  attach, D5a-LATE) and never audits the forwarder's links (D19-LINKS).
+  reports no unframe damage (every interface that can carry guest datagrams
+  was attached at boot, D5a-IFACE, D5a-LATE) and never audits the forwarder's links (D19-LINKS).
 - **Affected state:** the node admission latch, and with it the intake
   listeners and their steering entries (closed at the first hold, opened and
   steered again when the last hold ends, M-7).
@@ -19591,38 +19567,6 @@ intercept-live or Service `Stable`.
   through `serve` + `deploy` (P-33 bounded; V-19 and V-26 steering; lag at
   density in V-9).
 
-#### Gate G-V9 — configuration of an interface registered after boot (new; D5a-LATE)
-
-- **Existing evidence:** ADR-0165; A-31 (the image configures root-namespace
-  interfaces at boot only; only Overdrive writes routes); P-31 (an interface
-  without the program passes empty and frame-shaped datagrams framed). No
-  production path configures a root-namespace interface after boot today;
-  this gate binds the first that does.
-- **Owner:** the node network configuration path; the guest-flow owner
-  performs the attach (`SharedGuestNetworkOwner::attach_unframe_interface`).
-- **Promise:** a root-namespace interface registered after boot gets
-  addresses and routes only after it carries the egress unframe link.
-- **Affected state:** that interface's configuration only.
-- **Failure projection:** `UnframeAttachError::KernelMemory` → interface
-  unconfigured, `guest_flow.unframe_attach_failed { retried: true }`,
-  retried by the path while it still wants the interface; `InterfaceAbsent` →
-  the attempt ends; `Attach` → interface unconfigured,
-  `guest_flow.unframe_attach_failed { retried: false }`, not retried (an
-  Overdrive defect).
-- **Explicitly unaffected:** boot (already open), forwarding quiescence and
-  the audit, every allocation and flow, every other interface.
-- **Ordering:** attach → configure. No deadline of its own; the path's
-  retry cadence is its own and consumes no allocation budget.
-- **Counterexample:** attaching on the link notification while the
-  interface is configured independently leaves a window — and, if the
-  attach keeps failing, an unbounded one — in which empty and frame-shaped
-  datagrams leave through the interface framed (review r11 M-2).
-- **Evidence lane:** Tier-3 (V-17): the forwarder attach to an interface
-  registered after boot unframes once the interface is configured, and the
-  kernel's `ENOMEM` / `ENODEV` / other refusals map to the three variants;
-  unit test of the classification. The gate's end-to-end lane through
-  `serve` arrives with the node network configuration path.
-
 #### Required boundary scenarios (DISTILL obligations; executable after approval)
 
 | # | Scenario | G-V0 | G-V1 | G-V2 | G-V3 | G-V4 | G-V5 | G-V6 | G-V7 | G-V8 |
@@ -19655,7 +19599,6 @@ effects Tier-3, ordering seeded sim):
 | R5-9 | The acceptor reads the request before installing its vsock: no request is ever lost under a server-first destination and a client-first inbound (H-1) | G-V6 | Tier-3 |
 | R5-10 | Host owner SIGKILL mid-transfer: the non-mesh remote destination and the mesh remote peer observe a reset; the guest application observes a reset (H-5, G-CRASH) | G-V6 | Tier-3 (V-13) |
 | R5-11 | Boot after SIGKILL with the route, the constant rules and the pinned steering left behind: boot adopts and updates the steering, converges and serves (H-4); boot on a node whose network configuration puts an interface address inside the guest prefix refuses `GuestPrefixOverlapsNodeAddress` naming the address and interface, before any boot effect (D8-PREFIX-CFG) | G-V1 | Tier-3 + seeded sim |
-| R5-12 | Attach to an interface registered after the forwarder loaded (D5a-LATE; adapter level — Tier-3: a dummy interface the test creates stands in for a hot-added NIC): `GuestFlowForwarder::attach_unframe_interface` returns `Ok`, a repeat is `Ok` with no change, and once the interface is configured an empty guest datagram through it reaches its peer as 0 bytes; an attach to an interface deleted before the call returns `InterfaceAbsent`; the errno classification (`ENOMEM` → `KernelMemory`, `ENODEV` → `InterfaceAbsent`, any other → `Attach`) holds for every errno (unit); no attach outcome changes forwarding quiescence, an allocation or another interface's link | G-V9 | unit + Tier-3 (V-17) |
 | R5-13 | A leg-C transparent child with the same local address and port as an intake child is never installed by `sock_ops` (M-1) | G-V8 | Tier-3 (V-20) |
 | R5-14 | Guest UDP slot release: a socket that sent to N destinations frees N slots on close; a lost release report is recovered by the audit; an idle slot is released after 120 s (H-2, D25) | G-V6 | seeded sim (guest-owner seam) + Tier-3 |
 | R5-15 | Application TCP bind to 61,000 and UDP bind to 61,001 / 62,024 on `workload_addr` and `0.0.0.0` fail `EADDRINUSE`; a TCP bind to 61,001 and a UDP bind to 61,000 succeed; no ephemeral port in the range is ever assigned; the intake never appears in `ListenState` (H-2, D25, D25-BIND) | G-V7, G-V8 | Tier-3 |
@@ -19678,7 +19621,7 @@ effects Tier-3, ordering seeded sim):
 | R5-20 | Guest TCP connect to an unresponsive non-mesh destination: the guest `connect()` completes, no `PairingTimeout` fires, the flow holds one quota slot and one guest cell until the host kernel gives up, then the application sees a reset; a refused destination resets at once; meanwhile other flows and `ListenState` of the same VM proceed; 4,096 such connects exhaust only that VM's quota (D15-R3) | G-V6 | seeded sim (scripted connect outcome, host-SYN-retry duration as a sim parameter) + Tier-3 (V-9) |
 | R5-21 | `overdrive deploy` of a spec declaring listener port 61,000, 61,500 or 62,024 (TCP or UDP) is refused with `ListenerPortReserved` naming the range; 60,999 and 62,025 are accepted; the API ingress refuses the same specs with `AggregateError::Validation` (D25) | — (deploy validation) | unit + proptest (range boundaries) |
 | R5-37 | Intake capacity (D8a-CAP): deploys whose declared TCP ports reach exactly `GUEST_INTAKE_STEERING_MAX` across held leases are admitted; the next `assign` whose ports would exceed it returns `IntakeCapacityReached { reserved, requested, capacity }` with no state change and no CID claimed; a Retiring lease's ports still count; after its `release` the same deploy is admitted. With every admitted VM's guest listening on every declared port, every listener is steered and no `steer` returns a capacity failure; a listener closed and re-opened on the same port is steered again at once (its slot freed in the close step, K-L3). Proptest: for any admitted sequence, reserved ports ≤ capacity and open intake listeners ≤ reserved ports | G-V0, G-V8 | unit + proptest (pool) + seeded sim (production owner path, sim steering with capacity) + Quint (`intake`) + Tier-3 (V-26 (x)) |
-| R5-38 | Boot attach of the egress unframe program (D5a-IFACE, D5a-IFACE-BOOT): every interface present at boot carries the program when boot opens; an attach to one of them refused by the kernel with each `UnframeAttachError` variant (scripted in sim; Tier-3: an injected attach failure) refuses startup `UnframeAttach` naming the interface; an empty guest datagram leaving through any interface present at boot reaches its peer as 0 bytes | G-V1 | seeded sim + Tier-3 (V-17) |
+| R5-38 | Boot attach of the egress unframe program (D5a-IFACE, D5a-IFACE-BOOT): every interface present at boot carries the program when boot opens; an attach to one of them refused by the kernel with each `UnframeAttachError` variant (scripted in sim; Tier-3: an injected attach failure) refuses startup `UnframeAttach` naming the interface; the errno classification (`ENOMEM` → `KernelMemory`, any other → `Attach`) holds for every errno (unit); an empty guest datagram leaving through any interface present at boot reaches its peer as 0 bytes | G-V1 | unit + seeded sim + Tier-3 (V-17) |
 
 R5 scenarios touching D8a, D24a, D25, D26 and D15-R3 are DISTILL obligations:
 the user approved those decisions on 2026-10-06. R5-19 and R5-22 to R5-31
@@ -19687,11 +19630,13 @@ confirmed 2026-10-06). R5-19 and R5-32 follow the revision-8 decisions
 (D16-CLAIM, D8a-HOLD; approved by user 2026-10-07). R5-1, R5-2, R5-3,
 R5-11, R5-22 to R5-25, R5-29, R5-30 and R5-34 are stated for D8a-LOOKUP
 (revision 9; approved by user 2026-10-07), and R5-24 and R5-34 for
-D8a-LOAD-SWAP (revision 10; approved by user 2026-10-08); R5-11, R5-12,
+D8a-LOAD-SWAP (revision 10; approved by user 2026-10-08); R5-11,
 R5-22, R5-23, R5-37 and R5-38 for the revision-11 decisions (D8a-CAP,
-D5a-IFACE, D8-PREFIX-CFG; approved by user 2026-10-08), and R5-12, R5-22,
-R5-37 and R5-38 for D5a-LATE, D8a-CAP-RETRY and D5a-IFACE-BOOT (approved
-by user 2026-10-08); all pending independent DESIGN review. R5-33, R5-35 and R5-36 tested foreign deletion
+D5a-IFACE, D8-PREFIX-CFG; approved by user 2026-10-08), and R5-22,
+R5-37 and R5-38 for D8a-CAP-RETRY and D5a-IFACE-BOOT (approved
+by user 2026-10-08); all pending independent DESIGN review. There is no
+R5-12: no interface is attached after boot (D5a-LATE), so no scenario
+covers one. R5-33, R5-35 and R5-36 tested foreign deletion
 of steering entries, foreign link detach and foreign route writes; they are
 removed by APPLIANCE (2026-10-07), and R5-30 now drives the mTLS worker's
 own partial convergence instead of a foreign table deletion. R5-28 and R5-31
@@ -19782,7 +19727,7 @@ recorded before running (`.claude/rules/spike.md`).
 | V-14 | Guest listen-state reporting without payload reads, with a measured lag bound; TCP probe follows the application | **Proven (bounded)** — P-33 (kernel-map mechanism; lag ≤ 1.4 ms; churn, `SO_REUSEPORT`, restarts). Bounds: one VM, 7.0.0-29 only, spike owners | — |
 | V-15 | Is the ADR-0053 `connect4` program attached at `overdrive.slice` effective for sockets of a process in `overdrive.slice/control-plane.slice`, so guest datagram VIP flows through the production owner are rewritten? Prediction: yes | Open — **folded into V-6** | DELIVER step 11 acceptance only. Reclassified: ancestor inheritance is already production behaviour (ADR-0053 rewrites sockets of workload cgroups below `overdrive.slice/workloads.slice` from the same attachment); after D24a only datagram VIP flows depend on it, so it is a confirmation inside the walking skeleton, not a separate spike |
 | V-16 | Hybrid unframe on a NIC with UDP segmentation offload enabled: every size incl. empty and fragmented arrives byte-exact | Open | DELIVER step 4 |
-| V-17 | Hybrid unframe under the appliance's interface set (D5a-IFACE): several egress interfaces with policy routing, each attached at boot, every size incl. empty and fragmented byte-exact through each; an interface the kernel registers after boot (a dummy interface the spike creates stands in for a hot-added NIC), attached with `attach_unframe_interface` and then configured, carries every size byte-exact; the kernel's attach refusals observed and mapped (`ENODEV` for a deleted interface → `InterfaceAbsent`; `ENOMEM` → `KernelMemory`, recorded if it can be provoked, else the errno path named from the kernel source) (D5a-LATE) | Open | DELIVER step 4 |
+| V-17 | Hybrid unframe under the appliance's interface set (D5a-IFACE): several egress interfaces with policy routing, each attached at boot, every size incl. empty and fragmented byte-exact through each; the kernel's boot attach refusals observed and mapped (`ENOMEM` → `KernelMemory`, recorded if it can be provoked, else the errno path named from the kernel source; any other → `Attach`) (D5a-IFACE-BOOT) | Open | DELIVER step 4 |
 | V-18 | A frame-shaped application payload above the egress MTU under hybrid (escaped frame, fragmented, fragment-shifted) arrives byte-exact | Open | DELIVER step 4 |
 | V-19 | Guest-prefix exposure through the production composition (D8a, D8a-LOOKUP, B-2): no connection to a guest-prefix address reaches a host socket other than a steered intake listener or leg-C, with `serve` up and down | Open | DELIVER step 9 (and step 12) |
 | V-20 | Intake-child identity by clone-flagged socket storage (M-1) | Open | DELIVER step 4 |
@@ -20413,16 +20358,16 @@ fact the model assumes rather than checks:
 | K-L4 | The pinned link keeps its program and map running with no process; after the owner exits the map holds no live socket | V-26 |
 | K-L5 | Ingress ifindex is loopback for host-local connects, the receiving device otherwise | V-26 |
 | K-L9 | `BPF_LINK_UPDATE` swaps the link's program atomically, and on error the link still runs the earlier program | V-26 (viii) |
-| A-MEM | Memory pressure is not permanent: a `steer` retried infinitely often eventually succeeds (strong fairness on a successful steer; each failed attempt closes the listener, so the steer is only intermittently enabled). The same holds for an unframe attach refused `KernelMemory` (D5a-LATE). The steering map's entries and the listeners' psocks are charged to the memory cgroup of `serve` (`overdrive.slice/control-plane.slice`), which sets no `memory.max`, so only node-wide pressure produces `KernelMemory`; a limit placed on that slice would make a self-inflicted, persistent `KernelMemory` possible and must revisit A-MEM | Environment, not a kernel unknown; owned by #261 (node-wide CPU and memory accounting; A-MEM-OWNER, confirmed by the user 2026-10-08). The exposure while pressure lasts — that port refused, the event `guest_intake.bind_failed { retried: true }` each attempt — is observable; V-9 reports any occurrence at density |
+| A-MEM | Memory pressure is not permanent: a `steer` retried infinitely often eventually succeeds (strong fairness on a successful steer; each failed attempt closes the listener, so the steer is only intermittently enabled). The steering map's entries and the listeners' psocks are charged to the memory cgroup of `serve` (`overdrive.slice/control-plane.slice`), which sets no `memory.max`, so only node-wide pressure produces `KernelMemory`; a limit placed on that slice would make a self-inflicted, persistent `KernelMemory` possible and must revisit A-MEM | Environment, not a kernel unknown; owned by #261 (node-wide CPU and memory accounting; A-MEM-OWNER, confirmed by the user 2026-10-08). The exposure while pressure lasts — that port refused, the event `guest_intake.bind_failed { retried: true }` each attempt — is observable; V-9 reports any occurrence at density |
 | A-33 | The steering program the image ships decides as specified (§ *Driven port — guest-prefix steering*, Decision) | The Tier-3 steering scenarios R5-1, R5-2, R5-3 and R5-25, run in CI on the pinned kernel (ADR-0068) for the source the image is built from; not checked at runtime |
-| A-31 | Only Overdrive writes the node's kernel objects: nft tables, routes, BPF programs, maps and links, cgroups, network namespaces, vsock CIDs (APPLIANCE) | The appliance image configuration (ADR-0068); not a runtime validation item |
+| A-31 | Only Overdrive writes the node's kernel objects: nft tables, routes, BPF programs, maps and links, cgroups, network namespaces, vsock CIDs (APPLIANCE); the image configures root-namespace interfaces only at boot, so an interface registered later has no addresses or routes and carries no guest traffic (D5a-LATE) | The appliance image configuration (ADR-0068); not a runtime validation item |
 
 Not modelled, so the model gives no evidence on them: D26 / V-21, V-20
 (intake-child tag identity), D5 / D5a framing and unframe with its
-attachment set (D5a-IFACE, D5a-IFACE-BOOT) and the attach-before-configure
-order for interfaces registered after boot (D5a-LATE: a two-step order
-inside one owner that shares no state with the modelled protocol and never
-quiesces it), the forwarder's links (D19-LINKS), the prefix
+attachment set (D5a-IFACE, D5a-IFACE-BOOT: a boot step that shares no
+state with the modelled protocol; D5a-LATE adds no step — an interface
+registered after boot is never configured, part of A-31), the forwarder's
+links (D19-LINKS), the prefix
 configuration check (D8-PREFIX-CFG), D24 / D24a VIP resolution, K2
 half-close drain, the 2 ms listen-state lag, D15-R3 deadlines, the beacon
 beyond its shared claim discipline.
@@ -20505,9 +20450,7 @@ beyond its shared claim discipline.
   (claim probe refuses); a CID in the leased range still held by a VMM of an
   earlier `serve` run (`assign` skips it; no launch fails); a TCX attach
   refused on an interface present at boot (boot refuses `UnframeAttach`,
-  R5-38); an attach to an interface registered after boot refused by the
-  kernel (each `UnframeAttachError` variant; the interface stays
-  unconfigured, R5-12); a datagram above the egress MTU (fragment
+  each `UnframeAttachError` variant, R5-38); a datagram above the egress MTU (fragment
   shift); guest image without `inet_diag` (guest exits before READY with
   `ListenerSeed`); a node interface address inside the guest prefix (the
   probe refuses `GuestPrefixOverlapsNodeAddress`, R5-11); a stale tagged
@@ -21070,9 +21013,8 @@ and adds no decision.
 3. **D5a-IFACE — the unframe attachment set (ADR-0165; M-1).** *Contract:*
    boot attaches every interface present and refuses
    `GuestNetworkError::UnframeAttach { source: UnframeAttachError }` on a
-   failure; Overdrive-created interfaces and interfaces the kernel
-   registers after boot are configured only after their attach (D5a-LATE,
-   item 6). *Removed:* the other-software interface cases and the
+   failure; no interface is attached after boot, because none registered
+   after boot is configured (D5a-LATE, item 6). *Removed:* the other-software interface cases and the
    policy-based xfrm case from V-17, A-21 and ADR-0165; the boot-time
    accepted exposure.
 4. **D8-PREFIX-CFG — the guest prefix holds no node address (ADR-0152; M-3).**
@@ -21096,21 +21038,29 @@ and adds no decision.
    - **D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER (H-1)** — the boot
      refusal on any unframe attach failure, the retry of `KernelMemory`
      only, and A-MEM's owner #261, confirmed by the user as decisions.
-   - **D5a-LATE (M-2).** *Contract:* `SharedGuestNetworkOwner::
-     attach_unframe_interface(ifindex) -> Result<(), UnframeAttachError>`
-     (through `GuestFlowForwarder::attach_unframe_interface`), called by
-     the node network configuration path before it gives a root-namespace
-     interface registered after boot any address or route;
-     `UnframeAttachError` becomes `{ KernelMemory, InterfaceAbsent, Attach }`
-     (retried; attempt ends; defect, reported, not retried); the interface
-     stays unconfigured on any `Err`; A-31 records that the image configures
-     root-namespace interfaces at boot only; new gate G-V9. *Deleted:* the
-     owner's link-notification attach, the relist on notification loss, the
-     audit-cadence attach retry, `GuestNetworkFact::UnframeInterfaces`, and
-     the runtime-registered-interface exposure. *Alternative rejected:*
-     attach on notification beside independent configuration (r11 M-2: a
-     window, unbounded while the attach keeps failing, in which empty and
-     frame-shaped datagrams leave framed).
+   - **D5a-LATE (M-2).** *Contract:* on the appliance the image configures
+     root-namespace interfaces only at boot, before `serve` starts; an
+     interface the kernel registers later is never given addresses or
+     routes, so it carries no guest traffic and needs no attach. Part of
+     A-31, discharged by the appliance image (ADR-0068); the image
+     configuration must not configure an interface registered after boot
+     (an image requirement, not a runtime check). The dev and metal hosts'
+     catch-all systemd-networkd configuration is not the appliance image.
+     `UnframeAttachError` is `{ KernelMemory, Attach }`, produced only by
+     the boot attach, where every variant refuses startup (D5a-IFACE-BOOT).
+     *Deleted:* any attach after boot (no `attach_unframe_interface` on the
+     forwarder or the owner), the late-interface configuration path, gate
+     G-V9, `UnframeAttachError::InterfaceAbsent`, the
+     `guest_flow.unframe_attach_failed` event and its `retried` field,
+     scenario R5-12, the owner's link-notification attach, the relist on
+     notification loss, the audit-cadence attach retry,
+     `GuestNetworkFact::UnframeInterfaces`, and the
+     runtime-registered-interface exposure. *Alternatives rejected:* attach
+     on notification beside independent configuration (r11 M-2: a window,
+     unbounded while the attach keeps failing, in which empty and
+     frame-shaped datagrams leave framed); an attach as a precondition of
+     configuring a later interface (an operation, error classification,
+     retry and gate for a configuration the appliance never performs).
    - **Mechanical (H-2, M-1, L-2, L-3, L-4):** round 8 recorded; A-MEM
      stated as strong fairness; producers of `GuestSteeringError::MapLookup`
      and `Query` named; A-MEM's memory-cgroup charging stated; § *Changed
@@ -21211,10 +21161,10 @@ and adds no decision.
   blocker, 2 high, 2 medium, 4 low
   (`design/review-design-vsock-replacement-r11.md`).
 - **Revision 11, answers to its review (2026-10-08)**: D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER
-  and D5a-LATE (approved by user 2026-10-08); round 8 recorded; G-V9;
-  R5-12, V-17 and A-21 restated (§ *Revision 11 decisions* item 6). **Not
-  yet re-reviewed.** The model is unchanged: D5a-LATE adds no protocol
-  state.
+  and D5a-LATE (approved by user 2026-10-08); round 8 recorded; V-17, A-21
+  and A-31 stated for boot-only attachment (§ *Revision 11 decisions* item
+  6). **Not yet re-reviewed.** The model is unchanged: D5a-LATE adds no
+  protocol state.
 
 ### Review remediation
 
@@ -21235,7 +21185,7 @@ model-check tables below is open.
 | H-6 | G-V1, G-V2, G-V4, G-V5, G-V8 completed: existing evidence, owner, promise, affected state, failure projection, explicitly unaffected, ordering/budget, counterexample, evidence lane | delta § *Lifecycle Gate Ownership* |
 | H-7 | V-7 withdrawn per user ruling KVER (no kernel version gate; A-7 removed; kernel facts kept as fact). V-10 justified (host-kernel property; blocks only the security evidence step); V-12 reclassified (identity only, blocks step 9 acceptance); V-15 reclassified (existing production behaviour; folded into V-6). Every item now names the DELIVER step it blocks | delta § *Assumptions*, *Validation plan*, decision index; ADR-0146, ADR-0148, ADR-0150, ADR-0163 (V-7 references removed) |
 | M-1 | `sock_ops` recognises intake children by a clone-flagged socket-storage tag on the listener, never by port; leg-C children untouched; V-20. **Resolved — D7 correction confirmed 2026-10-06** | ADR-0151; delta forwarder API and contracts, probe stage 5, R5-13 |
-| M-2 | Non-`lo` unframe attach failures never quiesce and are never damage; the failure keeps its cause (`UnframeAttachError`). The runtime gap and the other-software / xfrm cases are removed by D5a-IFACE and D5a-LATE (2026-10-08) | ADR-0165; delta forwarder contracts, error taxonomy, Earned Trust self-application, V-17, R5-12 |
+| M-2 | Non-`lo` unframe attach failures never quiesce and are never damage; the failure keeps its cause (`UnframeAttachError`). The runtime gap and the other-software / xfrm cases are removed by D5a-IFACE and D5a-LATE (2026-10-08): attachment happens only at boot, where a failure refuses startup | ADR-0165; delta forwarder contracts, error taxonomy, Earned Trust self-application, V-17, R5-38 |
 | M-3 | ADR-0149 split: D5 stays in 0149, D5a moves to new ADR-0165. ADR-0158 split: D18 stays in 0158, D18a moves to new ADR-0166 | ADR-0149, ADR-0158 (rewritten), ADR-0165, ADR-0166 (new) |
 | M-4 | Amendment-pointer table for every Revalidate ADR (applied on acceptance; accepted bodies not edited here); proposed ADRs state what they amend; roadmap steps 12–15 added (nft rules 2–3 / `outbound_sources` removal; `managed_guest_ips` deletion — not moved to `start_alloc`; local route; deny set; next-fit) | delta § *Contract impact matrix* (amendment pointers), *Roadmap impact*; ADR-0152, ADR-0156, ADR-0167 status lines |
 | M-5 | Newtypes `InterfaceIndex`, `ListenPort`, used in every interface (`Uid` / `FileMode` / `Gid` surface dropped with their only consumer under D16-CLAIM) | delta § *Core vocabulary*, wire contracts, forwarder API, `VmmProbeError` |
@@ -21349,7 +21299,7 @@ answers each:
 | H-2 (link-damage audit and injection defend against an absent actor) | Links not audited, recovered or injected; their components deleted; producers named for what stays. **D19-LINKS — Proposed — approved by user 2026-10-08** | ADR-0159, ADR-0151, ADR-0165; delta forwarder contracts, error taxonomy, *Earned Trust*, V-8, roadmap |
 | H-3 (ADR-0152 a bucket; ADR-0171 bundles D8a-LOAD-SWAP) | ADR-0152 keeps the route; ADR-0172 (reachability), ADR-0173 (intake and host-initiated flow), ADR-0174 (client identity), ADR-0175 (D8a-LOAD-SWAP); each ADR carries only its own approval line | ADRs 0152, 0171–0175; cross-references in ADRs 0145, 0151, 0153, 0154, 0159, 0163 and the delta |
 | H-4 (Formal model section stale; README maps K-L9 to V-27) | Round 7 recorded with its run and per-module verdicts; its open points closed; hazard list replaced; status header and review record updated; K-L9 → V-26 (viii) and A-33 named consistently; round 8's README corrections listed | delta § *Formal protocol model* |
-| M-1 (D5a framed for non-appliance actors) | Boot attach to every interface present (refusal on failure), attach before Overdrive brings up its own interfaces, notification + relist for kernel-registered ones; other-software and policy-xfrm cases removed. **D5a-IFACE — Proposed — approved by user 2026-10-08** | ADR-0165; delta forwarder contracts, *Composition*, G-V1, A-21, V-17, R5-12, R5-38 |
+| M-1 (D5a framed for non-appliance actors) | Boot attach to every interface present (refusal on failure); no attach after boot (D5a-LATE); other-software and policy-xfrm cases removed. **D5a-IFACE — Proposed — approved by user 2026-10-08** | ADR-0165; delta forwarder contracts, *Composition*, G-V1, A-21, V-17, R5-38 |
 | M-2 (spec carries revision-9 terms) | Listed for round 8: `quiescence` route form and hazard, `prefix_boot` error name, "verified, probed" comments | delta § *Formal protocol model*, round 8 |
 | M-3 (two refusals with no appliance producer) | `PinnedObjectForeign` deleted; `ForeignGuestPrefixRoute` replaced by `GuestPrefixOverlapsNodeAddress` (producer: the operator's node network configuration). **D8-PREFIX-CFG — Proposed — approved by user 2026-10-08** | ADR-0152; delta § *Driven port — guest-prefix steering*, *Owner and provisioner*, *Composition*, error taxonomy, R5-11 |
 | M-4 (claimed vs checked invariant 6) | Invariant 6 stays "`local` only while a **pinned** link exists"; round 8 checks `link == pinned` | delta § *Formal protocol model* |
@@ -21368,7 +21318,7 @@ answers each:
 | H-1 (three derived consequences recorded as approved) | Surfaced to the user and confirmed as decisions: D5a-IFACE-BOOT, D8a-CAP-RETRY, A-MEM-OWNER. **Proposed — approved by user 2026-10-08** | ADR-0165, ADR-0176; delta § *User decisions — 2026-10-08 (independent review of revision 11)*, G-V1, R5-38, assumptions table |
 | H-2 (round 8 not recorded) | Round 8 recorded: run, 132 / 132, per-module verdicts, invariant 12 and `ServingReachable` hold, `noIntakeAdmission` (+`capRetry`) teeth, `ServingReachableNoMemRecovery`, CI flags as in `checks.toml`; status header, review record and *What blocks DISTILL* updated | delta § *Formal protocol model*, *Design review record* |
 | M-1 (A-MEM fairness) | A-MEM: a `steer` retried infinitely often eventually succeeds (strong fairness) | delta § *Formal protocol model* (progress, round 8, assumptions table) |
-| M-2 (runtime-registered-interface exposure unbounded and retried on defects) | Attach is a precondition of configuring a late interface, owned by the node network configuration path; `UnframeAttachError` classified (`KernelMemory` retried, `InterfaceAbsent`, `Attach` a defect not retried); the exposure, the notification watch, relist and audit-cadence retry removed; G-V9. **D5a-LATE — Proposed — approved by user 2026-10-08** | ADR-0165; delta forwarder and owner contracts, A-31, error taxonomy, G-V1, G-V5, G-V9, A-21, V-17, R5-12, *Earned Trust* |
+| M-2 (runtime-registered-interface exposure unbounded and retried on defects) | On the appliance the image configures root-namespace interfaces only at boot; an interface registered later is never given addresses or routes, carries no guest traffic and is not attached (part of A-31, discharged by the appliance image, ADR-0068). No late-interface attach operation, configuration path, retry, event or gate exists; the exposure, the notification watch, relist and audit-cadence retry removed; `UnframeAttachError` is `{ KernelMemory, Attach }`, boot only. **D5a-LATE — Proposed — approved by user 2026-10-08** | ADR-0165; delta forwarder and owner contracts, A-31, error taxonomy, G-V1, G-V5, A-21, V-17, *Earned Trust* |
 | L-1 (`ci` flag inconsistent with a runner start-up retry) | The CI rule counts a check's own time, excluding runner start-up retries, once the runner records them apart; the runner change is separate | delta § *Formal protocol model* (*Running it*) |
 | L-2 (`MapLookup`, `Query` without producers) | Producers named: `steer` (existing-entry read; socket cookie / options) and `load` (opening the pinned link) | delta § *Driven port — guest-prefix steering* |
 | L-3 (A-MEM omits the memory cgroup) | A-MEM states the charge to `overdrive.slice/control-plane.slice`, which sets no `memory.max`; a future limit must revisit A-MEM | delta assumptions table |
