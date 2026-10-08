@@ -1,0 +1,56 @@
+# intake-steer-forever-unreachable: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  steerLeft = -1
+  quiesced = FALSE
+  lastLS = {}
+  sess = FALSE
+  bindLeft = 1
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  alloc = "Absent"
+  entries = {}
+  lis = {}
+  up = TRUE
+  gen = 0
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [Crash]
+  alloc = "Absent"
+  up = FALSE
+
+State 4 [Restart]
+  up = TRUE
+
+State 5 [Provision]
+  alloc = "Provisioned"
+  gen = 2
+
+State 6 [SessOpen]
+  sess = TRUE
+
+State 7 [ActivateBegin]
+  alloc = "Activating"
+
+State 8 [ActivateOk]
+  alloc = "Active"
+
+State 9 [ListenState]
+  lastLS = {1}
+
+State 10 [BindListen]
+  lis = {1}
+
+State 11 [SteerFail]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  lis = {}
+
+State 12 [BindFail]
+  bindLeft = 0
+
+State 13 [BindListen]
+  lis = {1}
+
+-> loops back to State 12

@@ -1,0 +1,32 @@
+# intake-witness-activation-err: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  lastLS = {}
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  steerLeft = 1
+  lis = {}
+  up = TRUE
+  quiesced = FALSE
+  gen = 0
+  entries = {}
+  bindLeft = 1
+  sess = FALSE
+  alloc = "Absent"
+
+State 2 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ListenState]
+  lastLS = {1}
+
+State 5 [ActivateBegin]
+  alloc = "Activating"
+
+State 6 [BindFail]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  bindLeft = 0
+  alloc = "Provisioned"

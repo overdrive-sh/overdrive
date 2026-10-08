@@ -38,11 +38,11 @@ State 6
   vmUp = true
 
 State 7
-  sess = Map(1 -> { gen: 2, st: "pending" }, 2 -> { gen: 0, st: "none" })
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 2, st: "pending" })
 
 State 8
   claim = true
-  sess = Map(1 -> { gen: 2, st: "live" }, 2 -> { gen: 0, st: "none" })
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 2, st: "live" })
 
 State 9
   alloc = "Active"

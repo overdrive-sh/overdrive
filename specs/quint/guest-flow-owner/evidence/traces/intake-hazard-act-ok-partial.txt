@@ -1,0 +1,31 @@
+# intake-hazard-act-ok-partial: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  lis = {}
+  sess = FALSE
+  gen = 0
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  lastLS = {}
+  alloc = "Absent"
+  quiesced = FALSE
+  bindLeft = 1
+  up = TRUE
+  entries = {}
+  steerLeft = -1
+
+State 2 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ListenState]
+  lastLS = {1}
+
+State 5 [ActivateBegin]
+  alloc = "Activating"
+
+State 6 [ActivateOk]
+  g = [ actPartial |-> TRUE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  alloc = "Active"

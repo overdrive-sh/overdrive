@@ -1,0 +1,26 @@
+# shared-table-witness-crash-between-batches: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  route = "absent"
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  g = [ partialUp |-> FALSE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  holders = {}
+  up = TRUE
+  reject = FALSE
+  repLeft = 1
+  link = "none"
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  entries = {}
+  phase = "start"
+  divert = FALSE
+  flDmg = FALSE
+  lis = {}
+
+State 2 [BootStep]
+  phase = "rules"
+
+State 3 [Crash]
+  g = [ partialUp |-> FALSE, crashPartial |-> TRUE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  up = FALSE
+  reject = TRUE
+  phase = "start"

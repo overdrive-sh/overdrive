@@ -1,8 +1,10 @@
 State 1: <Initial predicate>
+/\ lease_bugCheckThenClaim_cid_lease_pend = {}
 /\ lease_bugCheckThenClaim_cid_lease_cursor = 0
 /\ lease_bugCheckThenClaim_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugCheckThenClaim_cid_lease_kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugCheckThenClaim_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCheckThenClaim_cid_lease_todo = {}
+/\ lease_bugCheckThenClaim_cid_lease_bootLeft = -1
 /\ lease_bugCheckThenClaim_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      loc |-> "none",
@@ -13,8 +15,7 @@ State 1: <Initial predicate>
      loc |-> "none",
      retry |-> FALSE,
      remembered |-> {} ] >>
-/\ lease_bugCheckThenClaim_cid_lease_errsLeft = 0
-/\ lease_bugCheckThenClaim_cid_lease_foreignLeft = 0
+/\ lease_bugCheckThenClaim_cid_lease_errsLeft = 1
 /\ lease_bugCheckThenClaim_cid_lease_walker = 0
 /\ lease_bugCheckThenClaim_cid_lease_exitsLeft = 1
 /\ lease_bugCheckThenClaim_cid_lease_g = [ clash |-> FALSE,
@@ -26,39 +27,13 @@ State 1: <Initial predicate>
   claimErr |-> FALSE,
   refusedUnasked |-> FALSE ]
 
-State 2: <lease_bugCheckThenClaim_cid_lease_ForeignRelease line 736, col 3 to line 741, col 6 of module lease_bugCheckThenClaim>
+State 2: <lease_bugCheckThenClaim_cid_lease_AssignBegin line 798, col 3 to line 878, col 53 of module lease_bugCheckThenClaim>
+/\ lease_bugCheckThenClaim_cid_lease_pend = {}
 /\ lease_bugCheckThenClaim_cid_lease_cursor = 0
 /\ lease_bugCheckThenClaim_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugCheckThenClaim_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugCheckThenClaim_cid_lease_todo = {}
-/\ lease_bugCheckThenClaim_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ],
-   [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ] >>
-/\ lease_bugCheckThenClaim_cid_lease_errsLeft = 0
-/\ lease_bugCheckThenClaim_cid_lease_foreignLeft = 0
-/\ lease_bugCheckThenClaim_cid_lease_walker = 0
-/\ lease_bugCheckThenClaim_cid_lease_exitsLeft = 1
-/\ lease_bugCheckThenClaim_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
-  skipped |-> FALSE,
-  skipOrphan |-> FALSE,
-  refusedHeld |-> FALSE,
-  refusedClaimable |-> FALSE,
-  claimErr |-> FALSE,
-  refusedUnasked |-> FALSE ]
-
-State 3: <lease_bugCheckThenClaim_cid_lease_AssignBegin line 840, col 3 to line 920, col 53 of module lease_bugCheckThenClaim>
-/\ lease_bugCheckThenClaim_cid_lease_cursor = 0
-/\ lease_bugCheckThenClaim_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugCheckThenClaim_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugCheckThenClaim_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCheckThenClaim_cid_lease_todo = {0, 1, 2}
+/\ lease_bugCheckThenClaim_cid_lease_bootLeft = -1
 /\ lease_bugCheckThenClaim_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      loc |-> "none",
@@ -69,8 +44,7 @@ State 3: <lease_bugCheckThenClaim_cid_lease_AssignBegin line 840, col 3 to line 
      loc |-> "none",
      retry |-> FALSE,
      remembered |-> {} ] >>
-/\ lease_bugCheckThenClaim_cid_lease_errsLeft = 0
-/\ lease_bugCheckThenClaim_cid_lease_foreignLeft = 0
+/\ lease_bugCheckThenClaim_cid_lease_errsLeft = 1
 /\ lease_bugCheckThenClaim_cid_lease_walker = 1
 /\ lease_bugCheckThenClaim_cid_lease_exitsLeft = 1
 /\ lease_bugCheckThenClaim_cid_lease_g = [ clash |-> FALSE,
@@ -82,13 +56,15 @@ State 3: <lease_bugCheckThenClaim_cid_lease_AssignBegin line 840, col 3 to line 
   claimErr |-> FALSE,
   refusedUnasked |-> FALSE ]
 
-State 4: <lease_bugCheckThenClaim_cid_lease_AssignTry line 926, col 3 to line 1047, col 53 of module lease_bugCheckThenClaim>
-/\ lease_bugCheckThenClaim_cid_lease_cursor = 1
-/\ lease_bugCheckThenClaim_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugCheckThenClaim_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugCheckThenClaim_cid_lease_todo = {}
-/\ lease_bugCheckThenClaim_cid_lease_al = << [ st |-> "admitted",
-     off |-> 0,
+State 3: <lease_bugCheckThenClaim_cid_lease_AssignTry line 884, col 3 to line 1005, col 53 of module lease_bugCheckThenClaim>
+/\ lease_bugCheckThenClaim_cid_lease_pend = {}
+/\ lease_bugCheckThenClaim_cid_lease_cursor = 0
+/\ lease_bugCheckThenClaim_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugCheckThenClaim_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugCheckThenClaim_cid_lease_todo = {1, 2}
+/\ lease_bugCheckThenClaim_cid_lease_bootLeft = -1
+/\ lease_bugCheckThenClaim_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
      loc |-> "none",
      retry |-> FALSE,
      remembered |-> {} ],
@@ -97,14 +73,42 @@ State 4: <lease_bugCheckThenClaim_cid_lease_AssignTry line 926, col 3 to line 10
      loc |-> "none",
      retry |-> FALSE,
      remembered |-> {} ] >>
-/\ lease_bugCheckThenClaim_cid_lease_errsLeft = 0
-/\ lease_bugCheckThenClaim_cid_lease_foreignLeft = 0
+/\ lease_bugCheckThenClaim_cid_lease_errsLeft = 1
+/\ lease_bugCheckThenClaim_cid_lease_walker = 1
+/\ lease_bugCheckThenClaim_cid_lease_exitsLeft = 1
+/\ lease_bugCheckThenClaim_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> TRUE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> FALSE,
+  refusedUnasked |-> FALSE ]
+
+State 4: <lease_bugCheckThenClaim_cid_lease_AssignTry line 884, col 3 to line 1005, col 53 of module lease_bugCheckThenClaim>
+/\ lease_bugCheckThenClaim_cid_lease_pend = {}
+/\ lease_bugCheckThenClaim_cid_lease_cursor = 2
+/\ lease_bugCheckThenClaim_cid_lease_lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_bugCheckThenClaim_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugCheckThenClaim_cid_lease_todo = {}
+/\ lease_bugCheckThenClaim_cid_lease_bootLeft = -1
+/\ lease_bugCheckThenClaim_cid_lease_al = << [ st |-> "admitted",
+     off |-> 1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_bugCheckThenClaim_cid_lease_errsLeft = 1
 /\ lease_bugCheckThenClaim_cid_lease_walker = 0
 /\ lease_bugCheckThenClaim_cid_lease_exitsLeft = 1
 /\ lease_bugCheckThenClaim_cid_lease_g = [ clash |-> FALSE,
   skipFree |-> FALSE,
-  skipped |-> FALSE,
-  skipOrphan |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> TRUE,
   refusedHeld |-> FALSE,
   refusedClaimable |-> FALSE,
   claimErr |-> FALSE,

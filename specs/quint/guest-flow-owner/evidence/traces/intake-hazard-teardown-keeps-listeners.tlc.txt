@@ -1,0 +1,170 @@
+State 1: <Initial predicate>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Absent"
+/\ intake_bugTeardownKeeps_intake_lastLS = {}
+/\ intake_bugTeardownKeeps_intake_lis = {}
+/\ intake_bugTeardownKeeps_intake_gen = 0
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = FALSE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE
+
+State 2: <intake_bugTeardownKeeps_intake_Provision line 596, col 3 to line 604, col 76 of module intake_bugTeardownKeeps>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Provisioned"
+/\ intake_bugTeardownKeeps_intake_lastLS = {}
+/\ intake_bugTeardownKeeps_intake_lis = {}
+/\ intake_bugTeardownKeeps_intake_gen = 1
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = FALSE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE
+
+State 3: <intake_bugTeardownKeeps_intake_SessOpen line 610, col 3 to line 618, col 76 of module intake_bugTeardownKeeps>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Provisioned"
+/\ intake_bugTeardownKeeps_intake_lastLS = {}
+/\ intake_bugTeardownKeeps_intake_lis = {}
+/\ intake_bugTeardownKeeps_intake_gen = 1
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = TRUE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE
+
+State 4: <intake_bugTeardownKeeps_intake_ActivateBegin line 268, col 3 to line 285, col 76 of module intake_bugTeardownKeeps>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Activating"
+/\ intake_bugTeardownKeeps_intake_lastLS = {}
+/\ intake_bugTeardownKeeps_intake_lis = {}
+/\ intake_bugTeardownKeeps_intake_gen = 1
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = TRUE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE
+
+State 5: <intake_bugTeardownKeeps_intake_ActivateOk line 481, col 3 to line 512, col 7 of module intake_bugTeardownKeeps>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Active"
+/\ intake_bugTeardownKeeps_intake_lastLS = {}
+/\ intake_bugTeardownKeeps_intake_lis = {}
+/\ intake_bugTeardownKeeps_intake_gen = 1
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = TRUE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE
+
+State 6: <intake_bugTeardownKeeps_intake_ListenState line 575, col 3 to line 590, col 76 of module intake_bugTeardownKeeps>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Active"
+/\ intake_bugTeardownKeeps_intake_lastLS = {1}
+/\ intake_bugTeardownKeeps_intake_lis = {}
+/\ intake_bugTeardownKeeps_intake_gen = 1
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = TRUE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE
+
+State 7: <intake_bugTeardownKeeps_intake_BindListen line 412, col 3 to line 426, col 76 of module intake_bugTeardownKeeps>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Active"
+/\ intake_bugTeardownKeeps_intake_lastLS = {1}
+/\ intake_bugTeardownKeeps_intake_lis = {1}
+/\ intake_bugTeardownKeeps_intake_gen = 1
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = TRUE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE
+
+State 8: <intake_bugTeardownKeeps_intake_Teardown line 637, col 3 to line 644, col 76 of module intake_bugTeardownKeeps>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Retiring"
+/\ intake_bugTeardownKeeps_intake_lastLS = {1}
+/\ intake_bugTeardownKeeps_intake_lis = {1}
+/\ intake_bugTeardownKeeps_intake_gen = 1
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = FALSE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE
+
+State 9: <intake_bugTeardownKeeps_intake_Release line 291, col 3 to line 310, col 7 of module intake_bugTeardownKeeps>
+/\ intake_bugTeardownKeeps_intake_steerLeft = -1
+/\ intake_bugTeardownKeeps_intake_bindLeft = 1
+/\ intake_bugTeardownKeeps_intake_alloc = "Absent"
+/\ intake_bugTeardownKeeps_intake_lastLS = {}
+/\ intake_bugTeardownKeeps_intake_lis = {1}
+/\ intake_bugTeardownKeeps_intake_gen = 1
+/\ intake_bugTeardownKeeps_intake_up = TRUE
+/\ intake_bugTeardownKeeps_intake_sess = FALSE
+/\ intake_bugTeardownKeeps_intake_entries = {}
+/\ intake_bugTeardownKeeps_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> TRUE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE ]
+/\ intake_bugTeardownKeeps_intake_quiesced = FALSE

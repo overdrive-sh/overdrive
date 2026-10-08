@@ -1,38 +1,71 @@
-# cid-lease-refusal-snapshot: counterexample, 8 state(s) (from the TLC trace)
+# cid-lease-refusal-snapshot: counterexample, 14 state(s) (from the TLC trace)
 
 State 1
+  pend = {}
   walker = 0
   al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
-  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 0
   todo = {}
+  bootLeft = -1
   exitsLeft = 1
   errsLeft = 1
-  foreignLeft = 0
 
 State 2 [AssignBegin]
   walker = 1
   todo = {0, 1, 2}
 
 State 3 [AssignTry]
-  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> TRUE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
   todo = {1, 2}
 
-State 4 [ForeignRelease]
-  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+State 4 [AssignTry]
+  walker = 0
+  al = << [ st |-> "admitted", off |-> 1, loc |-> "slot", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> 1 @@ 2 :> 0)
+  cursor = 2
+  todo = {}
 
-State 5 [ForeignTake]
-  kern = (0 :> 0 @@ 1 :> -1 @@ 2 :> 0)
+State 5 [LaunchBegin]
+  al = << [ st |-> "launching", off |-> 1, loc |-> "taken", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
 
-State 6 [AssignTry]
-  todo = {2}
+State 6 [Boot]
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> -2 @@ 2 :> 0)
+  cursor = 0
 
-State 7 [ForeignTake]
-  kern = (0 :> 0 @@ 1 :> -1 @@ 2 :> -1)
+State 7 [AssignBegin]
+  walker = 1
+  todo = {0, 1, 2}
 
 State 8 [AssignTry]
+  todo = {1, 2}
+
+State 9 [AssignTry]
+  todo = {2}
+
+State 10 [AssignTry]
   walker = 0
-  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> TRUE, refusedClaimable |-> TRUE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  al = << [ st |-> "admitted", off |-> 2, loc |-> "slot", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+  kern = (0 :> -2 @@ 1 :> -2 @@ 2 :> 1)
+  todo = {}
+
+State 11 [AssignBegin]
+  walker = 2
+  todo = {0, 1}
+
+State 12 [AssignTry]
+  todo = {1}
+
+State 13 [OrphanExit]
+  kern = (0 :> 0 @@ 1 :> -2 @@ 2 :> 1)
+
+State 14 [AssignTry]
+  walker = 0
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> TRUE, refusedHeld |-> TRUE, refusedClaimable |-> TRUE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
   todo = {}

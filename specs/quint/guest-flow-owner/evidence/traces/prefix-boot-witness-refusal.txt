@@ -1,0 +1,32 @@
+# prefix-boot-witness-refusal: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  stop = "init"
+  phase = "start"
+  swapOk = FALSE
+  failLeft = 1
+  bin = "none"
+  loaded = FALSE
+  route = "absent"
+  prog = "none"
+  crashLeft = -1
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  up = FALSE
+  estab = FALSE
+  adopted = FALSE
+  link = "none"
+
+State 2 [Restart]
+  stop = "none"
+  bin = "v1"
+  up = TRUE
+
+State 3 [BootStep]
+  phase = "load"
+
+State 4 [Fail]
+  stop = "refused"
+  phase = "start"
+  failLeft = 0
+  g = [ refused |-> TRUE, loadRefused |-> TRUE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  up = FALSE

@@ -1,0 +1,167 @@
+State 1: <Initial predicate>
+/\ boot_bugUnpinned_prefix_boot_swapOk = FALSE
+/\ boot_bugUnpinned_prefix_boot_failLeft = 1
+/\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugUnpinned_prefix_boot_estab = FALSE
+/\ boot_bugUnpinned_prefix_boot_loaded = FALSE
+/\ boot_bugUnpinned_prefix_boot_prog = "none"
+/\ boot_bugUnpinned_prefix_boot_phase = "start"
+/\ boot_bugUnpinned_prefix_boot_link = "none"
+/\ boot_bugUnpinned_prefix_boot_adopted = FALSE
+/\ boot_bugUnpinned_prefix_boot_up = FALSE
+/\ boot_bugUnpinned_prefix_boot_route = "absent"
+/\ boot_bugUnpinned_prefix_boot_stop = "init"
+/\ boot_bugUnpinned_prefix_boot_bin = "none"
+/\ boot_bugUnpinned_prefix_boot_crashLeft = -1
+
+State 2: <boot_bugUnpinned_prefix_boot_Restart line 226, col 5 to line 237, col 74 of module boot_bugUnpinned>
+/\ boot_bugUnpinned_prefix_boot_swapOk = FALSE
+/\ boot_bugUnpinned_prefix_boot_failLeft = 1
+/\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugUnpinned_prefix_boot_estab = FALSE
+/\ boot_bugUnpinned_prefix_boot_loaded = FALSE
+/\ boot_bugUnpinned_prefix_boot_prog = "none"
+/\ boot_bugUnpinned_prefix_boot_phase = "start"
+/\ boot_bugUnpinned_prefix_boot_link = "none"
+/\ boot_bugUnpinned_prefix_boot_adopted = FALSE
+/\ boot_bugUnpinned_prefix_boot_up = TRUE
+/\ boot_bugUnpinned_prefix_boot_route = "absent"
+/\ boot_bugUnpinned_prefix_boot_stop = "none"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
+/\ boot_bugUnpinned_prefix_boot_crashLeft = -1
+
+State 3: <boot_bugUnpinned_prefix_boot_BootStep line 317, col 3 to line 436, col 75 of module boot_bugUnpinned>
+/\ boot_bugUnpinned_prefix_boot_swapOk = FALSE
+/\ boot_bugUnpinned_prefix_boot_failLeft = 1
+/\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugUnpinned_prefix_boot_estab = FALSE
+/\ boot_bugUnpinned_prefix_boot_loaded = FALSE
+/\ boot_bugUnpinned_prefix_boot_prog = "none"
+/\ boot_bugUnpinned_prefix_boot_phase = "load"
+/\ boot_bugUnpinned_prefix_boot_link = "none"
+/\ boot_bugUnpinned_prefix_boot_adopted = FALSE
+/\ boot_bugUnpinned_prefix_boot_up = TRUE
+/\ boot_bugUnpinned_prefix_boot_route = "absent"
+/\ boot_bugUnpinned_prefix_boot_stop = "none"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
+/\ boot_bugUnpinned_prefix_boot_crashLeft = -1
+
+State 4: <boot_bugUnpinned_prefix_boot_BootStep line 317, col 3 to line 436, col 75 of module boot_bugUnpinned>
+/\ boot_bugUnpinned_prefix_boot_swapOk = FALSE
+/\ boot_bugUnpinned_prefix_boot_failLeft = 1
+/\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugUnpinned_prefix_boot_estab = FALSE
+/\ boot_bugUnpinned_prefix_boot_loaded = TRUE
+/\ boot_bugUnpinned_prefix_boot_prog = "none"
+/\ boot_bugUnpinned_prefix_boot_phase = "swap"
+/\ boot_bugUnpinned_prefix_boot_link = "none"
+/\ boot_bugUnpinned_prefix_boot_adopted = FALSE
+/\ boot_bugUnpinned_prefix_boot_up = TRUE
+/\ boot_bugUnpinned_prefix_boot_route = "absent"
+/\ boot_bugUnpinned_prefix_boot_stop = "none"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
+/\ boot_bugUnpinned_prefix_boot_crashLeft = -1
+
+State 5: <boot_bugUnpinned_prefix_boot_BootStep line 317, col 3 to line 436, col 75 of module boot_bugUnpinned>
+/\ boot_bugUnpinned_prefix_boot_swapOk = TRUE
+/\ boot_bugUnpinned_prefix_boot_failLeft = 1
+/\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugUnpinned_prefix_boot_estab = FALSE
+/\ boot_bugUnpinned_prefix_boot_loaded = TRUE
+/\ boot_bugUnpinned_prefix_boot_prog = "v1"
+/\ boot_bugUnpinned_prefix_boot_phase = "pin"
+/\ boot_bugUnpinned_prefix_boot_link = "attached"
+/\ boot_bugUnpinned_prefix_boot_adopted = FALSE
+/\ boot_bugUnpinned_prefix_boot_up = TRUE
+/\ boot_bugUnpinned_prefix_boot_route = "absent"
+/\ boot_bugUnpinned_prefix_boot_stop = "none"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
+/\ boot_bugUnpinned_prefix_boot_crashLeft = -1
+
+State 6: <boot_bugUnpinned_prefix_boot_BootStep line 317, col 3 to line 436, col 75 of module boot_bugUnpinned>
+/\ boot_bugUnpinned_prefix_boot_swapOk = TRUE
+/\ boot_bugUnpinned_prefix_boot_failLeft = 1
+/\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugUnpinned_prefix_boot_estab = FALSE
+/\ boot_bugUnpinned_prefix_boot_loaded = TRUE
+/\ boot_bugUnpinned_prefix_boot_prog = "v1"
+/\ boot_bugUnpinned_prefix_boot_phase = "route"
+/\ boot_bugUnpinned_prefix_boot_link = "attached"
+/\ boot_bugUnpinned_prefix_boot_adopted = FALSE
+/\ boot_bugUnpinned_prefix_boot_up = TRUE
+/\ boot_bugUnpinned_prefix_boot_route = "absent"
+/\ boot_bugUnpinned_prefix_boot_stop = "none"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
+/\ boot_bugUnpinned_prefix_boot_crashLeft = -1
+
+State 7: <boot_bugUnpinned_prefix_boot_BootStep line 317, col 3 to line 436, col 75 of module boot_bugUnpinned>
+/\ boot_bugUnpinned_prefix_boot_swapOk = TRUE
+/\ boot_bugUnpinned_prefix_boot_failLeft = 1
+/\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugUnpinned_prefix_boot_estab = TRUE
+/\ boot_bugUnpinned_prefix_boot_loaded = TRUE
+/\ boot_bugUnpinned_prefix_boot_prog = "v1"
+/\ boot_bugUnpinned_prefix_boot_phase = "open"
+/\ boot_bugUnpinned_prefix_boot_link = "attached"
+/\ boot_bugUnpinned_prefix_boot_adopted = FALSE
+/\ boot_bugUnpinned_prefix_boot_up = TRUE
+/\ boot_bugUnpinned_prefix_boot_route = "local"
+/\ boot_bugUnpinned_prefix_boot_stop = "none"
+/\ boot_bugUnpinned_prefix_boot_bin = "v1"
+/\ boot_bugUnpinned_prefix_boot_crashLeft = -1

@@ -1,0 +1,69 @@
+# prefix-boot-hazard-detach: counterexample, 12 state(s) (from the TLC trace)
+
+State 1
+  stop = "init"
+  phase = "start"
+  loaded = FALSE
+  route = "absent"
+  crashLeft = -1
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  up = FALSE
+  prog = "none"
+  failLeft = 1
+  bin = "none"
+  adopted = FALSE
+  estab = FALSE
+  link = "none"
+  swapOk = FALSE
+
+State 2 [Restart]
+  stop = "none"
+  up = TRUE
+  bin = "v1"
+
+State 3 [BootStep]
+  phase = "load"
+
+State 4 [BootStep]
+  phase = "swap"
+  loaded = TRUE
+
+State 5 [BootStep]
+  phase = "pin"
+  prog = "v1"
+  link = "attached"
+  swapOk = TRUE
+
+State 6 [BootStep]
+  phase = "route"
+  link = "pinned"
+
+State 7 [BootStep]
+  phase = "open"
+  route = "local"
+  estab = TRUE
+
+State 8 [Crash]
+  stop = "crash"
+  phase = "start"
+  loaded = FALSE
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  up = FALSE
+  swapOk = FALSE
+
+State 9 [Restart]
+  stop = "none"
+  up = TRUE
+
+State 10 [BootStep]
+  phase = "load"
+
+State 11 [BootStep]
+  phase = "swap"
+  loaded = TRUE
+
+State 12 [BootStep]
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> TRUE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  prog = "none"
+  adopted = TRUE
+  link = "none"

@@ -1,0 +1,31 @@
+# prefix-boot-hazard-route-first: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  link = "none"
+  crashLeft = -1
+  stop = "init"
+  swapOk = FALSE
+  up = FALSE
+  route = "absent"
+  loaded = FALSE
+  adopted = FALSE
+  bin = "none"
+  estab = FALSE
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  failLeft = 1
+  prog = "none"
+  phase = "start"
+
+State 2 [Restart]
+  stop = "none"
+  up = TRUE
+  bin = "v1"
+
+State 3 [BootStep]
+  phase = "route"
+
+State 4 [BootStep]
+  route = "local"
+  estab = TRUE
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> TRUE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  phase = "load"

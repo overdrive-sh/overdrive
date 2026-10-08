@@ -1,0 +1,47 @@
+# quiescence-witness-fail-stop: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
+  repLeft = 1
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  up = TRUE
+  route = "local"
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  stop = "none"
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
+  latch = FALSE
+  lis = TRUE
+  holders = {}
+
+State 2 [Damage]
+  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+
+State 3 [RecQuiesce]
+  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+  latch = TRUE
+  lis = FALSE
+  holders = {"IpRules"}
+
+State 4 [RepFail]
+  repLeft = 0
+  att = [IpRules |-> 1, FlowListeners |-> 0]
+
+State 5 [RecRepair]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
+  rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
+
+State 6 [Damage]
+  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+
+State 7 [RecRedo]
+  att = [IpRules |-> 2, FlowListeners |-> 0]
+  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+
+State 8 [FailStop]
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  up = FALSE
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  stop = "failstop"
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE ]
+  latch = FALSE
+  holders = {}

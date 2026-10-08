@@ -1,0 +1,37 @@
+# intake-witness-second-allocation: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  steerLeft = -1
+  quiesced = FALSE
+  lastLS = {}
+  sess = FALSE
+  bindLeft = 1
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  alloc = "Absent"
+  entries = {}
+  lis = {}
+  up = TRUE
+  gen = 0
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [Teardown]
+  alloc = "Retiring"
+
+State 4 [Release]
+  alloc = "Absent"
+
+State 5 [Provision]
+  alloc = "Provisioned"
+  gen = 2
+
+State 6 [SessOpen]
+  sess = TRUE
+
+State 7 [ActivateBegin]
+  alloc = "Activating"
+
+State 8 [ActivateOk]
+  alloc = "Active"

@@ -1,0 +1,53 @@
+# prefix-boot-hazard-unpinned: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  swapOk = FALSE
+  failLeft = 1
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  estab = FALSE
+  loaded = FALSE
+  prog = "none"
+  phase = "start"
+  link = "none"
+  adopted = FALSE
+  up = FALSE
+  route = "absent"
+  stop = "init"
+  bin = "none"
+  crashLeft = -1
+
+State 2 [Restart]
+  up = TRUE
+  stop = "none"
+  bin = "v2"
+
+State 3 [BootStep]
+  phase = "load"
+
+State 4 [BootStep]
+  loaded = TRUE
+  phase = "swap"
+
+State 5 [BootStep]
+  swapOk = TRUE
+  prog = "v2"
+  phase = "pin"
+  link = "attached"
+
+State 6 [BootStep]
+  phase = "route"
+
+State 7 [BootStep]
+  estab = TRUE
+  phase = "open"
+  route = "local"
+
+State 8 [Crash]
+  swapOk = FALSE
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  loaded = FALSE
+  prog = "none"
+  phase = "start"
+  link = "none"
+  up = FALSE
+  stop = "crash"

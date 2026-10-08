@@ -1,0 +1,34 @@
+# shared-table-hazard-non-loopback: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  g = [ partialUp |-> FALSE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  phase = "start"
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  flDmg = FALSE
+  holders = {}
+  repLeft = 1
+  reject = FALSE
+  route = "absent"
+  lis = {}
+  link = "none"
+  entries = {}
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  divert = FALSE
+  up = TRUE
+
+State 2 [BootStep]
+  phase = "rules"
+
+State 3 [RulesPartial]
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  phase = "steer"
+
+State 4 [BootStep]
+  phase = "open"
+  route = "local"
+  link = "pinned"
+
+State 5 [BringUp]
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> TRUE, reopenEarly |-> FALSE ]
+  lis = {1}
+  entries = {1}

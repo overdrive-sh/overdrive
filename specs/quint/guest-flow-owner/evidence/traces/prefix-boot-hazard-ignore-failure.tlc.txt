@@ -1,0 +1,167 @@
+State 1: <Initial predicate>
+/\ boot_bugIgnoreFailure_prefix_boot_crashLeft = -1
+/\ boot_bugIgnoreFailure_prefix_boot_route = "absent"
+/\ boot_bugIgnoreFailure_prefix_boot_up = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_prog = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugIgnoreFailure_prefix_boot_adopted = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_link = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_failLeft = 1
+/\ boot_bugIgnoreFailure_prefix_boot_estab = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_stop = "init"
+/\ boot_bugIgnoreFailure_prefix_boot_swapOk = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_phase = "start"
+/\ boot_bugIgnoreFailure_prefix_boot_bin = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_loaded = FALSE
+
+State 2: <boot_bugIgnoreFailure_prefix_boot_Restart line 285, col 5 to line 298, col 46 of module boot_bugIgnoreFailure>
+/\ boot_bugIgnoreFailure_prefix_boot_crashLeft = -1
+/\ boot_bugIgnoreFailure_prefix_boot_route = "absent"
+/\ boot_bugIgnoreFailure_prefix_boot_up = TRUE
+/\ boot_bugIgnoreFailure_prefix_boot_prog = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugIgnoreFailure_prefix_boot_adopted = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_link = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_failLeft = 1
+/\ boot_bugIgnoreFailure_prefix_boot_estab = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_stop = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_swapOk = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_phase = "start"
+/\ boot_bugIgnoreFailure_prefix_boot_bin = "v1"
+/\ boot_bugIgnoreFailure_prefix_boot_loaded = FALSE
+
+State 3: <boot_bugIgnoreFailure_prefix_boot_BootStep line 401, col 3 to line 526, col 47 of module boot_bugIgnoreFailure>
+/\ boot_bugIgnoreFailure_prefix_boot_crashLeft = -1
+/\ boot_bugIgnoreFailure_prefix_boot_route = "absent"
+/\ boot_bugIgnoreFailure_prefix_boot_up = TRUE
+/\ boot_bugIgnoreFailure_prefix_boot_prog = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugIgnoreFailure_prefix_boot_adopted = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_link = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_failLeft = 1
+/\ boot_bugIgnoreFailure_prefix_boot_estab = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_stop = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_swapOk = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_phase = "load"
+/\ boot_bugIgnoreFailure_prefix_boot_bin = "v1"
+/\ boot_bugIgnoreFailure_prefix_boot_loaded = FALSE
+
+State 4: <boot_bugIgnoreFailure_prefix_boot_Fail line 532, col 3 to line 579, col 10 of module boot_bugIgnoreFailure>
+/\ boot_bugIgnoreFailure_prefix_boot_crashLeft = -1
+/\ boot_bugIgnoreFailure_prefix_boot_route = "absent"
+/\ boot_bugIgnoreFailure_prefix_boot_up = TRUE
+/\ boot_bugIgnoreFailure_prefix_boot_prog = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugIgnoreFailure_prefix_boot_adopted = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_link = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_failLeft = 0
+/\ boot_bugIgnoreFailure_prefix_boot_estab = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_stop = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_swapOk = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_phase = "swap"
+/\ boot_bugIgnoreFailure_prefix_boot_bin = "v1"
+/\ boot_bugIgnoreFailure_prefix_boot_loaded = FALSE
+
+State 5: <boot_bugIgnoreFailure_prefix_boot_BootStep line 401, col 3 to line 526, col 47 of module boot_bugIgnoreFailure>
+/\ boot_bugIgnoreFailure_prefix_boot_crashLeft = -1
+/\ boot_bugIgnoreFailure_prefix_boot_route = "absent"
+/\ boot_bugIgnoreFailure_prefix_boot_up = TRUE
+/\ boot_bugIgnoreFailure_prefix_boot_prog = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugIgnoreFailure_prefix_boot_adopted = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_link = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_failLeft = 0
+/\ boot_bugIgnoreFailure_prefix_boot_estab = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_stop = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_swapOk = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_phase = "pin"
+/\ boot_bugIgnoreFailure_prefix_boot_bin = "v1"
+/\ boot_bugIgnoreFailure_prefix_boot_loaded = FALSE
+
+State 6: <boot_bugIgnoreFailure_prefix_boot_BootStep line 401, col 3 to line 526, col 47 of module boot_bugIgnoreFailure>
+/\ boot_bugIgnoreFailure_prefix_boot_crashLeft = -1
+/\ boot_bugIgnoreFailure_prefix_boot_route = "absent"
+/\ boot_bugIgnoreFailure_prefix_boot_up = TRUE
+/\ boot_bugIgnoreFailure_prefix_boot_prog = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugIgnoreFailure_prefix_boot_adopted = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_link = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_failLeft = 0
+/\ boot_bugIgnoreFailure_prefix_boot_estab = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_stop = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_swapOk = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_phase = "route"
+/\ boot_bugIgnoreFailure_prefix_boot_bin = "v1"
+/\ boot_bugIgnoreFailure_prefix_boot_loaded = FALSE
+
+State 7: <boot_bugIgnoreFailure_prefix_boot_BootStep line 401, col 3 to line 526, col 47 of module boot_bugIgnoreFailure>
+/\ boot_bugIgnoreFailure_prefix_boot_crashLeft = -1
+/\ boot_bugIgnoreFailure_prefix_boot_route = "local"
+/\ boot_bugIgnoreFailure_prefix_boot_up = TRUE
+/\ boot_bugIgnoreFailure_prefix_boot_prog = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> TRUE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugIgnoreFailure_prefix_boot_adopted = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_link = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_failLeft = 0
+/\ boot_bugIgnoreFailure_prefix_boot_estab = TRUE
+/\ boot_bugIgnoreFailure_prefix_boot_stop = "none"
+/\ boot_bugIgnoreFailure_prefix_boot_swapOk = FALSE
+/\ boot_bugIgnoreFailure_prefix_boot_phase = "open"
+/\ boot_bugIgnoreFailure_prefix_boot_bin = "v1"
+/\ boot_bugIgnoreFailure_prefix_boot_loaded = FALSE

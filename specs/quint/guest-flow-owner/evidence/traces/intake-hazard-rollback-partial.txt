@@ -1,0 +1,38 @@
+# intake-hazard-rollback-partial: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  alloc = "Absent"
+  sess = FALSE
+  lastLS = {}
+  lis = {}
+  up = TRUE
+  gen = 0
+  quiesced = FALSE
+  steerLeft = 1
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  entries = {}
+  bindLeft = 1
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ListenState]
+  lastLS = {1}
+
+State 5 [ListenState]
+  lastLS = {1, 2}
+
+State 6 [ActivateBegin]
+  alloc = "Activating"
+
+State 7 [BindListen]
+  lis = {1}
+
+State 8 [BindFail]
+  alloc = "Provisioned"
+  g = [ actPartial |-> FALSE, actResidue |-> TRUE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  bindLeft = 0

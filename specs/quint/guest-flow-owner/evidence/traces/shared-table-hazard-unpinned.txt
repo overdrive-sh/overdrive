@@ -1,0 +1,40 @@
+# shared-table-hazard-unpinned: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  up = TRUE
+  divert = FALSE
+  lis = {}
+  link = "none"
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  holders = {}
+  phase = "start"
+  flDmg = FALSE
+  repLeft = 1
+  reject = FALSE
+  g = [ partialUp |-> FALSE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  entries = {}
+  route = "absent"
+
+State 2 [BootStep]
+  phase = "rules"
+
+State 3 [BootStep]
+  divert = TRUE
+  phase = "steer"
+  reject = TRUE
+
+State 4 [BootStep]
+  link = "pinned"
+  phase = "open"
+  route = "local"
+
+State 5 [MtlsPartial]
+  divert = FALSE
+  reject = FALSE
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+
+State 6 [Crash]
+  up = FALSE
+  link = "none"
+  phase = "start"

@@ -1,0 +1,42 @@
+# intake-hazard-teardown-keeps-listeners: counterexample, 9 state(s) (from the TLC trace)
+
+State 1
+  steerLeft = -1
+  bindLeft = 1
+  alloc = "Absent"
+  lastLS = {}
+  lis = {}
+  gen = 0
+  up = TRUE
+  sess = FALSE
+  entries = {}
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  quiesced = FALSE
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ActivateBegin]
+  alloc = "Activating"
+
+State 5 [ActivateOk]
+  alloc = "Active"
+
+State 6 [ListenState]
+  lastLS = {1}
+
+State 7 [BindListen]
+  lis = {1}
+
+State 8 [Teardown]
+  alloc = "Retiring"
+  sess = FALSE
+
+State 9 [Release]
+  alloc = "Absent"
+  lastLS = {}
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> TRUE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]

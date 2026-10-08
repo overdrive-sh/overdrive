@@ -54,29 +54,33 @@
  *         guest-side connection V_g — an accepted V_g observes the reset; a V_g still in the
  *         guest's accept queue is either removed from it (GuestQueueReset) or, if the guest accepts
  *         it after the close, observed as ended (GuestSeesHostClose). The reset may race the
- *         guest's accept; it still arrives. ENV_GUEST_MISSES_HOST_CLOSE=true drops this
+ *         guest's accept; it still arrives. OFF "K-A4" drops this
  *         assumption ................................................................... V-24
  *
- * BUG_* constants each switch ONE design rule off (teeth). The design model sets all to false.
+ * OFF names the rules switched off (teeth); the design instance switches none off.
  */
 module owner_flows {
   // ------------------------------------------------------------------ parameters
-  const CONNS: Set[int]
-  const FLOW_IDS: Set[int]
-  const MAXGEN: int
+  // OFF: design rules / kernel assumptions switched off, or a candidate alternative switched on
+  // (hazard instances in hazard/owner_flows_hazards.qnt); empty in the design.
+  const OFF: Set[str]
 
-  const BUG_SESSION_SPLIT_CLAIM: bool   // L-3 violated: "no live claim?" checked, then claimed later
-  const BUG_INSTALL_BEFORE_READ: bool   // H-1 violated: acceptor installs V_h before the full request
-  const BUG_ADMIT_SPLIT: bool           // admission check done, flow registered in the CID table later
-  const BUG_PAIRED_NO_RECHECK: bool     // step 6 continuation ignores that the flow was aborted
-  const BUG_NO_ABORT_ON_LOSS: bool      // control-session loss does not abort the CID's flows
-  const BUG_TEARDOWN_SKIPS_FLOWS: bool  // teardown closes listeners/session but not the flows
-  const ENV_STALE_CONN_SURVIVES: bool   // drop kernel assumption K-A2
-  const HFLOWS: Set[int]
-  const BUG_LATE_PAIRED_RESURRECTS: bool // U-5 off: the host acts on a Paired for a flow it closed
-  const ENV_GUEST_MISSES_HOST_CLOSE: bool // drop K-A4: the guest never observes the host's close of V_h
-  const ALT_GUEST_ABORT_TOMBSTONE: bool  // candidate: the guest keeps an Abort for a host-origin id it
-                                         // has not accepted yet, and closes that flow at accept
+  val CONNS: Set[int] = Set(1, 2)
+  val FLOW_IDS: Set[int] = Set(1, 2)
+  val MAXGEN: int = 2
+  val HFLOWS: Set[int] = Set(1)
+
+  val BUG_SESSION_SPLIT_CLAIM: bool = OFF.contains("sessionSplitClaim")     // L-3 violated: "no live claim?" checked, then claimed later
+  val BUG_INSTALL_BEFORE_READ: bool = OFF.contains("installBeforeRead")     // H-1 violated: acceptor installs V_h before the full request
+  val BUG_ADMIT_SPLIT: bool = OFF.contains("admitSplit")                    // admission check done, flow registered in the CID table later
+  val BUG_PAIRED_NO_RECHECK: bool = OFF.contains("pairedNoRecheck")         // step 6 continuation ignores that the flow was aborted
+  val BUG_NO_ABORT_ON_LOSS: bool = OFF.contains("noAbortOnLoss")            // control-session loss does not abort the CID's flows
+  val BUG_TEARDOWN_SKIPS_FLOWS: bool = OFF.contains("teardownSkipsFlows")   // teardown closes listeners/session but not the flows
+  val ENV_STALE_CONN_SURVIVES: bool = OFF.contains("K-A2")                  // drop kernel assumption K-A2
+  val BUG_LATE_PAIRED_RESURRECTS: bool = OFF.contains("latePairedResurrects") // U-5 off: the host acts on a Paired for a flow it closed
+  val ENV_GUEST_MISSES_HOST_CLOSE: bool = OFF.contains("K-A4")              // drop K-A4: the guest never observes the host's close of V_h
+  val ALT_GUEST_ABORT_TOMBSTONE: bool = OFF.contains("altTombstone")        // candidate: the guest keeps an Abort for a host-origin id it
+                                                                            // has not accepted yet, and closes that flow at accept
 
   // ------------------------------------------------------------------ types
   // st: none | pending (in host accept queue) | checked (bug only) | live | dead (peer gone, loss
@@ -525,6 +529,4 @@ module owner_flows {
 
 // ------------------------------------------------------------------ design instances
 // the design: one CID reused by 2 allocations, 2 control connections, 2 guest-opened flows, 1 host-opened flow
-module flows_ok {
-  import owner_flows(CONNS = Set(1, 2), FLOW_IDS = Set(1, 2), MAXGEN = 2, BUG_SESSION_SPLIT_CLAIM = false, BUG_INSTALL_BEFORE_READ = false, BUG_ADMIT_SPLIT = false, BUG_PAIRED_NO_RECHECK = false, BUG_NO_ABORT_ON_LOSS = false, BUG_TEARDOWN_SKIPS_FLOWS = false, ENV_STALE_CONN_SURVIVES = false, HFLOWS = Set(1), BUG_LATE_PAIRED_RESURRECTS = false, ENV_GUEST_MISSES_HOST_CLOSE = false, ALT_GUEST_ABORT_TOMBSTONE = false).* from "./owner_flows"
-}
+module flows_ok { import owner_flows(OFF = Set()).* from "./owner_flows" }

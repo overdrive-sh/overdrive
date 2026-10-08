@@ -1,0 +1,52 @@
+# prefix-boot-witness-crash-with-local: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  stop = "init"
+  phase = "start"
+  swapOk = FALSE
+  failLeft = 1
+  bin = "none"
+  loaded = FALSE
+  route = "absent"
+  prog = "none"
+  crashLeft = -1
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  up = FALSE
+  estab = FALSE
+  adopted = FALSE
+  link = "none"
+
+State 2 [Restart]
+  stop = "none"
+  bin = "v1"
+  up = TRUE
+
+State 3 [BootStep]
+  phase = "load"
+
+State 4 [BootStep]
+  phase = "swap"
+  loaded = TRUE
+
+State 5 [BootStep]
+  phase = "pin"
+  swapOk = TRUE
+  prog = "v1"
+  link = "attached"
+
+State 6 [BootStep]
+  phase = "route"
+  link = "pinned"
+
+State 7 [BootStep]
+  phase = "open"
+  route = "local"
+  estab = TRUE
+
+State 8 [Crash]
+  stop = "crash"
+  phase = "start"
+  swapOk = FALSE
+  loaded = FALSE
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  up = FALSE

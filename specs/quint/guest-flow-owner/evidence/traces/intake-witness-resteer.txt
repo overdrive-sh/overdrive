@@ -1,0 +1,45 @@
+# intake-witness-resteer: counterexample, 10 state(s) (from the TLC trace)
+
+State 1
+  bindLeft = 1
+  steerLeft = 1
+  alloc = "Absent"
+  up = TRUE
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  sess = FALSE
+  entries = {}
+  lis = {}
+  lastLS = {}
+  gen = 0
+  quiesced = FALSE
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ActivateBegin]
+  alloc = "Activating"
+
+State 5 [ActivateOk]
+  alloc = "Active"
+
+State 6 [ListenState]
+  lastLS = {1}
+
+State 7 [BindListen]
+  lis = {1}
+
+State 8 [SteerFail]
+  steerLeft = 0
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  lis = {}
+
+State 9 [BindListen]
+  lis = {1}
+
+State 10 [Steer]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> TRUE, revokeKept |-> FALSE ]
+  entries = {1}

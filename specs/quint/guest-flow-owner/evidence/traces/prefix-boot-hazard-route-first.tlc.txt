@@ -1,0 +1,95 @@
+State 1: <Initial predicate>
+/\ boot_bugRouteFirst_prefix_boot_link = "none"
+/\ boot_bugRouteFirst_prefix_boot_crashLeft = -1
+/\ boot_bugRouteFirst_prefix_boot_stop = "init"
+/\ boot_bugRouteFirst_prefix_boot_swapOk = FALSE
+/\ boot_bugRouteFirst_prefix_boot_up = FALSE
+/\ boot_bugRouteFirst_prefix_boot_route = "absent"
+/\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
+/\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
+/\ boot_bugRouteFirst_prefix_boot_bin = "none"
+/\ boot_bugRouteFirst_prefix_boot_estab = FALSE
+/\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugRouteFirst_prefix_boot_failLeft = 1
+/\ boot_bugRouteFirst_prefix_boot_prog = "none"
+/\ boot_bugRouteFirst_prefix_boot_phase = "start"
+
+State 2: <boot_bugRouteFirst_prefix_boot_Restart line 280, col 5 to line 291, col 78 of module boot_bugRouteFirst>
+/\ boot_bugRouteFirst_prefix_boot_link = "none"
+/\ boot_bugRouteFirst_prefix_boot_crashLeft = -1
+/\ boot_bugRouteFirst_prefix_boot_stop = "none"
+/\ boot_bugRouteFirst_prefix_boot_swapOk = FALSE
+/\ boot_bugRouteFirst_prefix_boot_up = TRUE
+/\ boot_bugRouteFirst_prefix_boot_route = "absent"
+/\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
+/\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
+/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_estab = FALSE
+/\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugRouteFirst_prefix_boot_failLeft = 1
+/\ boot_bugRouteFirst_prefix_boot_prog = "none"
+/\ boot_bugRouteFirst_prefix_boot_phase = "start"
+
+State 3: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, col 79 of module boot_bugRouteFirst>
+/\ boot_bugRouteFirst_prefix_boot_link = "none"
+/\ boot_bugRouteFirst_prefix_boot_crashLeft = -1
+/\ boot_bugRouteFirst_prefix_boot_stop = "none"
+/\ boot_bugRouteFirst_prefix_boot_swapOk = FALSE
+/\ boot_bugRouteFirst_prefix_boot_up = TRUE
+/\ boot_bugRouteFirst_prefix_boot_route = "absent"
+/\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
+/\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
+/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_estab = FALSE
+/\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugRouteFirst_prefix_boot_failLeft = 1
+/\ boot_bugRouteFirst_prefix_boot_prog = "none"
+/\ boot_bugRouteFirst_prefix_boot_phase = "route"
+
+State 4: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, col 79 of module boot_bugRouteFirst>
+/\ boot_bugRouteFirst_prefix_boot_link = "none"
+/\ boot_bugRouteFirst_prefix_boot_crashLeft = -1
+/\ boot_bugRouteFirst_prefix_boot_stop = "none"
+/\ boot_bugRouteFirst_prefix_boot_swapOk = FALSE
+/\ boot_bugRouteFirst_prefix_boot_up = TRUE
+/\ boot_bugRouteFirst_prefix_boot_route = "local"
+/\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
+/\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
+/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_estab = TRUE
+/\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> TRUE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugRouteFirst_prefix_boot_failLeft = 1
+/\ boot_bugRouteFirst_prefix_boot_prog = "none"
+/\ boot_bugRouteFirst_prefix_boot_phase = "load"

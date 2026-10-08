@@ -1,0 +1,39 @@
+# shared-table-witness-partial-while-down: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  route = "absent"
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  g = [ partialUp |-> FALSE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  holders = {}
+  up = TRUE
+  reject = FALSE
+  repLeft = 1
+  link = "none"
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  entries = {}
+  phase = "start"
+  divert = FALSE
+  flDmg = FALSE
+  lis = {}
+
+State 2 [BootStep]
+  phase = "rules"
+
+State 3 [BootStep]
+  reject = TRUE
+  phase = "steer"
+  divert = TRUE
+
+State 4 [BootStep]
+  route = "local"
+  link = "pinned"
+  phase = "open"
+
+State 5 [MtlsPartial]
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  reject = FALSE
+  divert = FALSE
+
+State 6 [Crash]
+  up = FALSE
+  phase = "start"

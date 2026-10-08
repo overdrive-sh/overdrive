@@ -35,21 +35,26 @@
  *   K-B3  Emptying / recreating a slot's framing and reassembly cells discards every parked frame
  *         (no frame survives in a psock backlog)................................... NO V-item (R5-14 Tier-3 partially)
  *
- * BUG_* constants each switch ONE design rule off (teeth). The design model sets all to false.
+ * OFF names the rules switched off (teeth); the design instances switch none off.
  */
 module udp_slots {
-  const SOCKS: Set[int]
-  const DESTS: Set[int]
-  const SLOTS: Set[int]
-  const MAXFID: int
+  // OFF: design rules switched off (hazard instances in hazard/udp_slots_hazards.qnt); CFG: "ok" (two
+  // destinations, three association ids) or "live" (one destination: small enough for TLC)
+  const OFF: Set[str]
+  const CFG: str
 
-  const BUG_CLAIM_SPLIT: bool          // slot claim: "is s free?" and "take s" are two steps
-  const BUG_KEEP_FRAMES: bool          // P-35: release returns the slot with frames still parked
-  const BUG_LATE_PAIRED_BY_SLOT: bool  // late Paired matched to the slot it was opened from, not by fid
-  const BUG_IGNORE_LATE_PAIRED: bool   // late Paired silently dropped instead of answered with Abort
-  const BUG_RELEASE_ONE_SLOT: bool     // closing a socket releases only one of its slots (no check: the audit masks it)
-  const ENV_REPORT_LOSS: bool          // sock_release reports may be lost (audit is the backstop)
-  const BUG_KEEP_FRAMES_ON_END: bool   // U-2 off: Refused / Abort leaves the parked frames in the cell
+  val SOCKS: Set[int] = Set(1, 2)
+  val DESTS: Set[int] = if (CFG == "live") Set(1) else Set(1, 2)
+  val SLOTS: Set[int] = Set(0, 1)
+  val MAXFID: int = if (CFG == "live") 2 else 3
+
+  val BUG_CLAIM_SPLIT: bool = OFF.contains("claimSplit")                // slot claim: "is s free?" and "take s" are two steps
+  val BUG_KEEP_FRAMES: bool = OFF.contains("keepFrames")                // P-35: release returns the slot with frames still parked
+  val BUG_LATE_PAIRED_BY_SLOT: bool = OFF.contains("latePairedBySlot")  // late Paired matched to the slot it was opened from, not by fid
+  val BUG_IGNORE_LATE_PAIRED: bool = OFF.contains("ignoreLatePaired")   // late Paired silently dropped instead of answered with Abort
+  val BUG_RELEASE_ONE_SLOT: bool = OFF.contains("releaseOneSlot")       // closing a socket releases only one of its slots (no check: the audit masks it)
+  val ENV_REPORT_LOSS: bool = true                                       // sock_release reports may be lost (audit is the backstop)
+  val BUG_KEEP_FRAMES_ON_END: bool = OFF.contains("keepFramesOnEnd")    // U-2 off: Refused / Abort leaves the parked frames in the cell
 
   type Tag = (int, int)                // (socket, destination) of a frame
   type Slot = { owned: bool, sock: int, dest: int, fid: int, routed: bool, parked: Set[Tag], holders: int }
@@ -380,14 +385,6 @@ module udp_slots {
 
 // ------------------------------------------------------------------ design instances
 // the design: 2 sockets, 2 destinations, 2 slots, 3 association ids, lost release reports
-module slots_ok {
-  import udp_slots(SOCKS = Set(1, 2), DESTS = Set(1, 2), SLOTS = Set(0, 1), MAXFID = 3,
-    BUG_CLAIM_SPLIT = false, BUG_KEEP_FRAMES = false, BUG_LATE_PAIRED_BY_SLOT = false,
-    BUG_IGNORE_LATE_PAIRED = false, BUG_RELEASE_ONE_SLOT = false, ENV_REPORT_LOSS = true, BUG_KEEP_FRAMES_ON_END = false).* from "./udp_slots"
-}
+module slots_ok { import udp_slots(OFF = Set(), CFG = "ok").* from "./udp_slots" }
 // the design, one destination: small enough for TLC (exhaustive safety and liveness)
-module slots_live {
-  import udp_slots(SOCKS = Set(1, 2), DESTS = Set(1), SLOTS = Set(0, 1), MAXFID = 2,
-    BUG_CLAIM_SPLIT = false, BUG_KEEP_FRAMES = false, BUG_LATE_PAIRED_BY_SLOT = false,
-    BUG_IGNORE_LATE_PAIRED = false, BUG_RELEASE_ONE_SLOT = false, ENV_REPORT_LOSS = true, BUG_KEEP_FRAMES_ON_END = false).* from "./udp_slots"
-}
+module slots_live { import udp_slots(OFF = Set(), CFG = "live").* from "./udp_slots" }

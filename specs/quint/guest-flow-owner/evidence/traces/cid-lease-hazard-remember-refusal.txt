@@ -1,41 +1,76 @@
-# cid-lease-hazard-remember-refusal: counterexample, 8 state(s) (from the TLC trace)
+# cid-lease-hazard-remember-refusal: counterexample, 14 state(s) (from the TLC trace)
 
 State 1
-  errsLeft = 0
+  pend = {}
+  bootLeft = -1
+  errsLeft = 1
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
   todo = {}
   al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
   walker = 0
-  foreignLeft = 0
   g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
   exitsLeft = 1
   cursor = 0
 
-State 2 [ForeignTake]
-  kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> 0)
-
-State 3 [AssignBegin]
+State 2 [AssignBegin]
   todo = {0, 1, 2}
   walker = 1
 
-State 4 [AssignTry]
+State 3 [AssignTry]
   todo = {1, 2}
   al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
-  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> TRUE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
 
-State 5 [AssignTry]
+State 4 [AssignTry]
+  lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> 1 @@ 2 :> 0)
+  todo = {}
+  al = << [ st |-> "admitted", off |-> 1, loc |-> "slot", retry |-> FALSE, remembered |-> {0} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  walker = 0
+  cursor = 2
+
+State 5 [LaunchBegin]
+  al = << [ st |-> "launching", off |-> 1, loc |-> "taken", retry |-> FALSE, remembered |-> {0} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+
+State 6 [Boot]
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> -2 @@ 2 :> 0)
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  cursor = 0
+
+State 7 [AssignBegin]
+  todo = {0, 1, 2}
+  walker = 1
+
+State 8 [AssignTry]
+  todo = {1, 2}
+  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+
+State 9 [AssignTry]
   todo = {2}
   al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0, 1} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
 
-State 6 [ForeignTake]
-  kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
-
-State 7 [AssignTry]
+State 10 [AssignTry]
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+  kern = (0 :> -2 @@ 1 :> -2 @@ 2 :> 1)
   todo = {}
-  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0, 1, 2} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  al = << [ st |-> "admitted", off |-> 2, loc |-> "slot", retry |-> FALSE, remembered |-> {0, 1} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
   walker = 0
-  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> TRUE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
 
-State 8 [AssignBegin]
-  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> TRUE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> TRUE ]
+State 11 [AssignBegin]
+  todo = {0, 1}
+  walker = 2
+
+State 12 [AssignTry]
+  todo = {1}
+  al = << [ st |-> "admitted", off |-> 2, loc |-> "slot", retry |-> FALSE, remembered |-> {0, 1} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0} ] >>
+
+State 13 [AssignTry]
+  todo = {}
+  al = << [ st |-> "admitted", off |-> 2, loc |-> "slot", retry |-> FALSE, remembered |-> {0, 1} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0, 1} ] >>
+  walker = 0
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> TRUE, refusedHeld |-> TRUE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+
+State 14 [AssignBegin]
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> TRUE, refusedHeld |-> TRUE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> TRUE ]

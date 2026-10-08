@@ -1,0 +1,287 @@
+State 1: <Initial predicate>
+/\ boot_bugDetach_prefix_boot_stop = "init"
+/\ boot_bugDetach_prefix_boot_phase = "start"
+/\ boot_bugDetach_prefix_boot_loaded = FALSE
+/\ boot_bugDetach_prefix_boot_route = "absent"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = FALSE
+/\ boot_bugDetach_prefix_boot_prog = "none"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "none"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = FALSE
+/\ boot_bugDetach_prefix_boot_link = "none"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE
+
+State 2: <boot_bugDetach_prefix_boot_Restart line 272, col 5 to line 283, col 70 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "start"
+/\ boot_bugDetach_prefix_boot_loaded = FALSE
+/\ boot_bugDetach_prefix_boot_route = "absent"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "none"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = FALSE
+/\ boot_bugDetach_prefix_boot_link = "none"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE
+
+State 3: <boot_bugDetach_prefix_boot_BootStep line 379, col 3 to line 486, col 71 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "load"
+/\ boot_bugDetach_prefix_boot_loaded = FALSE
+/\ boot_bugDetach_prefix_boot_route = "absent"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "none"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = FALSE
+/\ boot_bugDetach_prefix_boot_link = "none"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE
+
+State 4: <boot_bugDetach_prefix_boot_BootStep line 379, col 3 to line 486, col 71 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "swap"
+/\ boot_bugDetach_prefix_boot_loaded = TRUE
+/\ boot_bugDetach_prefix_boot_route = "absent"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "none"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = FALSE
+/\ boot_bugDetach_prefix_boot_link = "none"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE
+
+State 5: <boot_bugDetach_prefix_boot_BootStep line 379, col 3 to line 486, col 71 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "pin"
+/\ boot_bugDetach_prefix_boot_loaded = TRUE
+/\ boot_bugDetach_prefix_boot_route = "absent"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "v1"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = FALSE
+/\ boot_bugDetach_prefix_boot_link = "attached"
+/\ boot_bugDetach_prefix_boot_swapOk = TRUE
+
+State 6: <boot_bugDetach_prefix_boot_BootStep line 379, col 3 to line 486, col 71 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "route"
+/\ boot_bugDetach_prefix_boot_loaded = TRUE
+/\ boot_bugDetach_prefix_boot_route = "absent"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "v1"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = FALSE
+/\ boot_bugDetach_prefix_boot_link = "pinned"
+/\ boot_bugDetach_prefix_boot_swapOk = TRUE
+
+State 7: <boot_bugDetach_prefix_boot_BootStep line 379, col 3 to line 486, col 71 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "open"
+/\ boot_bugDetach_prefix_boot_loaded = TRUE
+/\ boot_bugDetach_prefix_boot_route = "local"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "v1"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = TRUE
+/\ boot_bugDetach_prefix_boot_link = "pinned"
+/\ boot_bugDetach_prefix_boot_swapOk = TRUE
+
+State 8: <boot_bugDetach_prefix_boot_Crash line 309, col 3 to line 343, col 7 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "crash"
+/\ boot_bugDetach_prefix_boot_phase = "start"
+/\ boot_bugDetach_prefix_boot_loaded = FALSE
+/\ boot_bugDetach_prefix_boot_route = "local"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = FALSE
+/\ boot_bugDetach_prefix_boot_prog = "v1"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = TRUE
+/\ boot_bugDetach_prefix_boot_link = "pinned"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE
+
+State 9: <boot_bugDetach_prefix_boot_Restart line 272, col 5 to line 283, col 70 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "start"
+/\ boot_bugDetach_prefix_boot_loaded = FALSE
+/\ boot_bugDetach_prefix_boot_route = "local"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "v1"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = TRUE
+/\ boot_bugDetach_prefix_boot_link = "pinned"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE
+
+State 10: <boot_bugDetach_prefix_boot_BootStep line 379, col 3 to line 486, col 71 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "load"
+/\ boot_bugDetach_prefix_boot_loaded = FALSE
+/\ boot_bugDetach_prefix_boot_route = "local"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "v1"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = TRUE
+/\ boot_bugDetach_prefix_boot_link = "pinned"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE
+
+State 11: <boot_bugDetach_prefix_boot_BootStep line 379, col 3 to line 486, col 71 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "swap"
+/\ boot_bugDetach_prefix_boot_loaded = TRUE
+/\ boot_bugDetach_prefix_boot_route = "local"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "v1"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = FALSE
+/\ boot_bugDetach_prefix_boot_estab = TRUE
+/\ boot_bugDetach_prefix_boot_link = "pinned"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE
+
+State 12: <boot_bugDetach_prefix_boot_BootStep line 379, col 3 to line 486, col 71 of module boot_bugDetach>
+/\ boot_bugDetach_prefix_boot_stop = "none"
+/\ boot_bugDetach_prefix_boot_phase = "swap"
+/\ boot_bugDetach_prefix_boot_loaded = TRUE
+/\ boot_bugDetach_prefix_boot_route = "local"
+/\ boot_bugDetach_prefix_boot_crashLeft = -1
+/\ boot_bugDetach_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> TRUE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_bugDetach_prefix_boot_up = TRUE
+/\ boot_bugDetach_prefix_boot_prog = "none"
+/\ boot_bugDetach_prefix_boot_failLeft = 1
+/\ boot_bugDetach_prefix_boot_bin = "v1"
+/\ boot_bugDetach_prefix_boot_adopted = TRUE
+/\ boot_bugDetach_prefix_boot_estab = TRUE
+/\ boot_bugDetach_prefix_boot_link = "none"
+/\ boot_bugDetach_prefix_boot_swapOk = FALSE

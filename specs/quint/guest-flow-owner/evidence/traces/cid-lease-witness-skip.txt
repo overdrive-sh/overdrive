@@ -1,21 +1,22 @@
 # cid-lease-witness-skip: counterexample, 3 state(s) (from the TLC trace)
 
 State 1
+  pend = {}
   walker = 0
   al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
-  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 0
   todo = {}
+  bootLeft = -1
   exitsLeft = 1
   errsLeft = 1
-  foreignLeft = 0
 
 State 2 [AssignBegin]
   walker = 1
   todo = {0, 1, 2}
 
 State 3 [AssignTry]
-  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
+  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> TRUE, skipOrphan |-> TRUE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
   todo = {1, 2}

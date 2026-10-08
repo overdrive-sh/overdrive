@@ -1,18 +1,19 @@
 # cid-lease-hazard-release-before-vmm-held: counterexample, 5 state(s) (from the TLC trace)
 
 State 1
-  errsLeft = 0
+  pend = {}
+  errsLeft = 1
   al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
-  kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+  kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
   todo = {}
   walker = 0
   g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   exitsLeft = 1
-  foreignLeft = 0
   cursor = 0
+  bootLeft = -1
 
-State 2 [ForeignRelease]
+State 2 [OrphanExit]
   kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
 State 3 [AssignBegin]

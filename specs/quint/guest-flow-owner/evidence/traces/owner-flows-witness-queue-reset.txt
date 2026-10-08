@@ -28,11 +28,11 @@ State 3
   vmUp = true
 
 State 4
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
+  sess = Map(1 -> { gen: 1, st: "pending" }, 2 -> { gen: 0, st: "none" })
 
 State 5
   claim = true
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "live" })
+  sess = Map(1 -> { gen: 1, st: "live" }, 2 -> { gen: 0, st: "none" })
 
 State 6
   alloc = "Active"
@@ -41,9 +41,10 @@ State 7
   hf = Map(1 -> { gen: 1, st: "req" })
 
 State 8
-  quiesced = true
+  alloc = "Retiring"
+  claim = false
+  sess = Map(1 -> { gen: 1, st: "closed" }, 2 -> { gen: 0, st: "none" })
   hf = Map(1 -> { gen: 1, st: "closed" })
-  toGuestAbort = Set(1)
 
 State 9
   gf = Map(1 -> { c: 0, gen: 1, st: "reset" })

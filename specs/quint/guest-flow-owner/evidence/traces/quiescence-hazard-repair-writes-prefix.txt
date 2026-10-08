@@ -1,0 +1,28 @@
+# quiescence-hazard-repair-writes-prefix: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  repLeft = 1
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
+  stop = "none"
+  route = "local"
+  lis = TRUE
+  up = TRUE
+  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
+  latch = FALSE
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  holders = {}
+
+State 2 [Damage]
+  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+
+State 3 [RecQuiesce]
+  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+  lis = FALSE
+  latch = TRUE
+  holders = {"IpRules"}
+
+State 4 [RecRepair]
+  rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> TRUE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]

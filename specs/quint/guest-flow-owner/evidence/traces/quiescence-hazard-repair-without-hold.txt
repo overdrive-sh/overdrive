@@ -1,0 +1,21 @@
+# quiescence-hazard-repair-without-hold: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  repLeft = 1
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  latch = FALSE
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
+  lis = TRUE
+  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
+  stop = "none"
+  up = TRUE
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  route = "local"
+  holders = {}
+
+State 2 [Damage]
+  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+
+State 3 [RecRepairNoHold]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> TRUE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]

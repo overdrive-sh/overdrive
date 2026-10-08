@@ -1,0 +1,311 @@
+State 1: <Initial predicate>
+/\ boot_ok_prefix_boot_stop = "init"
+/\ boot_ok_prefix_boot_phase = "start"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "none"
+/\ boot_ok_prefix_boot_loaded = FALSE
+/\ boot_ok_prefix_boot_route = "absent"
+/\ boot_ok_prefix_boot_prog = "none"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = FALSE
+/\ boot_ok_prefix_boot_estab = FALSE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "none"
+
+State 2: <boot_ok_prefix_boot_Restart line 222, col 5 to line 233, col 56 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "start"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = FALSE
+/\ boot_ok_prefix_boot_route = "absent"
+/\ boot_ok_prefix_boot_prog = "none"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = FALSE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "none"
+
+State 3: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "load"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = FALSE
+/\ boot_ok_prefix_boot_route = "absent"
+/\ boot_ok_prefix_boot_prog = "none"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = FALSE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "none"
+
+State 4: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "swap"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = TRUE
+/\ boot_ok_prefix_boot_route = "absent"
+/\ boot_ok_prefix_boot_prog = "none"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = FALSE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "none"
+
+State 5: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "pin"
+/\ boot_ok_prefix_boot_swapOk = TRUE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = TRUE
+/\ boot_ok_prefix_boot_route = "absent"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = FALSE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "attached"
+
+State 6: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "route"
+/\ boot_ok_prefix_boot_swapOk = TRUE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = TRUE
+/\ boot_ok_prefix_boot_route = "absent"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = FALSE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "pinned"
+
+State 7: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "open"
+/\ boot_ok_prefix_boot_swapOk = TRUE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = TRUE
+/\ boot_ok_prefix_boot_route = "local"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> FALSE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = TRUE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "pinned"
+
+State 8: <boot_ok_prefix_boot_Crash line 259, col 3 to line 292, col 7 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "crash"
+/\ boot_ok_prefix_boot_phase = "start"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = FALSE
+/\ boot_ok_prefix_boot_route = "local"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = FALSE
+/\ boot_ok_prefix_boot_estab = TRUE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "pinned"
+
+State 9: <boot_ok_prefix_boot_Restart line 222, col 5 to line 233, col 56 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "start"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = FALSE
+/\ boot_ok_prefix_boot_route = "local"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = TRUE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "pinned"
+
+State 10: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "load"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = FALSE
+/\ boot_ok_prefix_boot_route = "local"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = TRUE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "pinned"
+
+State 11: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "swap"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = TRUE
+/\ boot_ok_prefix_boot_route = "local"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = TRUE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "pinned"
+
+State 12: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "none"
+/\ boot_ok_prefix_boot_phase = "pin"
+/\ boot_ok_prefix_boot_swapOk = TRUE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = TRUE
+/\ boot_ok_prefix_boot_route = "local"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> FALSE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = TRUE
+/\ boot_ok_prefix_boot_estab = TRUE
+/\ boot_ok_prefix_boot_adopted = TRUE
+/\ boot_ok_prefix_boot_link = "pinned"
+
+State 13: <boot_ok_prefix_boot_Crash line 259, col 3 to line 292, col 7 of module boot_ok>
+/\ boot_ok_prefix_boot_stop = "crash"
+/\ boot_ok_prefix_boot_phase = "start"
+/\ boot_ok_prefix_boot_swapOk = FALSE
+/\ boot_ok_prefix_boot_failLeft = 1
+/\ boot_ok_prefix_boot_bin = "v1"
+/\ boot_ok_prefix_boot_loaded = FALSE
+/\ boot_ok_prefix_boot_route = "local"
+/\ boot_ok_prefix_boot_prog = "v1"
+/\ boot_ok_prefix_boot_crashLeft = -1
+/\ boot_ok_prefix_boot_g = [ refused |-> FALSE,
+  loadRefused |-> FALSE,
+  updated |-> FALSE,
+  detached |-> FALSE,
+  routeUnswapped |-> FALSE,
+  crashLocal |-> TRUE,
+  crashAfterSwap |-> TRUE,
+  crashMidAttach |-> FALSE,
+  swapFailKept |-> FALSE ]
+/\ boot_ok_prefix_boot_up = FALSE
+/\ boot_ok_prefix_boot_estab = TRUE
+/\ boot_ok_prefix_boot_adopted = FALSE
+/\ boot_ok_prefix_boot_link = "pinned"

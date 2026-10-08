@@ -1,0 +1,86 @@
+# shared-table-hazard-any-restore: counterexample, 18 state(s) (from the TLC trace)
+
+State 1
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  entries = {}
+  phase = "start"
+  lis = {}
+  link = "none"
+  flDmg = FALSE
+  reject = FALSE
+  up = TRUE
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  route = "absent"
+  holders = {}
+  g = [ partialUp |-> FALSE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  repLeft = -1
+  divert = FALSE
+
+State 2 [BootStep]
+  phase = "rules"
+
+State 3 [RulesPartial]
+  phase = "steer"
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+
+State 4 [BootStep]
+  phase = "open"
+  link = "pinned"
+  route = "local"
+
+State 5 [ListenerTaskExit]
+  flDmg = TRUE
+
+State 6 [RecQuiesce]
+  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+  holders = {"IpRules"}
+
+State 7 [RecQuiesce]
+  rec = [IpRules |-> "held", FlowListeners |-> "held"]
+  holders = {"IpRules", "FlowListeners"}
+
+State 8 [RecRepair]
+  rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
+  flDmg = FALSE
+
+State 9 [RecRestore]
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  holders = {}
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> TRUE ]
+
+State 10 [BringUp]
+  entries = {1}
+  lis = {1}
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> TRUE, reopenEarly |-> TRUE ]
+
+State 11 [ListenerTaskExit]
+  flDmg = TRUE
+
+State 12 [MtlsPartial]
+  reject = TRUE
+
+State 13 [RecQuiesce]
+  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+  entries = {}
+  lis = {}
+  holders = {"IpRules"}
+
+State 14 [RecQuiesce]
+  rec = [IpRules |-> "held", FlowListeners |-> "held"]
+  holders = {"IpRules", "FlowListeners"}
+
+State 15 [MtlsPartial]
+  reject = FALSE
+
+State 16 [RecRepair]
+  rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
+  flDmg = FALSE
+
+State 17 [RecRestore]
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  holders = {}
+
+State 18 [ListenerTaskExit]
+  flDmg = TRUE
+
+-> loops back to State 11

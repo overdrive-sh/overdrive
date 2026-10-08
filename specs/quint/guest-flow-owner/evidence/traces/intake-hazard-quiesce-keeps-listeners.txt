@@ -1,0 +1,36 @@
+# intake-hazard-quiesce-keeps-listeners: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  sess = FALSE
+  bindLeft = 1
+  entries = {}
+  alloc = "Absent"
+  up = TRUE
+  lis = {}
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  lastLS = {}
+  gen = 0
+  steerLeft = -1
+  quiesced = FALSE
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ActivateBegin]
+  alloc = "Activating"
+
+State 5 [ActivateOk]
+  alloc = "Active"
+
+State 6 [Quiesce]
+  quiesced = TRUE
+
+State 7 [ListenState]
+  lastLS = {1}
+
+State 8 [BindListen]
+  lis = {1}

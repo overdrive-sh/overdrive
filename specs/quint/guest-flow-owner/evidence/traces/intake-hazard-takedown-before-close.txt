@@ -1,0 +1,39 @@
+# intake-hazard-takedown-before-close: counterexample, 9 state(s) (from the TLC trace)
+
+State 1
+  alloc = "Absent"
+  entries = {}
+  sess = FALSE
+  quiesced = FALSE
+  lis = {}
+  gen = 0
+  up = TRUE
+  steerLeft = -1
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  bindLeft = 1
+  lastLS = {}
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ActivateBegin]
+  alloc = "Activating"
+
+State 5 [ActivateOk]
+  alloc = "Active"
+
+State 6 [ListenState]
+  lastLS = {1}
+
+State 7 [BindListen]
+  lis = {1}
+
+State 8 [Steer]
+  entries = {1}
+
+State 9 [ListenState]
+  lastLS = {}

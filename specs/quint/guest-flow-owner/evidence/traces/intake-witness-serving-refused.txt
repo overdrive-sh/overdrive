@@ -1,0 +1,27 @@
+# intake-witness-serving-refused: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  steerLeft = -1
+  quiesced = FALSE
+  lastLS = {}
+  sess = FALSE
+  bindLeft = 1
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  alloc = "Absent"
+  entries = {}
+  lis = {}
+  up = TRUE
+  gen = 0
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ListenState]
+  lastLS = {1}
+
+State 5 [ActivateBegin]
+  alloc = "Activating"

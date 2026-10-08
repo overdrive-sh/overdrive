@@ -1,0 +1,41 @@
+# prefix-boot-hazard-ignore-failure: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  crashLeft = -1
+  route = "absent"
+  up = FALSE
+  prog = "none"
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  adopted = FALSE
+  link = "none"
+  failLeft = 1
+  estab = FALSE
+  stop = "init"
+  swapOk = FALSE
+  phase = "start"
+  bin = "none"
+  loaded = FALSE
+
+State 2 [Restart]
+  up = TRUE
+  stop = "none"
+  bin = "v1"
+
+State 3 [BootStep]
+  phase = "load"
+
+State 4 [Fail]
+  failLeft = 0
+  phase = "swap"
+
+State 5 [BootStep]
+  phase = "pin"
+
+State 6 [BootStep]
+  phase = "route"
+
+State 7 [BootStep]
+  route = "local"
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> TRUE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  estab = TRUE
+  phase = "open"

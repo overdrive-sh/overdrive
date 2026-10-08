@@ -1,0 +1,67 @@
+# prefix-boot-witness-update: counterexample, 11 state(s) (from the TLC trace)
+
+State 1
+  stop = "init"
+  phase = "start"
+  swapOk = FALSE
+  failLeft = 1
+  bin = "none"
+  loaded = FALSE
+  route = "absent"
+  prog = "none"
+  crashLeft = -1
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  up = FALSE
+  estab = FALSE
+  adopted = FALSE
+  link = "none"
+
+State 2 [Restart]
+  stop = "none"
+  bin = "v2"
+  up = TRUE
+
+State 3 [BootStep]
+  phase = "load"
+
+State 4 [BootStep]
+  phase = "swap"
+  loaded = TRUE
+
+State 5 [BootStep]
+  phase = "pin"
+  swapOk = TRUE
+  prog = "v2"
+  link = "attached"
+
+State 6 [BootStep]
+  phase = "route"
+  link = "pinned"
+
+State 7 [Fail]
+  stop = "refused"
+  phase = "start"
+  swapOk = FALSE
+  failLeft = 0
+  loaded = FALSE
+  g = [ refused |-> TRUE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  up = FALSE
+
+State 8 [Restart]
+  stop = "none"
+  bin = "v1"
+  up = TRUE
+
+State 9 [BootStep]
+  phase = "load"
+
+State 10 [BootStep]
+  phase = "swap"
+  loaded = TRUE
+
+State 11 [BootStep]
+  phase = "pin"
+  swapOk = TRUE
+  prog = "v1"
+  g = [ refused |-> TRUE, loadRefused |-> FALSE, updated |-> TRUE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  adopted = TRUE

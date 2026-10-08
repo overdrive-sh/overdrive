@@ -1,7 +1,9 @@
 State 1: <Initial predicate>
-/\ lease_bugRemember_cid_lease_errsLeft = 0
+/\ lease_bugRemember_cid_lease_pend = {}
+/\ lease_bugRemember_cid_lease_bootLeft = -1
+/\ lease_bugRemember_cid_lease_errsLeft = 1
 /\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> -1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemember_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRemember_cid_lease_todo = {}
 /\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
@@ -14,7 +16,6 @@ State 1: <Initial predicate>
      retry |-> FALSE,
      remembered |-> {} ] >>
 /\ lease_bugRemember_cid_lease_walker = 0
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
 /\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
   skipFree |-> FALSE,
   skipped |-> FALSE,
@@ -26,38 +27,12 @@ State 1: <Initial predicate>
 /\ lease_bugRemember_cid_lease_exitsLeft = 1
 /\ lease_bugRemember_cid_lease_cursor = 0
 
-State 2: <lease_bugRemember_cid_lease_ForeignTake line 611, col 3 to line 613, col 9 of module lease_bugRemember>
-/\ lease_bugRemember_cid_lease_errsLeft = 0
+State 2: <lease_bugRemember_cid_lease_AssignBegin line 667, col 3 to line 735, col 47 of module lease_bugRemember>
+/\ lease_bugRemember_cid_lease_pend = {}
+/\ lease_bugRemember_cid_lease_bootLeft = -1
+/\ lease_bugRemember_cid_lease_errsLeft = 1
 /\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_todo = {}
-/\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ],
-   [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ] >>
-/\ lease_bugRemember_cid_lease_walker = 0
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
-/\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
-  skipped |-> FALSE,
-  skipOrphan |-> FALSE,
-  refusedHeld |-> FALSE,
-  refusedClaimable |-> FALSE,
-  claimErr |-> FALSE,
-  refusedUnasked |-> FALSE ]
-/\ lease_bugRemember_cid_lease_exitsLeft = 1
-/\ lease_bugRemember_cid_lease_cursor = 0
-
-State 3: <lease_bugRemember_cid_lease_AssignBegin line 704, col 3 to line 772, col 47 of module lease_bugRemember>
-/\ lease_bugRemember_cid_lease_errsLeft = 0
-/\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> 0)
+/\ lease_bugRemember_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRemember_cid_lease_todo = {0, 1, 2}
 /\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
@@ -70,7 +45,6 @@ State 3: <lease_bugRemember_cid_lease_AssignBegin line 704, col 3 to line 772, c
      retry |-> FALSE,
      remembered |-> {} ] >>
 /\ lease_bugRemember_cid_lease_walker = 1
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
 /\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
   skipFree |-> FALSE,
   skipped |-> FALSE,
@@ -82,10 +56,12 @@ State 3: <lease_bugRemember_cid_lease_AssignBegin line 704, col 3 to line 772, c
 /\ lease_bugRemember_cid_lease_exitsLeft = 1
 /\ lease_bugRemember_cid_lease_cursor = 0
 
-State 4: <lease_bugRemember_cid_lease_AssignTry line 778, col 3 to line 884, col 47 of module lease_bugRemember>
-/\ lease_bugRemember_cid_lease_errsLeft = 0
+State 3: <lease_bugRemember_cid_lease_AssignTry line 741, col 3 to line 847, col 47 of module lease_bugRemember>
+/\ lease_bugRemember_cid_lease_pend = {}
+/\ lease_bugRemember_cid_lease_bootLeft = -1
+/\ lease_bugRemember_cid_lease_errsLeft = 1
 /\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> 0)
+/\ lease_bugRemember_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRemember_cid_lease_todo = {1, 2}
 /\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
@@ -98,11 +74,10 @@ State 4: <lease_bugRemember_cid_lease_AssignTry line 778, col 3 to line 884, col
      retry |-> FALSE,
      remembered |-> {} ] >>
 /\ lease_bugRemember_cid_lease_walker = 1
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
 /\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
   skipFree |-> FALSE,
   skipped |-> TRUE,
-  skipOrphan |-> FALSE,
+  skipOrphan |-> TRUE,
   refusedHeld |-> FALSE,
   refusedClaimable |-> FALSE,
   claimErr |-> FALSE,
@@ -110,142 +85,89 @@ State 4: <lease_bugRemember_cid_lease_AssignTry line 778, col 3 to line 884, col
 /\ lease_bugRemember_cid_lease_exitsLeft = 1
 /\ lease_bugRemember_cid_lease_cursor = 0
 
-State 5: <lease_bugRemember_cid_lease_AssignTry line 778, col 3 to line 884, col 47 of module lease_bugRemember>
+State 4: <lease_bugRemember_cid_lease_AssignClaimErr line 188, col 3 to line 204, col 46 of module lease_bugRemember>
+/\ lease_bugRemember_cid_lease_pend = {}
+/\ lease_bugRemember_cid_lease_bootLeft = -1
 /\ lease_bugRemember_cid_lease_errsLeft = 0
 /\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_todo = {2}
+/\ lease_bugRemember_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemember_cid_lease_todo = {}
 /\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      loc |-> "none",
      retry |-> FALSE,
-     remembered |-> {0, 1} ],
+     remembered |-> {0} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_bugRemember_cid_lease_walker = 0
+/\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> TRUE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> TRUE,
+  refusedUnasked |-> FALSE ]
+/\ lease_bugRemember_cid_lease_exitsLeft = 1
+/\ lease_bugRemember_cid_lease_cursor = 0
+
+State 5: <lease_bugRemember_cid_lease_OrphanExit line 627, col 3 to line 639, col 70 of module lease_bugRemember>
+/\ lease_bugRemember_cid_lease_pend = {}
+/\ lease_bugRemember_cid_lease_bootLeft = -1
+/\ lease_bugRemember_cid_lease_errsLeft = 0
+/\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemember_cid_lease_todo = {}
+/\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {0} ],
+   [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {} ] >>
+/\ lease_bugRemember_cid_lease_walker = 0
+/\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
+  skipFree |-> FALSE,
+  skipped |-> TRUE,
+  skipOrphan |-> TRUE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> TRUE,
+  refusedUnasked |-> FALSE ]
+/\ lease_bugRemember_cid_lease_exitsLeft = 1
+/\ lease_bugRemember_cid_lease_cursor = 0
+
+State 6: <lease_bugRemember_cid_lease_AssignBegin line 667, col 3 to line 735, col 47 of module lease_bugRemember>
+/\ lease_bugRemember_cid_lease_pend = {}
+/\ lease_bugRemember_cid_lease_bootLeft = -1
+/\ lease_bugRemember_cid_lease_errsLeft = 0
+/\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemember_cid_lease_todo = {1, 2}
+/\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     loc |-> "none",
+     retry |-> FALSE,
+     remembered |-> {0} ],
    [ st |-> "wait",
      off |-> -1,
      loc |-> "none",
      retry |-> FALSE,
      remembered |-> {} ] >>
 /\ lease_bugRemember_cid_lease_walker = 1
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
-/\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
-  skipped |-> TRUE,
-  skipOrphan |-> FALSE,
-  refusedHeld |-> FALSE,
-  refusedClaimable |-> FALSE,
-  claimErr |-> FALSE,
-  refusedUnasked |-> FALSE ]
-/\ lease_bugRemember_cid_lease_exitsLeft = 1
-/\ lease_bugRemember_cid_lease_cursor = 0
-
-State 6: <lease_bugRemember_cid_lease_ForeignTake line 611, col 3 to line 613, col 9 of module lease_bugRemember>
-/\ lease_bugRemember_cid_lease_errsLeft = 0
-/\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
-/\ lease_bugRemember_cid_lease_todo = {2}
-/\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {0, 1} ],
-   [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ] >>
-/\ lease_bugRemember_cid_lease_walker = 1
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
-/\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
-  skipped |-> TRUE,
-  skipOrphan |-> FALSE,
-  refusedHeld |-> FALSE,
-  refusedClaimable |-> FALSE,
-  claimErr |-> FALSE,
-  refusedUnasked |-> FALSE ]
-/\ lease_bugRemember_cid_lease_exitsLeft = 1
-/\ lease_bugRemember_cid_lease_cursor = 0
-
-State 7: <lease_bugRemember_cid_lease_AssignTry line 778, col 3 to line 884, col 47 of module lease_bugRemember>
-/\ lease_bugRemember_cid_lease_errsLeft = 0
-/\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
-/\ lease_bugRemember_cid_lease_todo = {}
-/\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {0, 1, 2} ],
-   [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ] >>
-/\ lease_bugRemember_cid_lease_walker = 0
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
-/\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
-  skipped |-> TRUE,
-  skipOrphan |-> FALSE,
-  refusedHeld |-> TRUE,
-  refusedClaimable |-> FALSE,
-  claimErr |-> FALSE,
-  refusedUnasked |-> FALSE ]
-/\ lease_bugRemember_cid_lease_exitsLeft = 1
-/\ lease_bugRemember_cid_lease_cursor = 0
-
-State 8: <lease_bugRemember_cid_lease_ForeignRelease line 619, col 3 to line 621, col 6 of module lease_bugRemember>
-/\ lease_bugRemember_cid_lease_errsLeft = 0
-/\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> -1 @@ 2 :> -1)
-/\ lease_bugRemember_cid_lease_todo = {}
-/\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {0, 1, 2} ],
-   [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ] >>
-/\ lease_bugRemember_cid_lease_walker = 0
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
-/\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
-  skipped |-> TRUE,
-  skipOrphan |-> FALSE,
-  refusedHeld |-> TRUE,
-  refusedClaimable |-> FALSE,
-  claimErr |-> FALSE,
-  refusedUnasked |-> FALSE ]
-/\ lease_bugRemember_cid_lease_exitsLeft = 1
-/\ lease_bugRemember_cid_lease_cursor = 0
-
-State 9: <lease_bugRemember_cid_lease_AssignBegin line 704, col 3 to line 772, col 47 of module lease_bugRemember>
-/\ lease_bugRemember_cid_lease_errsLeft = 0
-/\ lease_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> -1 @@ 2 :> -1)
-/\ lease_bugRemember_cid_lease_todo = {}
-/\ lease_bugRemember_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {0, 1, 2} ],
-   [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ] >>
-/\ lease_bugRemember_cid_lease_walker = 0
-/\ lease_bugRemember_cid_lease_foreignLeft = 0
 /\ lease_bugRemember_cid_lease_g = [ clash |-> FALSE,
   skipFree |-> TRUE,
   skipped |-> TRUE,
-  skipOrphan |-> FALSE,
-  refusedHeld |-> TRUE,
-  refusedClaimable |-> TRUE,
-  claimErr |-> FALSE,
-  refusedUnasked |-> TRUE ]
+  skipOrphan |-> TRUE,
+  refusedHeld |-> FALSE,
+  refusedClaimable |-> FALSE,
+  claimErr |-> TRUE,
+  refusedUnasked |-> FALSE ]
 /\ lease_bugRemember_cid_lease_exitsLeft = 1
 /\ lease_bugRemember_cid_lease_cursor = 0
