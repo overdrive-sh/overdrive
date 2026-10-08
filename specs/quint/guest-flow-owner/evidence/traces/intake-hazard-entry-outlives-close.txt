@@ -1,17 +1,19 @@
 # intake-hazard-entry-outlives-close: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  parked = {}
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
   lastLS = {}
   sess = FALSE
+  oRes = 0
   lis = {}
+  oEnt = 0
   quiesced = FALSE
   alloc = "Absent"
   gen = 0
   entries = {}
   up = TRUE
   bindLeft = 1
-  steerLeft = -1
 
 State 2 [Provision]
   alloc = "Provisioned"

@@ -28,17 +28,17 @@ State 3
   vmUp = true
 
 State 4
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
+  sess = Map(1 -> { gen: 1, st: "pending" }, 2 -> { gen: 0, st: "none" })
 
 State 5
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "queued" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  claim = true
+  sess = Map(1 -> { gen: 1, st: "live" }, 2 -> { gen: 0, st: "none" })
 
 State 6
-  claim = true
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "live" })
+  alloc = "Active"
 
 State 7
-  alloc = "Active"
+  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "queued" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
 
 State 8
   flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "accepted" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })

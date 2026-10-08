@@ -2,14 +2,15 @@
 
 This directory holds the formal model of the guest-flow owner protocol of the
 vsock attachment replacement (feature `netns-density-295`, ADR-0145 to
-ADR-0171). The specification is a design artifact and the DISTILL conformance
+ADR-0176). The specification is a design artifact and the DISTILL conformance
 oracle (ADR-0168, decision QUINT): DISTILL drives the implementation against
 these modules through quint-connect. The models encode the design text of
-**revision 10** (revision 9, the APPLIANCE narrowing of 2026-10-07 and
-D8a-LOAD-SWAP of 2026-10-08, which removed the runtime probe and boot `verify`) in
+**revision 11** (revision 9, the APPLIANCE narrowing of 2026-10-07,
+D8a-LOAD-SWAP of 2026-10-08, which removed the runtime probe and boot `verify`,
+and D8a-CAP of 2026-10-08, intake-port admission against the steering capacity) in
 `docs/feature/netns-density-295/feature-delta.md` § *vsock Attachment
 Replacement DESIGN* (§ *Revision 9 decisions*, item 7 APPLIANCE; § *Revision 10
-decisions*; § *Formal protocol model*). On the appliance only Overdrive writes the kernel objects the
+decisions*; § *User decisions — 2026-10-08*; § *Formal protocol model*). On the appliance only Overdrive writes the kernel objects the
 model covers (A-31), so no action stands for other software deleting the nft
 table, deleting steering entries, detaching the steering link, writing the
 route or taking a CID. Crash and restart at every step and Overdrive's own
@@ -23,9 +24,11 @@ Model-check results: `docs/feature/netns-density-295/spike/quint-owner-findings.
 `docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r5.md`
 (revision 9 + APPLIANCE: the steering model split into four concerns),
 `docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r6.md`
-(probe before attach in `prefix_boot`) and
+(probe before attach in `prefix_boot`),
 `docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r7.md`
-(this revision: load → swap → route in `prefix_boot`, D8a-LOAD-SWAP).
+(load → swap → route in `prefix_boot`, D8a-LOAD-SWAP) and
+`docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r8.md`
+(this revision: D8a-CAP in `intake`, M-4 in `prefix_boot`, M-2 in `quiescence`).
 
 ## Layout
 
@@ -36,7 +39,7 @@ Model-check results: `docs/feature/netns-density-295/spike/quint-owner-findings.
 | `cid_lease.qnt` | Module C: lease offsets → CID, next-fit walk with the atomic host-kernel claim (D16-CLAIM), claim handoff to the VMM, release, `serve` crash with surviving VMMs (the only CID holders outside the pool) and restart |
 | `prefix_landing.qnt` | Shared, stateless: where a connection to a workload address lands, per client class (used by the four steering modules) |
 | `prefix_boot.qnt` | Steering concern 1: boot convergence of the pinned steering and the prefix route (D8a-ROUTE, D8a-LOAD-SWAP, U-4) |
-| `intake.qnt` | Steering concern 2: intake listeners and their steering entries (D8a-LOOKUP, D23, U-6, U-3, M-7) |
+| `intake.qnt` | Steering concern 2: intake-port admission against the steering capacity, intake listeners and their steering entries (D8a-LOOKUP, D8a-CAP, D23, U-6, U-3, M-7) |
 | `quiescence.qnt` | Steering concern 3: named quiescence holders and component recoveries (D8a-HOLD, ADR-0124, UP-7, UP-12) |
 | `shared_table.qnt` | Steering concern 4: the shared nft table left partial by Overdrive (K-D3), the steering's independence from it, the leg-C bypass window and the table repair under the IpRules recovery's hold |
 | `hazard/*.qnt` | Hazard instances: each is a main module instantiated with one design rule switched off through its `OFF` constant (a one-line `import`) |
@@ -56,14 +59,15 @@ therefore `import <module>(OFF = Set("<rule>"), CFG = "<cfg>").* from "../<modul
 | B | Socket liveness, pending `sock_release` reports, slots, host associations, control messages | claim, send, associate, pair / refuse / abort, late `Paired`, pairing deadline, socket close (report or lost report), report handling, audit, idle release |
 | C | The kernel's CID holder table (free / surviving VMM / our claim), lease per offset, next-fit cursor, the `assign` walk (pool lock), per-allocation state and where its claim's file is (slot / in transit / VMM) | assign begin, one claim per step (claim / `InUse` skip / non-`InUse` error), `take_claim`, `create` Ok / Err, VMM exit before READY, stop, `pool.release`, redeploy, surviving-VMM exit, `serve` crash + restart (a VMM being created survives iff it had inherited its device) |
 | boot | `serve` up / boot phase / why down, this boot's program version, whether it loaded and whether its swap returned Ok, the link (none / attached unpinned / pinned) and its program, the tagged route (`absent` / `local`) and `estab` | boot steps 1–8 (one step), load (the kernel verifier may reject), swap (`BPF_LINK_UPDATE` of the adopted link, or a first attach then pin), route; a failure of each of these and of the route write (→ refuse, route not written, earlier program kept); crash between any two steps and inside swap (between attach and pin); restart with either program version |
-| intake | `serve` up, intake listeners, steering entries, allocation state, session, last `ListenState`, quiescence | per-allocation events (each closes every listener whose port stops serving, in the same step: K-L3), bind / listen, `steer` and their failures (steer may fail forever), activation begin / Ok / rollback, teardown, release, quiesce / restore, crash, restart |
-| quiescence | holders, latch, per-component recovery state (idle / held / repaired), damage, attempts, the wanted intake listener, the route (`local`; the `otherRepairsPrefix` hazard writes a revision-9 fence form, standing for any write) | damage (recurring), quiesce under the component's holder, repair (that component only), repair failure, failed post-repair audit, restore with the hold, fail-stop, owner bring-up, crash, restart (boot may leave the table partial again) |
+| intake | `serve` up, intake listeners, steering entries, allocation state (its reservation of the declared ports while held, Retiring included: D8a-CAP), session, last `ListenState`, quiescence, ports parked by a reported steer defect, one other allocation's reservation and steered listeners (the map's capacity CAP = 2) | admission (reserve, or refuse `IntakeCapacityReached` with no state change) of ours and the other allocation, per-allocation events (each closes every listener whose port stops serving, in the same step: K-L3), bind / listen and their failure (retried), `steer` Ok / `KernelMemory` (retried, A-MEM) / a defect (reported, not retried: the port is parked until it stops serving) / the kernel's capacity refusal (unreachable with admission), activation begin / Ok / rollback, teardown, release, quiesce / restore, the other allocation's steer / close / release, crash, restart |
+| quiescence | holders, latch, per-component recovery state (idle / held / repaired), damage, attempts, the wanted intake listener, whether the route (single form `local`) and the pinned steering are as boot converged them or a runtime step wrote one of them (the `otherRepairsPrefix` hazard: any runtime route or steering write) | damage (recurring), quiesce under the component's holder, repair (that component only), repair failure, failed post-repair audit, restore with the hold, fail-stop, owner bring-up, crash, restart (boot may leave the table partial again) |
 | shared_table | boot phase, the table's two parts (`divert`, `reject`), steering link, route, listeners and entries, holders and recoveries (IpRules, FlowListeners) | boot step 8 complete / stopping part-way / a crash between its batches, step 9, the mTLS worker's runtime convergence stopping part-way (unbounded), listener-task exit, owner bring-up, recovery steps, crash, restart |
 
 **Abstraction.** One CID (or one workload address) reused by two allocations;
 two control connections; two guest-opened flows and one host-opened flow; two
 UDP slots, two sockets, one or two destinations; three lease offsets and two or
-three workloads; two guest ports, one or two declared. Time is abstract: every
+three workloads; two guest ports, one or two declared; a steering capacity of
+two entries shared with one other allocation declaring two ports. Time is abstract: every
 deadline is a nondeterministic action. A connection's landing place
 (`prefix_landing.qnt`) is a state predicate over three client classes
 (Overdrive's marked leg-S / probes, other host-local clients, remote clients)
@@ -75,7 +79,7 @@ rules as absent (the steering alone); `intake` takes boot as one step, the
 steering converged and the rules complete; `quiescence` abstracts the table to a
 damage flag and the listeners to one wanted listener; `shared_table` takes step
 9 as one step that always succeeds. The shipped steering program is assumed
-correct (Tier-3 tests in CI, V-26): a program that loads is a correct program,
+correct (A-33): a program that loads is a correct program,
 so no module has a defective-program state. Per-allocation serialization (M-7)
 is one atomic step per event that also closes every listener whose port stops
 serving. The `assign` walk is stepwise (one claim ioctl per step) and holds the
@@ -103,20 +107,21 @@ pool lock; surviving VMMs exit between its steps.
 | K-D5 | Closing a listener resets the children in its accept queue | V-13 |
 | K-L1 | `sk_lookup` runs for a loopback-ingress connection to a `local`-route address that carries no socket, before the listener / wildcard lookup; a drop yields a TCP reset | V-26 |
 | K-L2 | A prerouting TPROXY-assigned packet (leg-C divert) bypasses `sk_lookup` | V-26 |
-| K-L3 | Closing a listening socket removes it from the socket map in the same step (`intake_bugEntryOutlives` drops it) | V-26 |
+| K-L3 | Closing a listening socket removes it from the socket map in the same step, and its slot is free for a new entry (D8a-CAP) (`intake_bugEntryOutlives` drops it) | V-26 (iii), (x) |
 | K-L4 | The pinned link and map keep running with no process; after the owner exits the map holds no live socket | V-26 |
 | K-L5 | Ingress ifindex is loopback for host-local connects, the receiving device otherwise | V-26 |
-| K-L9 | `BPF_LINK_UPDATE` swaps the link's program atomically, and on error the link still runs the earlier program (`prefix_boot`: `swap` of an adopted link is one atomic step; a failed `swap` keeps the program) | V-27 |
-| A-PROG | The shipped steering program decides as specified: a program that loads is a correct program (`prefix_landing`: an attached program is `ours`) | Tier-3 steering tests in CI (V-26) |
+| K-L9 | `BPF_LINK_UPDATE` swaps the link's program atomically, and on error the link still runs the earlier program (`prefix_boot`: `swap` of an adopted link is one atomic step; a failed `swap` keeps the program) | V-26 (viii) |
+| A-MEM | A `steer` refused for kernel memory (`KernelMemory`) succeeds on a later retry: memory pressure is not permanent (`intake`: strong fairness on a successful `Steer` in `ServingReachable`; `ServingReachableNoMemRecovery` drops it) | Environment, not a kernel unknown (node memory capacity: #261); the exposure is observable (`guest_intake.bind_failed { retried: true }`), V-9 reports any occurrence at density |
+| A-33 | The shipped steering program decides as specified: a program that loads is a correct program (`prefix_landing`: an attached program is `ours`) | The Tier-3 steering scenarios R5-1, R5-2, R5-3 and R5-25, run in CI on the pinned kernel (ADR-0068); not checked at runtime |
 | A-31 | Only Overdrive writes the node's kernel objects (APPLIANCE) | The appliance image configuration (ADR-0068); not a runtime validation item |
 
 ## Properties and teeth
 
 | Module | Safety (design instances) | Progress (TLC) | Teeth (`OFF`) |
 |---|---|---|---|
-| `prefix_boot` | `LocalOnlyOverLink` (invariant 6: `local` only while a link with a loaded program exists), `LocalOnlyOverLinkWhileDown`, `RouteOnlyAfterSwap`, `NoWildcardReached`, `NothingDeliveredWhileDown`, `NoElsewhere` (U-4), `NeverDetached` (K-L9), `OpenConverged` (a boot opens only with its program in the pinned link and the route `local`) | `BootOpens` | `routeFirst`, `ignoreFailure`, `detach` (non-atomic swap), `unpinned` |
-| `intake` | `NoWildcardReached`, `ReachOnlyServing`, `EntryNamesServingListener`, `NothingDeliveredWhileDown`, `RemoteNeverDirect`, `UnmarkedOnLegC`, `ActivationAllOrNothing`, `ProvisionedHasNoListener`, `NoReleaseWithListener`, `QuiescedClosesListeners` | `ServingReachable`, `ActivationCompletes` | `entryOutlives` (K-L3), `takedownBeforeClose`, `rollbackPartial`, `actOkPartial`, `teardownKeeps`, `quiesceKeeps` |
-| `quiescence` | `LatchIffHolders`, `HeldIsHolder`, `NoReopenBeforeRepair`, `NoRepairWithoutHold`, `QuiescedClosesListeners`, `RepairNeverWritesPrefix`, `FailStopLeavesPrefixLocal` (UP-12) | `IpRulesEpisodeEnds`, `FlowListenersEpisodeEnds` (UP-7), `IpRulesRepaired` — each under its own recovery's fairness only | `anyRestore`, `repairNoHold`, `redoNoCount` (UP-7), `otherRepairsPrefix` |
+| `prefix_boot` | `LocalOnlyOverLink` (invariant 6, M-4: `local` only while a pinned link with a loaded program exists), `LocalOnlyOverLinkWhileDown`, `RouteOnlyAfterSwap`, `NoWildcardReached`, `NothingDeliveredWhileDown`, `NoElsewhere` (U-4), `NeverDetached` (K-L9), `OpenConverged` (a boot opens only with its program in the pinned link and the route `local`) | `BootOpens` | `routeFirst`, `ignoreFailure`, `detach` (non-atomic swap), `unpinned` |
+| `intake` | `NoWildcardReached`, `ReachOnlyServing`, `EntryNamesServingListener`, `NothingDeliveredWhileDown`, `RemoteNeverDirect`, `UnmarkedOnLegC`, `ActivationAllOrNothing`, `ProvisionedHasNoListener`, `NoReleaseWithListener`, `QuiescedClosesListeners`, invariant 12 (D8a-CAP): `ReservedWithinCapacity`, `ListenersWithinReserved`, `EntriesWithinListeners`, `NoCapacitySteerFailure`; `ParkedOnlyWhileServing` | `ServingReachable` (under A-MEM; a port parked by a reported defect is excluded), `ActivationCompletes` | `entryOutlives` (K-L3), `takedownBeforeClose`, `rollbackPartial`, `actOkPartial`, `teardownKeeps`, `quiesceKeeps`, `noIntakeAdmission` (D8a-CAP), `noIntakeAdmission` + `capRetry` (the revision-10 capacity-driven retry) |
+| `quiescence` | `LatchIffHolders`, `HeldIsHolder`, `NoReopenBeforeRepair`, `NoRepairWithoutHold`, `QuiescedClosesListeners`, `RepairNeverWritesPrefix`, `FailStopLeavesPrefixAsBooted` (UP-12) | `IpRulesEpisodeEnds`, `FlowListenersEpisodeEnds` (UP-7), `IpRulesRepaired` — each under its own recovery's fairness only | `anyRestore`, `repairNoHold`, `redoNoCount` (UP-7), `otherRepairsPrefix` |
 | `shared_table` | `NoWildcardReached` (invariant 11), `RemoteNeverDirect`, `NothingDeliveredWhileDown`, `NoReopenBeforeRepair`, `QuiescedClosesListeners` | `TableRepaired` (the IpRules recovery's repair completes under its hold, or `serve` stops) — under that recovery's own fairness and boot only | `steeringInNft`, `unpinned`, `nonLoopback`, `anyRestore` |
 | C | `CidUnique`, `ClaimHeld`, `NoLaunchClash`, `NoSkipWhileClaimable`, `NoLeakedClaim`, `RefusalEachClaimInUse` | `EventuallyPlaced` | `checkThenClaim`, `releaseBeforeVmm`, `rememberInUse` |
 
@@ -125,8 +130,10 @@ listed in `checks.toml`.
 
 Not modelled: D25-BIND (R5-15), D26 / V-21, V-20, framing and unframe (D5 /
 D5a), VIP resolution (D24 / D24a), half-close drain, the listen-state lag
-bound, D15-R3 deadlines, the beacon beyond its claim discipline, an untagged
-route overlapping the prefix (`ForeignGuestPrefixRoute`), the map-shape
+bound, D15-R3 deadlines, the beacon beyond its claim discipline, the unframe
+program's attachment set (D5a-IFACE), the forwarder's process-owned links
+(D19-LINKS), the boot prefix-configuration check (D8-PREFIX-CFG: it runs before
+any boot effect), the map-shape
 replacement at `load` (a new map at every boot), the ADR-0124 time bound itself (the model checks
 ordering and step counts; the bound is V-9).
 

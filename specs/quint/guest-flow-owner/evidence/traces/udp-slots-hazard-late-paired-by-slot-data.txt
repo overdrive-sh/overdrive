@@ -19,29 +19,29 @@ State 1
   guestEnded = Set()
 
 State 2
-  slots = Map(0 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 }, 1 -> { dest: 1, fid: 0, holders: 1, owned: true, parked: Set((1, 1)), routed: false, sock: 1 })
+  slots = Map(0 -> { dest: 1, fid: 0, holders: 1, owned: true, parked: Set((1, 1)), routed: false, sock: 1 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
 
 State 3
-  slots = Map(0 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 }, 1 -> { dest: 1, fid: 1, holders: 1, owned: true, parked: Set((1, 1)), routed: false, sock: 1 })
+  slots = Map(0 -> { dest: 1, fid: 1, holders: 1, owned: true, parked: Set((1, 1)), routed: false, sock: 1 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
   nextFid = 2
-  host = Map(1 -> { dest: 1, slot: 1, sock: 1, st: "req" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
+  host = Map(1 -> { dest: 1, slot: 0, sock: 1, st: "req" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
 
 State 4
-  host = Map(1 -> { dest: 1, slot: 1, sock: 1, st: "paired" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
-  toGuestPaired = Set(1)
-
-State 5
   sockAlive = Map(1 -> false, 2 -> true)
   releasePending = Map(1 -> true, 2 -> false)
 
-State 6
+State 5
   slots = Map(0 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
   toHostEnd = Set(1)
 
+State 6
+  slots = Map(0 -> { dest: 2, fid: 0, holders: 1, owned: true, parked: Set((2, 2)), routed: false, sock: 2 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
+
 State 7
-  slots = Map(0 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 }, 1 -> { dest: 2, fid: 0, holders: 1, owned: true, parked: Set((2, 2)), routed: false, sock: 2 })
+  host = Map(1 -> { dest: 1, slot: 0, sock: 1, st: "paired" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
+  toGuestPaired = Set(1)
 
 State 8
-  slots = Map(0 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 }, 1 -> { dest: 2, fid: 1, holders: 1, owned: true, parked: Set(), routed: true, sock: 2 })
+  slots = Map(0 -> { dest: 2, fid: 1, holders: 1, owned: true, parked: Set(), routed: true, sock: 2 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
   toGuestPaired = Set()
   misdelivered = true

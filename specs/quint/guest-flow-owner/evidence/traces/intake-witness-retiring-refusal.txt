@@ -1,0 +1,26 @@
+# intake-witness-retiring-refusal: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  quiesced = FALSE
+  lastLS = {}
+  sess = FALSE
+  oRes = 0
+  bindLeft = 1
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+  oEnt = 0
+  alloc = "Absent"
+  entries = {}
+  parked = {}
+  lis = {}
+  up = TRUE
+  gen = 0
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [Teardown]
+  alloc = "Retiring"
+
+State 4 [OtherAdmit]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> TRUE, defected |-> FALSE ]

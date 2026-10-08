@@ -462,18 +462,18 @@ State 16: <lease_live_bugRemember_cid_lease_Stop line 577, col 3 to line 621, co
 /\ lease_live_bugRemember_cid_lease_errsLeft = 0
 /\ lease_live_bugRemember_cid_lease_walker = 0
 
-State 17: <lease_live_bugRemember_cid_lease_OrphanExit line 712, col 3 to line 730, col 80 of module lease_live_bugRemember>
-/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
+State 17: <lease_live_bugRemember_cid_lease_AssignBegin line 757, col 3 to line 837, col 52 of module lease_live_bugRemember>
+/\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> -2 @@ 2 :> 2)
 /\ lease_live_bugRemember_cid_lease_todo = {}
 /\ lease_live_bugRemember_cid_lease_cursor = 0
 /\ lease_live_bugRemember_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
+  skipFree |-> TRUE,
   skipped |-> TRUE,
   skipOrphan |-> TRUE,
-  refusedHeld |-> FALSE,
-  refusedClaimable |-> FALSE,
+  refusedHeld |-> TRUE,
+  refusedClaimable |-> TRUE,
   claimErr |-> TRUE,
-  refusedUnasked |-> FALSE ]
+  refusedUnasked |-> TRUE ]
 /\ lease_live_bugRemember_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
 /\ lease_live_bugRemember_cid_lease_bootLeft = 0
 /\ lease_live_bugRemember_cid_lease_exitsLeft = 2
@@ -491,7 +491,7 @@ State 17: <lease_live_bugRemember_cid_lease_OrphanExit line 712, col 3 to line 7
 /\ lease_live_bugRemember_cid_lease_errsLeft = 0
 /\ lease_live_bugRemember_cid_lease_walker = 0
 
-State 18: <lease_live_bugRemember_cid_lease_AssignBegin line 757, col 3 to line 837, col 52 of module lease_live_bugRemember>
+State 18: <lease_live_bugRemember_cid_lease_OrphanExit line 712, col 3 to line 730, col 80 of module lease_live_bugRemember>
 /\ lease_live_bugRemember_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
 /\ lease_live_bugRemember_cid_lease_todo = {}
 /\ lease_live_bugRemember_cid_lease_cursor = 0

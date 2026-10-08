@@ -2,10 +2,10 @@
 
 State 1
   repLeft = 1
+  prefix = "booted"
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
   stop = "none"
-  route = "local"
   lis = TRUE
   up = TRUE
   dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
@@ -23,6 +23,7 @@ State 3 [RecQuiesce]
   holders = {"IpRules"}
 
 State 4 [RecRepair]
+  prefix = "written"
   rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> TRUE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
   dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]

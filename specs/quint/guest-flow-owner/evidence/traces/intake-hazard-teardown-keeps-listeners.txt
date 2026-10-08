@@ -1,7 +1,6 @@
 # intake-hazard-teardown-keeps-listeners: counterexample, 9 state(s) (from the TLC trace)
 
 State 1
-  steerLeft = -1
   bindLeft = 1
   alloc = "Absent"
   lastLS = {}
@@ -9,9 +8,12 @@ State 1
   gen = 0
   up = TRUE
   sess = FALSE
+  oRes = 0
   entries = {}
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+  oEnt = 0
   quiesced = FALSE
+  parked = {}
 
 State 2 [Provision]
   alloc = "Provisioned"
@@ -39,4 +41,4 @@ State 8 [Teardown]
 State 9 [Release]
   alloc = "Absent"
   lastLS = {}
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> TRUE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> TRUE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]

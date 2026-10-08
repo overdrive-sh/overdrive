@@ -10,7 +10,7 @@ State 1
   stop = "none"
   up = TRUE
   att = [IpRules |-> 0, FlowListeners |-> 0]
-  route = "local"
+  prefix = "booted"
   holders = {}
 
 State 2 [Damage]

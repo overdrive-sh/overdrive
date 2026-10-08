@@ -55,7 +55,7 @@ module shared_table {
   var phase: str            // start | rules | steer | open
   var divert: bool
   var reject: bool
-  var link: str             // none | pinned  (the pinned steering, verified)
+  var link: str             // none | pinned  (the pinned steering link running this boot's program)
   var route: str            // absent | local
   var lis: Set[int]
   var entries: Set[int]
@@ -103,7 +103,7 @@ module shared_table {
     if (phase == "start") all { phase' = "rules", keepTable, keepNode }
     // step 8: leg-C, then the constant rules (converged complete)
     else if (phase == "rules") all { phase' = "steer", divert' = true, reject' = true, keepNode }
-    // step 9: the pinned steering converged, verified, probed; then the route `local`
+    // step 9: this boot's program loaded and swapped into the pinned link (concern 1); then the route `local`
     else all { phase' = "open", keepTable, link' = "pinned", route' = "local" },
     up' = up, lis' = lis, entries' = entries, keepRec, flDmg' = flDmg, repLeft' = repLeft, g' = g,
   }

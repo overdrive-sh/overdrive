@@ -1,14 +1,16 @@
 # intake-witness-serving-refused: counterexample, 5 state(s) (from the TLC trace)
 
 State 1
-  steerLeft = -1
   quiesced = FALSE
   lastLS = {}
   sess = FALSE
+  oRes = 0
   bindLeft = 1
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+  oEnt = 0
   alloc = "Absent"
   entries = {}
+  parked = {}
   lis = {}
   up = TRUE
   gen = 0

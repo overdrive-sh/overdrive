@@ -17,10 +17,10 @@
  *     detach; with no pin, the program is attached (link process-scoped) and then pinned (two
  *     sub-steps: `swap`, `pin`). `route` keeps or adds the tagged `local` route.
  *   - Any failure of load / swap / pin / the route write → startup refuses
- *     `GuestPrefixSteeringUnverified`; the route is not written and the link keeps its earlier
+ *     `GuestPrefixSteeringConverge`; the route is not written and the link keeps its earlier
  *     program (K-L9; nothing is attached after a failed load).
- *   - The shipped program is assumed correct (discharged by Tier-3 tests in CI, V-26): a program that
- *     loads is a correct program, so the model has no defective-program state.
+ *   - The shipped program is assumed correct (A-33, discharged by the Tier-3 steering scenarios R5-1,
+ *     R5-2, R5-3, R5-25 in CI): a program that loads is a correct program, so the model has no defective-program state.
  *   - the route has two forms, `absent` and `local`; route, pinned link and map persist across a
  *     crash and graceful shutdown (U-4, K-D3, K-L4); nothing at runtime writes the route or the
  *     program (A-31), so this module has no runtime.
@@ -200,8 +200,9 @@ module prefix_boot {
   action step = any { Restart, BootStep, Fail, Crash }
 
   // ------------------------------------------------------------------ invariants
-  // (6, D8a-ROUTE) the route is `local` only while a link with a loaded program exists
-  val LocalOnlyOverLink: bool = route == "local" implies (link != "none" and prog != "none")
+  // (6, D8a-ROUTE, M-4) the route is `local` only while a PINNED steering link with a loaded program
+  // exists (a first link attached and not yet pinned does not count)
+  val LocalOnlyOverLink: bool = route == "local" implies (link == "pinned" and prog != "none")
   // (6) ... in particular whenever serve is down (crash, refusal, fail-stop)
   val LocalOnlyOverLinkWhileDown: bool = not(up) implies LocalOnlyOverLink
   // (D8a-ROUTE) a boot writes `local` only after its own swap returned Ok

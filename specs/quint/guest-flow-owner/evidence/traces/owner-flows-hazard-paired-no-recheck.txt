@@ -31,36 +31,34 @@ State 4
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
 
 State 5
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "queued" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
-
-State 6
   claim = true
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "live" })
+
+State 6
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "queued" })
 
 State 7
   alloc = "Active"
 
 State 8
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "accepted" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "accepted" })
 
 State 9
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 1, st: "accepted" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 1, st: "accepted" })
 
 State 10
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 2, st: "read" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 2, st: "read" })
 
 State 11
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 2, st: "installed" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 2, st: "installed" })
 
 State 12
-  flows = Map(1 -> { gen: 1, inFlight: true, req: 2, st: "connecting" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: true, req: 2, st: "connecting" })
 
 State 13
-  alloc = "Retiring"
-  claim = false
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "closed" })
-  flows = Map(1 -> { gen: 1, inFlight: true, req: 2, st: "closed" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  quiesced = true
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: true, req: 2, st: "closed" })
 
 State 14
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 2, st: "paired" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 2, st: "paired" })
   badPaired = true

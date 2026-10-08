@@ -2,6 +2,7 @@ State 1: <Initial predicate>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
@@ -9,17 +10,17 @@ State 1: <Initial predicate>
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = TRUE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = FALSE
 
-State 2: <quiesce_live_bugRedoNoCount_quiescence_Damage line 564, col 3 to line 583, col 49 of module quiesce_live_bugRedoNoCount>
-/\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+State 2: <quiesce_live_bugRedoNoCount_quiescence_Damage line 565, col 3 to line 584, col 49 of module quiesce_live_bugRedoNoCount>
+/\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
@@ -27,17 +28,17 @@ State 2: <quiesce_live_bugRedoNoCount_quiescence_Damage line 564, col 3 to line 
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = TRUE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = FALSE
 
-State 3: <quiesce_live_bugRedoNoCount_quiescence_Damage line 564, col 3 to line 583, col 49 of module quiesce_live_bugRedoNoCount>
+State 3: <quiesce_live_bugRedoNoCount_quiescence_Damage line 565, col 3 to line 584, col 49 of module quiesce_live_bugRedoNoCount>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
@@ -45,17 +46,17 @@ State 3: <quiesce_live_bugRedoNoCount_quiescence_Damage line 564, col 3 to line 
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = TRUE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = FALSE
 
-State 4: <quiesce_live_bugRedoNoCount_quiescence_RecQuiesce line 240, col 3 to line 273, col 7 of module quiesce_live_bugRedoNoCount>
+State 4: <quiesce_live_bugRedoNoCount_quiescence_RecQuiesce line 239, col 3 to line 272, col 7 of module quiesce_live_bugRedoNoCount>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
@@ -63,17 +64,17 @@ State 4: <quiesce_live_bugRedoNoCount_quiescence_RecQuiesce line 240, col 3 to l
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules"}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
 
-State 5: <quiesce_live_bugRedoNoCount_quiescence_RepFail line 511, col 3 to line 558, col 7 of module quiesce_live_bugRedoNoCount>
+State 5: <quiesce_live_bugRedoNoCount_quiescence_RepFail line 512, col 3 to line 559, col 7 of module quiesce_live_bugRedoNoCount>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 0]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
@@ -81,17 +82,17 @@ State 5: <quiesce_live_bugRedoNoCount_quiescence_RepFail line 511, col 3 to line
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules"}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
 
-State 6: <quiesce_live_bugRedoNoCount_quiescence_RecQuiesce line 240, col 3 to line 273, col 7 of module quiesce_live_bugRedoNoCount>
+State 6: <quiesce_live_bugRedoNoCount_quiescence_RecQuiesce line 239, col 3 to line 272, col 7 of module quiesce_live_bugRedoNoCount>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 0]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
@@ -99,155 +100,82 @@ State 6: <quiesce_live_bugRedoNoCount_quiescence_RecQuiesce line 240, col 3 to l
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "held"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules", "FlowListeners"}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
 
-State 7: <quiesce_live_bugRedoNoCount_quiescence_RecRepair line 279, col 3 to line 322, col 7 of module quiesce_live_bugRedoNoCount>
-/\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
-/\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 0]
-/\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
-/\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  prefixWritten |-> FALSE,
-  overlapped |-> TRUE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> FALSE ]
-/\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
-/\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
-/\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules", "FlowListeners"}
-/\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
-/\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
-/\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
-
-State 8: <quiesce_live_bugRedoNoCount_quiescence_RecRestore line 366, col 3 to line 435, col 53 of module quiesce_live_bugRedoNoCount>
-/\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
-/\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 0]
-/\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
-/\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  prefixWritten |-> FALSE,
-  overlapped |-> TRUE,
-  stillQuiesced |-> TRUE,
-  failStopped |-> FALSE ]
-/\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
-/\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
-/\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules"}
-/\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
-/\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
-/\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
-
-State 9: <quiesce_live_bugRedoNoCount_quiescence_Damage line 564, col 3 to line 583, col 49 of module quiesce_live_bugRedoNoCount>
-/\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
-/\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 0]
-/\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
-/\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  prefixWritten |-> FALSE,
-  overlapped |-> TRUE,
-  stillQuiesced |-> TRUE,
-  failStopped |-> FALSE ]
-/\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
-/\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
-/\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules"}
-/\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
-/\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
-/\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
-
-State 10: <quiesce_live_bugRedoNoCount_quiescence_RecQuiesce line 240, col 3 to line 273, col 7 of module quiesce_live_bugRedoNoCount>
-/\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
-/\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 0]
-/\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
-/\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  prefixWritten |-> FALSE,
-  overlapped |-> TRUE,
-  stillQuiesced |-> TRUE,
-  failStopped |-> FALSE ]
-/\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
-/\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "held"]
-/\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules", "FlowListeners"}
-/\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
-/\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
-/\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
-
-State 11: <quiesce_live_bugRedoNoCount_quiescence_RepFail line 511, col 3 to line 558, col 7 of module quiesce_live_bugRedoNoCount>
+State 7: <quiesce_live_bugRedoNoCount_quiescence_RepFail line 512, col 3 to line 559, col 7 of module quiesce_live_bugRedoNoCount>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 1]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
   overlapped |-> TRUE,
-  stillQuiesced |-> TRUE,
+  stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "held"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules", "FlowListeners"}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
 
-State 12: <quiesce_live_bugRedoNoCount_quiescence_RepFail line 511, col 3 to line 558, col 7 of module quiesce_live_bugRedoNoCount>
+State 8: <quiesce_live_bugRedoNoCount_quiescence_RepFail line 512, col 3 to line 559, col 7 of module quiesce_live_bugRedoNoCount>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 2]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
   overlapped |-> TRUE,
-  stillQuiesced |-> TRUE,
+  stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "held"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules", "FlowListeners"}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
 
-State 13: <quiesce_live_bugRedoNoCount_quiescence_RecRepair line 279, col 3 to line 322, col 7 of module quiesce_live_bugRedoNoCount>
+State 9: <quiesce_live_bugRedoNoCount_quiescence_RecRepair line 278, col 3 to line 323, col 7 of module quiesce_live_bugRedoNoCount>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 2]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
   overlapped |-> TRUE,
-  stillQuiesced |-> TRUE,
+  stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "repaired", FlowListeners |-> "held"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules", "FlowListeners"}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
 
-State 14: <quiesce_live_bugRedoNoCount_quiescence_Damage line 564, col 3 to line 583, col 49 of module quiesce_live_bugRedoNoCount>
+State 10: <quiesce_live_bugRedoNoCount_quiescence_Damage line 565, col 3 to line 584, col 49 of module quiesce_live_bugRedoNoCount>
 /\ quiesce_live_bugRedoNoCount_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 /\ quiesce_live_bugRedoNoCount_quiescence_att = [IpRules |-> 1, FlowListeners |-> 2]
 /\ quiesce_live_bugRedoNoCount_quiescence_stop = "none"
+/\ quiesce_live_bugRedoNoCount_quiescence_prefix = "booted"
 /\ quiesce_live_bugRedoNoCount_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
   overlapped |-> TRUE,
-  stillQuiesced |-> TRUE,
+  stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_live_bugRedoNoCount_quiescence_up = TRUE
-/\ quiesce_live_bugRedoNoCount_quiescence_route = "local"
 /\ quiesce_live_bugRedoNoCount_quiescence_rec = [IpRules |-> "repaired", FlowListeners |-> "held"]
 /\ quiesce_live_bugRedoNoCount_quiescence_holders = {"IpRules", "FlowListeners"}
 /\ quiesce_live_bugRedoNoCount_quiescence_repLeft = -1
 /\ quiesce_live_bugRedoNoCount_quiescence_lis = FALSE
 /\ quiesce_live_bugRedoNoCount_quiescence_latch = TRUE
 
-Back to state 12: <quiesce_live_bugRedoNoCount_quiescence_RecRedo line 328, col 3 to line 360, col 49 of module quiesce_live_bugRedoNoCount>
+Back to state 8: <quiesce_live_bugRedoNoCount_quiescence_RecRedo line 329, col 3 to line 361, col 49 of module quiesce_live_bugRedoNoCount>

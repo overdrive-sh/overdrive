@@ -31,7 +31,7 @@ State 2: <boot_bugRouteFirst_prefix_boot_Restart line 280, col 5 to line 291, co
 /\ boot_bugRouteFirst_prefix_boot_route = "absent"
 /\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
 /\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
-/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_bin = "v2"
 /\ boot_bugRouteFirst_prefix_boot_estab = FALSE
 /\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
   loadRefused |-> FALSE,
@@ -55,7 +55,7 @@ State 3: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, c
 /\ boot_bugRouteFirst_prefix_boot_route = "absent"
 /\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
 /\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
-/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_bin = "v2"
 /\ boot_bugRouteFirst_prefix_boot_estab = FALSE
 /\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
   loadRefused |-> FALSE,
@@ -79,7 +79,7 @@ State 4: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, c
 /\ boot_bugRouteFirst_prefix_boot_route = "local"
 /\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
 /\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
-/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_bin = "v2"
 /\ boot_bugRouteFirst_prefix_boot_estab = TRUE
 /\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
   loadRefused |-> FALSE,

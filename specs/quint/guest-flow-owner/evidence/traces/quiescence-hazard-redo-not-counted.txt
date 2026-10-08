@@ -1,12 +1,12 @@
-# quiescence-hazard-redo-not-counted: counterexample, 14 state(s) (from the TLC trace)
+# quiescence-hazard-redo-not-counted: counterexample, 10 state(s) (from the TLC trace)
 
 State 1
   dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
   att = [IpRules |-> 0, FlowListeners |-> 0]
   stop = "none"
+  prefix = "booted"
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
   up = TRUE
-  route = "local"
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   holders = {}
   repLeft = -1
@@ -14,7 +14,7 @@ State 1
   latch = FALSE
 
 State 2 [Damage]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 
 State 3 [Damage]
   dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
@@ -33,33 +33,17 @@ State 6 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "held"]
   holders = {"IpRules", "FlowListeners"}
 
-State 7 [RecRepair]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
-  rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
-
-State 8 [RecRestore]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE ]
-  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
-  holders = {"IpRules"}
-
-State 9 [Damage]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
-
-State 10 [RecQuiesce]
-  rec = [IpRules |-> "held", FlowListeners |-> "held"]
-  holders = {"IpRules", "FlowListeners"}
-
-State 11 [RepFail]
+State 7 [RepFail]
   att = [IpRules |-> 1, FlowListeners |-> 1]
 
-State 12 [RepFail]
+State 8 [RepFail]
   att = [IpRules |-> 1, FlowListeners |-> 2]
 
-State 13 [RecRepair]
+State 9 [RecRepair]
   dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
   rec = [IpRules |-> "repaired", FlowListeners |-> "held"]
 
-State 14 [Damage]
+State 10 [Damage]
   dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 
--> loops back to State 12
+-> loops back to State 8

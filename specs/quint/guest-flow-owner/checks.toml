@@ -7,9 +7,9 @@
 # expect "holds" = the design property; "violation" = a non-vacuity witness (the behaviour is
 # reachable), a hazard/teeth instance (one design rule switched off through OFF), or documented
 # behaviour. Expectations are the design's claims; where the prediction written before the run
-# differs, the comment above the check says so (round 7: D8a-LOAD-SWAP of 2026-10-08 in
-# prefix_boot; findings:
-# docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r7.md).
+# differs, the comment above the check says so (round 8: revision 11 — D8a-CAP in intake, M-4 in
+# prefix_boot, M-2 in quiescence; findings:
+# docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r8.md).
 # ci = true only for checks measured under 2 minutes wall-clock on the Lima VM (`cargo xtask quint check`).
 
 
@@ -234,6 +234,7 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
+# round 8: ci = false (148.6 s in round 7; review L-3)
 [[check]]
 name = "udp-slots-release-liveness"
 spec = "udp_slots.qnt"
@@ -241,7 +242,7 @@ main = "slots_live"
 temporal = "ReleasedSlotBecomesFree"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 
 [[check]]
 name = "udp-slots-safety-apalache"
@@ -335,6 +336,7 @@ max_steps = 12
 expect = "violation"
 ci = false
 
+# round 8: ci = false (135.8 s in round 7, start-up retry included)
 [[check]]
 name = "udp-slots-hazard-ignore-late-paired"
 spec = "hazard/udp_slots_hazards.qnt"
@@ -343,7 +345,7 @@ invariant = "LatePairedAborted"
 backend = "apalache"
 max_steps = 12
 expect = "violation"
-ci = true
+ci = false
 
 [[check]]
 name = "udp-slots-hazard-keep-frames-on-end"
@@ -741,8 +743,9 @@ ci = true
 
 
 # Steering concern 2 — intake listeners and their steering entries (intake.qnt): D8a-LOOKUP, D23, U-6,
-# U-3, M-7. Instances: intake_ok (one declared port, crash, one bind failure, steer failing forever),
-# intake_two (two declared ports, one steer failure), intake_live (steer fails once).
+# U-3, M-7, D8a-CAP. Instances: intake_ok (one declared port, crash, one bind failure, KernelMemory
+# steer failures unbounded, steer defects, another allocation competing for the capacity CAP = 2),
+# intake_two (two declared ports), intake_live (as intake_ok, no steer defects).
 [[check]]
 name = "intake-safety-tlc"
 spec = "intake.qnt"
@@ -761,6 +764,7 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
+# round 8: 166.8 s with the other allocation and the capacity added (over 2 minutes: not CI)
 [[check]]
 name = "intake-safety-apalache"
 spec = "intake.qnt"
@@ -769,12 +773,23 @@ invariant = "Safety"
 backend = "apalache"
 max_steps = 12
 expect = "holds"
-ci = true
+ci = false
 
+# D8a-CAP + A-MEM: a serving port is eventually reachable (round 7: violated, steer could fail forever)
 [[check]]
 name = "intake-serving-reachable"
 spec = "intake.qnt"
 main = "intake_live"
+temporal = "ServingReachable"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+# with steer defects: a parked port is released when it stops serving
+[[check]]
+name = "intake-serving-reachable-with-defects"
+spec = "intake.qnt"
+main = "intake_ok"
 temporal = "ServingReachable"
 backend = "tlc"
 expect = "holds"
@@ -789,15 +804,52 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
-# steer failing forever: the serving port stays refused (documented, R5-22; safety holds in
-# intake-safety-tlc, which runs this instance)
+# assumption off (A-MEM): kernel memory never recovers, KernelMemory steer failures forever — the
+# serving port stays refused; shows what the transience of KernelMemory carries
 [[check]]
 name = "intake-steer-forever-unreachable"
 spec = "intake.qnt"
-main = "intake_ok"
-temporal = "ServingReachable"
+main = "intake_live"
+temporal = "ServingReachableNoMemRecovery"
 backend = "tlc"
 expect = "violation"
+ci = true
+
+# Invariant 12 (D8a-CAP), each also in Safety
+[[check]]
+name = "intake-reserved-within-capacity"
+spec = "intake.qnt"
+main = "intake_two"
+invariant = "ReservedWithinCapacity"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-listeners-within-reserved"
+spec = "intake.qnt"
+main = "intake_two"
+invariant = "ListenersWithinReserved"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-entries-within-listeners"
+spec = "intake.qnt"
+main = "intake_two"
+invariant = "EntriesWithinListeners"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-no-capacity-steer-failure"
+spec = "intake.qnt"
+main = "intake_two"
+invariant = "NoCapacitySteerFailure"
+backend = "tlc"
+expect = "holds"
 ci = true
 
 # Non-vacuity witnesses (expected violation)
@@ -855,6 +907,43 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
+# D8a-CAP witnesses
+[[check]]
+name = "intake-witness-capacity-refusal"
+spec = "intake.qnt"
+main = "intake_ok"
+invariant = "WitnessNoCapacityRefusal"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "intake-witness-retiring-refusal"
+spec = "intake.qnt"
+main = "intake_ok"
+invariant = "WitnessNoRetiringRefusal"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "intake-witness-full-map"
+spec = "intake.qnt"
+main = "intake_two"
+invariant = "WitnessNoFullMap"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "intake-witness-defect"
+spec = "intake.qnt"
+main = "intake_ok"
+invariant = "WitnessNoDefect"
+backend = "tlc"
+expect = "violation"
+ci = true
+
 # Teeth (hazard/intake_hazards.qnt)
 [[check]]
 name = "intake-hazard-entry-outlives-close"
@@ -906,6 +995,35 @@ name = "intake-hazard-quiesce-keeps-listeners"
 spec = "hazard/intake_hazards.qnt"
 main = "intake_bugQuiesceKeeps"
 invariant = "QuiescedClosesListeners"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# D8a-CAP: admission does not reserve
+[[check]]
+name = "intake-hazard-no-admission-over-capacity"
+spec = "hazard/intake_hazards.qnt"
+main = "intake_bugNoIntakeAdmission"
+invariant = "ReservedWithinCapacity"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "intake-hazard-no-admission-capacity-steer-failure"
+spec = "hazard/intake_hazards.qnt"
+main = "intake_bugNoIntakeAdmission"
+invariant = "NoCapacitySteerFailure"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# D8a-CAP: revision-10 capacity-driven retry with admission off — the port retries forever against a full map
+[[check]]
+name = "intake-hazard-cap-retry-unreachable"
+spec = "hazard/intake_hazards.qnt"
+main = "intake_bugCapRetryNoAdmission"
+temporal = "ServingReachable"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1055,10 +1173,10 @@ expect = "violation"
 ci = true
 
 [[check]]
-name = "quiescence-hazard-fail-stop-fences"
+name = "quiescence-hazard-fail-stop-after-runtime-prefix-write"
 spec = "hazard/quiescence_hazards.qnt"
 main = "quiesce_bugOtherRepairsPrefix"
-invariant = "FailStopLeavesPrefixLocal"
+invariant = "FailStopLeavesPrefixAsBooted"
 backend = "tlc"
 expect = "violation"
 ci = true

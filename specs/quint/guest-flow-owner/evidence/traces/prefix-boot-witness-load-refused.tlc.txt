@@ -27,7 +27,7 @@ State 2: <boot_ok_prefix_boot_Restart line 222, col 5 to line 233, col 56 of mod
 /\ boot_ok_prefix_boot_phase = "start"
 /\ boot_ok_prefix_boot_swapOk = FALSE
 /\ boot_ok_prefix_boot_failLeft = 1
-/\ boot_ok_prefix_boot_bin = "v2"
+/\ boot_ok_prefix_boot_bin = "v1"
 /\ boot_ok_prefix_boot_loaded = FALSE
 /\ boot_ok_prefix_boot_route = "absent"
 /\ boot_ok_prefix_boot_prog = "none"
@@ -51,7 +51,7 @@ State 3: <boot_ok_prefix_boot_BootStep line 308, col 3 to line 407, col 57 of mo
 /\ boot_ok_prefix_boot_phase = "load"
 /\ boot_ok_prefix_boot_swapOk = FALSE
 /\ boot_ok_prefix_boot_failLeft = 1
-/\ boot_ok_prefix_boot_bin = "v2"
+/\ boot_ok_prefix_boot_bin = "v1"
 /\ boot_ok_prefix_boot_loaded = FALSE
 /\ boot_ok_prefix_boot_route = "absent"
 /\ boot_ok_prefix_boot_prog = "none"
@@ -75,7 +75,7 @@ State 4: <boot_ok_prefix_boot_Fail line 413, col 3 to line 452, col 10 of module
 /\ boot_ok_prefix_boot_phase = "start"
 /\ boot_ok_prefix_boot_swapOk = FALSE
 /\ boot_ok_prefix_boot_failLeft = 0
-/\ boot_ok_prefix_boot_bin = "v2"
+/\ boot_ok_prefix_boot_bin = "v1"
 /\ boot_ok_prefix_boot_loaded = FALSE
 /\ boot_ok_prefix_boot_route = "absent"
 /\ boot_ok_prefix_boot_prog = "none"

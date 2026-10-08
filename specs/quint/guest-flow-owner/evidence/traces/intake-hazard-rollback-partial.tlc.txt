@@ -1,151 +1,199 @@
 State 1: <Initial predicate>
+/\ intake_bugRollbackPartial_intake_parked = {}
 /\ intake_bugRollbackPartial_intake_alloc = "Absent"
 /\ intake_bugRollbackPartial_intake_sess = FALSE
+/\ intake_bugRollbackPartial_intake_oRes = 0
 /\ intake_bugRollbackPartial_intake_lastLS = {}
+/\ intake_bugRollbackPartial_intake_oEnt = 0
 /\ intake_bugRollbackPartial_intake_lis = {}
 /\ intake_bugRollbackPartial_intake_up = TRUE
 /\ intake_bugRollbackPartial_intake_gen = 0
 /\ intake_bugRollbackPartial_intake_quiesced = FALSE
-/\ intake_bugRollbackPartial_intake_steerLeft = 1
 /\ intake_bugRollbackPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugRollbackPartial_intake_entries = {}
 /\ intake_bugRollbackPartial_intake_bindLeft = 1
 
-State 2: <intake_bugRollbackPartial_intake_Provision line 622, col 3 to line 631, col 80 of module intake_bugRollbackPartial>
+State 2: <intake_bugRollbackPartial_intake_Provision line 791, col 3 to line 804, col 80 of module intake_bugRollbackPartial>
+/\ intake_bugRollbackPartial_intake_parked = {}
 /\ intake_bugRollbackPartial_intake_alloc = "Provisioned"
 /\ intake_bugRollbackPartial_intake_sess = FALSE
+/\ intake_bugRollbackPartial_intake_oRes = 0
 /\ intake_bugRollbackPartial_intake_lastLS = {}
+/\ intake_bugRollbackPartial_intake_oEnt = 0
 /\ intake_bugRollbackPartial_intake_lis = {}
 /\ intake_bugRollbackPartial_intake_up = TRUE
 /\ intake_bugRollbackPartial_intake_gen = 1
 /\ intake_bugRollbackPartial_intake_quiesced = FALSE
-/\ intake_bugRollbackPartial_intake_steerLeft = 1
 /\ intake_bugRollbackPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugRollbackPartial_intake_entries = {}
 /\ intake_bugRollbackPartial_intake_bindLeft = 1
 
-State 3: <intake_bugRollbackPartial_intake_SessOpen line 637, col 3 to line 646, col 80 of module intake_bugRollbackPartial>
+State 3: <intake_bugRollbackPartial_intake_SessOpen line 810, col 3 to line 821, col 80 of module intake_bugRollbackPartial>
+/\ intake_bugRollbackPartial_intake_parked = {}
 /\ intake_bugRollbackPartial_intake_alloc = "Provisioned"
 /\ intake_bugRollbackPartial_intake_sess = TRUE
+/\ intake_bugRollbackPartial_intake_oRes = 0
 /\ intake_bugRollbackPartial_intake_lastLS = {}
+/\ intake_bugRollbackPartial_intake_oEnt = 0
 /\ intake_bugRollbackPartial_intake_lis = {}
 /\ intake_bugRollbackPartial_intake_up = TRUE
 /\ intake_bugRollbackPartial_intake_gen = 1
 /\ intake_bugRollbackPartial_intake_quiesced = FALSE
-/\ intake_bugRollbackPartial_intake_steerLeft = 1
 /\ intake_bugRollbackPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugRollbackPartial_intake_entries = {}
 /\ intake_bugRollbackPartial_intake_bindLeft = 1
 
-State 4: <intake_bugRollbackPartial_intake_ListenState line 599, col 3 to line 616, col 80 of module intake_bugRollbackPartial>
+State 4: <intake_bugRollbackPartial_intake_ListenState line 766, col 3 to line 785, col 80 of module intake_bugRollbackPartial>
+/\ intake_bugRollbackPartial_intake_parked = {}
 /\ intake_bugRollbackPartial_intake_alloc = "Provisioned"
 /\ intake_bugRollbackPartial_intake_sess = TRUE
+/\ intake_bugRollbackPartial_intake_oRes = 0
 /\ intake_bugRollbackPartial_intake_lastLS = {1}
+/\ intake_bugRollbackPartial_intake_oEnt = 0
 /\ intake_bugRollbackPartial_intake_lis = {}
 /\ intake_bugRollbackPartial_intake_up = TRUE
 /\ intake_bugRollbackPartial_intake_gen = 1
 /\ intake_bugRollbackPartial_intake_quiesced = FALSE
-/\ intake_bugRollbackPartial_intake_steerLeft = 1
 /\ intake_bugRollbackPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugRollbackPartial_intake_entries = {}
 /\ intake_bugRollbackPartial_intake_bindLeft = 1
 
-State 5: <intake_bugRollbackPartial_intake_ListenState line 599, col 3 to line 616, col 80 of module intake_bugRollbackPartial>
+State 5: <intake_bugRollbackPartial_intake_ListenState line 766, col 3 to line 785, col 80 of module intake_bugRollbackPartial>
+/\ intake_bugRollbackPartial_intake_parked = {}
 /\ intake_bugRollbackPartial_intake_alloc = "Provisioned"
 /\ intake_bugRollbackPartial_intake_sess = TRUE
+/\ intake_bugRollbackPartial_intake_oRes = 0
 /\ intake_bugRollbackPartial_intake_lastLS = {1, 2}
+/\ intake_bugRollbackPartial_intake_oEnt = 0
 /\ intake_bugRollbackPartial_intake_lis = {}
 /\ intake_bugRollbackPartial_intake_up = TRUE
 /\ intake_bugRollbackPartial_intake_gen = 1
 /\ intake_bugRollbackPartial_intake_quiesced = FALSE
-/\ intake_bugRollbackPartial_intake_steerLeft = 1
 /\ intake_bugRollbackPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugRollbackPartial_intake_entries = {}
 /\ intake_bugRollbackPartial_intake_bindLeft = 1
 
-State 6: <intake_bugRollbackPartial_intake_ActivateBegin line 274, col 3 to line 294, col 80 of module intake_bugRollbackPartial>
+State 6: <intake_bugRollbackPartial_intake_ActivateBegin line 338, col 3 to line 362, col 80 of module intake_bugRollbackPartial>
+/\ intake_bugRollbackPartial_intake_parked = {}
 /\ intake_bugRollbackPartial_intake_alloc = "Activating"
 /\ intake_bugRollbackPartial_intake_sess = TRUE
+/\ intake_bugRollbackPartial_intake_oRes = 0
 /\ intake_bugRollbackPartial_intake_lastLS = {1, 2}
+/\ intake_bugRollbackPartial_intake_oEnt = 0
 /\ intake_bugRollbackPartial_intake_lis = {}
 /\ intake_bugRollbackPartial_intake_up = TRUE
 /\ intake_bugRollbackPartial_intake_gen = 1
 /\ intake_bugRollbackPartial_intake_quiesced = FALSE
-/\ intake_bugRollbackPartial_intake_steerLeft = 1
 /\ intake_bugRollbackPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugRollbackPartial_intake_entries = {}
 /\ intake_bugRollbackPartial_intake_bindLeft = 1
 
-State 7: <intake_bugRollbackPartial_intake_BindListen line 427, col 3 to line 442, col 80 of module intake_bugRollbackPartial>
+State 7: <intake_bugRollbackPartial_intake_BindListen line 612, col 3 to line 633, col 80 of module intake_bugRollbackPartial>
+/\ intake_bugRollbackPartial_intake_parked = {}
 /\ intake_bugRollbackPartial_intake_alloc = "Activating"
 /\ intake_bugRollbackPartial_intake_sess = TRUE
+/\ intake_bugRollbackPartial_intake_oRes = 0
 /\ intake_bugRollbackPartial_intake_lastLS = {1, 2}
-/\ intake_bugRollbackPartial_intake_lis = {1}
+/\ intake_bugRollbackPartial_intake_oEnt = 0
+/\ intake_bugRollbackPartial_intake_lis = {2}
 /\ intake_bugRollbackPartial_intake_up = TRUE
 /\ intake_bugRollbackPartial_intake_gen = 1
 /\ intake_bugRollbackPartial_intake_quiesced = FALSE
-/\ intake_bugRollbackPartial_intake_steerLeft = 1
 /\ intake_bugRollbackPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugRollbackPartial_intake_entries = {}
 /\ intake_bugRollbackPartial_intake_bindLeft = 1
 
-State 8: <intake_bugRollbackPartial_intake_BindFail line 540, col 3 to line 550, col 51 of module intake_bugRollbackPartial>
+State 8: <intake_bugRollbackPartial_intake_BindFail line 721, col 3 to line 731, col 90 of module intake_bugRollbackPartial>
+/\ intake_bugRollbackPartial_intake_parked = {}
 /\ intake_bugRollbackPartial_intake_alloc = "Provisioned"
 /\ intake_bugRollbackPartial_intake_sess = TRUE
+/\ intake_bugRollbackPartial_intake_oRes = 0
 /\ intake_bugRollbackPartial_intake_lastLS = {1, 2}
-/\ intake_bugRollbackPartial_intake_lis = {1}
+/\ intake_bugRollbackPartial_intake_oEnt = 0
+/\ intake_bugRollbackPartial_intake_lis = {2}
 /\ intake_bugRollbackPartial_intake_up = TRUE
 /\ intake_bugRollbackPartial_intake_gen = 1
 /\ intake_bugRollbackPartial_intake_quiesced = FALSE
-/\ intake_bugRollbackPartial_intake_steerLeft = 1
 /\ intake_bugRollbackPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> TRUE,
   actErr |-> TRUE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugRollbackPartial_intake_entries = {}
 /\ intake_bugRollbackPartial_intake_bindLeft = 0

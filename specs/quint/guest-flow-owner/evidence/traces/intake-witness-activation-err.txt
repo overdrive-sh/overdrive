@@ -1,16 +1,18 @@
 # intake-witness-activation-err: counterexample, 6 state(s) (from the TLC trace)
 
 State 1
+  oEnt = 0
   lastLS = {}
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
-  steerLeft = 1
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
   lis = {}
   up = TRUE
   quiesced = FALSE
   gen = 0
+  parked = {}
   entries = {}
   bindLeft = 1
   sess = FALSE
+  oRes = 0
   alloc = "Absent"
 
 State 2 [Provision]
@@ -27,6 +29,6 @@ State 5 [ActivateBegin]
   alloc = "Activating"
 
 State 6 [BindFail]
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
   bindLeft = 0
   alloc = "Provisioned"

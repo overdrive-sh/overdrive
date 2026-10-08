@@ -14,3 +14,8 @@ module intake_bugActOkPartial { import intake(OFF = Set("actOkPartial"), CFG = "
 module intake_bugTeardownKeeps { import intake(OFF = Set("teardownKeeps"), CFG = "ok").* from "../intake" }
 // M-7: quiescence leaves intake listeners open
 module intake_bugQuiesceKeeps { import intake(OFF = Set("quiesceKeeps"), CFG = "ok").* from "../intake" }
+// D8a-CAP: admission does not reserve declared ports against the steering capacity
+module intake_bugNoIntakeAdmission { import intake(OFF = Set("noIntakeAdmission"), CFG = "ok").* from "../intake" }
+// D8a-CAP: revision-10 capacity-driven steer retry, with admission switched off (no defects: the
+// liveness instance)
+module intake_bugCapRetryNoAdmission { import intake(OFF = Set("noIntakeAdmission", "capRetry"), CFG = "live").* from "../intake" }

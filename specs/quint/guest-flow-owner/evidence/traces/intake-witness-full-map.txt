@@ -1,0 +1,44 @@
+# intake-witness-full-map: counterexample, 10 state(s) (from the TLC trace)
+
+State 1
+  oEnt = 0
+  lastLS = {}
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+  lis = {}
+  up = TRUE
+  quiesced = FALSE
+  gen = 0
+  parked = {}
+  entries = {}
+  bindLeft = 1
+  sess = FALSE
+  oRes = 0
+  alloc = "Absent"
+
+State 2 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ListenState]
+  lastLS = {1}
+
+State 5 [ListenState]
+  lastLS = {1, 2}
+
+State 6 [ActivateBegin]
+  alloc = "Activating"
+
+State 7 [BindListen]
+  lis = {1}
+
+State 8 [Steer]
+  entries = {1}
+
+State 9 [BindListen]
+  lis = {1, 2}
+
+State 10 [Steer]
+  entries = {1, 2}

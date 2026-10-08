@@ -1,4 +1,4 @@
-# shared-table-hazard-any-restore: counterexample, 18 state(s) (from the TLC trace)
+# shared-table-hazard-any-restore: counterexample, 17 state(s) (from the TLC trace)
 
 State 1
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
@@ -28,12 +28,12 @@ State 4 [BootStep]
   link = "pinned"
   route = "local"
 
-State 5 [ListenerTaskExit]
-  flDmg = TRUE
-
-State 6 [RecQuiesce]
+State 5 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "idle"]
   holders = {"IpRules"}
+
+State 6 [ListenerTaskExit]
+  flDmg = TRUE
 
 State 7 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "held"]
@@ -53,24 +53,24 @@ State 10 [BringUp]
   lis = {1}
   g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> TRUE, reopenEarly |-> TRUE ]
 
-State 11 [ListenerTaskExit]
-  flDmg = TRUE
+State 11 [MtlsPartial]
+  divert = TRUE
 
-State 12 [MtlsPartial]
-  reject = TRUE
-
-State 13 [RecQuiesce]
+State 12 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "idle"]
   entries = {}
   lis = {}
   holders = {"IpRules"}
+
+State 13 [ListenerTaskExit]
+  flDmg = TRUE
 
 State 14 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "held"]
   holders = {"IpRules", "FlowListeners"}
 
 State 15 [MtlsPartial]
-  reject = FALSE
+  divert = FALSE
 
 State 16 [RecRepair]
   rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
@@ -80,7 +80,4 @@ State 17 [RecRestore]
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   holders = {}
 
-State 18 [ListenerTaskExit]
-  flDmg = TRUE
-
--> loops back to State 11
+-> loops back to State 10

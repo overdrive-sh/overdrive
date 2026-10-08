@@ -5,11 +5,13 @@ State 1
   entries = {}
   sess = FALSE
   quiesced = FALSE
+  oRes = 0
   lis = {}
+  oEnt = 0
+  parked = {}
   gen = 0
   up = TRUE
-  steerLeft = -1
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
   bindLeft = 1
   lastLS = {}
 

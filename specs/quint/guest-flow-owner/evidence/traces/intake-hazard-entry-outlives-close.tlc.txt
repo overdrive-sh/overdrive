@@ -1,151 +1,199 @@
 State 1: <Initial predicate>
+/\ intake_bugEntryOutlives_intake_parked = {}
 /\ intake_bugEntryOutlives_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugEntryOutlives_intake_lastLS = {}
 /\ intake_bugEntryOutlives_intake_sess = FALSE
+/\ intake_bugEntryOutlives_intake_oRes = 0
 /\ intake_bugEntryOutlives_intake_lis = {}
+/\ intake_bugEntryOutlives_intake_oEnt = 0
 /\ intake_bugEntryOutlives_intake_quiesced = FALSE
 /\ intake_bugEntryOutlives_intake_alloc = "Absent"
 /\ intake_bugEntryOutlives_intake_gen = 0
 /\ intake_bugEntryOutlives_intake_entries = {}
 /\ intake_bugEntryOutlives_intake_up = TRUE
 /\ intake_bugEntryOutlives_intake_bindLeft = 1
-/\ intake_bugEntryOutlives_intake_steerLeft = -1
 
-State 2: <intake_bugEntryOutlives_intake_Provision line 593, col 3 to line 601, col 76 of module intake_bugEntryOutlives>
+State 2: <intake_bugEntryOutlives_intake_Provision line 758, col 3 to line 770, col 76 of module intake_bugEntryOutlives>
+/\ intake_bugEntryOutlives_intake_parked = {}
 /\ intake_bugEntryOutlives_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugEntryOutlives_intake_lastLS = {}
 /\ intake_bugEntryOutlives_intake_sess = FALSE
+/\ intake_bugEntryOutlives_intake_oRes = 0
 /\ intake_bugEntryOutlives_intake_lis = {}
+/\ intake_bugEntryOutlives_intake_oEnt = 0
 /\ intake_bugEntryOutlives_intake_quiesced = FALSE
 /\ intake_bugEntryOutlives_intake_alloc = "Provisioned"
 /\ intake_bugEntryOutlives_intake_gen = 1
 /\ intake_bugEntryOutlives_intake_entries = {}
 /\ intake_bugEntryOutlives_intake_up = TRUE
 /\ intake_bugEntryOutlives_intake_bindLeft = 1
-/\ intake_bugEntryOutlives_intake_steerLeft = -1
 
-State 3: <intake_bugEntryOutlives_intake_SessOpen line 607, col 3 to line 615, col 76 of module intake_bugEntryOutlives>
+State 3: <intake_bugEntryOutlives_intake_SessOpen line 776, col 3 to line 786, col 76 of module intake_bugEntryOutlives>
+/\ intake_bugEntryOutlives_intake_parked = {}
 /\ intake_bugEntryOutlives_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugEntryOutlives_intake_lastLS = {}
 /\ intake_bugEntryOutlives_intake_sess = TRUE
+/\ intake_bugEntryOutlives_intake_oRes = 0
 /\ intake_bugEntryOutlives_intake_lis = {}
+/\ intake_bugEntryOutlives_intake_oEnt = 0
 /\ intake_bugEntryOutlives_intake_quiesced = FALSE
 /\ intake_bugEntryOutlives_intake_alloc = "Provisioned"
 /\ intake_bugEntryOutlives_intake_gen = 1
 /\ intake_bugEntryOutlives_intake_entries = {}
 /\ intake_bugEntryOutlives_intake_up = TRUE
 /\ intake_bugEntryOutlives_intake_bindLeft = 1
-/\ intake_bugEntryOutlives_intake_steerLeft = -1
 
-State 4: <intake_bugEntryOutlives_intake_ListenState line 572, col 3 to line 587, col 76 of module intake_bugEntryOutlives>
+State 4: <intake_bugEntryOutlives_intake_ListenState line 735, col 3 to line 752, col 76 of module intake_bugEntryOutlives>
+/\ intake_bugEntryOutlives_intake_parked = {}
 /\ intake_bugEntryOutlives_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugEntryOutlives_intake_lastLS = {1}
 /\ intake_bugEntryOutlives_intake_sess = TRUE
+/\ intake_bugEntryOutlives_intake_oRes = 0
 /\ intake_bugEntryOutlives_intake_lis = {}
+/\ intake_bugEntryOutlives_intake_oEnt = 0
 /\ intake_bugEntryOutlives_intake_quiesced = FALSE
 /\ intake_bugEntryOutlives_intake_alloc = "Provisioned"
 /\ intake_bugEntryOutlives_intake_gen = 1
 /\ intake_bugEntryOutlives_intake_entries = {}
 /\ intake_bugEntryOutlives_intake_up = TRUE
 /\ intake_bugEntryOutlives_intake_bindLeft = 1
-/\ intake_bugEntryOutlives_intake_steerLeft = -1
 
-State 5: <intake_bugEntryOutlives_intake_ActivateBegin line 262, col 3 to line 279, col 76 of module intake_bugEntryOutlives>
+State 5: <intake_bugEntryOutlives_intake_ActivateBegin line 325, col 3 to line 346, col 76 of module intake_bugEntryOutlives>
+/\ intake_bugEntryOutlives_intake_parked = {}
 /\ intake_bugEntryOutlives_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugEntryOutlives_intake_lastLS = {1}
 /\ intake_bugEntryOutlives_intake_sess = TRUE
+/\ intake_bugEntryOutlives_intake_oRes = 0
 /\ intake_bugEntryOutlives_intake_lis = {}
+/\ intake_bugEntryOutlives_intake_oEnt = 0
 /\ intake_bugEntryOutlives_intake_quiesced = FALSE
 /\ intake_bugEntryOutlives_intake_alloc = "Activating"
 /\ intake_bugEntryOutlives_intake_gen = 1
 /\ intake_bugEntryOutlives_intake_entries = {}
 /\ intake_bugEntryOutlives_intake_up = TRUE
 /\ intake_bugEntryOutlives_intake_bindLeft = 1
-/\ intake_bugEntryOutlives_intake_steerLeft = -1
 
-State 6: <intake_bugEntryOutlives_intake_BindListen line 409, col 3 to line 423, col 76 of module intake_bugEntryOutlives>
+State 6: <intake_bugEntryOutlives_intake_BindListen line 588, col 3 to line 608, col 76 of module intake_bugEntryOutlives>
+/\ intake_bugEntryOutlives_intake_parked = {}
 /\ intake_bugEntryOutlives_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugEntryOutlives_intake_lastLS = {1}
 /\ intake_bugEntryOutlives_intake_sess = TRUE
+/\ intake_bugEntryOutlives_intake_oRes = 0
 /\ intake_bugEntryOutlives_intake_lis = {1}
+/\ intake_bugEntryOutlives_intake_oEnt = 0
 /\ intake_bugEntryOutlives_intake_quiesced = FALSE
 /\ intake_bugEntryOutlives_intake_alloc = "Activating"
 /\ intake_bugEntryOutlives_intake_gen = 1
 /\ intake_bugEntryOutlives_intake_entries = {}
 /\ intake_bugEntryOutlives_intake_up = TRUE
 /\ intake_bugEntryOutlives_intake_bindLeft = 1
-/\ intake_bugEntryOutlives_intake_steerLeft = -1
 
-State 7: <intake_bugEntryOutlives_intake_Steer line 429, col 3 to line 450, col 7 of module intake_bugEntryOutlives>
+State 7: <intake_bugEntryOutlives_intake_Steer line 887, col 3 to line 908, col 7 of module intake_bugEntryOutlives>
+/\ intake_bugEntryOutlives_intake_parked = {}
 /\ intake_bugEntryOutlives_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugEntryOutlives_intake_lastLS = {1}
 /\ intake_bugEntryOutlives_intake_sess = TRUE
+/\ intake_bugEntryOutlives_intake_oRes = 0
 /\ intake_bugEntryOutlives_intake_lis = {1}
+/\ intake_bugEntryOutlives_intake_oEnt = 0
 /\ intake_bugEntryOutlives_intake_quiesced = FALSE
 /\ intake_bugEntryOutlives_intake_alloc = "Activating"
 /\ intake_bugEntryOutlives_intake_gen = 1
 /\ intake_bugEntryOutlives_intake_entries = {1}
 /\ intake_bugEntryOutlives_intake_up = TRUE
 /\ intake_bugEntryOutlives_intake_bindLeft = 1
-/\ intake_bugEntryOutlives_intake_steerLeft = -1
 
-State 8: <intake_bugEntryOutlives_intake_Crash line 310, col 3 to line 323, col 76 of module intake_bugEntryOutlives>
+State 8: <intake_bugEntryOutlives_intake_Crash line 380, col 3 to line 397, col 76 of module intake_bugEntryOutlives>
+/\ intake_bugEntryOutlives_intake_parked = {}
 /\ intake_bugEntryOutlives_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugEntryOutlives_intake_lastLS = {}
 /\ intake_bugEntryOutlives_intake_sess = FALSE
+/\ intake_bugEntryOutlives_intake_oRes = 0
 /\ intake_bugEntryOutlives_intake_lis = {}
+/\ intake_bugEntryOutlives_intake_oEnt = 0
 /\ intake_bugEntryOutlives_intake_quiesced = FALSE
 /\ intake_bugEntryOutlives_intake_alloc = "Absent"
 /\ intake_bugEntryOutlives_intake_gen = 1
 /\ intake_bugEntryOutlives_intake_entries = {1}
 /\ intake_bugEntryOutlives_intake_up = FALSE
 /\ intake_bugEntryOutlives_intake_bindLeft = 1
-/\ intake_bugEntryOutlives_intake_steerLeft = -1

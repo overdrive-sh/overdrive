@@ -1,11 +1,11 @@
-# quiescence-hazard-fail-stop-fences: counterexample, 8 state(s) (from the TLC trace)
+# quiescence-hazard-fail-stop-after-runtime-prefix-write: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
   repLeft = 1
+  prefix = "booted"
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
   stop = "none"
-  route = "local"
   lis = TRUE
   up = TRUE
   dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
@@ -23,6 +23,7 @@ State 3 [RecQuiesce]
   holders = {"IpRules"}
 
 State 4 [RecRepair]
+  prefix = "written"
   rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> TRUE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
   dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
@@ -36,7 +37,6 @@ State 6 [RecRedo]
 
 State 7 [RepFail]
   repLeft = 0
-  route = "fence"
   att = [IpRules |-> 2, FlowListeners |-> 0]
 
 State 8 [FailStop]

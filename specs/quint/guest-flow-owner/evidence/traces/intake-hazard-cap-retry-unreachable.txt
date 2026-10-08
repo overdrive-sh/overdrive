@@ -1,0 +1,66 @@
+# intake-hazard-cap-retry-unreachable: counterexample, 16 state(s) (from the TLC trace)
+
+State 1
+  lis = {}
+  parked = {}
+  sess = FALSE
+  quiesced = FALSE
+  oRes = 0
+  gen = 0
+  oEnt = 0
+  lastLS = {}
+  bindLeft = 1
+  up = TRUE
+  entries = {}
+  alloc = "Absent"
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+
+State 2 [OtherAdmit]
+  oRes = 2
+
+State 3 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 4 [Teardown]
+  alloc = "Retiring"
+
+State 5 [OtherSteer]
+  oEnt = 1
+
+State 6 [Release]
+  alloc = "Absent"
+
+State 7 [Provision]
+  gen = 2
+  alloc = "Provisioned"
+
+State 8 [OtherSteer]
+  oEnt = 2
+
+State 9 [SessOpen]
+  sess = TRUE
+
+State 10 [ActivateBegin]
+  alloc = "Activating"
+
+State 11 [ActivateOk]
+  alloc = "Active"
+
+State 12 [ListenState]
+  lastLS = {1}
+
+State 13 [BindListen]
+  lis = {1}
+
+State 14 [SteerCapFail]
+  lis = {}
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+
+State 15 [BindFail]
+  bindLeft = 0
+
+State 16 [BindListen]
+  lis = {1}
+
+-> loops back to State 15

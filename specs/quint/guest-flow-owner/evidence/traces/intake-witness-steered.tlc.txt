@@ -1,8 +1,8 @@
 State 1: <Initial predicate>
-/\ intake_ok_intake_steerLeft = -1
 /\ intake_ok_intake_quiesced = FALSE
 /\ intake_ok_intake_lastLS = {}
 /\ intake_ok_intake_sess = FALSE
+/\ intake_ok_intake_oRes = 0
 /\ intake_ok_intake_bindLeft = 1
 /\ intake_ok_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -10,18 +10,24 @@ State 1: <Initial predicate>
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_ok_intake_oEnt = 0
 /\ intake_ok_intake_alloc = "Absent"
 /\ intake_ok_intake_entries = {}
+/\ intake_ok_intake_parked = {}
 /\ intake_ok_intake_lis = {}
 /\ intake_ok_intake_up = TRUE
 /\ intake_ok_intake_gen = 0
 
-State 2: <intake_ok_intake_Provision line 519, col 3 to line 526, col 48 of module intake_ok>
-/\ intake_ok_intake_steerLeft = -1
+State 2: <intake_ok_intake_Provision line 655, col 3 to line 664, col 48 of module intake_ok>
 /\ intake_ok_intake_quiesced = FALSE
 /\ intake_ok_intake_lastLS = {}
 /\ intake_ok_intake_sess = FALSE
+/\ intake_ok_intake_oRes = 0
 /\ intake_ok_intake_bindLeft = 1
 /\ intake_ok_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -29,18 +35,24 @@ State 2: <intake_ok_intake_Provision line 519, col 3 to line 526, col 48 of modu
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_ok_intake_oEnt = 0
 /\ intake_ok_intake_alloc = "Provisioned"
 /\ intake_ok_intake_entries = {}
+/\ intake_ok_intake_parked = {}
 /\ intake_ok_intake_lis = {}
 /\ intake_ok_intake_up = TRUE
 /\ intake_ok_intake_gen = 1
 
-State 3: <intake_ok_intake_SessOpen line 532, col 3 to line 539, col 48 of module intake_ok>
-/\ intake_ok_intake_steerLeft = -1
+State 3: <intake_ok_intake_SessOpen line 670, col 3 to line 678, col 48 of module intake_ok>
 /\ intake_ok_intake_quiesced = FALSE
 /\ intake_ok_intake_lastLS = {}
 /\ intake_ok_intake_sess = TRUE
+/\ intake_ok_intake_oRes = 0
 /\ intake_ok_intake_bindLeft = 1
 /\ intake_ok_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -48,18 +60,24 @@ State 3: <intake_ok_intake_SessOpen line 532, col 3 to line 539, col 48 of modul
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_ok_intake_oEnt = 0
 /\ intake_ok_intake_alloc = "Provisioned"
 /\ intake_ok_intake_entries = {}
+/\ intake_ok_intake_parked = {}
 /\ intake_ok_intake_lis = {}
 /\ intake_ok_intake_up = TRUE
 /\ intake_ok_intake_gen = 1
 
-State 4: <intake_ok_intake_ActivateBegin line 246, col 3 to line 259, col 48 of module intake_ok>
-/\ intake_ok_intake_steerLeft = -1
+State 4: <intake_ok_intake_ActivateBegin line 306, col 3 to line 321, col 48 of module intake_ok>
 /\ intake_ok_intake_quiesced = FALSE
 /\ intake_ok_intake_lastLS = {}
 /\ intake_ok_intake_sess = TRUE
+/\ intake_ok_intake_oRes = 0
 /\ intake_ok_intake_bindLeft = 1
 /\ intake_ok_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -67,18 +85,24 @@ State 4: <intake_ok_intake_ActivateBegin line 246, col 3 to line 259, col 48 of 
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_ok_intake_oEnt = 0
 /\ intake_ok_intake_alloc = "Activating"
 /\ intake_ok_intake_entries = {}
+/\ intake_ok_intake_parked = {}
 /\ intake_ok_intake_lis = {}
 /\ intake_ok_intake_up = TRUE
 /\ intake_ok_intake_gen = 1
 
-State 5: <intake_ok_intake_ActivateOk line 426, col 3 to line 450, col 7 of module intake_ok>
-/\ intake_ok_intake_steerLeft = -1
+State 5: <intake_ok_intake_ActivateOk line 571, col 3 to line 597, col 7 of module intake_ok>
 /\ intake_ok_intake_quiesced = FALSE
 /\ intake_ok_intake_lastLS = {}
 /\ intake_ok_intake_sess = TRUE
+/\ intake_ok_intake_oRes = 0
 /\ intake_ok_intake_bindLeft = 1
 /\ intake_ok_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -86,18 +110,24 @@ State 5: <intake_ok_intake_ActivateOk line 426, col 3 to line 450, col 7 of modu
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_ok_intake_oEnt = 0
 /\ intake_ok_intake_alloc = "Active"
 /\ intake_ok_intake_entries = {}
+/\ intake_ok_intake_parked = {}
 /\ intake_ok_intake_lis = {}
 /\ intake_ok_intake_up = TRUE
 /\ intake_ok_intake_gen = 1
 
-State 6: <intake_ok_intake_ListenState line 501, col 3 to line 513, col 48 of module intake_ok>
-/\ intake_ok_intake_steerLeft = -1
+State 6: <intake_ok_intake_ListenState line 636, col 3 to line 649, col 48 of module intake_ok>
 /\ intake_ok_intake_quiesced = FALSE
 /\ intake_ok_intake_lastLS = {1}
 /\ intake_ok_intake_sess = TRUE
+/\ intake_ok_intake_oRes = 0
 /\ intake_ok_intake_bindLeft = 1
 /\ intake_ok_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -105,18 +135,24 @@ State 6: <intake_ok_intake_ListenState line 501, col 3 to line 513, col 48 of mo
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_ok_intake_oEnt = 0
 /\ intake_ok_intake_alloc = "Active"
 /\ intake_ok_intake_entries = {}
+/\ intake_ok_intake_parked = {}
 /\ intake_ok_intake_lis = {}
 /\ intake_ok_intake_up = TRUE
 /\ intake_ok_intake_gen = 1
 
-State 7: <intake_ok_intake_BindListen line 370, col 3 to line 380, col 48 of module intake_ok>
-/\ intake_ok_intake_steerLeft = -1
+State 7: <intake_ok_intake_BindListen line 523, col 3 to line 536, col 48 of module intake_ok>
 /\ intake_ok_intake_quiesced = FALSE
 /\ intake_ok_intake_lastLS = {1}
 /\ intake_ok_intake_sess = TRUE
+/\ intake_ok_intake_oRes = 0
 /\ intake_ok_intake_bindLeft = 1
 /\ intake_ok_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -124,18 +160,24 @@ State 7: <intake_ok_intake_BindListen line 370, col 3 to line 380, col 48 of mod
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_ok_intake_oEnt = 0
 /\ intake_ok_intake_alloc = "Active"
 /\ intake_ok_intake_entries = {}
+/\ intake_ok_intake_parked = {}
 /\ intake_ok_intake_lis = {1}
 /\ intake_ok_intake_up = TRUE
 /\ intake_ok_intake_gen = 1
 
-State 8: <intake_ok_intake_Steer line 386, col 3 to line 402, col 7 of module intake_ok>
-/\ intake_ok_intake_steerLeft = -1
+State 8: <intake_ok_intake_Steer line 760, col 3 to line 776, col 7 of module intake_ok>
 /\ intake_ok_intake_quiesced = FALSE
 /\ intake_ok_intake_lastLS = {1}
 /\ intake_ok_intake_sess = TRUE
+/\ intake_ok_intake_oRes = 0
 /\ intake_ok_intake_bindLeft = 1
 /\ intake_ok_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -143,9 +185,15 @@ State 8: <intake_ok_intake_Steer line 386, col 3 to line 402, col 7 of module in
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_ok_intake_oEnt = 0
 /\ intake_ok_intake_alloc = "Active"
 /\ intake_ok_intake_entries = {1}
+/\ intake_ok_intake_parked = {}
 /\ intake_ok_intake_lis = {1}
 /\ intake_ok_intake_up = TRUE
 /\ intake_ok_intake_gen = 1

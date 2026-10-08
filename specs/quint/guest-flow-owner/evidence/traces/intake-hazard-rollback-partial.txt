@@ -1,15 +1,17 @@
 # intake-hazard-rollback-partial: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
+  parked = {}
   alloc = "Absent"
   sess = FALSE
+  oRes = 0
   lastLS = {}
+  oEnt = 0
   lis = {}
   up = TRUE
   gen = 0
   quiesced = FALSE
-  steerLeft = 1
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
   entries = {}
   bindLeft = 1
 
@@ -30,9 +32,9 @@ State 6 [ActivateBegin]
   alloc = "Activating"
 
 State 7 [BindListen]
-  lis = {1}
+  lis = {2}
 
 State 8 [BindFail]
   alloc = "Provisioned"
-  g = [ actPartial |-> FALSE, actResidue |-> TRUE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE ]
+  g = [ actPartial |-> FALSE, actResidue |-> TRUE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
   bindLeft = 0

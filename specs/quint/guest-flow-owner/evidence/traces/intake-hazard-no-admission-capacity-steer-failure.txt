@@ -1,0 +1,44 @@
+# intake-hazard-no-admission-capacity-steer-failure: counterexample, 10 state(s) (from the TLC trace)
+
+State 1
+  bindLeft = 1
+  parked = {}
+  up = TRUE
+  lis = {}
+  alloc = "Absent"
+  gen = 0
+  lastLS = {}
+  sess = FALSE
+  oRes = 0
+  entries = {}
+  quiesced = FALSE
+  oEnt = 0
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [SessOpen]
+  sess = TRUE
+
+State 4 [ListenState]
+  lastLS = {1}
+
+State 5 [ActivateBegin]
+  alloc = "Activating"
+
+State 6 [BindListen]
+  lis = {1}
+
+State 7 [Steer]
+  entries = {1}
+
+State 8 [OtherAdmit]
+  oRes = 2
+
+State 9 [OtherSteer]
+  oEnt = 1
+
+State 10 [OtherSteer]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> TRUE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]

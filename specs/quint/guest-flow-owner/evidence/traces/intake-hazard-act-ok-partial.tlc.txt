@@ -1,113 +1,149 @@
 State 1: <Initial predicate>
 /\ intake_bugActOkPartial_intake_lis = {}
 /\ intake_bugActOkPartial_intake_sess = FALSE
+/\ intake_bugActOkPartial_intake_oRes = 0
 /\ intake_bugActOkPartial_intake_gen = 0
+/\ intake_bugActOkPartial_intake_oEnt = 0
 /\ intake_bugActOkPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugActOkPartial_intake_lastLS = {}
 /\ intake_bugActOkPartial_intake_alloc = "Absent"
 /\ intake_bugActOkPartial_intake_quiesced = FALSE
 /\ intake_bugActOkPartial_intake_bindLeft = 1
 /\ intake_bugActOkPartial_intake_up = TRUE
 /\ intake_bugActOkPartial_intake_entries = {}
-/\ intake_bugActOkPartial_intake_steerLeft = -1
+/\ intake_bugActOkPartial_intake_parked = {}
 
-State 2: <intake_bugActOkPartial_intake_Provision line 586, col 3 to line 593, col 74 of module intake_bugActOkPartial>
+State 2: <intake_bugActOkPartial_intake_Provision line 753, col 3 to line 764, col 74 of module intake_bugActOkPartial>
 /\ intake_bugActOkPartial_intake_lis = {}
 /\ intake_bugActOkPartial_intake_sess = FALSE
+/\ intake_bugActOkPartial_intake_oRes = 0
 /\ intake_bugActOkPartial_intake_gen = 1
+/\ intake_bugActOkPartial_intake_oEnt = 0
 /\ intake_bugActOkPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugActOkPartial_intake_lastLS = {}
 /\ intake_bugActOkPartial_intake_alloc = "Provisioned"
 /\ intake_bugActOkPartial_intake_quiesced = FALSE
 /\ intake_bugActOkPartial_intake_bindLeft = 1
 /\ intake_bugActOkPartial_intake_up = TRUE
 /\ intake_bugActOkPartial_intake_entries = {}
-/\ intake_bugActOkPartial_intake_steerLeft = -1
+/\ intake_bugActOkPartial_intake_parked = {}
 
-State 3: <intake_bugActOkPartial_intake_SessOpen line 599, col 3 to line 607, col 74 of module intake_bugActOkPartial>
+State 3: <intake_bugActOkPartial_intake_SessOpen line 770, col 3 to line 780, col 74 of module intake_bugActOkPartial>
 /\ intake_bugActOkPartial_intake_lis = {}
 /\ intake_bugActOkPartial_intake_sess = TRUE
+/\ intake_bugActOkPartial_intake_oRes = 0
 /\ intake_bugActOkPartial_intake_gen = 1
+/\ intake_bugActOkPartial_intake_oEnt = 0
 /\ intake_bugActOkPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugActOkPartial_intake_lastLS = {}
 /\ intake_bugActOkPartial_intake_alloc = "Provisioned"
 /\ intake_bugActOkPartial_intake_quiesced = FALSE
 /\ intake_bugActOkPartial_intake_bindLeft = 1
 /\ intake_bugActOkPartial_intake_up = TRUE
 /\ intake_bugActOkPartial_intake_entries = {}
-/\ intake_bugActOkPartial_intake_steerLeft = -1
+/\ intake_bugActOkPartial_intake_parked = {}
 
-State 4: <intake_bugActOkPartial_intake_ListenState line 565, col 3 to line 580, col 74 of module intake_bugActOkPartial>
+State 4: <intake_bugActOkPartial_intake_ListenState line 730, col 3 to line 747, col 74 of module intake_bugActOkPartial>
 /\ intake_bugActOkPartial_intake_lis = {}
 /\ intake_bugActOkPartial_intake_sess = TRUE
+/\ intake_bugActOkPartial_intake_oRes = 0
 /\ intake_bugActOkPartial_intake_gen = 1
+/\ intake_bugActOkPartial_intake_oEnt = 0
 /\ intake_bugActOkPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugActOkPartial_intake_lastLS = {1}
 /\ intake_bugActOkPartial_intake_alloc = "Provisioned"
 /\ intake_bugActOkPartial_intake_quiesced = FALSE
 /\ intake_bugActOkPartial_intake_bindLeft = 1
 /\ intake_bugActOkPartial_intake_up = TRUE
 /\ intake_bugActOkPartial_intake_entries = {}
-/\ intake_bugActOkPartial_intake_steerLeft = -1
+/\ intake_bugActOkPartial_intake_parked = {}
 
-State 5: <intake_bugActOkPartial_intake_ActivateBegin line 265, col 3 to line 281, col 74 of module intake_bugActOkPartial>
+State 5: <intake_bugActOkPartial_intake_ActivateBegin line 328, col 3 to line 348, col 74 of module intake_bugActOkPartial>
 /\ intake_bugActOkPartial_intake_lis = {}
 /\ intake_bugActOkPartial_intake_sess = TRUE
+/\ intake_bugActOkPartial_intake_oRes = 0
 /\ intake_bugActOkPartial_intake_gen = 1
+/\ intake_bugActOkPartial_intake_oEnt = 0
 /\ intake_bugActOkPartial_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugActOkPartial_intake_lastLS = {1}
 /\ intake_bugActOkPartial_intake_alloc = "Activating"
 /\ intake_bugActOkPartial_intake_quiesced = FALSE
 /\ intake_bugActOkPartial_intake_bindLeft = 1
 /\ intake_bugActOkPartial_intake_up = TRUE
 /\ intake_bugActOkPartial_intake_entries = {}
-/\ intake_bugActOkPartial_intake_steerLeft = -1
+/\ intake_bugActOkPartial_intake_parked = {}
 
-State 6: <intake_bugActOkPartial_intake_ActivateOk line 475, col 3 to line 505, col 7 of module intake_bugActOkPartial>
+State 6: <intake_bugActOkPartial_intake_ActivateOk line 648, col 3 to line 682, col 7 of module intake_bugActOkPartial>
 /\ intake_bugActOkPartial_intake_lis = {}
 /\ intake_bugActOkPartial_intake_sess = TRUE
+/\ intake_bugActOkPartial_intake_oRes = 0
 /\ intake_bugActOkPartial_intake_gen = 1
+/\ intake_bugActOkPartial_intake_oEnt = 0
 /\ intake_bugActOkPartial_intake_g = [ actPartial |-> TRUE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> FALSE,
   resteered |-> FALSE,
-  revokeKept |-> FALSE ]
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
 /\ intake_bugActOkPartial_intake_lastLS = {1}
 /\ intake_bugActOkPartial_intake_alloc = "Active"
 /\ intake_bugActOkPartial_intake_quiesced = FALSE
 /\ intake_bugActOkPartial_intake_bindLeft = 1
 /\ intake_bugActOkPartial_intake_up = TRUE
 /\ intake_bugActOkPartial_intake_entries = {}
-/\ intake_bugActOkPartial_intake_steerLeft = -1
+/\ intake_bugActOkPartial_intake_parked = {}

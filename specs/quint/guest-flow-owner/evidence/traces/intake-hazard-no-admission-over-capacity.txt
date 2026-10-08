@@ -1,0 +1,23 @@
+# intake-hazard-no-admission-over-capacity: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  bindLeft = 1
+  parked = {}
+  up = TRUE
+  lis = {}
+  alloc = "Absent"
+  gen = 0
+  lastLS = {}
+  sess = FALSE
+  oRes = 0
+  entries = {}
+  quiesced = FALSE
+  oEnt = 0
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+
+State 2 [Provision]
+  alloc = "Provisioned"
+  gen = 1
+
+State 3 [OtherAdmit]
+  oRes = 2

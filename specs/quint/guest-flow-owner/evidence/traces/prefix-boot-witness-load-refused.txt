@@ -18,7 +18,7 @@ State 1
 
 State 2 [Restart]
   stop = "none"
-  bin = "v2"
+  bin = "v1"
   up = TRUE
 
 State 3 [BootStep]

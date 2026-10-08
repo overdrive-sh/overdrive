@@ -5,7 +5,7 @@ State 1
   repLeft = 1
   att = [IpRules |-> 0, FlowListeners |-> 0]
   up = TRUE
-  route = "local"
+  prefix = "booted"
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   stop = "none"
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
@@ -22,20 +22,20 @@ State 3 [RecQuiesce]
   lis = FALSE
   holders = {"IpRules"}
 
-State 4 [RepFail]
-  repLeft = 0
-  att = [IpRules |-> 1, FlowListeners |-> 0]
-
-State 5 [RecRepair]
+State 4 [RecRepair]
   dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
   rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
 
-State 6 [Damage]
+State 5 [Damage]
   dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
 
-State 7 [RecRedo]
-  att = [IpRules |-> 2, FlowListeners |-> 0]
+State 6 [RecRedo]
+  att = [IpRules |-> 1, FlowListeners |-> 0]
   rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+
+State 7 [RepFail]
+  repLeft = 0
+  att = [IpRules |-> 2, FlowListeners |-> 0]
 
 State 8 [FailStop]
   att = [IpRules |-> 0, FlowListeners |-> 0]

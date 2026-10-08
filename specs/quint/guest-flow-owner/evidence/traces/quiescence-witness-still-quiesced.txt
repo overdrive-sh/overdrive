@@ -5,7 +5,7 @@ State 1
   repLeft = 1
   att = [IpRules |-> 0, FlowListeners |-> 0]
   up = TRUE
-  route = "local"
+  prefix = "booted"
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   stop = "none"
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]

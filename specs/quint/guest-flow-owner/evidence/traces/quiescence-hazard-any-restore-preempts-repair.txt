@@ -5,10 +5,10 @@ State 1
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
   lis = TRUE
   repLeft = -1
-  route = "local"
   dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
   att = [IpRules |-> 0, FlowListeners |-> 0]
   stop = "none"
+  prefix = "booted"
   latch = FALSE
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   holders = {}

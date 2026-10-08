@@ -1,4 +1,4 @@
-# owner-flows-env-guest-misses-host-close: counterexample, 16 state(s) (from the TLC trace)
+# owner-flows-env-guest-misses-host-close: counterexample, 14 state(s) (from the TLC trace)
 
 State 1
   hf = <<[st |-> "none", gen |-> 0]>>
@@ -23,53 +23,46 @@ State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [Teardown]
-  alloc = "Retiring"
-
-State 4 [Release]
-  alloc = "Absent"
-
-State 5 [Provision]
-  alloc = "Provisioned"
-  gen = 2
-
-State 6 [VmStart]
+State 3 [VmStart]
   vmUp = TRUE
-  vmGen = 2
+  vmGen = 1
 
-State 7 [GuestOpenFlow]
-  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+State 4 [GuestOpenSession]
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 8 [GuestOpenSession]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
-
-State 9 [GuestOpenFlow]
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-
-State 10 [HostAcceptSession]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "none", gen |-> 0]>>
+State 5 [HostAcceptSession]
+  sess = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
   claim = TRUE
 
-State 11 [Activate]
+State 6 [GuestOpenSession]
+  sess = <<[st |-> "live", gen |-> 1], [st |-> "pending", gen |-> 1]>>
+
+State 7 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+
+State 8 [GuestOpenFlow]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 9 [Activate]
   alloc = "Active"
 
-State 12 [HostOpenAccept]
-  hf = <<[st |-> "req", gen |-> 2]>>
+State 10 [HostOpenAccept]
+  hf = <<[st |-> "req", gen |-> 1]>>
 
-State 13 [HostAcceptFlow]
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "accepted", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+State 11 [HostAcceptFlow]
+  flows = << [st |-> "accepted", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
 
-State 14 [GuestOpenSession]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-
-State 15 [Teardown]
-  hf = <<[st |-> "closed", gen |-> 2]>>
-  sess = <<[st |-> "closed", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+State 12 [Teardown]
+  hf = <<[st |-> "closed", gen |-> 1]>>
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 1]>>
   alloc = "Retiring"
   claim = FALSE
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+  flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
 
-State 16 [HostAcceptSession]
-  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+State 13 [HostAcceptSession]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 1]>>
 
--> stutters forever in State 16
+State 14 [HostAcceptFlow]
+  flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+-> stutters forever in State 14

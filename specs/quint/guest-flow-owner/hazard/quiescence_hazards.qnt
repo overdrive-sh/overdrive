@@ -9,5 +9,5 @@ module quiesce_live_bugAnyRestore { import quiescence(OFF = Set("anyRestore"), C
 module quiesce_bugRepairNoHold { import quiescence(OFF = Set("repairNoHold"), CFG = "ok").* from "../quiescence" }
 // UP-7: a failed post-repair audit is not a failed attempt
 module quiesce_live_bugRedoNoCount { import quiescence(OFF = Set("redoNoCount"), CFG = "live").* from "../quiescence" }
-// G-V5 / UP-12: a recovery's repair also converges the steering and the route; its failure fences
+// G-V5 / UP-12: a recovery's repair also performs a runtime write of the route or the steering
 module quiesce_bugOtherRepairsPrefix { import quiescence(OFF = Set("otherRepairsPrefix"), CFG = "ok").* from "../quiescence" }

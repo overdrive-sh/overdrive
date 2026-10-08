@@ -18,8 +18,9 @@
  *   - each recovery: the audit finds c damaged → quiesce under its own holder → repair c
  *     (`converge_shared` for c only: never the steering program or the route) → audit → restore with
  *     its hold. A failed repair or a failed post-repair audit is a failed attempt (UP-7); the budget
- *     is per component recovery; when spent, serve fail-stops. Node-global objects (the route
- *     `local` behind the verified pinned steering) stay as they are (UP-12).
+ *     is per component recovery; when spent, serve fail-stops. Node-global objects (the route,
+ *     which has the single form `local`, and the pinned steering boot converged) stay as they are
+ *     (UP-12).
  *
  * Abstraction:
  *   - Components IpRules (damage = the shared nft table left partial by the mTLS worker; concern 4
@@ -34,7 +35,8 @@
  *   anyRestore         D8a-HOLD: one latch — any recovery's restore reopens; every hold ends
  *   repairNoHold       D8a-HOLD: a recovery repairs without holding quiescence
  *   redoNoCount        UP-7: a failed post-repair audit is not a failed attempt
- *   otherRepairsPrefix the repair also converges the steering and the route; a failure fences
+ *   otherRepairsPrefix the repair also performs a runtime write of the route or the steering (any
+ *                      such write; a failed repair leaves it interrupted)
  */
 module quiescence {
   const OFF: Set[str]
@@ -66,7 +68,8 @@ module quiescence {
   var att: str -> int        // failed attempts of the current episode (process-scoped)
   var repLeft: int
   var lis: bool              // the wanted intake listener is open (and steered)
-  var route: str             // local | fence  (local behind the verified pinned steering)
+  var prefix: str            // booted | written: the route (`local`) and the pinned steering are as
+                             // boot converged them, or a runtime step wrote one of them
   var g: Ghost
 
   val recIdle: str -> str = COMPONENTS.mapBy(c => "idle")
@@ -74,28 +77,28 @@ module quiescence {
   def dec(x: int): int = if (x < 0) x else x - 1
 
   action keepState = all { holders' = holders, latch' = latch, rec' = rec, att' = att, lis' = lis }
-  action keepEnv = all { up' = up, stop' = stop, dmg' = dmg, repLeft' = repLeft, route' = route }
+  action keepEnv = all { up' = up, stop' = stop, dmg' = dmg, repLeft' = repLeft, prefix' = prefix }
 
   action init = all {
     up' = true, stop' = "none", holders' = Set(), latch' = false, rec' = recIdle,
     dmg' = COMPONENTS.mapBy(c => false), att' = att0, repLeft' = REPAIR_FAILS, lis' = true,
-    route' = "local", g' = g0,
+    prefix' = "booted", g' = g0,
   }
 
   // ------------------------------------------------------------------ environment
   // Overdrive's own failure damages c (the mTLS worker leaves the table partial; a listener task exits)
   action Damage(c: str): bool = all { up, not(dmg.get(c)),
-    dmg' = dmg.set(c, true), up' = up, stop' = stop, repLeft' = repLeft, route' = route, keepState, g' = g }
+    dmg' = dmg.set(c, true), up' = up, stop' = stop, repLeft' = repLeft, prefix' = prefix, keepState, g' = g }
   action Crash = all { ALLOW_CRASH, up,
     up' = false, stop' = "crash", holders' = Set(), latch' = false, rec' = recIdle, att' = att0,
-    lis' = false, dmg' = dmg.set("FlowListeners", false), repLeft' = repLeft, route' = route, g' = g }
+    lis' = false, dmg' = dmg.set("FlowListeners", false), repLeft' = repLeft, prefix' = prefix, g' = g }
   // boot: step 8 converges the table again (it may be left partial again); the route and the pinned
-  // steering are converged at step 9 (concern 1) — `local` here
+  // steering are converged at step 9 (concern 1) — as booted here
   action Restart = {
     nondet partial = Set(false, dmg.get("IpRules")).oneOf()
     all { not(up),
       up' = true, stop' = "none", dmg' = dmg.set("IpRules", partial), holders' = holders,
-      latch' = latch, rec' = rec, att' = att, lis' = lis, repLeft' = repLeft, route' = route, g' = g }
+      latch' = latch, rec' = rec, att' = att, lis' = lis, repLeft' = repLeft, prefix' = "booted", g' = g }
   }
 
   // ------------------------------------------------------------------ owner
@@ -115,15 +118,16 @@ module quiescence {
   action RecRepair(c: str): bool = all {
     up, rec.get(c) == "held", holders.contains(c), att.get(c) < MAXATT,
     dmg' = dmg.set(c, false), rec' = rec.set(c, "repaired"),
-    route' = route, holders' = holders, latch' = latch, att' = att, lis' = lis,
+    prefix' = if (bug("otherRepairsPrefix")) "written" else prefix, holders' = holders, latch' = latch, att' = att, lis' = lis,
     up' = up, stop' = stop, repLeft' = repLeft,
     g' = { ...g, prefixWritten: g.prefixWritten or bug("otherRepairsPrefix") },
   }
-  // the repair returns Err: a failed attempt (otherRepairsPrefix: the failing total converge fences)
+  // the repair returns Err: a failed attempt (otherRepairsPrefix: its runtime write of the route or the
+  // steering is left interrupted)
   action RepFail(c: str): bool = all {
     up, rec.get(c) == "held", holders.contains(c), att.get(c) < MAXATT, repLeft != 0,
     att' = att.set(c, att.get(c) + 1), repLeft' = dec(repLeft),
-    route' = if (bug("otherRepairsPrefix")) "fence" else route,
+    prefix' = if (bug("otherRepairsPrefix")) "written" else prefix,
     holders' = holders, latch' = latch, rec' = rec, lis' = lis, up' = up, stop' = stop, dmg' = dmg,
     g' = { ...g, prefixWritten: g.prefixWritten or bug("otherRepairsPrefix") },
   }
@@ -154,13 +158,13 @@ module quiescence {
   action FailStop(c: str): bool = all {
     up, rec.get(c) == "held", att.get(c) >= MAXATT,
     up' = false, stop' = "failstop", holders' = Set(), latch' = false, rec' = recIdle, att' = att0,
-    lis' = false, dmg' = dmg.set("FlowListeners", false), repLeft' = repLeft, route' = route,
+    lis' = false, dmg' = dmg.set("FlowListeners", false), repLeft' = repLeft, prefix' = prefix,
     g' = { ...g, failStopped: true },
   }
   // repairNoHold: the recovery repairs without quiescing
   action RecRepairNoHold(c: str): bool = all {
     bug("repairNoHold"), up, rec.get(c) == "idle", dmg.get(c),
-    dmg' = dmg.set(c, false), up' = up, stop' = stop, repLeft' = repLeft, route' = route, keepState,
+    dmg' = dmg.set(c, false), up' = up, stop' = stop, repLeft' = repLeft, prefix' = prefix, keepState,
     g' = { ...g, repairNoHold: true },
   }
 
@@ -185,12 +189,13 @@ module quiescence {
   val QuiescedClosesListeners: bool = latch implies not(lis)
   // (6, G-V5) no recovery's repair writes the steering program or the route
   val RepairNeverWritesPrefix: bool = not(g.prefixWritten)
-  // (UP-12) another component's fail-stop leaves the route `local` behind the verified pinned steering
-  val FailStopLeavesPrefixLocal: bool = (not(up) and stop == "failstop") implies route == "local"
+  // (UP-12, 6) another component's fail-stop leaves the route `local` and the pinned steering as boot
+  // converged them: no runtime step wrote either
+  val FailStopLeavesPrefixAsBooted: bool = (not(up) and stop == "failstop") implies prefix == "booted"
 
   val Safety: bool = and {
     LatchIffHolders, HeldIsHolder, NoReopenBeforeRepair, NoRepairWithoutHold, QuiescedClosesListeners,
-    RepairNeverWritesPrefix, FailStopLeavesPrefixLocal,
+    RepairNeverWritesPrefix, FailStopLeavesPrefixAsBooted,
   }
 
   // ------------------------------------------------------------------ witnesses (expected violated)

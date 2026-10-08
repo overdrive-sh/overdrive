@@ -83,10 +83,10 @@ State 15 [AssignTry]
 State 16 [Stop]
   al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {0, 1} ], [ st |-> "retiring", off |-> 2, loc |-> "slot", retry |-> FALSE, remembered |-> {0, 1} ] >>
 
-State 17 [OrphanExit]
-  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
-
-State 18 [AssignBegin]
+State 17 [AssignBegin]
   g = [ clash |-> FALSE, skipFree |-> TRUE, skipped |-> TRUE, skipOrphan |-> TRUE, refusedHeld |-> TRUE, refusedClaimable |-> TRUE, claimErr |-> TRUE, refusedUnasked |-> TRUE ]
+
+State 18 [OrphanExit]
+  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 2)
 
 -> stutters forever in State 18
