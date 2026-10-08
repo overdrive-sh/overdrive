@@ -2,8 +2,10 @@
 
 ## Status
 
-**Proposed — decision D8a-CAP approved by user 2026-10-08; pending
-independent DESIGN review.** GH #295. Recorded in the #295 feature delta,
+**Proposed — decision D8a-CAP approved by user 2026-10-08, and its retry
+classification (only kernel memory pressure is retried; every other steer
+failure is a reported defect) confirmed by the user as D8a-CAP-RETRY
+2026-10-08; pending independent DESIGN review.** GH #295. Recorded in the #295 feature delta,
 § *[REF] vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05*; the exact
 contract is § *Core vocabulary* (`GUEST_INTAKE_STEERING_MAX`,
 `GuestAddressPool::assign`) and § *Driven port — guest-prefix steering*.

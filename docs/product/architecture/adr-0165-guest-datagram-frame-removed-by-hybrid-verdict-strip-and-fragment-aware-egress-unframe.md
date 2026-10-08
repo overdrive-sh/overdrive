@@ -3,7 +3,10 @@
 ## Status
 
 **Proposed — approved by user (D5a = hybrid 2026-10-06; its attachment set,
-current wording D5a-IFACE, 2026-10-08); pending independent DESIGN review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
+current wording D5a-IFACE, 2026-10-08; the boot refusal on any attach
+failure, D5a-IFACE-BOOT, and the attach as a precondition of configuring an
+interface registered after boot, D5a-LATE, 2026-10-08); pending independent
+DESIGN review.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
 records one decision. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*, which holds the
 forwarder contract.
@@ -61,21 +64,27 @@ removal points:
   host socket's kernel-reported local address and peer (after any `connect4`
   rewrite), never from the requested destination.
 - **Attachment set.** On the appliance the host root namespace holds `lo`,
-  the image's NICs and the interfaces Overdrive creates (ADR-0068). The
-  program is attached:
-  - **at boot, to every interface present** — `lo` and the image's NICs. A
-    failed attachment refuses startup with the interface named;
-  - **before Overdrive brings up any interface it creates,** as a
-    precondition of setting it up. This design creates none; the rule binds
-    any component that does;
+  the image's NICs and the interfaces Overdrive creates (ADR-0068). An
+  interface carries guest datagrams only once it has addresses and routes,
+  and every interface gets the program before it can carry one:
+  - **at boot, to every interface present** — `lo` and the image's NICs,
+    configured by the image before `serve` starts. Any failed attachment
+    refuses startup with the interface named, before forwarding opens;
   - **to an interface the kernel registers after boot** (a NIC whose driver
-    probes late, or a hot-added NIC), on its link notification; a lost
-    notification (the kernel's netlink overrun) triggers a full relist, and
-    a failed attach is counted with its cause and retried at the audit
-    cadence. These never quiesce forwarding and are never audit damage.
+    probes late, or a hot-added NIC), as a precondition of configuring it.
+    The image configures no such interface; the node network configuration
+    path, its only configurer, gives it addresses and routes only after the
+    attach succeeds. A failed attach leaves the interface unconfigured and is
+    classified like a steer failure: kernel memory pressure is retried, a
+    removed interface ends the attempt, and any other failure is an
+    Overdrive defect, reported and not retried;
+  - **before Overdrive brings up any interface it creates,** by the same
+    precondition. This design creates none; the rule binds any component
+    that does.
 
-  The links are process-owned and not audited at runtime (ADR-0159). A TCX
-  link of an interface the kernel removes goes with the interface.
+  No attach outcome quiesces forwarding or counts as audit damage. The links
+  are process-owned and not audited at runtime (ADR-0159). A TCX link of an
+  interface the kernel removes goes with the interface.
 
 ## Alternatives considered
 
@@ -90,22 +99,26 @@ removal points:
   Leaves empty and frame-shaped datagrams through that NIC reaching their
   peers framed for as long as the attach keeps failing, an exposure a boot
   precondition removes. Rejected.
-- **Treat a failed attachment to a runtime-registered interface as audit
-  damage.** Would quiesce every flow on the node for a gap that affects only
-  empty and frame-shaped datagrams through one interface. Rejected.
+- **Attach an interface registered after boot on its link notification,
+  configured independently, retrying failures.** Leaves a window from
+  registration to attach — unbounded while the attach keeps failing, and
+  retried even when the failure is a defect — in which empty and
+  frame-shaped datagrams leave through it framed. Making the attach a
+  precondition of configuration removes the window. Rejected.
+- **Treat a failed attachment to an interface registered after boot as
+  audit damage.** Would quiesce every flow on the node for an interface that
+  carries no guest datagram while unconfigured. Rejected.
 
 ## Consequences
 
 - Non-empty datagrams leave the host independent of routing, interface set and
   MTU; only empty and frame-shaped datagrams depend on the egress program.
-- Every interface present at boot and every interface Overdrive creates
-  carries the program before any guest datagram can leave through it.
-- One bounded exposure remains, for an interface the kernel registers after
-  boot: from its registration until its attach (the notification latency, or
-  the relist that follows a lost notification), and while the kernel
-  keeps refusing the attach, an empty datagram leaving through it reaches its
-  peer as 8 bytes and a frame-shaped payload in its framed form. Counters,
-  the failure record and the audit's interface fact make it observable.
+- Every interface — present at boot, registered later, or created by
+  Overdrive — carries the program before any guest datagram can leave
+  through it; no runtime exposure remains.
+- An interface registered after boot whose attach fails stays unconfigured
+  until a retried attach succeeds (kernel memory pressure) or for good (a
+  defect, reported).
 - The host carries one TC egress program per root-namespace interface plus a
   fragment-tracking map; it is a no-op for unregistered tuples.
 - Untested, and therefore validation items in the feature delta: NICs with UDP
