@@ -39,16 +39,31 @@
 //!   the check's `timeout_secs`, else [`DEFAULT_TIMEOUT_SECS`]); exceeding it
 //!   yields [`Outcome::TimedOut`].
 //! - **Server start-up hangs.** Quint compiles every check (both backends)
-//!   through an Apalache server it starts on a private port. If Apalache has
-//!   not begun its first pass ([`started_work`]) within
-//!   [`STARTUP_BOUND_SECS`] — the server never came up, or came up but Quint
-//!   never handed it the job — the attempt is killed and retried once on a
-//!   fresh port; a second hang is a tool error naming the cause. Quint
-//!   exiting after starting the server but before the first pass (a gRPC
-//!   handshake failure under load) is the same failure and gets the same
-//!   single retry. A server
-//!   that is merely listening is not progress: the observed hang leaves the
-//!   server up and idle.
+//!   through an Apalache server it starts on a private port. Two bounds
+//!   apply before Apalache begins its first pass ([`started_work`]): the
+//!   server must print its start line within [`STARTUP_BOUND_SECS`] of the
+//!   attempt's start, and the first pass must follow within
+//!   [`FIRST_PASS_BOUND_SECS`] of that line. Either miss kills the attempt
+//!   and retries it once on a fresh port; a second miss is a tool error
+//!   naming the cause. Quint exiting after starting the server but before the
+//!   first pass (a gRPC reflection failure under load) is the same failure
+//!   and gets the same single retry. A server that is merely listening is not
+//!   progress. The observed hang is in Quint's gRPC client: reflection
+//!   succeeds on its first channel, Quint opens a second channel for the
+//!   command, the HTTP/2 preface and SETTINGS are exchanged on it, and Quint
+//!   never sends the `run` request, which has no deadline — so the server
+//!   stays up and idle. Healthy attempts begin the first pass within 20 s of
+//!   the server's start line even with three checks per CPU, so the second
+//!   bound frees a hung attempt early instead of holding its reservation for
+//!   the full start-up bound.
+//! - **Timing.** Each check records its own time (`seconds`, the final
+//!   attempt's run time), the run time of the attempts abandoned to start-up
+//!   retries (`retry_seconds`), and the wall time from its first attempt's
+//!   start to its verdict (`wall_seconds`, which also includes any wait for
+//!   the budget between attempts). The `ci = true` two-minute rule applies to
+//!   the check's own time: a `ci` check whose own time exceeds
+//!   [`CI_BUDGET_SECS`] draws a warning naming the flags to change; it is not
+//!   a failure.
 //! - **Parallelism.** Checks run concurrently under a memory and CPU budget
 //!   ([`resources`]): each check reserves memory and CPUs by backend — TLC
 //!   its capped heap (passed to Quint through `--tlc-config`) and workers,
@@ -122,9 +137,15 @@ const FIRST_PASS_MARKER: &str = "PASS #0:";
 /// Per-attempt wall-clock budget when neither `--timeout` nor the check's
 /// `timeout_secs` sets one.
 pub const DEFAULT_TIMEOUT_SECS: u64 = 900;
-/// How long the Apalache server may take to become ready before the attempt
-/// counts as a start-up hang.
+/// How long the Apalache server may take to print its start line before the
+/// attempt counts as a start-up hang.
 pub const STARTUP_BOUND_SECS: u64 = 120;
+/// How long after the server's start line Apalache may take to begin its
+/// first pass before the attempt counts as a start-up hang. The longest
+/// healthy gap measured was 19.5 s, with 24 checks on 8 CPUs.
+pub const FIRST_PASS_BOUND_SECS: u64 = 45;
+/// The own time above which a `ci = true` check draws a warning.
+pub const CI_BUDGET_SECS: f64 = 120.0;
 /// How often the peak resident memory of running checks is sampled.
 const RSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 /// Environment variable carrying the run id into every child process, so
@@ -561,9 +582,41 @@ pub enum AttemptEnd {
     },
     /// The attempt exceeded its wall-clock budget and was killed.
     TimedOut,
-    /// Apalache did not begin its first pass within the start-up bound; the
-    /// attempt was killed.
-    StartupHang,
+    /// Apalache did not begin its first pass in time; the attempt was killed.
+    StartupHang(StartupStall),
+}
+
+/// Where a start-up hang stalled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupStall {
+    /// The Apalache server did not print its start line within the start-up
+    /// bound.
+    ServerNotUp,
+    /// The server started, but no first pass followed within the first-pass
+    /// bound: Quint never handed it the job.
+    NoFirstPass,
+}
+
+/// The two start-up bounds of an attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartupBounds {
+    /// From the attempt's start to the server's start line.
+    pub server: Duration,
+    /// From the server's start line to the first pass.
+    pub first_pass: Duration,
+}
+
+impl StartupBounds {
+    /// The runner's bounds: [`STARTUP_BOUND_SECS`] and [`FIRST_PASS_BOUND_SECS`].
+    pub const RUNNER: Self = Self {
+        server: Duration::from_secs(STARTUP_BOUND_SECS),
+        first_pass: Duration::from_secs(FIRST_PASS_BOUND_SECS),
+    };
+}
+
+/// Whether a check's output shows the Apalache server started.
+pub fn server_started(output: &str) -> bool {
+    output.contains(SERVER_START_MARKER)
 }
 
 /// Whether a check's output shows Apalache began work on it.
@@ -571,21 +624,30 @@ pub fn started_work(output: &str) -> bool {
     output.lines().any(|l| l.starts_with(FIRST_PASS_MARKER))
 }
 
-/// Decide whether a still-running attempt must be killed. The overall
-/// timeout takes precedence over the start-up bound.
+/// Decide whether a still-running attempt must be killed.
+///
+/// `elapsed` runs from the attempt's start; `since_server_up` from when the
+/// server's start line was first seen (`None` = not yet). The overall timeout
+/// takes precedence over the start-up bounds, and an attempt Apalache has
+/// started (`started`) is never a start-up hang.
 pub fn deadline_check(
     elapsed: Duration,
     started: bool,
+    since_server_up: Option<Duration>,
     timeout: Duration,
-    startup_bound: Duration,
+    bounds: StartupBounds,
 ) -> Option<AttemptEnd> {
     if elapsed >= timeout {
-        Some(AttemptEnd::TimedOut)
-    } else if !started && elapsed >= startup_bound {
-        Some(AttemptEnd::StartupHang)
-    } else {
-        None
+        return Some(AttemptEnd::TimedOut);
     }
+    if started {
+        return None;
+    }
+    let stall = since_server_up.map_or_else(
+        || (elapsed >= bounds.server).then_some(StartupStall::ServerNotUp),
+        |up| (up >= bounds.first_pass).then_some(StartupStall::NoFirstPass),
+    );
+    stall.map(AttemptEnd::StartupHang)
 }
 
 /// What to do after an attempt ended.
@@ -614,7 +676,7 @@ pub fn attempt_verdict(
     end: AttemptEnd,
     output: &str,
     timeout: Duration,
-    startup_bound: Duration,
+    bounds: StartupBounds,
 ) -> AttemptVerdict {
     match end {
         AttemptEnd::Exited { success } => {
@@ -623,10 +685,7 @@ pub fn attempt_verdict(
             // began the job (e.g. a gRPC reflection DEADLINE_EXCEEDED under
             // load): the same start-up failure as a hang, so it gets the same
             // single retry. A spec error never gets as far as the server.
-            if outcome == Outcome::ToolError
-                && output.contains(SERVER_START_MARKER)
-                && !started_work(output)
-            {
+            if outcome == Outcome::ToolError && server_started(output) && !started_work(output) {
                 return if attempt <= 1 {
                     AttemptVerdict::Retry {
                         cause: "Apalache server started but Quint failed before the first pass; \
@@ -658,22 +717,74 @@ pub fn attempt_verdict(
                 timeout.as_secs()
             )),
         },
-        AttemptEnd::StartupHang if attempt <= 1 => AttemptVerdict::Retry {
-            cause: format!(
-                "Apalache server not ready (no first pass) within {}s; process group killed, \
-                 retrying on a fresh port",
-                startup_bound.as_secs()
-            ),
-        },
-        AttemptEnd::StartupHang => AttemptVerdict::Final {
-            outcome: Outcome::ToolError,
-            cause: Some(format!(
-                "Apalache server never became ready (no first pass) within {}s on {attempt} \
-                 attempts (fresh port each)",
-                startup_bound.as_secs()
-            )),
-        },
+        AttemptEnd::StartupHang(stall) => {
+            let what = match stall {
+                StartupStall::ServerNotUp => {
+                    format!("Apalache server did not start within {}s", bounds.server.as_secs())
+                }
+                StartupStall::NoFirstPass => format!(
+                    "Apalache server started but Quint never handed it the job (no first pass \
+                     within {}s of the server's start)",
+                    bounds.first_pass.as_secs()
+                ),
+            };
+            if attempt <= 1 {
+                AttemptVerdict::Retry {
+                    cause: format!("{what}; process group killed, retrying on a fresh port"),
+                }
+            } else {
+                AttemptVerdict::Final {
+                    outcome: Outcome::ToolError,
+                    cause: Some(format!(
+                        "start-up hang on {attempt} attempts (fresh port each); last: {what}"
+                    )),
+                }
+            }
+        }
     }
+}
+
+/// Run times of one check, in seconds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CheckTiming {
+    /// The check's own time: the final attempt's run time.
+    pub seconds: f64,
+    /// Run time of the earlier attempts, abandoned to start-up retries.
+    pub retry_seconds: f64,
+    /// From the first attempt's start to the verdict, including any wait for
+    /// the budget between attempts.
+    pub wall_seconds: f64,
+}
+
+impl CheckTiming {
+    /// Split per-attempt run times (in start order; the last is the final
+    /// attempt) and the wall time into a [`CheckTiming`]. No attempt means
+    /// the check never started.
+    pub fn from_attempts(attempt_secs: &[f64], wall_seconds: f64) -> Self {
+        let (seconds, retry_seconds) = match attempt_secs.split_last() {
+            // Fold from +0.0: `Sum` for f64 starts at -0.0.
+            Some((last, earlier)) => (*last, earlier.iter().fold(0.0, |acc, s| acc + s)),
+            None => (0.0, 0.0),
+        };
+        Self { seconds, retry_seconds, wall_seconds }
+    }
+}
+
+/// Whether a `ci = true` check's own time breaks the two-minute rule. Only a
+/// result (holds / violation) measures the check; a timeout or tool error
+/// already fails it.
+pub fn ci_overrun(ci: bool, outcome: Outcome, seconds: f64) -> bool {
+    ci && matches!(outcome, Outcome::Holds | Outcome::Violation) && seconds > CI_BUDGET_SECS
+}
+
+/// The flags an author can change to bring a `ci` check under the rule.
+fn ci_overrun_hint(c: &Check) -> String {
+    let bound = match (c.backend, c.max_steps) {
+        (Backend::Apalache, Some(n)) => format!("lower `max_steps` (now {n})"),
+        (Backend::Apalache, None) => "set a lower `max_steps` (now Quint's default)".to_owned(),
+        (Backend::Tlc, _) => "shrink the model's constants or raise `workers`".to_owned(),
+    };
+    format!("{bound}, or set `ci = false`")
 }
 
 /// Estimated wall-clock seconds for a run, plus the count without history.
@@ -1039,6 +1150,8 @@ struct Running {
     attempt: u32,
     port: u16,
     started: Instant,
+    /// When the server's start line was first seen in the log.
+    server_up: Option<Instant>,
     started_work: bool,
     log_path: PathBuf,
     group: Group,
@@ -1054,7 +1167,12 @@ struct CheckRecord {
     expect: Expect,
     outcome: Outcome,
     pass: bool,
+    /// The check's own time: the final attempt's run time.
     seconds: f64,
+    /// Run time of the attempts abandoned to start-up retries.
+    retry_seconds: f64,
+    /// From the first attempt's start to the verdict.
+    wall_seconds: f64,
     attempts: u32,
     timeout_secs: u64,
     cause: Option<String>,
@@ -1255,6 +1373,7 @@ fn start_attempt(
         attempt,
         port,
         started: Instant::now(),
+        server_up: None,
         started_work: false,
         log_path,
         group,
@@ -1271,13 +1390,18 @@ fn poll_attempt(r: &mut Running, timeout: Duration) -> Result<Option<AttemptEnd>
     if !r.started_work {
         let log =
             fs::read(&r.log_path).wrap_err_with(|| format!("reading {}", r.log_path.display()))?;
-        r.started_work = started_work(&String::from_utf8_lossy(&log));
+        let log = String::from_utf8_lossy(&log);
+        r.started_work = started_work(&log);
+        if r.server_up.is_none() && server_started(&log) {
+            r.server_up = Some(Instant::now());
+        }
     }
     Ok(deadline_check(
         r.started.elapsed(),
         r.started_work,
+        r.server_up.map(|t| t.elapsed()),
         timeout,
-        Duration::from_secs(STARTUP_BOUND_SECS),
+        StartupBounds::RUNNER,
     ))
 }
 
@@ -1354,7 +1478,8 @@ fn announce(
         worst_unknown.as_secs_f64() / 60.0 / f64::from(u32::try_from(parallel).unwrap_or(u32::MAX));
     eprintln!(
         "xtask quint check: {} check(s), budget {} (--jobs ≤ {max_jobs}), TLC heap {} MiB × {} \
-         workers, Apalache heap {} MiB + 1 CPU, start-up bound {STARTUP_BOUND_SECS}s, run id {run_id}",
+         workers, Apalache heap {} MiB + 1 CPU, start-up bounds {STARTUP_BOUND_SECS}s to the server, {FIRST_PASS_BOUND_SECS}s \
+         from it to the first pass, run id {run_id}",
         jobs.len(),
         res.budget,
         res.tlc_heap_mb,
@@ -1410,6 +1535,8 @@ struct Supervisor<'a> {
     head_blocked: Option<(usize, Instant)>,
     records: Vec<Option<CheckRecord>>,
     first_started: Vec<Option<Instant>>,
+    /// Run time of each ended attempt per job, in start order.
+    attempt_secs: Vec<Vec<f64>>,
     /// Peak resident memory per job over all its attempts (MiB).
     peak_rss_mb: Vec<u64>,
     last_sample: Instant,
@@ -1438,6 +1565,7 @@ impl<'a> Supervisor<'a> {
             head_blocked: None,
             records: vec![None; jobs.len()],
             first_started: vec![None; jobs.len()],
+            attempt_secs: vec![Vec::new(); jobs.len()],
             peak_rss_mb: vec![0; jobs.len()],
             last_sample: Instant::now(),
             peak_system_used_mb: None,
@@ -1561,19 +1689,22 @@ impl<'a> Supervisor<'a> {
         &self,
         job: usize,
         outcome: Outcome,
-        seconds: f64,
         attempts: u32,
         cause: Option<String>,
         log: PathBuf,
     ) -> CheckRecord {
         let j = &self.jobs[job];
+        let wall = self.first_started[job].map_or(0.0, |t| t.elapsed().as_secs_f64());
+        let timing = CheckTiming::from_attempts(&self.attempt_secs[job], wall);
         CheckRecord {
             name: j.check.name.clone(),
             backend: j.check.backend,
             expect: j.check.expect,
             outcome,
             pass: judge(j.check.expect, outcome),
-            seconds,
+            seconds: timing.seconds,
+            retry_seconds: timing.retry_seconds,
+            wall_seconds: timing.wall_seconds,
             attempts,
             timeout_secs: j.timeout.as_secs(),
             cause,
@@ -1604,9 +1735,10 @@ impl<'a> Supervisor<'a> {
             end,
             &String::from_utf8_lossy(&output),
             j.timeout,
-            Duration::from_secs(STARTUP_BOUND_SECS),
+            StartupBounds::RUNNER,
         );
         let attempt_secs = r.started.elapsed().as_secs_f64();
+        self.attempt_secs[r.job].push(attempt_secs);
         event(
             &j.out_dir,
             &format!(
@@ -1623,16 +1755,26 @@ impl<'a> Supervisor<'a> {
                 self.queue.push_front((r.job, r.attempt + 1));
             }
             AttemptVerdict::Final { outcome, cause } => {
-                let seconds =
-                    self.first_started[r.job].map_or(attempt_secs, |t| t.elapsed().as_secs_f64());
-                let rec = self.record(r.job, outcome, seconds, r.attempt, cause, r.log_path);
+                let rec = self.record(r.job, outcome, r.attempt, cause, r.log_path);
+                let retries = if r.attempt > 1 {
+                    format!(
+                        " + {:.1}s in {} start-up retr{}, {:.1}s wall",
+                        rec.retry_seconds,
+                        r.attempt - 1,
+                        if r.attempt == 2 { "y" } else { "ies" },
+                        rec.wall_seconds
+                    )
+                } else {
+                    String::new()
+                };
                 eprintln!(
-                    "{now} {}   {}/{} expect={} got={outcome} ({seconds:.1}s wall, peak {} of {} \
+                    "{now} {}   {}/{} expect={} got={outcome} ({:.1}s{retries}, peak {} of {} \
                      MiB){}",
                     if rec.pass { "PASS" } else { "FAIL" },
                     j.subsystem,
                     j.check.name,
                     j.check.expect.as_str(),
+                    rec.seconds,
                     rec.peak_rss_mb,
                     rec.reserved_mem_mb,
                     rec.cause.as_deref().map_or(String::new(), |c| format!(" — {c}")),
@@ -1655,6 +1797,7 @@ impl<'a> Supervisor<'a> {
         );
         for r in &mut self.running {
             r.group.terminate()?;
+            self.attempt_secs[r.job].push(r.started.elapsed().as_secs_f64());
             let j = &self.jobs[r.job];
             event(&j.out_dir, &format!("attempt {} killed: runner got signal {sig}", r.attempt))?;
             remove_scratch(&j.out_dir, r.attempt)?;
@@ -1665,7 +1808,6 @@ impl<'a> Supervisor<'a> {
                 let rec = self.record(
                     i,
                     Outcome::Interrupted,
-                    self.first_started[i].map_or(0.0, |t| t.elapsed().as_secs_f64()),
                     self.running.iter().find(|r| r.job == i).map_or(0, |r| r.attempt),
                     Some(format!("runner received signal {sig}")),
                     self.jobs[i].out_dir.clone(),
@@ -1709,8 +1851,9 @@ fn write_summaries(
         fs::write(&path, body).wrap_err_with(|| format!("writing {}", path.display()))?;
         eprintln!("xtask quint check: wrote {}", path.display());
 
-        // Merge this run's measured durations into the estimate history; a
-        // tool error, timeout or interruption measured nothing representative.
+        // Merge this run's measured durations (each check's own time) into
+        // the estimate history; a tool error, timeout or interruption
+        // measured nothing representative.
         let dpath = root.join(OUT_DIR).join(sub).join(DURATIONS_FILE);
         let mut durations = read_durations(&dpath);
         for r in &summary.checks {
@@ -1981,18 +2124,29 @@ fn print_table(
         jobs.iter().map(|j| j.subsystem.len() + 1 + j.check.name.len()).max().unwrap_or(5).max(5);
     eprintln!();
     eprintln!(
-        "{:<width$}  {:<8}  {:<9}  {:<11}  {:>8}  {:>3}  {:>14}  {:>8}  RESULT",
-        "CHECK", "BACKEND", "EXPECT", "OUTCOME", "WALL S", "TRY", "RESERVED", "PEAK MiB"
+        "{:<width$}  {:<8}  {:<9}  {:<11}  {:>8}  {:>3}  {:>7}  {:>8}  {:>14}  {:>8}  RESULT",
+        "CHECK",
+        "BACKEND",
+        "EXPECT",
+        "OUTCOME",
+        "SECS",
+        "TRY",
+        "RETRY S",
+        "WALL S",
+        "RESERVED",
+        "PEAK MiB"
     );
     for (j, r) in jobs.iter().zip(records) {
         eprintln!(
-            "{:<width$}  {:<8}  {:<9}  {:<11}  {:>8.1}  {:>3}  {:>14}  {:>8}  {}",
+            "{:<width$}  {:<8}  {:<9}  {:<11}  {:>8.1}  {:>3}  {:>7.1}  {:>8.1}  {:>14}  {:>8}  {}",
             format!("{}/{}", j.subsystem, r.name),
             r.backend.as_str(),
             r.expect.as_str(),
             r.outcome.as_str(),
             r.seconds,
             r.attempts,
+            r.retry_seconds,
+            r.wall_seconds,
             format!("{}M/{}cpu", r.reserved_mem_mb, r.reserved_cpus),
             r.peak_rss_mb,
             match (r.pass, trace_errors.get(r.name.as_str())) {
@@ -2009,6 +2163,29 @@ fn print_table(
         info.budget,
         info.peak_system_used_mb.map_or_else(|| "unknown".to_owned(), |m| format!("{m} MiB")),
     );
+    for w in ci_warnings(jobs, records) {
+        eprintln!("{w}");
+    }
+}
+
+/// One warning per `ci = true` check whose own time breaks the two-minute
+/// rule ([`ci_overrun`]).
+fn ci_warnings(jobs: &[Job], records: &[CheckRecord]) -> Vec<String> {
+    jobs.iter()
+        .zip(records)
+        .filter(|(j, r)| ci_overrun(j.check.ci, r.outcome, r.seconds))
+        .map(|(j, r)| {
+            format!(
+                "warning: {}/{} is `ci = true` but took {:.1}s of its own time (rule: ≤ \
+                 {CI_BUDGET_SECS:.0}s); {} in {}",
+                j.subsystem,
+                r.name,
+                r.seconds,
+                ci_overrun_hint(&j.check),
+                j.dir.join(CHECKS_FILE).display()
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -2247,17 +2424,86 @@ expect = "violation"
 
     const SECS: fn(u64) -> Duration = Duration::from_secs;
 
+    const BOUNDS: StartupBounds =
+        StartupBounds { server: Duration::from_secs(120), first_pass: Duration::from_secs(45) };
+    const NOT_UP: AttemptEnd = AttemptEnd::StartupHang(StartupStall::ServerNotUp);
+    const NO_PASS: AttemptEnd = AttemptEnd::StartupHang(StartupStall::NoFirstPass);
+
     #[test]
     fn deadline_check_orders_timeout_before_startup_hang() {
-        let (t, s) = (SECS(900), SECS(120));
-        assert_eq!(deadline_check(SECS(10), false, t, s), None);
-        assert_eq!(deadline_check(SECS(119), false, t, s), None);
-        assert_eq!(deadline_check(SECS(120), false, t, s), Some(AttemptEnd::StartupHang));
+        let t = SECS(900);
+        // Server not up yet: the server bound runs from the attempt's start.
+        assert_eq!(deadline_check(SECS(10), false, None, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(119), false, None, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(120), false, None, t, BOUNDS), Some(NOT_UP));
+        // Server up: the first-pass bound runs from the server's start line,
+        // and the server bound no longer applies.
+        assert_eq!(deadline_check(SECS(150), false, Some(SECS(44)), t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(50), false, Some(SECS(45)), t, BOUNDS), Some(NO_PASS));
         // A check Apalache has started is never a start-up hang.
-        assert_eq!(deadline_check(SECS(800), true, t, s), None);
-        assert_eq!(deadline_check(SECS(900), true, t, s), Some(AttemptEnd::TimedOut));
-        // A timeout shorter than the start-up bound fires as a timeout.
-        assert_eq!(deadline_check(SECS(5), false, SECS(5), s), Some(AttemptEnd::TimedOut));
+        assert_eq!(deadline_check(SECS(800), true, Some(SECS(790)), t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(800), true, None, t, BOUNDS), None);
+        assert_eq!(
+            deadline_check(SECS(900), true, Some(SECS(890)), t, BOUNDS),
+            Some(AttemptEnd::TimedOut)
+        );
+        // A timeout shorter than either bound fires as a timeout.
+        assert_eq!(
+            deadline_check(SECS(5), false, None, SECS(5), BOUNDS),
+            Some(AttemptEnd::TimedOut)
+        );
+        assert_eq!(
+            deadline_check(SECS(60), false, Some(SECS(50)), SECS(60), BOUNDS),
+            Some(AttemptEnd::TimedOut)
+        );
+    }
+
+    #[test]
+    fn server_started_reads_the_start_line() {
+        assert!(server_started("Starting checker server on port 45655...   I@22:21:49.830\n"));
+        assert!(!server_started("[TLC] Compiling to TLA+ (via Apalache)...\n"));
+    }
+
+    #[test]
+    fn timing_separates_own_time_from_retries_and_wall() {
+        // The L-1 case: a 120 s start-up hang, then an 18 s check.
+        let t = CheckTiming::from_attempts(&[120.1, 18.0], 138.3);
+        assert!((t.seconds - 18.0).abs() < 1e-9, "{t:?}");
+        assert!((t.retry_seconds - 120.1).abs() < 1e-9, "{t:?}");
+        assert!((t.wall_seconds - 138.3).abs() < 1e-9, "{t:?}");
+        let one = CheckTiming::from_attempts(&[7.5], 7.6);
+        assert_eq!(one, CheckTiming { seconds: 7.5, retry_seconds: 0.0, wall_seconds: 7.6 });
+        // No retry renders as 0.0, not -0.0.
+        assert!(one.retry_seconds.is_sign_positive(), "{one:?}");
+        let none = CheckTiming::from_attempts(&[], 0.0);
+        assert_eq!(none, CheckTiming { seconds: 0.0, retry_seconds: 0.0, wall_seconds: 0.0 });
+        let three = CheckTiming::from_attempts(&[1.0, 2.0, 4.0], 9.0);
+        assert_eq!(three, CheckTiming { seconds: 4.0, retry_seconds: 3.0, wall_seconds: 9.0 });
+    }
+
+    #[test]
+    fn ci_overrun_applies_to_ci_results_over_two_minutes_only() {
+        assert!(!ci_overrun(true, Outcome::Violation, 18.0));
+        assert!(!ci_overrun(true, Outcome::Holds, CI_BUDGET_SECS));
+        assert!(ci_overrun(true, Outcome::Holds, 120.1));
+        assert!(ci_overrun(true, Outcome::Violation, 300.0));
+        assert!(!ci_overrun(false, Outcome::Holds, 300.0));
+        for o in [Outcome::TimedOut, Outcome::ToolError, Outcome::Interrupted] {
+            assert!(!ci_overrun(true, o, 900.0), "{o}");
+        }
+    }
+
+    #[test]
+    fn ci_overrun_hint_names_the_flags_to_change() {
+        let mut c = parse(APALACHE_INV).expect("parses").remove(0);
+        c.max_steps = Some(14);
+        let hint = ci_overrun_hint(&c);
+        assert!(hint.contains("`max_steps` (now 14)") && hint.contains("`ci = false`"), "{hint}");
+        c.max_steps = None;
+        assert!(ci_overrun_hint(&c).contains("Quint's default"));
+        c.backend = Backend::Tlc;
+        let hint = ci_overrun_hint(&c);
+        assert!(hint.contains("`workers`") && hint.contains("`ci = false`"), "{hint}");
     }
 
     #[test]
@@ -2275,7 +2521,7 @@ expect = "violation"
 
     #[test]
     fn attempt_verdict_classifies_every_end() {
-        let (t, s) = (SECS(900), SECS(120));
+        let (t, s) = (SECS(900), BOUNDS);
         assert_eq!(
             attempt_verdict(1, AttemptEnd::Exited { success: true }, OK_OUT, t, s),
             AttemptVerdict::Final { outcome: Outcome::Holds, cause: None }
@@ -2296,10 +2542,19 @@ expect = "violation"
             }
             other => panic!("expected timed-out, got {other:?}"),
         }
-        assert!(matches!(
-            attempt_verdict(1, AttemptEnd::StartupHang, "", t, s),
-            AttemptVerdict::Retry { .. }
-        ));
+        match attempt_verdict(1, NOT_UP, "", t, s) {
+            AttemptVerdict::Retry { cause } => assert!(cause.contains("did not start"), "{cause}"),
+            other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
+        }
+        match attempt_verdict(1, NO_PASS, "", t, s) {
+            AttemptVerdict::Retry { cause } => {
+                assert!(
+                    cause.contains("never handed it the job") && cause.contains("45s"),
+                    "{cause}"
+                );
+            }
+            other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
+        }
         // Captured: Quint exited after the server started, before any pass.
         let reflection = "Starting checker server on port 36103...   I@22:42:50.782\n\
                           The Apalache server is running on port 36103. Press Ctrl-C to stop.\n\
@@ -2331,9 +2586,9 @@ expect = "violation"
             attempt_verdict(1, failed, &format!("{reflection}{VIOLATION_OUT}"), t, s),
             AttemptVerdict::Final { outcome: Outcome::Violation, .. }
         ));
-        match attempt_verdict(2, AttemptEnd::StartupHang, "", t, s) {
+        match attempt_verdict(2, NO_PASS, "", t, s) {
             AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(c) } => {
-                assert!(c.contains("never became ready"), "{c}");
+                assert!(c.contains("start-up hang on 2 attempts"), "{c}");
             }
             other => panic!("expected tool error, got {other:?}"),
         }

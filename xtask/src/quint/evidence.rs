@@ -162,8 +162,17 @@ pub struct CheckEvidence {
     pub pass: bool,
     /// Attempts made (a start-up failure is retried once).
     pub attempts: u32,
-    /// Wall-clock seconds from the first attempt's start.
+    /// The check's own time: run seconds of the final attempt. Evidence
+    /// recorded without `retry_seconds` holds the wall time from the first
+    /// attempt's start here instead.
     pub seconds: f64,
+    /// Run seconds of the attempts abandoned to start-up retries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_seconds: Option<f64>,
+    /// Seconds from the first attempt's start to the verdict, including any
+    /// wait for the budget between attempts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_seconds: Option<f64>,
     /// Per-attempt timeout in seconds.
     pub timeout_secs: u64,
     /// Cause of a non-result outcome.
@@ -248,6 +257,36 @@ fn cell(s: &str) -> String {
     s.replace('|', "\\|")
 }
 
+/// One check's row of the `summary.md` table.
+fn check_row(c: &CheckEvidence) -> String {
+    let mut files: Vec<String> = Vec::new();
+    if c.trace_error.is_some() {
+        files.push("**no trace**".to_owned());
+    }
+    for f in [&c.condensed, &c.trace, &c.failure_log].into_iter().flatten() {
+        files.push(format!("[{f}]({f})"));
+    }
+    let opt = |v: Option<f64>| v.map_or_else(|| "—".to_owned(), |v| format!("{v:.1}"));
+    format!(
+        "| {} | {} | {} | {} `{}` | {} | {} | {} | {} | {} | {} | {:.1} | {} | {} | {} |\n",
+        c.name,
+        c.spec,
+        c.main,
+        c.property_kind,
+        c.property,
+        c.backend.as_str(),
+        c.bound,
+        c.expect.as_str(),
+        c.outcome.as_str(),
+        if c.pass { "PASS" } else { "**FAIL**" },
+        c.attempts,
+        c.seconds,
+        opt(c.retry_seconds),
+        opt(c.wall_seconds),
+        files.join(" "),
+    )
+}
+
 /// Render `summary.md`.
 pub fn render_md(s: &EvidenceSummary) -> String {
     let mut out = String::new();
@@ -287,34 +326,11 @@ pub fn render_md(s: &EvidenceSummary) -> String {
     let _ = writeln!(
         out,
         "\n| Check | Spec | Main | Property | Backend | Bound | Expect | Outcome | Result | \
-         Attempts | Seconds | Evidence |"
+         Attempts | Seconds | Retry s | Wall s | Evidence |"
     );
-    let _ = writeln!(out, "|---|---|---|---|---|---|---|---|---|---:|---:|---|");
+    let _ = writeln!(out, "|---|---|---|---|---|---|---|---|---|---:|---:|---:|---:|---|");
     for c in &s.checks {
-        let mut files: Vec<String> = Vec::new();
-        if c.trace_error.is_some() {
-            files.push("**no trace**".to_owned());
-        }
-        for f in [&c.condensed, &c.trace, &c.failure_log].into_iter().flatten() {
-            files.push(format!("[{f}]({f})"));
-        }
-        let _ = writeln!(
-            out,
-            "| {} | {} | {} | {} `{}` | {} | {} | {} | {} | {} | {} | {:.1} | {} |",
-            c.name,
-            c.spec,
-            c.main,
-            c.property_kind,
-            c.property,
-            c.backend.as_str(),
-            c.bound,
-            c.expect.as_str(),
-            c.outcome.as_str(),
-            if c.pass { "PASS" } else { "**FAIL**" },
-            c.attempts,
-            c.seconds,
-            files.join(" "),
-        );
+        out.push_str(&check_row(c));
     }
     let failed: Vec<&CheckEvidence> = s.checks.iter().filter(|c| !c.pass).collect();
     if !failed.is_empty() {
@@ -756,6 +772,11 @@ fn stage_trace(
     Ok((raw_name, condensed_name))
 }
 
+/// Round seconds to milliseconds for the evidence.
+fn millis(secs: f64) -> f64 {
+    (secs * 1000.0).round() / 1000.0
+}
+
 fn check_evidence(job: &Job, rec: &CheckRecord, stage: &Stage) -> Result<CheckEvidence> {
     let c = &job.check;
     let (property_kind, property) = match &c.property {
@@ -779,7 +800,9 @@ fn check_evidence(job: &Job, rec: &CheckRecord, stage: &Stage) -> Result<CheckEv
         outcome: rec.outcome,
         pass: rec.pass,
         attempts: rec.attempts,
-        seconds: (rec.seconds * 1000.0).round() / 1000.0,
+        seconds: millis(rec.seconds),
+        retry_seconds: Some(millis(rec.retry_seconds)),
+        wall_seconds: Some(millis(rec.wall_seconds)),
         timeout_secs: rec.timeout_secs,
         cause: rec.cause.clone(),
         trace: None,
@@ -934,6 +957,8 @@ mod tests {
             pass,
             attempts: 1,
             seconds: 1.5,
+            retry_seconds: Some(0.0),
+            wall_seconds: Some(1.5),
             timeout_secs: 900,
             cause: None,
             trace: violation.then(|| format!("traces/{name}.itf.json")),
@@ -1017,13 +1042,39 @@ mod tests {
         ]);
         let md = render_md(&s);
         assert!(md.contains("| Result | 1 of 2 check(s) matched `expect` |"), "{md}");
-        assert!(md.contains("| w | a.qnt | m | invariant `Inv` | apalache | max_steps=4 | violation | violation | PASS | 1 | 1.5 | [traces/w.txt](traces/w.txt) [traces/w.itf.json](traces/w.itf.json) |"), "{md}");
-        assert!(md.contains("| h | a.qnt | m | invariant `Inv` | apalache | max_steps=4 | holds | tool-error | **FAIL** | 1 | 1.5 | [failures/h.log](failures/h.log) |"), "{md}");
+        assert!(md.contains("| w | a.qnt | m | invariant `Inv` | apalache | max_steps=4 | violation | violation | PASS | 1 | 1.5 | 0.0 | 1.5 | [traces/w.txt](traces/w.txt) [traces/w.itf.json](traces/w.itf.json) |"), "{md}");
+        assert!(md.contains("| h | a.qnt | m | invariant `Inv` | apalache | max_steps=4 | holds | tool-error | **FAIL** | 1 | 1.5 | 0.0 | 1.5 | [failures/h.log](failures/h.log) |"), "{md}");
         assert!(md.contains("- `checks.toml` `22`"), "{md}");
         assert!(md.contains("(dirty worktree)"), "{md}");
         // A `|` inside a value must not split the table cell.
         assert!(md.contains("| Apalache | 0.56.1 \\| build: 70cdaf4 |"), "{md}");
         assert!(md.contains("- `h`: expected holds, got tool-error"), "{md}");
+    }
+
+    #[test]
+    fn evidence_without_retry_and_wall_seconds_still_decodes_and_verifies() {
+        // Evidence recorded before the split timing fields existed.
+        let s = summary(vec![rec("w", Expect::Violation, Outcome::Violation)]);
+        let mut v: serde_json::Value = serde_json::to_value(&s).expect("encode");
+        let row = v["checks"][0].as_object_mut().expect("object");
+        row.remove("retry_seconds");
+        row.remove("wall_seconds");
+        let legacy: EvidenceSummary = serde_json::from_value(v).expect("legacy decodes");
+        assert_eq!(legacy.checks[0].retry_seconds, None);
+        assert_eq!(legacy.checks[0].wall_seconds, None);
+        assert!(
+            verify_summary(
+                &legacy,
+                &legacy.inputs,
+                &[check("w", Expect::Violation)],
+                &files(&legacy)
+            )
+            .is_empty()
+        );
+        // Re-encoding keeps the legacy shape (no null fields appear).
+        let json = serde_json::to_string(&legacy).expect("encode");
+        assert!(!json.contains("retry_seconds") && !json.contains("wall_seconds"), "{json}");
+        assert!(render_md(&legacy).contains("| 1 | 1.5 | — | — |"));
     }
 
     #[test]
@@ -1154,6 +1205,8 @@ mod tests {
             outcome,
             pass: judge(j.check.expect, outcome),
             seconds: 1.0,
+            retry_seconds: 0.0,
+            wall_seconds: 1.0,
             attempts: 1,
             timeout_secs: 900,
             cause: None,
