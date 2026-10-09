@@ -24,11 +24,12 @@ State 2 [Restart]
 State 3 [BootStep]
   phase = "load"
 
-State 4 [Fail]
-  failLeft = 0
+State 4 [BootStep]
   phase = "swap"
+  loaded = TRUE
 
-State 5 [BootStep]
+State 5 [Fail]
+  failLeft = 0
   phase = "pin"
 
 State 6 [BootStep]

@@ -7,13 +7,18 @@
 # expect "holds" = the design property; "violation" = a non-vacuity witness (the behaviour is
 # reachable), a hazard/teeth instance (one design rule switched off through OFF), or documented
 # behaviour. Expectations are the design's claims; where the prediction written before the run
-# differs, the comment above the check says so (round 8: revision 11 — D8a-CAP in intake, M-4 in
-# prefix_boot, M-2 in quiescence; findings:
-# docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r8.md).
-# ci = true only for checks measured under 2 minutes wall-clock on the Lima VM (`cargo xtask quint check`).
+# differs, the comment above the check says so (round 9: the 2026-10-09 spike remediation and its
+# round 2 — K-A2′, ATTR-TOKEN with ATTR-LIVE-CLAIM, the beacon and HALFCLOSE-SIGNAL in owner_flows,
+# CELL-RECREATE in udp_slots, INTAKE-BIND in prefix_landing; earlier rounds' findings:
+# docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r8.md and before).
+# ci = true only for checks whose own time (the runner records it apart from start-up retries) is
+# under 2 minutes on the Lima VM (`cargo xtask quint check`). Round 9: the module-A TLC liveness
+# checks of the core instance (GuestHalfEnds, SessionBecomesLive) take 135-140 s, and the udp_slots
+# exhaustive checks 300-810 s (cell generations and queued readiness events).
 
 
-# Module A: control sessions, flow admission, TcpAccept pairing (U-1, U-5). Invariants 1, 3, 4, CurrentGeneration, ClosedIsTerminal
+# Module A: control sessions, flow admission, launch attribution (ATTR-TOKEN), TcpAccept pairing (U-1, U-5).
+# Invariants 1, 3, 4, 4+ (CurrentGeneration), ClosedIsTerminal, NoCrossLaunchMsg, NoCrossLaunchSessionHeld
 [[check]]
 name = "owner-flows-safety-tlc"
 spec = "owner_flows.qnt"
@@ -42,7 +47,7 @@ main = "flows_ok"
 temporal = "GuestHalfEnds"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 
 
 # Non-vacuity witnesses: each behaviour is reachable (expected violation)
@@ -169,6 +174,8 @@ max_steps = 14
 expect = "violation"
 ci = true
 
+# ci = false from round 9: 115.9 s own time, at the two-minute limit (the module's added state slows
+# Apalache)
 [[check]]
 name = "owner-flows-hazard-teardown-skips-flows"
 spec = "hazard/owner_flows_hazards.qnt"
@@ -177,7 +184,7 @@ invariant = "CurrentGeneration"
 backend = "apalache"
 max_steps = 14
 expect = "violation"
-ci = true
+ci = false
 
 [[check]]
 name = "owner-flows-hazard-late-paired-resurrects"
@@ -190,14 +197,394 @@ expect = "violation"
 ci = true
 
 
-# K-A2 dropped (V-22): a dead VM's queued connection is attributed to the next allocation
+# ATTR-TOKEN with ATTR-LIVE-CLAIM (round 9). 4+ (`CurrentGeneration`), no control message for another
+# launch's flow (`NoCrossLaunchMsg`) and no SessionHeld across launches (`NoCrossLaunchSessionHeld`), each
+# as its own check on the design instance (they are also inside `Safety`). The claim step compares the
+# ControlOpen's token with the CID's LIVE token (Provisioned or Active) in the same step as the claim;
+# teardown does not touch connections in `reading`. Prediction written before the run: all three hold
+# (the round-9 first-run counterexample is closed at its read).
+
 [[check]]
-name = "owner-flows-env-stale-conn"
+name = "owner-flows-current-launch-tlc"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "CurrentGeneration"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-no-cross-launch-message-tlc"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "NoCrossLaunchMsg"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-no-cross-launch-session-held-tlc"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "NoCrossLaunchSessionHeld"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+# (ATTR-TOKEN, D18a) a provisioned launch whose guest keeps reconnecting eventually holds a live session
+[[check]]
+name = "owner-flows-session-becomes-live"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+temporal = "SessionBecomesLive"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+# K-A2′ (P-37): a dead launch's queued connection, its first record buffered, is accepted after the
+# CID's next lease exists (reachable)
+[[check]]
+name = "owner-flows-witness-stale-accept"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoStaleAccept"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+# ATTR-LIVE-CLAIM: the round-9 first-run shape — a connection accepted while the CID was Provisioned
+# is still unread after teardown (reachable; the design closes it at its read)
+[[check]]
+name = "owner-flows-witness-read-after-teardown"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoReadAfterTeardown"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth (ATTR-TOKEN): attribution by peer CID alone (the round-8 rule) under K-A2′
+[[check]]
+name = "owner-flows-hazard-peer-cid-only"
 spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_envStaleConn"
+main = "flows_bugPeerCidOnly"
 invariant = "CurrentGeneration"
 backend = "apalache"
 max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-peer-cid-only-message"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugPeerCidOnly"
+invariant = "NoCrossLaunchMsg"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth (ATTR-LIVE-CLAIM order): the session claim taken at accept, before the ControlOpen is read — a
+# stale connection of one launch holds the claim when the next launch's session arrives. (Its
+# SessionBecomesLive check is not teeth for this rule — the stale holder is closed at its read, so
+# progress holds — and was deleted in round 9.)
+[[check]]
+name = "owner-flows-hazard-claim-before-token-held"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugClaimBeforeToken"
+invariant = "NoCrossLaunchSessionHeld"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth (ATTR-LIVE-CLAIM): the first round-9 design — the CID state checked at accept only, the claim
+# step comparing with the lease token (Retiring included). Its first-run counterexample: a dead
+# launch's queued control connection accepted while Provisioned and read after teardown takes the
+# claim, which survives pool.release; the next lease's session is refused SessionHeld
+[[check]]
+name = "owner-flows-hazard-no-claim-recheck-held"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugNoClaimRecheck"
+invariant = "NoCrossLaunchSessionHeld"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-no-claim-recheck-current"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugNoClaimRecheck"
+invariant = "CurrentGeneration"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Rejected alternative to ATTR-LIVE-CLAIM (recorded as its behaviour, not as design): teardown also
+# closes connections in `reading`, and the claim step compares with the lease token. Prediction: every
+# safety invariant holds in this model (whose only owner listener is the control session); the
+# design rejects it because its correctness rests on teardown knowing every unread connection
+# across the owner's listeners and the driver
+[[check]]
+name = "owner-flows-alt-teardown-closes-reading-safety"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_altTeardownClosesReading"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# Beacon (VM driver, port 1234; ADR-0157, ATTR-TOKEN, ATTR-LIVE-CLAIM): instance `flows_beacon`. READY is
+# read, then compared with the live launch's token and the beacon claim taken in one step; driver.stop ends
+# liveness, closes the beacon session and releases the claim in one step, before pool.release. Prediction:
+# the three invariants and ReadyReleased hold
+
+[[check]]
+name = "owner-flows-beacon-current-launch"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+invariant = "BeaconCurrentLaunch"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-beacon-no-cross-launch-ready"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+invariant = "BeaconNoCrossLaunchReady"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-beacon-no-cross-launch-held"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+invariant = "BeaconNoCrossLaunchHeld"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-beacon-ready-released"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+temporal = "ReadyReleased"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-beacon-witness-ready"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+invariant = "WitnessNoReady"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# K-A2′ for the beacon: a dead launch's beacon connection (buffered READY) is read while the next launch is live
+[[check]]
+name = "owner-flows-beacon-witness-stale-read"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+invariant = "WitnessNoStaleBeaconRead"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth (ATTR-LIVE-CLAIM, beacon): READY compared with the lease's token without the live check — a
+# connection accepted while the launch was live and read after driver.stop takes the claim
+[[check]]
+name = "owner-flows-hazard-beacon-no-live-recheck"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugBeaconNoLiveRecheck"
+invariant = "BeaconCurrentLaunch"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-beacon-no-live-recheck-held"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugBeaconNoLiveRecheck"
+invariant = "BeaconNoCrossLaunchHeld"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth (ATTR-TOKEN, beacon): READY attributed by peer CID alone — a dead launch's buffered READY is
+# released as the next launch's
+[[check]]
+name = "owner-flows-hazard-beacon-peer-cid-only"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugBeaconPeerCidOnly"
+invariant = "BeaconNoCrossLaunchReady"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-beacon-peer-cid-only-current"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugBeaconPeerCidOnly"
+invariant = "BeaconCurrentLaunch"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# Half-close (HALFCLOSE-SIGNAL, ADR-0180): instance `flows_half` — one paired TCP flow (TcpConnect or
+# TcpAccept, chosen at init), the flow vsock and the control session as independent channels, each owner
+# able to die (its vsock end reaching the survivor as its own action, VsockEndReachesSurvivor), the
+# session able to drop, flow errors (teardown, quiescence) and outer resets per side. Invariant 13:
+# NoEofOnPeerLoss, FinOnlyAfterAck. Progress: HalfCloseCompletes (no fault), AnnounceEnds (faults
+# included), EarlyEofCarried. Prediction: all hold
+
+[[check]]
+name = "owner-flows-half-no-eof-on-peer-loss"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "NoEofOnPeerLoss"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-fin-only-after-ack"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "FinOnlyAfterAck"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-close-completes"
+spec = "owner_flows.qnt"
+main = "flows_half"
+temporal = "HalfCloseCompletes"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-announce-ends"
+spec = "owner_flows.qnt"
+main = "flows_half"
+temporal = "AnnounceEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-early-eof-carried"
+spec = "owner_flows.qnt"
+main = "flows_half"
+temporal = "EarlyEofCarried"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+# Non-vacuity: a clean half-close reaches a far end as EOF; a survivor aborts on a dead owner's vsock
+# end before it observes the session's loss (K-B4); an outer EOF before Paired is recorded
+[[check]]
+name = "owner-flows-half-witness-clean-eof"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "WitnessNoCleanEof"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-half-witness-survivor-abort-first"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "WitnessNoSurvivorAbortFirst"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-half-witness-early-eof"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "WitnessNoEarlyEof"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth: the round-8 rule (a vsock end is a half-close) — the survivor of an owner death sends a FIN
+[[check]]
+name = "owner-flows-hazard-rdhup-is-halfclose"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugRdhupIsHalfClose"
+invariant = "NoEofOnPeerLoss"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth: no acknowledgement — HalfClose sent and the vsock shut down at once, the receiver aborting a
+# bare vsock end: a clean half-close whose end-of-stream overtakes the message is aborted
+[[check]]
+name = "owner-flows-hazard-no-ack"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugNoAck"
+temporal = "HalfCloseCompletes"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-no-ack-fin"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugNoAck"
+invariant = "FinOnlyAfterAck"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth: the acknowledging side waits (acks only after its own outer EOF) — the announcer waits forever
+[[check]]
+name = "owner-flows-hazard-ack-waits"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugAckWaits"
+temporal = "AnnounceEnds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth: an outer EOF before Paired aborts the flow (the early half-close is lost)
+[[check]]
+name = "owner-flows-hazard-early-eof-aborts"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugEarlyEofAborts"
+temporal = "EarlyEofCarried"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Rejected alternative (V-13 variant C, recorded as why the acknowledgement was chosen): HalfClose
+# without acknowledgement, a bare vsock end held until the message or session loss. Prediction: it
+# keeps NoEofOnPeerLoss, and a receiver whose peer ended its vsock without the message while its
+# session lives holds the end forever (ReceiverPendingEnds violated)
+[[check]]
+name = "owner-flows-alt-pending-wait-no-eof"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_altPendingWait"
+invariant = "NoEofOnPeerLoss"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-alt-pending-wait-receiver"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_altPendingWait"
+temporal = "ReceiverPendingEnds"
+backend = "tlc"
 expect = "violation"
 ci = true
 
@@ -225,6 +612,8 @@ ci = true
 
 
 # Module B: guest UDP slots (D25, SLOT-ABORT, U-2). TLC exhaustive on the 1-destination instance
+# ci = false from round 9: the cell generations (CELL-RECREATE) and the queued readiness events
+# enlarge the exhaustive instance (about 300 s own time)
 [[check]]
 name = "udp-slots-safety-tlc"
 spec = "udp_slots.qnt"
@@ -232,9 +621,9 @@ main = "slots_live"
 invariant = "Safety"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 
-# ci = true: 67.4 s own time (the two-minute rule applies to own time, not start-up retries)
+# ci = false from round 9 (about 710 s own time; see above)
 [[check]]
 name = "udp-slots-release-liveness"
 spec = "udp_slots.qnt"
@@ -242,7 +631,8 @@ main = "slots_live"
 temporal = "ReleasedSlotBecomesFree"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
+timeout_secs = 1800
 
 [[check]]
 name = "udp-slots-safety-apalache"
@@ -325,7 +715,7 @@ max_steps = 12
 expect = "violation"
 ci = true
 
-# ci = true: 108.4 s own time (the two-minute rule applies to own time, not start-up retries)
+# ci = false from round 9: 140.3 s own time (the readiness events enlarge the search)
 [[check]]
 name = "udp-slots-hazard-late-paired-by-slot-data"
 spec = "hazard/udp_slots_hazards.qnt"
@@ -334,7 +724,7 @@ invariant = "ReleasedSlotCarriesNoData"
 backend = "apalache"
 max_steps = 12
 expect = "violation"
-ci = true
+ci = false
 
 # ci = true: 14.1 s own time in round 8 (round 7's 135.8 s included start-up retries)
 [[check]]
@@ -363,6 +753,53 @@ spec = "hazard/udp_slots_hazards.qnt"
 main = "slots_liveTeeth"
 temporal = "NoAuditFairness"
 backend = "tlc"
+expect = "violation"
+ci = true
+
+# CELL-RECREATE (round 9): every end of association recreates the cells (a new cell generation);
+# readiness is dispatched by (slot, generation) and an event of an earlier generation is discarded.
+# Invariant 14 (`NoStaleGenerationStart`) is inside `Safety` (udp-slots-safety-*).
+[[check]]
+name = "udp-slots-witness-stale-event"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoStaleEvent"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# Teeth: the cells emptied, not recreated (K-B3 as falsified, P-41) — the residue refills the cell and
+# re-triggers readiness, and the slot re-associates with no new datagram
+[[check]]
+name = "udp-slots-hazard-cells-emptied-only"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugCellsEmptiedOnly"
+invariant = "NoReassociationWithoutNewDatagram"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# Teeth: readiness dispatched by slot (raw descriptor) only — an event of an earlier generation starts
+# an association with no new datagram
+[[check]]
+name = "udp-slots-hazard-fd-dispatch"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugFdDispatch"
+invariant = "NoReassociationWithoutNewDatagram"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-fd-dispatch-generation"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugFdDispatch"
+invariant = "NoStaleGenerationStart"
+backend = "apalache"
+max_steps = 12
 expect = "violation"
 ci = true
 

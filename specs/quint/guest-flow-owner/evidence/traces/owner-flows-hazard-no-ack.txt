@@ -1,0 +1,66 @@
+# owner-flows-hazard-no-ack: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  hc = [ opener |-> "g", paired |-> [g |-> FALSE, h |-> FALSE], outEof |-> [g |-> FALSE, h |-> FALSE], farHc |-> [g |-> FALSE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]
+  hf = <<[st |-> "none", gen |-> 0]>>
+  alloc = "Absent"
+  bHeldByOther = FALSE
+  heldByOther = FALSE
+  phantom = FALSE
+  vmUp = FALSE
+  badPaired = FALSE
+  quiesced = FALSE
+  abortDiscarded = {}
+  claim = 0
+  resurrected = FALSE
+  crossMsg = FALSE
+  gen = 0
+  drvLive = FALSE
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+  toHostRefused = {}
+  readyCross = FALSE
+  vmGen = 0
+  toHostPaired = {}
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  bclaim = 0
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  toGuestAbort = {}
+  gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+
+State 2 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> FALSE, h |-> FALSE], outEof |-> [g |-> TRUE, h |-> FALSE], farHc |-> [g |-> TRUE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]
+
+State 3 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> FALSE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> FALSE], farHc |-> [g |-> TRUE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<"Paired">>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]
+
+State 4 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> FALSE], farHc |-> [g |-> TRUE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]
+
+State 5 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> FALSE], farHc |-> [g |-> TRUE, h |-> FALSE], ann |-> [g |-> "done", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<"HalfClose">>, h |-> <<>>], vEnd |-> [g |-> TRUE, h |-> FALSE], vEndSent |-> [g |-> TRUE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+State 6 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> TRUE], farHc |-> [g |-> TRUE, h |-> TRUE], ann |-> [g |-> "done", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<"HalfClose">>, h |-> <<>>], vEnd |-> [g |-> TRUE, h |-> FALSE], vEndSent |-> [g |-> TRUE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+State 7 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> TRUE], farHc |-> [g |-> TRUE, h |-> TRUE], ann |-> [g |-> "done", h |-> "done"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<"HalfClose">>, h |-> <<"HalfClose">>], vEnd |-> [g |-> TRUE, h |-> TRUE], vEndSent |-> [g |-> TRUE, h |-> TRUE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+State 8 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> TRUE], farHc |-> [g |-> TRUE, h |-> TRUE], ann |-> [g |-> "done", h |-> "done"], acked |-> [g |-> TRUE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<"HalfClose", "Ack">>, h |-> <<>>], vEnd |-> [g |-> TRUE, h |-> TRUE], vEndSent |-> [g |-> TRUE, h |-> TRUE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+State 9 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> TRUE], farHc |-> [g |-> TRUE, h |-> TRUE], ann |-> [g |-> "done", h |-> "done"], acked |-> [g |-> TRUE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> FALSE], far |-> [g |-> "none", h |-> "reset"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<"HalfClose", "Ack">>, h |-> <<"Abort">>], vEnd |-> [g |-> FALSE, h |-> TRUE], vEndSent |-> [g |-> TRUE, h |-> TRUE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+State 10 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> TRUE], farHc |-> [g |-> TRUE, h |-> TRUE], ann |-> [g |-> "done", h |-> "done"], acked |-> [g |-> TRUE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> FALSE, h |-> FALSE], far |-> [g |-> "reset", h |-> "reset"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<"HalfClose", "Ack">>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> TRUE], vEndSent |-> [g |-> TRUE, h |-> TRUE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+State 11 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> TRUE], farHc |-> [g |-> TRUE, h |-> TRUE], ann |-> [g |-> "done", h |-> "done"], acked |-> [g |-> TRUE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> FALSE, h |-> FALSE], far |-> [g |-> "reset", h |-> "reset"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<"HalfClose", "Ack">>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> TRUE, h |-> TRUE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+State 12 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> TRUE], farHc |-> [g |-> TRUE, h |-> TRUE], ann |-> [g |-> "done", h |-> "done"], acked |-> [g |-> TRUE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> FALSE, h |-> FALSE], far |-> [g |-> "reset", h |-> "reset"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<"Ack">>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> TRUE, h |-> TRUE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+State 13 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> TRUE, h |-> TRUE], outEof |-> [g |-> TRUE, h |-> TRUE], farHc |-> [g |-> TRUE, h |-> TRUE], ann |-> [g |-> "done", h |-> "done"], acked |-> [g |-> TRUE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> FALSE, h |-> FALSE], far |-> [g |-> "reset", h |-> "reset"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> TRUE, h |-> TRUE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> TRUE, faulted |-> FALSE ]
+
+-> stutters forever in State 13

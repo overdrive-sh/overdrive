@@ -19,7 +19,7 @@ State 1
 State 2 [Restart]
   up = TRUE
   stop = "none"
-  bin = "v1"
+  bin = "v2"
 
 State 3 [BootStep]
   phase = "load"
@@ -30,7 +30,7 @@ State 4 [BootStep]
 
 State 5 [BootStep]
   swapOk = TRUE
-  prog = "v1"
+  prog = "v2"
   phase = "pin"
   link = "attached"
 

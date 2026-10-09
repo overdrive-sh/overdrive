@@ -27,36 +27,7 @@ State 1: <Initial predicate>
 /\ lease_ok_cid_lease_exitsLeft = 1
 /\ lease_ok_cid_lease_errsLeft = 1
 
-State 2: <lease_ok_cid_lease_OrphanExit line 563, col 3 to line 572, col 52 of module lease_ok>
-/\ lease_ok_cid_lease_pend = {}
-/\ lease_ok_cid_lease_walker = 0
-/\ lease_ok_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ],
-   [ st |-> "wait",
-     off |-> -1,
-     loc |-> "none",
-     retry |-> FALSE,
-     remembered |-> {} ] >>
-/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
-  skipFree |-> FALSE,
-  skipped |-> FALSE,
-  skipOrphan |-> FALSE,
-  refusedHeld |-> FALSE,
-  refusedClaimable |-> FALSE,
-  claimErr |-> FALSE,
-  refusedUnasked |-> FALSE ]
-/\ lease_ok_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_ok_cid_lease_cursor = 0
-/\ lease_ok_cid_lease_todo = {}
-/\ lease_ok_cid_lease_bootLeft = -1
-/\ lease_ok_cid_lease_exitsLeft = 1
-/\ lease_ok_cid_lease_errsLeft = 1
-
-State 3: <lease_ok_cid_lease_AssignBegin line 597, col 3 to line 655, col 38 of module lease_ok>
+State 2: <lease_ok_cid_lease_AssignBegin line 597, col 3 to line 655, col 38 of module lease_ok>
 /\ lease_ok_cid_lease_pend = {}
 /\ lease_ok_cid_lease_walker = 1
 /\ lease_ok_cid_lease_al = << [ st |-> "wait",
@@ -78,14 +49,14 @@ State 3: <lease_ok_cid_lease_AssignBegin line 597, col 3 to line 655, col 38 of 
   refusedClaimable |-> FALSE,
   claimErr |-> FALSE,
   refusedUnasked |-> FALSE ]
-/\ lease_ok_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_ok_cid_lease_cursor = 0
 /\ lease_ok_cid_lease_todo = {0, 1, 2}
 /\ lease_ok_cid_lease_bootLeft = -1
 /\ lease_ok_cid_lease_exitsLeft = 1
 /\ lease_ok_cid_lease_errsLeft = 1
 
-State 4: <lease_ok_cid_lease_AssignClaimErr line 180, col 3 to line 193, col 68 of module lease_ok>
+State 3: <lease_ok_cid_lease_AssignClaimErr line 180, col 3 to line 193, col 68 of module lease_ok>
 /\ lease_ok_cid_lease_pend = {}
 /\ lease_ok_cid_lease_walker = 0
 /\ lease_ok_cid_lease_al = << [ st |-> "wait",
@@ -107,7 +78,7 @@ State 4: <lease_ok_cid_lease_AssignClaimErr line 180, col 3 to line 193, col 68 
   refusedClaimable |-> FALSE,
   claimErr |-> TRUE,
   refusedUnasked |-> FALSE ]
-/\ lease_ok_cid_lease_kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_ok_cid_lease_cursor = 0
 /\ lease_ok_cid_lease_todo = {}
 /\ lease_ok_cid_lease_bootLeft = -1

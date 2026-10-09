@@ -22,20 +22,20 @@ State 2 [Provision]
 State 3 [SessOpen]
   sess = TRUE
 
-State 4 [ListenState]
+State 4 [OtherAdmit]
+  oRes = 2
+
+State 5 [ListenState]
   lastLS = {1}
 
-State 5 [ActivateBegin]
+State 6 [ActivateBegin]
   alloc = "Activating"
 
-State 6 [BindListen]
+State 7 [BindListen]
   lis = {1}
 
-State 7 [Steer]
+State 8 [Steer]
   entries = {1}
-
-State 8 [OtherAdmit]
-  oRes = 2
 
 State 9 [OtherSteer]
   oEnt = 1

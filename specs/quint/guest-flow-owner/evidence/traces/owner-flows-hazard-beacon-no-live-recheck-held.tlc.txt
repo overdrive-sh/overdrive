@@ -1,0 +1,689 @@
+State 1: <Initial predicate>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Absent"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 2: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3501, col 4 to line 3502, col 58 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Provisioned"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 3: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3501, col 4 to line 3502, col 58 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Provisioned"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 4: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3501, col 4 to line 3502, col 58 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Retiring"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 5: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3505, col 9 to line 3506, col 60 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Retiring"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 6: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3501, col 4 to line 3502, col 58 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Retiring"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 7: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3505, col 9 to line 3506, col 60 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Retiring"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 8: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3505, col 9 to line 3506, col 60 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Retiring"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 9: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3505, col 9 to line 3506, col 60 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Retiring"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 10: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3501, col 4 to line 3502, col 58 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Absent"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 11: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3501, col 4 to line 3502, col 58 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Provisioned"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 12: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3501, col 4 to line 3502, col 58 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Provisioned"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 13: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3505, col 9 to line 3506, col 60 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "pending", gen |-> 2]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Provisioned"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 14: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3505, col 9 to line 3506, col 60 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "reading", gen |-> 2]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Provisioned"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}
+
+State 15: <flows_bugBeaconNoLiveRecheck_owner_flows_step line 3505, col 9 to line 3506, col 60 of module flows_bugBeaconNoLiveRecheck>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "closed", gen |-> 2]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bHeldByOther = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmUp = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_alloc = "Provisioned"
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_phantom = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_claim = 0
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_gen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_vmGen = 2
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_bclaim = 1
+/\ flows_bugBeaconNoLiveRecheck_owner_flows_toGuestAbort = {}

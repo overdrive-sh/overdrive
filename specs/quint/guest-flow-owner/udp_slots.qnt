@@ -12,6 +12,12 @@
  *   U-2 After `Refused` / `Abort` the slot's parked frames are discarded; the slot stays owned by
  *          its (socket, destination) and does not re-associate for that association — only a new
  *          datagram from the application starts a new association (A-18).
+ * and the round-2 remediation decision of 2026-10-09 (§ Spike remediation decisions, round 2):
+ *   CELL-RECREATE Every end of an association (slot release and U-2) discards the parked frames by
+ *          RECREATING the slot's framing and reassembly cells (a new cell generation), never by
+ *          emptying them; overdrive-init dispatches each readiness event by its registration's
+ *          identity (slot index, cell generation), never by raw descriptor: an event of an older
+ *          generation is discarded.
  *
  * Abstraction:
  *   - SOCKS: application UDP sockets (by cookie; a cookie is never reused, so a closed socket never
@@ -26,14 +32,25 @@
  *     each flow id gets at most one Paired/Refused).
  *   - Time is abstract: GUEST_DATAGRAM_SLOT_IDLE (120 s) is a nondeterministic IdleRelease of a slot
  *     with nothing parked.
+ *   - Cells (CELL-RECREATE): each slot carries a cell generation, recreated (advanced) at every end
+ *     of association; every datagram parked in a cell queues a readiness event registered for the
+ *     slot's generation then current, in `ready`. Generations only grow and dispatch compares an
+ *     event's generation only for equality with its slot's current one, so an event is kept as
+ *     (slot, current?) — "earlier generation" is `false` — which keeps the instance finite for TLC.
+ *     Association set-up (Datagram step 2) is triggered by consuming one event and trusts it (a
+ *     readiness event means frames). The
+ *     step order of an end of association (cut the reassembly output → close the legs → recreate →
+ *     disconnect → remove the unframe tuple) concerns framing, which the model does not carry
+ *     (R5-14, Tier-3). The quarantine of a slot whose new cell cannot be created is not modelled.
  *
  * ASSUMPTIONS:
  *   K-B1  Closing T_g / Q_g is observed by the host as the association's end, even when the host
  *         accepts them after the guest closed them ......................... P-22 / V-2 (bounded)
  *   K-B2  The guest `sock_release` hook reports a released socket, or the report is lost and the
  *         level-triggered audit (sock_diag) finds slots whose cookie no longer exists ....... R5-14
- *   K-B3  Emptying / recreating a slot's framing and reassembly cells discards every parked frame
- *         (no frame survives in a psock backlog)................................... NO V-item (R5-14 Tier-3 partially)
+ *   K-B3  Recreating a slot's framing and reassembly cells discards every parked frame; EMPTYING
+ *         them does not (sender-side queue / psock backlog residue refills the cell and re-triggers
+ *         readiness: OFF "cellsEmptiedOnly") ................ V-5(c) (P-41: recreated validated, emptied falsified)
  *
  * OFF names the rules switched off (teeth); the design instances switch none off.
  */
@@ -55,6 +72,10 @@ module udp_slots {
   val BUG_RELEASE_ONE_SLOT: bool = OFF.contains("releaseOneSlot")       // closing a socket releases only one of its slots (no check: the audit masks it)
   val ENV_REPORT_LOSS: bool = true                                       // sock_release reports may be lost (audit is the backstop)
   val BUG_KEEP_FRAMES_ON_END: bool = OFF.contains("keepFramesOnEnd")    // U-2 off: Refused / Abort leaves the parked frames in the cell
+  val BUG_CELLS_EMPTIED_ONLY: bool = OFF.contains("cellsEmptiedOnly")   // CELL-RECREATE off: the cells are emptied, not recreated; the
+                                                                         // residue refills them and re-triggers readiness (K-B3 as falsified)
+  val BUG_FD_DISPATCH: bool = OFF.contains("fdDispatch")                // CELL-RECREATE off: readiness dispatched by slot (raw descriptor)
+                                                                         // only, ignoring the generation
 
   type Tag = (int, int)                // (socket, destination) of a frame
   type Slot = { owned: bool, sock: int, dest: int, fid: int, routed: bool, parked: Set[Tag], holders: int }
@@ -77,14 +98,36 @@ module udp_slots {
                                         //        no datagram from the application since
   var staleReassoc: bool                // ghost: such a slot re-associated without a new datagram
   var guestEnded: Set[int]              // association ids the guest ended itself (pairing deadline)
+  var ready: Set[(int, bool)]           // readiness events not yet dispatched: (slot, registered for its CURRENT
+                                        //   cell generation?) — `false`: an earlier generation (CELL-RECREATE)
+  var residue: int -> Set[Tag]          // cellsEmptiedOnly only: frames left in the sender-side queue / psock backlog
+  var staleGenStart: bool               // ghost: an association started from an event of an earlier generation
 
   val FIDS: Set[int] = 1.to(MAXFID)
   val freeSlot: Slot = { owned: false, sock: 0, dest: 0, fid: 0, routed: false, parked: Set(), holders: 0 }
   def ownerOf(k: int, d: int): Set[int] = SLOTS.filter(s => slots.get(s).owned and slots.get(s).sock == k and slots.get(s).dest == d)
   def mismatch(tags: Set[Tag], a: Assoc): bool = tags.exists(t => t != (a.sock, a.dest))
   // release (correct): end the association (host observes it), discard parked frames, return the slot
-  def released(x: Slot): Slot = if (BUG_KEEP_FRAMES) { ...freeSlot, parked: x.parked } else freeSlot
+  def released(x: Slot): Slot = { ...freeSlot, parked: parkedAfterEnd(x, true) }
   def endOf(ss: Set[int]): Set[int] = ss.filter(s => slots.get(s).fid != 0).map(s => slots.get(s).fid)
+  // An end of association on slots `ss` (U-2 when `rel` is false, release when true). The design
+  // recreates the cells: the parked frames go, the generation advances, and every event already
+  // queued for the slot is of an earlier generation. keepFramesOnEnd / keepFrames: the cells are
+  // left as they are — same generation, frames still there, the cell still readable (a level-
+  // triggered event of the current generation). cellsEmptiedOnly: the cells are emptied — same
+  // generation — and the frames survive as residue (Refill).
+  def recreates(rel: bool): bool =
+    not(BUG_CELLS_EMPTIED_ONLY) and not(if (rel) BUG_KEEP_FRAMES else BUG_KEEP_FRAMES_ON_END)
+  def keepsFrames(rel: bool): bool = if (rel) BUG_KEEP_FRAMES else BUG_KEEP_FRAMES_ON_END
+  def residueAfterEnd(ss: Set[int]): int -> Set[Tag] =
+    residue.keys().mapBy(s => if (ss.contains(s) and BUG_CELLS_EMPTIED_ONLY) residue.get(s).union(slots.get(s).parked) else residue.get(s))
+  def readyAfterEnd(ss: Set[int], rel: bool): Set[(int, bool)] =
+    // recreating advances the slot's generation: every event already queued for it is now of an
+    // earlier generation
+    val aged = if (recreates(rel)) ready.map(e => if (ss.contains(e._1)) (e._1, false) else e) else ready
+    if (keepsFrames(rel)) aged.union(ss.filter(s => slots.get(s).parked != Set()).map(s => (s, true))) else aged
+  // the cell's frames when it is not recreated: kept, or emptied (cellsEmptiedOnly: into residue)
+  def parkedAfterEnd(x: Slot, rel: bool): Set[Tag] = if (keepsFrames(rel)) x.parked else Set()
 
   action init = all {
     sockAlive' = SOCKS.mapBy(k => true),
@@ -96,7 +139,9 @@ module udp_slots {
     toGuestPaired' = Set(), toGuestRefused' = Set(), toGuestAbort' = Set(),
     toHostAbort' = Set(), toHostEnd' = Set(),
     misdelivered' = false, lateIgnored' = false, endedNoNew' = Set(), staleReassoc' = false, guestEnded' = Set(),
+    ready' = Set(), residue' = SLOTS.mapBy(s => Set()), staleGenStart' = false,
   }
+  action keepCells = all { ready' = ready, residue' = residue, staleGenStart' = staleGenStart }
 
   // ------------------------------------------------------------------ application sends
   // A datagram to (k, d) on the slot that already owns (k, d): delivered if routed, else parked.
@@ -105,11 +150,13 @@ module udp_slots {
     val x = slots.get(s)
     if (x.routed) all {
       misdelivered' = (misdelivered or (host.get(x.fid).st == "paired" and mismatch(Set((k, d)), host.get(x.fid)))),
-      slots' = slots,
+      slots' = slots, ready' = ready,
     } else all {
       misdelivered' = misdelivered,
       slots' = slots.set(s, { ...x, parked: x.parked.union(Set((k, d))) }),
+      ready' = ready.union(Set((s, true))),
     },
+    residue' = residue, staleGenStart' = staleGenStart,
     sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
@@ -120,6 +167,7 @@ module udp_slots {
     not(BUG_CLAIM_SPLIT), sockAlive.get(k), ownerOf(k, d) == Set(), not(slots.get(s).owned),
     slots' = slots.set(s, { owned: true, sock: k, dest: d, fid: 0, routed: false,
                            parked: slots.get(s).parked.union(Set((k, d))), holders: 1 }),
+    ready' = ready.union(Set((s, true))), residue' = residue, staleGenStart' = staleGenStart,
     sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
@@ -128,7 +176,7 @@ module udp_slots {
   action AppPick(k: int, d: int, s: int): bool = all {
     BUG_CLAIM_SPLIT, sockAlive.get(k), ownerOf(k, d) == Set(), not(slots.get(s).owned),
     not(picks.exists(p => p.k == k and p.d == d)),
-    picks' = picks.union(Set({ k: k, d: d, s: s })),
+    picks' = picks.union(Set({ k: k, d: d, s: s })), keepCells,
     slots' = slots, sockAlive' = sockAlive, releasePending' = releasePending, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
@@ -140,6 +188,7 @@ module udp_slots {
     slots' = slots.set(s, { ...slots.get(s), owned: true, sock: k, dest: d,
                            parked: slots.get(s).parked.union(Set((k, d))),
                            holders: slots.get(s).holders + 1 }),
+    ready' = ready.union(Set((s, true))), residue' = residue, staleGenStart' = staleGenStart,
     sockAlive' = sockAlive, releasePending' = releasePending, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
@@ -147,26 +196,55 @@ module udp_slots {
   }
 
   // ------------------------------------------------------------------ association set-up
-  // Datagram step 2: on framing-cell readiness, claim a FlowId, open T_g + Q_g, write both requests.
-  action GuestAssociate(s: int): bool = all {
+  // Datagram step 2: a readiness event of slot s is dispatched. The design dispatches by (slot, cell
+  // generation): an event of an earlier generation is discarded. A current one, for an owned slot
+  // with no association, claims a FlowId, opens T_g + Q_g and writes both requests (the event is
+  // trusted: readiness means frames). fdDispatch: dispatched by slot only, whatever its generation.
+  action GuestReady(s: int, cur: bool): bool = all {
+    ready.contains((s, cur)),
     val x = slots.get(s)
-    all {
-      x.owned, x.parked != Set(), x.fid == 0, not(x.routed), nextFid <= MAXFID,
+    val stale = not(cur)
+    if (stale and not(BUG_FD_DISPATCH)) all {
+      // an event of an earlier cell generation: discarded
+      slots' = slots, host' = host, nextFid' = nextFid, staleReassoc' = staleReassoc,
+      endedNoNew' = endedNoNew, staleGenStart' = staleGenStart,
+    } else if (x.owned and x.fid == 0 and not(x.routed) and nextFid <= MAXFID) all {
       slots' = slots.set(s, { ...x, fid: nextFid }),
       host' = host.set(nextFid, { st: "req", sock: x.sock, dest: x.dest, slot: s }),
+      nextFid' = nextFid + 1,
+      staleReassoc' = (staleReassoc or endedNoNew.contains(s)),
+      endedNoNew' = endedNoNew.exclude(Set(s)),
+      staleGenStart' = (staleGenStart or stale),
+    } else all {
+      // nothing to set up (an association is already pending or routed; the slot is free)
+      slots' = slots, host' = host, nextFid' = nextFid, staleReassoc' = staleReassoc,
+      endedNoNew' = endedNoNew, staleGenStart' = staleGenStart,
     },
-    nextFid' = nextFid + 1,
+    ready' = ready.exclude(Set((s, cur))), residue' = residue,
     sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks,
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
-    misdelivered' = misdelivered, lateIgnored' = lateIgnored, endedNoNew' = endedNoNew.exclude(Set(s)), staleReassoc' = (staleReassoc or endedNoNew.contains(s)), guestEnded' = guestEnded,
+    misdelivered' = misdelivered, lateIgnored' = lateIgnored, guestEnded' = guestEnded,
+  }
+  // cellsEmptiedOnly: the residue refills the emptied cell and re-triggers readiness (P-41)
+  action Refill(s: int): bool = all {
+    residue.get(s) != Set(),
+    slots' = slots.set(s, { ...slots.get(s), parked: slots.get(s).parked.union(residue.get(s)) }),
+    residue' = residue.set(s, Set()),
+    ready' = ready.union(Set((s, true))),
+    staleGenStart' = staleGenStart,
+    sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
+    host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
+    toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
+    misdelivered' = misdelivered, lateIgnored' = lateIgnored, endedNoNew' = endedNoNew,
+    staleReassoc' = staleReassoc, guestEnded' = guestEnded,
   }
   // Datagram steps 3-4 (host): pair, or refuse (Policy / HostInternal / Capacity / ...).
   action HostPair(i: int): bool = all {
     host.get(i).st == "req",
     host' = host.set(i, { ...host.get(i), st: "paired" }),
     toGuestPaired' = toGuestPaired.union(Set(i)),
-    sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
+    keepCells, sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
     nextFid' = nextFid, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -175,7 +253,7 @@ module udp_slots {
     host.get(i).st == "req",
     host' = host.set(i, { ...host.get(i), st: "closed" }),
     toGuestRefused' = toGuestRefused.union(Set(i)),
-    sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
+    keepCells, sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
     nextFid' = nextFid, toGuestPaired' = toGuestPaired, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -185,7 +263,7 @@ module udp_slots {
     host.get(i).st == "paired",
     host' = host.set(i, { ...host.get(i), st: "closed" }),
     toGuestAbort' = toGuestAbort.union(Set(i)),
-    sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
+    keepCells, sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
     nextFid' = nextFid, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -219,7 +297,7 @@ module udp_slots {
     },
     sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
-    toHostEnd' = toHostEnd,
+    toHostEnd' = toHostEnd, keepCells,
   }
   // Refused / Abort received: the association closes on the guest side; the slot stays owned by its
   // (socket, destination); its parked frames are discarded (U-2) and only the next datagram
@@ -231,11 +309,12 @@ module udp_slots {
     val ended = SLOTS.filter(s => slots.get(s).owned and slots.get(s).fid == i)
     all {
       slots' = slots.keys().mapBy(s =>
-        if (ended.contains(s)) { ...slots.get(s), fid: 0, routed: false,
-                                 parked: if (BUG_KEEP_FRAMES_ON_END) slots.get(s).parked else Set() }
+        if (ended.contains(s)) { ...slots.get(s), fid: 0, routed: false, parked: parkedAfterEnd(slots.get(s), false) }
         else slots.get(s)),
       endedNoNew' = endedNoNew.union(ended),
+      residue' = residueAfterEnd(ended), ready' = readyAfterEnd(ended, false),
     },
+    staleGenStart' = staleGenStart,
     sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
     misdelivered' = misdelivered, lateIgnored' = lateIgnored, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -246,7 +325,9 @@ module udp_slots {
     val x = slots.get(s)
     all {
       x.owned, x.fid != 0, not(x.routed),
-      slots' = slots.set(s, { ...x, fid: 0, parked: if (BUG_KEEP_FRAMES_ON_END) x.parked else Set() }),
+      slots' = slots.set(s, { ...x, fid: 0, parked: parkedAfterEnd(x, false) }),
+      residue' = residueAfterEnd(Set(s)), ready' = readyAfterEnd(Set(s), false),
+      staleGenStart' = staleGenStart,
       toHostAbort' = toHostAbort.union(Set(x.fid)),
       guestEnded' = guestEnded.union(Set(x.fid)),
       endedNoNew' = endedNoNew.union(Set(s)),
@@ -265,6 +346,7 @@ module udp_slots {
     sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
     nextFid' = nextFid, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, misdelivered' = misdelivered, lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
+    keepCells,
   }
 
   // ------------------------------------------------------------------ slot release (D25)
@@ -276,6 +358,7 @@ module udp_slots {
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
+    keepCells,
   }
   // the sock_release report is lost (K-B2): only the audit can find the slots
   action SockCloseReportLost(k: int): bool = all {
@@ -286,11 +369,14 @@ module udp_slots {
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
+    keepCells,
   }
   action releaseSet(ss: Set[int]): bool = all {
     slots' = slots.keys().mapBy(s => if (ss.contains(s)) released(slots.get(s)) else slots.get(s)),
     toHostEnd' = toHostEnd.union(endOf(ss)),
     endedNoNew' = endedNoNew.exclude(ss),
+    residue' = residueAfterEnd(ss), ready' = readyAfterEnd(ss, true),
+    staleGenStart' = staleGenStart,
   }
   // overdrive-init handles the report: every slot of the released socket (slot-ownership table)
   action GuestReleaseSock(k: int): bool = all {
@@ -323,6 +409,8 @@ module udp_slots {
   }
 
   action releaseAny = { nondet k = SOCKS.oneOf() GuestReleaseSock(k) }
+  // overdrive-init's event loop takes one queued readiness event
+  action dispatchReady = { nondet e = ready.oneOf() GuestReady(e._1, e._2) }
   action step = {
     nondet k = SOCKS.oneOf()
     nondet d = DESTS.oneOf()
@@ -330,7 +418,7 @@ module udp_slots {
     nondet i = FIDS.oneOf()
     any {
       AppSendOnSlot(k, d, s), AppClaim(k, d, s), AppPick(k, d, s), AppTake(k, d, s),
-      GuestAssociate(s), HostPair(i), HostRefuse(i), HostAbortAssoc(i), GuestRecvPaired(i),
+      dispatchReady, Refill(s), HostPair(i), HostRefuse(i), HostAbortAssoc(i), GuestRecvPaired(i),
       GuestRecvEnd(i), GuestPairingTimeout(s), HostRecvEnd(i), SockClose(k), SockCloseReportLost(k), GuestReleaseSock(k),
       GuestAudit, IdleRelease(s),
     }
@@ -362,8 +450,10 @@ module udp_slots {
   val LatePairedAborted: bool = not(lateIgnored)
   // U-2: after Refused / Abort a slot re-associates only for a new datagram from its application
   val NoReassociationWithoutNewDatagram: bool = not(staleReassoc)
+  // (14, CELL-RECREATE) no association starts from a readiness event of an earlier cell generation
+  val NoStaleGenerationStart: bool = not(staleGenStart)
   val Safety: bool = SlotHeldOnce and ReleasedSlotCarriesNoData and RouteCurrent and LatePairedAborted and
-    NoReassociationWithoutNewDatagram
+    NoReassociationWithoutNewDatagram and NoStaleGenerationStart
 
   // ------------------------------------------------------------------ liveness (TLC)
   def orphan(s: int): bool = slots.get(s).owned and not(sockAlive.get(slots.get(s).sock))
@@ -378,6 +468,8 @@ module udp_slots {
   val WitnessNoRouted: bool = SLOTS.forall(s => not(slots.get(s).routed))
   val WitnessNoTwoSlotsOneSocket: bool = not(SOCKS.exists(k =>
     SLOTS.filter(s => slots.get(s).owned and slots.get(s).sock == k).size() >= 2))
+  // CELL-RECREATE: an event of an earlier cell generation is queued (and will be discarded)
+  val WitnessNoStaleEvent: bool = ready.forall(e => e._2)
   val WitnessNoReassociation: bool = not(SLOTS.exists(s => slots.get(s).owned and slots.get(s).fid >= 2 and
     host.get(slots.get(s).fid - 1).sock == slots.get(s).sock and host.get(slots.get(s).fid - 1).dest == slots.get(s).dest))
 }

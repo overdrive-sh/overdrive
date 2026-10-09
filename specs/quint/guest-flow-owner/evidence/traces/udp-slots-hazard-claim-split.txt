@@ -17,17 +17,21 @@ State 1
   endedNoNew = Set()
   staleReassoc = false
   guestEnded = Set()
+  ready = Set()
+  residue = Map(0 -> Set(), 1 -> Set())
+  staleGenStart = false
 
 State 2
-  picks = Set({ d: 1, k: 2, s: 0 })
+  picks = Set({ d: 2, k: 1, s: 1 })
 
 State 3
-  picks = Set({ d: 1, k: 2, s: 0 }, { d: 2, k: 1, s: 0 })
+  picks = Set({ d: 1, k: 2, s: 1 }, { d: 2, k: 1, s: 1 })
 
 State 4
-  slots = Map(0 -> { dest: 2, fid: 0, holders: 1, owned: true, parked: Set((1, 2)), routed: false, sock: 1 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
-  picks = Set({ d: 1, k: 2, s: 0 })
+  slots = Map(0 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 }, 1 -> { dest: 2, fid: 0, holders: 1, owned: true, parked: Set((1, 2)), routed: false, sock: 1 })
+  picks = Set({ d: 1, k: 2, s: 1 })
+  ready = Set((1, true))
 
 State 5
-  slots = Map(0 -> { dest: 1, fid: 0, holders: 2, owned: true, parked: Set((1, 2), (2, 1)), routed: false, sock: 2 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
+  slots = Map(0 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 }, 1 -> { dest: 1, fid: 0, holders: 2, owned: true, parked: Set((1, 2), (2, 1)), routed: false, sock: 2 })
   picks = Set()

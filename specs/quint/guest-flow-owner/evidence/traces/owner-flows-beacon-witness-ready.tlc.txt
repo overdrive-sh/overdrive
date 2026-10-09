@@ -1,0 +1,321 @@
+State 1: <Initial predicate>
+/\ flows_beacon_owner_flows_vmUp = FALSE
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_phantom = FALSE
+/\ flows_beacon_owner_flows_toHostRefused = {}
+/\ flows_beacon_owner_flows_toGuestAbort = {}
+/\ flows_beacon_owner_flows_quiesced = FALSE
+/\ flows_beacon_owner_flows_bHeldByOther = FALSE
+/\ flows_beacon_owner_flows_alloc = "Absent"
+/\ flows_beacon_owner_flows_gen = 0
+/\ flows_beacon_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_beacon_owner_flows_badPaired = FALSE
+/\ flows_beacon_owner_flows_claim = 0
+/\ flows_beacon_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_beacon_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_drvLive = FALSE
+/\ flows_beacon_owner_flows_crossMsg = FALSE
+/\ flows_beacon_owner_flows_abortDiscarded = {}
+/\ flows_beacon_owner_flows_resurrected = FALSE
+/\ flows_beacon_owner_flows_bclaim = 0
+/\ flows_beacon_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_readyCross = FALSE
+/\ flows_beacon_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_beacon_owner_flows_heldByOther = FALSE
+/\ flows_beacon_owner_flows_toHostPaired = {}
+/\ flows_beacon_owner_flows_vmGen = 0
+
+State 2: <flows_beacon_owner_flows_step line 2857, col 4 to line 2857, col 70 of module flows_beacon>
+/\ flows_beacon_owner_flows_vmUp = FALSE
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_phantom = FALSE
+/\ flows_beacon_owner_flows_toHostRefused = {}
+/\ flows_beacon_owner_flows_toGuestAbort = {}
+/\ flows_beacon_owner_flows_quiesced = FALSE
+/\ flows_beacon_owner_flows_bHeldByOther = FALSE
+/\ flows_beacon_owner_flows_alloc = "Provisioned"
+/\ flows_beacon_owner_flows_gen = 1
+/\ flows_beacon_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_beacon_owner_flows_badPaired = FALSE
+/\ flows_beacon_owner_flows_claim = 0
+/\ flows_beacon_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_beacon_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_drvLive = FALSE
+/\ flows_beacon_owner_flows_crossMsg = FALSE
+/\ flows_beacon_owner_flows_abortDiscarded = {}
+/\ flows_beacon_owner_flows_resurrected = FALSE
+/\ flows_beacon_owner_flows_bclaim = 0
+/\ flows_beacon_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_readyCross = FALSE
+/\ flows_beacon_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_beacon_owner_flows_heldByOther = FALSE
+/\ flows_beacon_owner_flows_toHostPaired = {}
+/\ flows_beacon_owner_flows_vmGen = 0
+
+State 3: <flows_beacon_owner_flows_step line 2857, col 4 to line 2857, col 70 of module flows_beacon>
+/\ flows_beacon_owner_flows_vmUp = TRUE
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_phantom = FALSE
+/\ flows_beacon_owner_flows_toHostRefused = {}
+/\ flows_beacon_owner_flows_toGuestAbort = {}
+/\ flows_beacon_owner_flows_quiesced = FALSE
+/\ flows_beacon_owner_flows_bHeldByOther = FALSE
+/\ flows_beacon_owner_flows_alloc = "Provisioned"
+/\ flows_beacon_owner_flows_gen = 1
+/\ flows_beacon_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_beacon_owner_flows_badPaired = FALSE
+/\ flows_beacon_owner_flows_claim = 0
+/\ flows_beacon_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_beacon_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_drvLive = TRUE
+/\ flows_beacon_owner_flows_crossMsg = FALSE
+/\ flows_beacon_owner_flows_abortDiscarded = {}
+/\ flows_beacon_owner_flows_resurrected = FALSE
+/\ flows_beacon_owner_flows_bclaim = 0
+/\ flows_beacon_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_readyCross = FALSE
+/\ flows_beacon_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_beacon_owner_flows_heldByOther = FALSE
+/\ flows_beacon_owner_flows_toHostPaired = {}
+/\ flows_beacon_owner_flows_vmGen = 1
+
+State 4: <flows_beacon_owner_flows_step line 2857, col 4 to line 2857, col 70 of module flows_beacon>
+/\ flows_beacon_owner_flows_vmUp = TRUE
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_phantom = FALSE
+/\ flows_beacon_owner_flows_toHostRefused = {}
+/\ flows_beacon_owner_flows_toGuestAbort = {}
+/\ flows_beacon_owner_flows_quiesced = FALSE
+/\ flows_beacon_owner_flows_bHeldByOther = FALSE
+/\ flows_beacon_owner_flows_alloc = "Retiring"
+/\ flows_beacon_owner_flows_gen = 1
+/\ flows_beacon_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_beacon_owner_flows_badPaired = FALSE
+/\ flows_beacon_owner_flows_claim = 0
+/\ flows_beacon_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_beacon_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_drvLive = TRUE
+/\ flows_beacon_owner_flows_crossMsg = FALSE
+/\ flows_beacon_owner_flows_abortDiscarded = {}
+/\ flows_beacon_owner_flows_resurrected = FALSE
+/\ flows_beacon_owner_flows_bclaim = 0
+/\ flows_beacon_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_readyCross = FALSE
+/\ flows_beacon_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_beacon_owner_flows_heldByOther = FALSE
+/\ flows_beacon_owner_flows_toHostPaired = {}
+/\ flows_beacon_owner_flows_vmGen = 1
+
+State 5: <flows_beacon_owner_flows_step line 2859, col 9 to line 2859, col 78 of module flows_beacon>
+/\ flows_beacon_owner_flows_vmUp = TRUE
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_phantom = FALSE
+/\ flows_beacon_owner_flows_toHostRefused = {}
+/\ flows_beacon_owner_flows_toGuestAbort = {}
+/\ flows_beacon_owner_flows_quiesced = FALSE
+/\ flows_beacon_owner_flows_bHeldByOther = FALSE
+/\ flows_beacon_owner_flows_alloc = "Retiring"
+/\ flows_beacon_owner_flows_gen = 1
+/\ flows_beacon_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_beacon_owner_flows_badPaired = FALSE
+/\ flows_beacon_owner_flows_claim = 0
+/\ flows_beacon_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_beacon_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_drvLive = TRUE
+/\ flows_beacon_owner_flows_crossMsg = FALSE
+/\ flows_beacon_owner_flows_abortDiscarded = {}
+/\ flows_beacon_owner_flows_resurrected = FALSE
+/\ flows_beacon_owner_flows_bclaim = 0
+/\ flows_beacon_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_readyCross = FALSE
+/\ flows_beacon_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_beacon_owner_flows_heldByOther = FALSE
+/\ flows_beacon_owner_flows_toHostPaired = {}
+/\ flows_beacon_owner_flows_vmGen = 1
+
+State 6: <flows_beacon_owner_flows_step line 2859, col 9 to line 2859, col 78 of module flows_beacon>
+/\ flows_beacon_owner_flows_vmUp = TRUE
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_phantom = FALSE
+/\ flows_beacon_owner_flows_toHostRefused = {}
+/\ flows_beacon_owner_flows_toGuestAbort = {}
+/\ flows_beacon_owner_flows_quiesced = FALSE
+/\ flows_beacon_owner_flows_bHeldByOther = FALSE
+/\ flows_beacon_owner_flows_alloc = "Retiring"
+/\ flows_beacon_owner_flows_gen = 1
+/\ flows_beacon_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_beacon_owner_flows_badPaired = FALSE
+/\ flows_beacon_owner_flows_claim = 0
+/\ flows_beacon_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_beacon_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_drvLive = TRUE
+/\ flows_beacon_owner_flows_crossMsg = FALSE
+/\ flows_beacon_owner_flows_abortDiscarded = {}
+/\ flows_beacon_owner_flows_resurrected = FALSE
+/\ flows_beacon_owner_flows_bclaim = 0
+/\ flows_beacon_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_readyCross = FALSE
+/\ flows_beacon_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_beacon_owner_flows_heldByOther = FALSE
+/\ flows_beacon_owner_flows_toHostPaired = {}
+/\ flows_beacon_owner_flows_vmGen = 1
+
+State 7: <flows_beacon_owner_flows_step line 2859, col 9 to line 2859, col 78 of module flows_beacon>
+/\ flows_beacon_owner_flows_vmUp = TRUE
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_phantom = FALSE
+/\ flows_beacon_owner_flows_toHostRefused = {}
+/\ flows_beacon_owner_flows_toGuestAbort = {}
+/\ flows_beacon_owner_flows_quiesced = FALSE
+/\ flows_beacon_owner_flows_bHeldByOther = FALSE
+/\ flows_beacon_owner_flows_alloc = "Retiring"
+/\ flows_beacon_owner_flows_gen = 1
+/\ flows_beacon_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_beacon_owner_flows_badPaired = FALSE
+/\ flows_beacon_owner_flows_claim = 0
+/\ flows_beacon_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_beacon_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_drvLive = TRUE
+/\ flows_beacon_owner_flows_crossMsg = FALSE
+/\ flows_beacon_owner_flows_abortDiscarded = {}
+/\ flows_beacon_owner_flows_resurrected = FALSE
+/\ flows_beacon_owner_flows_bclaim = 1
+/\ flows_beacon_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_readyCross = FALSE
+/\ flows_beacon_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_beacon_owner_flows_heldByOther = FALSE
+/\ flows_beacon_owner_flows_toHostPaired = {}
+/\ flows_beacon_owner_flows_vmGen = 1

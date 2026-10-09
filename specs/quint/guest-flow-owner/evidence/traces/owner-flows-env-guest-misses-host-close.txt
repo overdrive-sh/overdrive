@@ -1,79 +1,87 @@
 # owner-flows-env-guest-misses-host-close: counterexample, 17 state(s) (from the TLC trace)
 
 State 1
-  hf = <<[st |-> "none", gen |-> 0]>>
-  badPaired = FALSE
-  vmUp = FALSE
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-  resurrected = FALSE
-  phantom = FALSE
-  alloc = "Absent"
-  vmGen = 0
-  toHostPaired = {}
-  toHostRefused = {}
+  gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
   quiesced = FALSE
+  hc = [ opener |-> "g", paired |-> [g |-> FALSE, h |-> FALSE], outEof |-> [g |-> FALSE, h |-> FALSE], farHc |-> [g |-> FALSE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]
+  drvLive = FALSE
+  hf = <<[st |-> "none", gen |-> 0]>>
+  claim = 0
+  crossMsg = FALSE
+  resurrected = FALSE
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  bclaim = 0
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+  vmGen = 0
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  vmUp = FALSE
+  toHostPaired = {}
+  phantom = FALSE
+  toHostRefused = {}
   abortDiscarded = {}
+  readyCross = FALSE
+  badPaired = FALSE
   toGuestAbort = {}
   gen = 0
-  claim = FALSE
-  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-  gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+  alloc = "Absent"
+  bHeldByOther = FALSE
+  heldByOther = FALSE
 
-State 2 [Provision]
-  alloc = "Provisioned"
+State 2 [step]
   gen = 1
+  alloc = "Provisioned"
 
-State 3 [VmStart]
-  vmUp = TRUE
+State 3 [step]
   vmGen = 1
+  vmUp = TRUE
 
-State 4 [Teardown]
+State 4 [step]
   alloc = "Retiring"
 
-State 5 [GuestOpenSession]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
+State 5 [step]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 6 [VmStop]
+State 6 [step]
+  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 7 [step]
   vmUp = FALSE
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
 
-State 7 [Release]
+State 8 [step]
   alloc = "Absent"
 
-State 8 [Provision]
-  alloc = "Provisioned"
+State 9 [step]
   gen = 2
+  alloc = "Provisioned"
 
-State 9 [VmStart]
-  vmUp = TRUE
+State 10 [step]
   vmGen = 2
+  vmUp = TRUE
 
-State 10 [GuestOpenFlow]
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+State 11 [step]
+  sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
-State 11 [GuestOpenSession]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 1]>>
+State 12 [step]
+  sess = <<[st |-> "reading", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
-State 12 [HostAcceptFlow]
-  flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+State 13 [step]
+  claim = 1
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
-State 13 [HostAcceptSession]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 1]>>
-  claim = TRUE
-
-State 14 [Activate]
+State 14 [step]
   alloc = "Active"
 
-State 15 [HostOpenAccept]
+State 15 [step]
   hf = <<[st |-> "req", gen |-> 2]>>
 
-State 16 [Teardown]
+State 16 [step]
   hf = <<[st |-> "closed", gen |-> 2]>>
-  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 1]>>
-  alloc = "Retiring"
-  claim = FALSE
+  toGuestAbort = {1}
 
-State 17 [GuestOpenFlow]
-  flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+State 17 [step]
+  claim = 0
+  sess = <<[st |-> "closed", gen |-> 2], [st |-> "none", gen |-> 0]>>
+  toGuestAbort = {}
+  alloc = "Retiring"
 
 -> stutters forever in State 17

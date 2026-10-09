@@ -1,4 +1,4 @@
-# prefix-boot-witness-refusal: counterexample, 5 state(s) (from the TLC trace)
+# prefix-boot-witness-refusal: counterexample, 4 state(s) (from the TLC trace)
 
 State 1
   stop = "init"
@@ -24,14 +24,9 @@ State 2 [Restart]
 State 3 [BootStep]
   phase = "load"
 
-State 4 [BootStep]
-  phase = "swap"
-  loaded = TRUE
-
-State 5 [Fail]
+State 4 [Fail]
   stop = "refused"
   phase = "start"
   failLeft = 0
-  loaded = FALSE
-  g = [ refused |-> TRUE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  g = [ refused |-> TRUE, loadRefused |-> TRUE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
   up = FALSE

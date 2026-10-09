@@ -2,15 +2,21 @@
 
 This directory holds the formal model of the guest-flow owner protocol of the
 vsock attachment replacement (feature `netns-density-295`, ADR-0145 to
-ADR-0176). The specification is a design artifact and the DISTILL conformance
+ADR-0181). The specification is a design artifact and the DISTILL conformance
 oracle (ADR-0168, decision QUINT): DISTILL drives the implementation against
 these modules through quint-connect. The models encode the design text of
 **revision 11** (revision 9, the APPLIANCE narrowing of 2026-10-07,
 D8a-LOAD-SWAP of 2026-10-08, which removed the runtime probe and boot `verify`,
-and D8a-CAP of 2026-10-08, intake-port admission against the steering capacity) in
+and D8a-CAP of 2026-10-08, intake-port admission against the steering capacity)
+with the **spike remediation decisions of 2026-10-09** (ATTR-TOKEN, ADR-0177, and the
+measured kernel behaviour K-A2′ in `owner_flows`; INTAKE-BIND, ADR-0178, in
+`prefix_landing`) and **their round 2** (ATTR-LIVE-CLAIM — the live launch token
+compared in the claim's step, for the control session and the VM driver's beacon
+— and HALFCLOSE-SIGNAL, ADR-0180, in `owner_flows`; CELL-RECREATE in `udp_slots`) in
 `docs/feature/netns-density-295/feature-delta.md` § *vsock Attachment
 Replacement DESIGN* (§ *Revision 9 decisions*, item 7 APPLIANCE; § *Revision 10
-decisions*; § *User decisions — 2026-10-08*; § *Formal protocol model*). On the appliance only Overdrive writes the kernel objects the
+decisions*; § *User decisions — 2026-10-08*; § *Spike remediation decisions —
+2026-10-09* and *round 2*; § *Formal protocol model*, round 9). On the appliance only Overdrive writes the kernel objects the
 model covers (A-31), so no action stands for other software deleting the nft
 table, deleting steering entries, detaching the steering link, writing the
 route or taking a CID. Crash and restart at every step and Overdrive's own
@@ -28,16 +34,24 @@ Model-check results: `docs/feature/netns-density-295/spike/quint-owner-findings.
 `docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r7.md`
 (load → swap → route in `prefix_boot`, D8a-LOAD-SWAP) and
 `docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r8.md`
-(this revision: D8a-CAP in `intake`, M-4 in `prefix_boot`, M-2 in `quiescence`).
+(D8a-CAP in `intake`, M-4 in `prefix_boot`, M-2 in `quiescence`). Round 9
+(this revision: K-A2′, ATTR-TOKEN with ATTR-LIVE-CLAIM, the beacon and
+HALFCLOSE-SIGNAL in `owner_flows`; CELL-RECREATE in `udp_slots`; INTAKE-BIND in
+`prefix_landing`) is recorded in `evidence/summary.md`. Its first run found a
+counterexample against ATTR-TOKEN's session claim (a dead launch's queued control
+connection, accepted while the CID was Provisioned and read after teardown, took
+the claim, which outlived `pool.release`); the design answered it with
+ATTR-LIVE-CLAIM, and that counterexample is now the teeth of the hazard
+`noClaimRecheck`.
 
 ## Layout
 
 | Path | Content |
 |---|---|
-| `owner_flows.qnt` | Module A: control session per CID, guest-opened flow admission, host-opened `TcpAccept` pairing, allocation lifecycle, quiescence (as the latch flows see) |
-| `udp_slots.qnt` | Module B: guest UDP slot pool, datagram associations, slot release |
+| `owner_flows.qnt` | Module A, three instances. `flows_ok` (CFG `core`): control session per CID, launch attribution by peer CID and live launch token (ATTR-TOKEN, ATTR-LIVE-CLAIM) under the measured K-A2′, guest-opened flow admission, host-opened `TcpAccept` pairing, allocation lifecycle, quiescence (as the latch flows see). `flows_beacon` (CFG `beacon`): the VM driver's beacon — live launch, READY attribution and the beacon claim, `driver.stop`. `flows_half` (CFG `half`): one paired TCP flow's half-close handshake (HALFCLOSE-SIGNAL), owner death per side, session loss |
+| `udp_slots.qnt` | Module B: guest UDP slot pool, datagram associations, slot release, cell generations and readiness dispatch (CELL-RECREATE) |
 | `cid_lease.qnt` | Module C: lease offsets → CID, next-fit walk with the atomic host-kernel claim (D16-CLAIM), claim handoff to the VMM, release, `serve` crash with surviving VMMs (the only CID holders outside the pool) and restart |
-| `prefix_landing.qnt` | Shared, stateless: where a connection to a workload address lands, per client class (used by the four steering modules) |
+| `prefix_landing.qnt` | Shared, stateless: where a connection to a workload address lands, per client class (used by the three steering modules that import it); an intake listener is reached only through its steering entry (INTAKE-BIND) |
 | `prefix_boot.qnt` | Steering concern 1: boot convergence of the pinned steering and the prefix route (D8a-ROUTE, D8a-LOAD-SWAP, U-4) |
 | `intake.qnt` | Steering concern 2: intake-port admission against the steering capacity, intake listeners and their steering entries (D8a-LOOKUP, D8a-CAP, D23, U-6, U-3, M-7) |
 | `quiescence.qnt` | Steering concern 3: named quiescence holders and component recoveries (D8a-HOLD, ADR-0124, UP-7, UP-12) |
@@ -55,17 +69,27 @@ therefore `import <module>(OFF = Set("<rule>"), CFG = "<cfg>").* from "../<modul
 
 | Module | State | Actions |
 |---|---|---|
-| A | Owner CID table (`Absent / Provisioned / Active / Retiring`), generation of the allocation leasing the CID, VM up/down, admission latch, the `ClaimSet` claim, control connections, guest-opened flows, host-opened flows on both sides, control messages per direction | provision, VM start / stop, activate, teardown, release, quiesce, restore; session open / accept / loss; flow accept, read, install, connect, completion, discard; `TcpAccept` open, guest accept, `Paired` / `Refused`, `Abort`, guest cleanup |
-| B | Socket liveness, pending `sock_release` reports, slots, host associations, control messages | claim, send, associate, pair / refuse / abort, late `Paired`, pairing deadline, socket close (report or lost report), report handling, audit, idle release |
+| A (`core`) | Owner CID table (`Absent / Provisioned / Active / Retiring`), the lease leasing the CID (its launch token, live while Provisioned or Active), the launch of the last VM, VM up/down, admission latch, the `ClaimSet` claim and its holder, control connections (each with the launch that opened it: queued, being read, live, dead, closed), guest-opened flows (each with its launch; registered awaiting the token check, or attributed), host-opened flows on both sides, control messages per direction | provision, VM start / stop (K-A2′: accepted connections fail, queued ones survive with their buffered first record), activate, teardown (ends the live token, closes the session, releases the claim; leaves connections being read), release, quiesce, restore; session connect / reconnect, accept (early close on the CID state), read + live-token check + claim in one step, loss; flow connect, check-and-register, request read + live-token check, install, connect, completion, discard, end (with or without a control message); `TcpAccept` open, guest accept, `Paired` / `Refused`, `Abort`, guest cleanup |
+| A (`beacon`) | The allocation lifecycle, VM up/down, the driver's live launch (started, not stopped), the beacon claim and its holder, beacon connections (each with its launch and a buffered READY: queued, being read, live, closed) | provision, VM start / exit, teardown, `driver.stop` (ends liveness, closes the beacon session, releases the claim — one step; leaves connections being read), release (after `driver.stop` and teardown); beacon dial / re-dial, accept (early close with no live launch), READY read + live-launch check + claim in one step |
+| A (`half`) | One paired TCP flow, per side (guest owner, host owner): pairing, the outer leg's recorded EOF, the announcement (none / HalfClosing / done), the acknowledged peer direction, the outer shutdown, the far end's first terminal event (ghost), owner alive, observed session loss; the control session's two FIFO directions and the flow vsock's end-of-stream per direction, as independent channels | far-end half-close (before or after `Paired` on the opener's side), `Paired`, `HalfClose` (after the drain), `HalfCloseAck` (at once; U-5 discard), vsock shutdown after the acknowledgement, vsock end arriving (announced → outer shutdown; unannounced → abort with reset, `UnannouncedVsockEnd`), clean close, session-loss observation (after the peer's in-flight messages); faults: outer reset, flow error / teardown / quiescence, owner death per side (linger resets its far end; its vsock end reaches the survivor as its own action, `VsockEndReachesSurvivor`), session drop, a defect ending a vsock without the handshake |
+| B | Socket liveness, pending `sock_release` reports, slots, host associations, control messages, queued readiness events (each registered for its slot's current or an earlier cell generation), residue (hazard only) | claim, send, readiness dispatch (an earlier generation's event discarded; a current one starts an association), pair / refuse / abort, late `Paired`, pairing deadline, socket close (report or lost report), report handling, audit, idle release; every end of association recreates the cells (a new generation) |
 | C | The kernel's CID holder table (free / surviving VMM / our claim), lease per offset, next-fit cursor, the `assign` walk (pool lock), per-allocation state and where its claim's file is (slot / in transit / VMM) | assign begin, one claim per step (claim / `InUse` skip / non-`InUse` error), `take_claim`, `create` Ok / Err, VMM exit before READY, stop, `pool.release`, redeploy, surviving-VMM exit, `serve` crash + restart (a VMM being created survives iff it had inherited its device) |
 | boot | `serve` up / boot phase / why down, this boot's program version, whether it loaded and whether its swap returned Ok, the link (none / attached unpinned / pinned) and its program, the tagged route (`absent` / `local`) and `estab` | boot steps 1–8 (one step), load (the kernel verifier may reject), swap (`BPF_LINK_UPDATE` of the adopted link, or a first attach then pin), route; a failure of each of these and of the route write (→ refuse, route not written, earlier program kept); crash between any two steps and inside swap (between attach and pin); restart with either program version |
 | intake | `serve` up, intake listeners, steering entries, allocation state (its reservation of the declared ports while held, Retiring included: D8a-CAP), session, last `ListenState`, quiescence, ports parked by a reported steer defect, one other allocation's reservation and steered listeners (the map's capacity CAP = 2) | admission (reserve, or refuse `IntakeCapacityReached` with no state change) of ours and the other allocation, per-allocation events (each closes every listener whose port stops serving, in the same step: K-L3), bind / listen and their failure (retried), `steer` Ok / `KernelMemory` (retried, A-MEM) / a defect (reported, not retried: the port is parked until it stops serving) / the kernel's capacity refusal (unreachable with admission), activation begin / Ok / rollback, teardown, release, quiesce / restore, the other allocation's steer / close / release, crash, restart |
 | quiescence | holders, latch, per-component recovery state (idle / held / repaired), damage, attempts, the wanted intake listener, whether the route (single form `local`) and the pinned steering are as boot converged them or a runtime step wrote one of them (the `otherRepairsPrefix` hazard: any runtime route or steering write) | damage (recurring), quiesce under the component's holder, repair (that component only), repair failure, failed post-repair audit, restore with the hold, fail-stop, owner bring-up, crash, restart (boot may leave the table partial again) |
 | shared_table | boot phase, the table's two parts (`divert`, `reject`), steering link, route, listeners and entries, holders and recoveries (IpRules, FlowListeners) | boot step 8 complete / stopping part-way / a crash between its batches, step 9, the mTLS worker's runtime convergence stopping part-way (unbounded), listener-task exit, owner bring-up, recovery steps, crash, restart |
 
-**Abstraction.** One CID (or one workload address) reused by two allocations;
-two control connections; two guest-opened flows and one host-opened flow; two
-UDP slots, two sockets, one or two destinations; three lease offsets and two or
+**Abstraction.** One CID (or one workload address) reused by two allocations,
+one launch each, so a launch token is the lease's generation; two control
+connections (reused after they close: the guest reconnects); two guest-opened
+flows and one host-opened flow (instance `core`); two beacon connections
+(instance `beacon`); one paired TCP flow whose opener — guest (TcpConnect) or host
+(TcpAccept) — is chosen at init (instance `half`); a connection's first record
+(`ControlOpen`, READY, request) is buffered at connect, and an accepted connection
+whose VM dies before its first record is read is closed (K-A2′); two
+UDP slots, two sockets, one or two destinations, a cell generation per slot
+abstracted to current / earlier (generations only grow, and dispatch compares an
+event's generation only for equality with its slot's current one); three lease offsets and two or
 three workloads; two guest ports, one or two declared; a steering capacity of
 two entries shared with one other allocation declaring two ports. Time is abstract: every
 deadline is a nondeterministic action. A connection's landing place
@@ -90,27 +114,30 @@ pool lock; surviving VMMs exit between its steps.
 | ID | Assumption | Discharged by |
 |---|---|---|
 | K-A1 | Peer-CID attribution is authentic (vhost stamps the device CID) | V-10 (bind level proven, P-17) |
-| K-A2 | A released vhost device's connections, accept-queue entries included, are reset before the CID is reassigned (`flows_envStaleConn` drops it) | V-22 |
+| K-A2′ | At VMM death, the host connections of that VM already accepted fail at their next I/O; a connection still in a host accept queue stays queued and is accepted later — after the launch's teardown and the CID's next lease and launch included — with the CID as peer, delivering its buffered first record (failing its first read if it has none). Attribution therefore uses the CID's live launch token, compared in the claim's step (ATTR-TOKEN, ATTR-LIVE-CLAIM), never the peer CID alone. Replaces K-A2 (accept-queue entries reset before CID reuse), which V-22 falsified (`flows_bugPeerCidOnly`, `flows_bugBeaconPeerCidOnly`) | Measured: V-22 (P-37, `docs/feature/netns-density-295/spike/findings-v22.md`). Modelled in round 9 |
 | K-A3 | A socket installed before its request is read hands the request to the verdict, which drops it | P-23 (+ R5-9 regression) |
-| K-A4 | The host's close of `V_h` of an aborted or session-lost `TcpAccept` tears down the guest-side connection, including one still in the guest's accept queue (`flows_envGuestMissesHostClose` drops it) | V-24 |
+| K-A4 | The host's close of `V_h` of an aborted or session-lost `TcpAccept` tears down the guest-side connection, including one still in the guest's accept queue: after the request read, V_g reads EOF, reports `POLLRDHUP`, first write `EPIPE` (TCPACCEPT-END); "no byte reaches the application" also rests on H-1 (`flows_envGuestMissesHostClose` drops it) | Validated: V-24 (P-38, `spike/findings-v24.md`) |
 | A-FID | Host flow ids are not reused within one pairing window | `FlowId` contract (design property) |
-| K-B1 | Closing `T_g` / `Q_g` is observed by the host as the association's end | V-22 |
+| K-B1 | Closing `T_g` / `Q_g` is observed by the host as the association's end, even when the host accepts after the close | Validated: V-22 (P-37: buffered data, then EOF) |
 | K-B2 | `sock_release` reports the socket, or the audit finds orphan slots | R5-14 (no kernel unknown; no V-item) |
-| K-B3 | Emptying or recreating a slot's cells discards every parked frame | V-5(c) |
+| K-B3 | Recreating a slot's framing / reassembly cells discards every parked frame; emptying them does not — sender-side queue / psock backlog residue refills the cell (`slots_bugCellsEmptiedOnly`); the design recreates (CELL-RECREATE) | Validated by V-5(c) for recreated cells; falsified for emptied cells (P-41, `spike/findings-v5c.md`) |
+| K-B4 | When an owner dies, the surviving owner observes the end of each of its flow vsocks — in the measured case before the control-session loss — and the far ends the dying owner held are reset by linger (`owner_flows`, instance `half`: `HcOwnerDies`, `VsockEndReachesSurvivor`, unordered against the survivor's `HcLossObserved`) | Validated by V-13 (P-42: vsock end first in 415 of 415 deaths; linger resets 110/110 per cell; `spike/findings-v13.md`). Modelled in round 9 |
 | K-C1 | A duplicate CID is refused at device creation and the first holder is unaffected; a CID is free right after its holder's last reference closes | P-16 |
 | K-C2 | The only CID holders outside the pool's leases are Overdrive VMMs that survived a `serve` crash; they exit at any time | Environment, modelled as actions (`Boot`, `OrphanExit`); the absence of other holders is A-31 |
-| K-C3 | A claim on an unowned instance is exclusive while any reference to its file is open, survives the handoff to the VMM, and is released at the last close | V-25 |
-| K-D1 | With the `local` route and no lookup decision, a connection reaches a wildcard host listener unless a listener bound to `workload_addr:p` exists | V-19 |
+| K-C3 | A claim on an unowned instance is exclusive while any reference to its file is open, survives the handoff to the VMM, and is released at the last close | Validated: V-25 (P-39, `spike/findings-v25.md`; handoff on a prototype `fd=`) |
+| K-D1 | With the `local` route and no lookup decision, a connection to `workload_addr:p` reaches a wildcard host listener on `p` (an intake listener is never bound to `workload_addr:p`, INTAKE-BIND, so it is reached only through its steering entry) | V-19 |
 | K-D2 | With the nft rules: unmarked host-local prefix traffic is diverted to leg-C or rejected; remote prefix traffic diverted to leg-C or dropped; a divert with no leg-C socket falls through to the drop | V-19 |
 | K-D3 | The rules, the route and the pinned steering persist across a `serve` crash or shutdown; each nft batch applies atomically, so a partial table arises only between batches (the mTLS worker failing part-way, or `serve` crashing between them) | V-19 (persistence, U-4); V-26 (iv), (vii) (steering independent of the table) |
 | K-D4 | Without a tagged route the prefix is not local: a packet to it is routed elsewhere unless the nft rules divert or reject it first | V-19 |
-| K-D5 | Closing a listener resets the children in its accept queue | V-13 |
-| K-L1 | `sk_lookup` runs for a loopback-ingress connection to a `local`-route address that carries no socket, before the listener / wildcard lookup; a drop yields a TCP reset | V-26 |
-| K-L2 | A prerouting TPROXY-assigned packet (leg-C divert) bypasses `sk_lookup` | V-26 |
-| K-L3 | Closing a listening socket removes it from the socket map in the same step, and its slot is free for a new entry (D8a-CAP) (`intake_bugEntryOutlives` drops it) | V-26 (iii), (x) |
-| K-L4 | The pinned link and map keep running with no process; after the owner exits the map holds no live socket | V-26 |
-| K-L5 | Ingress ifindex is loopback for host-local connects, the receiving device otherwise | V-26 |
-| K-L9 | `BPF_LINK_UPDATE` swaps the link's program atomically, and on error the link still runs the earlier program (`prefix_boot`: `swap` of an adopted link is one atomic step; a failed `swap` keeps the program) | V-26 (viii) |
+| K-D5 | Closing a listener resets the children in its accept queue | Not exercised by V-13 (P-42) or V-20 (P-46); kernel behaviour of `inet_csk_listen_stop`. R5-10's host-owner kill with a connect burst in flight is the Tier-3 check |
+| K-D6 | The constant guest-prefix output reject and prerouting drop decide only connection-opening packets; `ct state established,related` is accepted before them, so replies of an admitted connection pass whatever their address (PREFIX-REPLY) | P-40 (V-26: replies timed out without the rule, completed with it); R5-43 (Tier-3, production rules). Not modelled: the models decide where new connections land |
+| K-L1 | `sk_lookup` runs for a loopback-ingress connection to a `local`-route address that carries no socket, before the listener / wildcard lookup; a drop yields a TCP reset | Validated: V-26 (P-40, `spike/findings-v26.md`) |
+| K-L2 | A prerouting TPROXY-assigned packet (leg-C divert) bypasses `sk_lookup` | Validated: V-26 (P-40) |
+| K-L3 | Closing a listening socket removes it from the socket map in the same step, and its slot is free for a new entry (D8a-CAP) (`intake_bugEntryOutlives` drops it) | Validated: V-26 (iii), (x) (P-40) |
+| K-L4 | The pinned link and map keep running with no process; after the owner exits the map holds no live socket | Validated: V-26 (P-40) |
+| K-L5 | Ingress ifindex is loopback for host-local connects, the receiving device otherwise | Validated: V-26 (P-40) |
+| K-L9 | `BPF_LINK_UPDATE` swaps the link's program atomically, and on error the link still runs the earlier program (`prefix_boot`: `swap` of an adopted link is one atomic step; a failed `swap` keeps the program) | Validated: V-26 (viii) (P-40) |
+| K-L10 | `sk_lookup` assigns the listener an entry names whatever address and port that listener is bound to; binds of one port on distinct specific addresses coexist (`prefix_landing`: an entry reaches its listener, and nothing reaches a listener by its bound address) | Validated: V-26 (P-40: listeners on `A:0` and `127.0.0.1:34567` assigned; capacity fill) |
 | A-MEM | A `steer` refused for kernel memory (`KernelMemory`) succeeds on a later retry: memory pressure is not permanent (`intake`: strong fairness on a successful `Steer` in `ServingReachable`; `ServingReachableNoMemRecovery` drops it) | Environment, not a kernel unknown (node memory capacity: #261); the exposure is observable (`guest_intake.bind_failed { retried: true }`), V-9 reports any occurrence at density |
 | A-33 | The shipped steering program decides as specified: a program that loads is a correct program (`prefix_landing`: an attached program is `ours`) | The Tier-3 steering scenarios R5-1, R5-2, R5-3 and R5-25, run in CI on the pinned kernel (ADR-0068); not checked at runtime |
 | A-31 | Only Overdrive writes the node's kernel objects (APPLIANCE) | The appliance image configuration (ADR-0068); not a runtime validation item |
@@ -125,12 +152,26 @@ pool lock; surviving VMMs exit between its steps.
 | `shared_table` | `NoWildcardReached` (invariant 11), `RemoteNeverDirect`, `NothingDeliveredWhileDown`, `NoReopenBeforeRepair`, `QuiescedClosesListeners` | `TableRepaired` (the IpRules recovery's repair completes under its hold, or `serve` stops) — under that recovery's own fairness and boot only | `steeringInNft`, `unpinned`, `nonLoopback`, `anyRestore` |
 | C | `CidUnique`, `ClaimHeld`, `NoLaunchClash`, `NoSkipWhileClaimable`, `NoLeakedClaim`, `RefusalEachClaimInUse` | `EventuallyPlaced` | `checkThenClaim`, `releaseBeforeVmm`, `rememberInUse` |
 
-Modules A and B are unchanged in content; their properties and teeth are
-listed in `checks.toml`.
+| A (`core`) | `OneLiveSession` (1), `NoInstallBeforeRead` (3), `NoAdmitWhenClosed` (4, U-1), `CurrentGeneration` (4+, ATTR-TOKEN / ATTR-LIVE-CLAIM: every live session and every attributed flow belongs to the lease holding the CID, which is not released), `NoCrossLaunchMsg` (ATTR-TOKEN: no control message on a session for a flow of another launch), `NoCrossLaunchSessionHeld` (ATTR-LIVE-CLAIM: no session refused because a connection of another launch holds the claim), `ClosedIsTerminal` (U-5) | `GuestHalfEnds` (U-5, K-A4), `SessionBecomesLive` (a provisioned launch whose guest keeps reconnecting gets a live session) | `sessionSplitClaim`, `installBeforeRead`, `admitSplit`, `pairedNoRecheck`, `noAbortOnLoss`, `teardownSkipsFlows`, `latePairedResurrects`, `peerCidOnly` (ATTR-TOKEN off → `CurrentGeneration`, `NoCrossLaunchMsg`), `claimBeforeToken` (claim before the token is read → `NoCrossLaunchSessionHeld`), `noClaimRecheck` (the first round-9 design: lease token, state checked at accept only → `NoCrossLaunchSessionHeld`, `CurrentGeneration`); environment `K-A4`; candidates `altTombstone` and `altTeardownClosesReading` (the rejected alternative to ATTR-LIVE-CLAIM: holds in the model) |
+| A (`beacon`) | `BeaconCurrentLaunch` (every held beacon claim belongs to the CID's live launch), `BeaconNoCrossLaunchReady` (no READY of one launch released as another's), `BeaconNoCrossLaunchHeld` (no beacon connection refused because one of another launch holds the claim) | `ReadyReleased` (a live launch whose guest keeps re-dialling gets its READY released) | `beaconNoLiveRecheck` (lease token, no live check → `BeaconCurrentLaunch`, `BeaconNoCrossLaunchHeld`), `beaconPeerCidOnly` (→ `BeaconNoCrossLaunchReady`, `BeaconCurrentLaunch`) |
+| A (`half`) | Invariant 13 (HALFCLOSE-SIGNAL): `NoEofOnPeerLoss` (a far end reads EOF for a direction only if that direction's far end half-closed it — never because an owner died), `FinOnlyAfterAck` (no vsock shutdown before the peer's acknowledgement) | `HalfCloseCompletes` (no fault: an announced half-close reaches the far end), `AnnounceEnds` (a HalfClosing wait ends, faults included), `EarlyEofCarried` (an outer EOF before `Paired` is carried out after it) | `rdhupIsHalfClose` (the round-8 rule → `NoEofOnPeerLoss`), `noAck` (→ `HalfCloseCompletes`, `FinOnlyAfterAck`), `ackWaits` (the acknowledging side waits → `AnnounceEnds`), `earlyEofAborts` (→ `EarlyEofCarried`); candidate `altPendingWait` (V-13 variant C: holds `NoEofOnPeerLoss`, violates `ReceiverPendingEnds`) |
+| B | `SlotHeldOnce` (2), `ReleasedSlotCarriesNoData` (2), `RouteCurrent` (2), `LatePairedAborted` (2, SLOT-ABORT), `NoReassociationWithoutNewDatagram` (U-2), invariant 14 `NoStaleGenerationStart` (CELL-RECREATE: no association starts from a readiness event of an earlier cell generation) | `ReleasedSlotBecomesFree` | `claimSplit`, `keepFrames` (P-35), `latePairedBySlot`, `ignoreLatePaired`, `keepFramesOnEnd` (U-2), `cellsEmptiedOnly` (K-B3 as falsified → `NoReassociationWithoutNewDatagram`), `fdDispatch` (raw-descriptor dispatch → `NoReassociationWithoutNewDatagram`, `NoStaleGenerationStart`); no audit fairness |
 
-Not modelled: D25-BIND (R5-15), D26 / V-21, V-20, framing and unframe (D5 /
-D5a), VIP resolution (D24 / D24a), half-close drain, the listen-state lag
-bound, D15-R3 deadlines, the beacon beyond its claim discipline, the unframe
+Not modelled: D25-BIND (R5-15), D26 / V-21 and D26-PINS (rule construction), V-20
+and INTAKE-TAG-MAP, framing and unframe (D5 / D5a), USO-NO-SEGMENT,
+FRAG-MAP-LIFECYCLE and IFACE-NO-STACK (egress program and boot checks sharing no
+state with the modelled protocol), VIP resolution (D24 / D24a), the K2 drain
+counters (the half-close handshake itself is modelled; a drain is one step and its
+deadline a flow error), the linger clearing on a clean close, the CELL-RECREATE
+step order and the quarantine of a slot whose new cell cannot be created (framing;
+R5-14), the listen-state lag bound, D15-R3 deadlines, the beacon's EXEC / EXIT /
+SHUTDOWN after READY, the guest's token check of a `TcpAccept` request (it
+cannot fail in this abstraction: the host opens `V_h` only to the current
+launch and a `V_g` dies with its VM), the stale-entry 4-tuple refusal of a new
+connect (P-37: a refused connect is retried like any reconnect), INTAKE-PORTS
+(a deploy check), PREFIX-REPLY (replies, K-D6), the intake host-port block
+conflict check at `probe_startup` (INTAKE-BIND: a boot refusal before any
+effect), the unframe
 program's attachment set (D5a-IFACE), the forwarder's process-owned links
 (D19-LINKS), the boot prefix-configuration check (D8-PREFIX-CFG: it runs before
 any boot effect), the map-shape

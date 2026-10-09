@@ -42,7 +42,12 @@
  *     steered listeners `oEnt` (each holds one map slot): it is admitted, steers, closes and is
  *     released by the environment, against the same capacity.
  *
- * ASSUMPTIONS: K-L1–K-L5 (V-26), K-D1, K-D2 (V-19), K-D5 (V-13), A-MEM — see prefix_landing.qnt /
+ * INTAKE-BIND (ADR-0178): each listener is bound to workload_addr:<its intake block port>, never the
+ * declared port, so it is reached only through its steering entry (prefix_landing, K-L10); a bind
+ * can still fail, and each failure is retried (BindFail; the wildcard-collision cause, P-40 F-1, is
+ * removed by the block, whose conflicts `probe_startup` refuses at boot — not modelled).
+ *
+ * ASSUMPTIONS: K-L1–K-L5, K-L10 (V-26), K-D1, K-D2 (V-19), K-D5 (V-13), A-MEM — see prefix_landing.qnt /
  * README. A-MEM (a `KernelMemory` refusal is not permanent) is the fairness on a successful steer in
  * `ServingReachable`; each failed attempt closes the listener, so the steer is enabled only
  * intermittently and the fairness is strong (SF) on that action. `ServingReachableNoMemRecovery`

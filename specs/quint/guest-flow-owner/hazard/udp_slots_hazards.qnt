@@ -18,3 +18,8 @@ module slots_liveTeeth {
   temporal NoAuditFairness =
     weakFair(releaseAny, slots).implies(always(anyOrphan.implies(eventually(not(anyOrphan)))))
 }
+// CELL-RECREATE off (K-B3 as falsified, P-41): the cells are emptied, not recreated; the residue in
+// the sender-side queue / psock backlog refills them and re-triggers readiness
+module slots_bugCellsEmptiedOnly { import udp_slots(OFF = Set("cellsEmptiedOnly"), CFG = "ok").* from "../udp_slots" }
+// CELL-RECREATE off: readiness dispatched by slot (raw descriptor) only, ignoring the cell generation
+module slots_bugFdDispatch { import udp_slots(OFF = Set("fdDispatch"), CFG = "ok").* from "../udp_slots" }

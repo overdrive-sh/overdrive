@@ -58,7 +58,7 @@ State 4: <quiesce_ok_quiescence_RecQuiesce line 212, col 3 to line 237, col 7 of
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
 /\ quiesce_ok_quiescence_prefix = "booted"
-/\ quiesce_ok_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+/\ quiesce_ok_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "held"]
 /\ quiesce_ok_quiescence_stop = "none"
 /\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -68,27 +68,27 @@ State 4: <quiesce_ok_quiescence_RecQuiesce line 212, col 3 to line 237, col 7 of
   failStopped |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = TRUE
 /\ quiesce_ok_quiescence_lis = FALSE
-/\ quiesce_ok_quiescence_holders = {"IpRules"}
+/\ quiesce_ok_quiescence_holders = {"FlowListeners"}
 
-State 5: <quiesce_ok_quiescence_RecRepair line 243, col 3 to line 275, col 7 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
+State 5: <quiesce_ok_quiescence_RecQuiesce line 212, col 3 to line 237, col 7 of module quiesce_ok>
+/\ quiesce_ok_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
 /\ quiesce_ok_quiescence_prefix = "booted"
-/\ quiesce_ok_quiescence_rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
+/\ quiesce_ok_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "held"]
 /\ quiesce_ok_quiescence_stop = "none"
 /\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
-  overlapped |-> FALSE,
+  overlapped |-> TRUE,
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = TRUE
 /\ quiesce_ok_quiescence_lis = FALSE
-/\ quiesce_ok_quiescence_holders = {"IpRules"}
+/\ quiesce_ok_quiescence_holders = {"IpRules", "FlowListeners"}
 
-State 6: <quiesce_ok_quiescence_RecQuiesce line 212, col 3 to line 237, col 7 of module quiesce_ok>
+State 6: <quiesce_ok_quiescence_RecRepair line 243, col 3 to line 275, col 7 of module quiesce_ok>
 /\ quiesce_ok_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]

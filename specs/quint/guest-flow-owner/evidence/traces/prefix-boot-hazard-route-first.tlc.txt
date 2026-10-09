@@ -22,7 +22,7 @@ State 1: <Initial predicate>
 /\ boot_bugRouteFirst_prefix_boot_prog = "none"
 /\ boot_bugRouteFirst_prefix_boot_phase = "start"
 
-State 2: <boot_bugRouteFirst_prefix_boot_Restart line 280, col 5 to line 291, col 78 of module boot_bugRouteFirst>
+State 2: <boot_bugRouteFirst_prefix_boot_Restart line 277, col 5 to line 288, col 78 of module boot_bugRouteFirst>
 /\ boot_bugRouteFirst_prefix_boot_link = "none"
 /\ boot_bugRouteFirst_prefix_boot_crashLeft = -1
 /\ boot_bugRouteFirst_prefix_boot_stop = "none"
@@ -31,7 +31,7 @@ State 2: <boot_bugRouteFirst_prefix_boot_Restart line 280, col 5 to line 291, co
 /\ boot_bugRouteFirst_prefix_boot_route = "absent"
 /\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
 /\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
-/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_bin = "v2"
 /\ boot_bugRouteFirst_prefix_boot_estab = FALSE
 /\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
   loadRefused |-> FALSE,
@@ -46,7 +46,7 @@ State 2: <boot_bugRouteFirst_prefix_boot_Restart line 280, col 5 to line 291, co
 /\ boot_bugRouteFirst_prefix_boot_prog = "none"
 /\ boot_bugRouteFirst_prefix_boot_phase = "start"
 
-State 3: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, col 79 of module boot_bugRouteFirst>
+State 3: <boot_bugRouteFirst_prefix_boot_BootStep line 384, col 3 to line 505, col 79 of module boot_bugRouteFirst>
 /\ boot_bugRouteFirst_prefix_boot_link = "none"
 /\ boot_bugRouteFirst_prefix_boot_crashLeft = -1
 /\ boot_bugRouteFirst_prefix_boot_stop = "none"
@@ -55,7 +55,7 @@ State 3: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, c
 /\ boot_bugRouteFirst_prefix_boot_route = "absent"
 /\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
 /\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
-/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_bin = "v2"
 /\ boot_bugRouteFirst_prefix_boot_estab = FALSE
 /\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
   loadRefused |-> FALSE,
@@ -70,7 +70,7 @@ State 3: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, c
 /\ boot_bugRouteFirst_prefix_boot_prog = "none"
 /\ boot_bugRouteFirst_prefix_boot_phase = "route"
 
-State 4: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, col 79 of module boot_bugRouteFirst>
+State 4: <boot_bugRouteFirst_prefix_boot_BootStep line 384, col 3 to line 505, col 79 of module boot_bugRouteFirst>
 /\ boot_bugRouteFirst_prefix_boot_link = "none"
 /\ boot_bugRouteFirst_prefix_boot_crashLeft = -1
 /\ boot_bugRouteFirst_prefix_boot_stop = "none"
@@ -79,7 +79,7 @@ State 4: <boot_bugRouteFirst_prefix_boot_BootStep line 387, col 3 to line 508, c
 /\ boot_bugRouteFirst_prefix_boot_route = "local"
 /\ boot_bugRouteFirst_prefix_boot_loaded = FALSE
 /\ boot_bugRouteFirst_prefix_boot_adopted = FALSE
-/\ boot_bugRouteFirst_prefix_boot_bin = "v1"
+/\ boot_bugRouteFirst_prefix_boot_bin = "v2"
 /\ boot_bugRouteFirst_prefix_boot_estab = TRUE
 /\ boot_bugRouteFirst_prefix_boot_g = [ refused |-> FALSE,
   loadRefused |-> FALSE,

@@ -1,361 +1,737 @@
 State 1: <Initial predicate>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
 /\ flows_altTombstoneMissesClose_owner_flows_alloc = "Absent"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
 /\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
 /\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
 /\ flows_altTombstoneMissesClose_owner_flows_gen = 0
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
 
-State 2: <flows_altTombstoneMissesClose_owner_flows_Provision line 773, col 3 to line 793, col 54 of module flows_altTombstoneMissesClose>
+State 2: <flows_altTombstoneMissesClose_owner_flows_step line 3516, col 4 to line 3517, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
 /\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
 /\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 1
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
 /\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 1
 
-State 3: <flows_altTombstoneMissesClose_owner_flows_Teardown line 1561, col 3 to line 1606, col 60 of module flows_altTombstoneMissesClose>
+State 3: <flows_altTombstoneMissesClose_owner_flows_step line 3516, col 4 to line 3517, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
 /\ flows_altTombstoneMissesClose_owner_flows_alloc = "Retiring"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
 /\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 1
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
 /\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 1
 
-State 4: <flows_altTombstoneMissesClose_owner_flows_Release line 943, col 3 to line 962, col 54 of module flows_altTombstoneMissesClose>
+State 4: <flows_altTombstoneMissesClose_owner_flows_step line 3516, col 4 to line 3517, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
 /\ flows_altTombstoneMissesClose_owner_flows_alloc = "Absent"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
 /\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
 /\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
 /\ flows_altTombstoneMissesClose_owner_flows_gen = 1
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+
+State 5: <flows_altTombstoneMissesClose_owner_flows_step line 3516, col 4 to line 3517, col 59 of module flows_altTombstoneMissesClose>
 /\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
 /\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 5: <flows_altTombstoneMissesClose_owner_flows_Provision line 773, col 3 to line 793, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_vmGen = 0
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+
+State 6: <flows_altTombstoneMissesClose_owner_flows_step line 3516, col 4 to line 3517, col 59 of module flows_altTombstoneMissesClose>
 /\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
 /\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 6: <flows_altTombstoneMissesClose_owner_flows_VmStart line 799, col 3 to line 820, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
+
+State 7: <flows_altTombstoneMissesClose_owner_flows_step line 3518, col 9 to line 3519, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 7: <flows_altTombstoneMissesClose_owner_flows_GuestOpenSession line 1001, col 3 to line 1031, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 8: <flows_altTombstoneMissesClose_owner_flows_GuestOpenSession line 1001, col 3 to line 1031, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
 
-State 9: <flows_altTombstoneMissesClose_owner_flows_GuestOpenFlow line 1163, col 3 to line 1195, col 54 of module flows_altTombstoneMissesClose>
+State 8: <flows_altTombstoneMissesClose_owner_flows_step line 3518, col 9 to line 3519, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
 /\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
 /\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
 /\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 10: <flows_altTombstoneMissesClose_owner_flows_HostAcceptFlow line 1825, col 3 to line 1862, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+
+State 9: <flows_altTombstoneMissesClose_owner_flows_step line 3518, col 9 to line 3519, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
 /\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
+
+State 10: <flows_altTombstoneMissesClose_owner_flows_step line 3518, col 9 to line 3519, col 59 of module flows_altTombstoneMissesClose>
 /\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 11: <flows_altTombstoneMissesClose_owner_flows_HostAcceptSession line 1037, col 3 to line 1075, col 54 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
 /\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
 /\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
 /\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 12: <flows_altTombstoneMissesClose_owner_flows_Activate line 1535, col 3 to line 1555, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Active"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
+
+State 11: <flows_altTombstoneMissesClose_owner_flows_step line 3518, col 9 to line 3519, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "reading", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 13: <flows_altTombstoneMissesClose_owner_flows_GuestOpenFlow line 1163, col 3 to line 1195, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Active"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
+
+State 12: <flows_altTombstoneMissesClose_owner_flows_step line 3518, col 9 to line 3519, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Provisioned"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 2
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
+
+State 13: <flows_altTombstoneMissesClose_owner_flows_step line 3516, col 4 to line 3517, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Active"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 2
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
+
+State 14: <flows_altTombstoneMissesClose_owner_flows_step line 3518, col 9 to line 3519, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Active"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "req", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 2
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
+
+State 15: <flows_altTombstoneMissesClose_owner_flows_step line 3516, col 4 to line 3517, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Retiring"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "closed", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
+/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
+
+State 16: <flows_altTombstoneMissesClose_owner_flows_step line 3518, col 9 to line 3519, col 59 of module flows_altTombstoneMissesClose>
+/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_bclaim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Retiring"
+/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "closed", gen |-> 2]>>
+/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
+/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_claim = 0
+/\ flows_altTombstoneMissesClose_owner_flows_bHeldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
+/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
+/\ flows_altTombstoneMissesClose_owner_flows_heldByOther = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
    [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 14: <flows_altTombstoneMissesClose_owner_flows_HostAcceptFlow line 1825, col 3 to line 1862, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Active"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_altTombstoneMissesClose_owner_flows_readyCross = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
-   [st |-> "accepted", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 15: <flows_altTombstoneMissesClose_owner_flows_HostOpenAccept line 1702, col 3 to line 1728, col 57 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Active"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
+/\ flows_altTombstoneMissesClose_owner_flows_drvLive = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
+/\ flows_altTombstoneMissesClose_owner_flows_crossMsg = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
 /\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "req", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
-   [st |-> "accepted", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
 
-State 16: <flows_altTombstoneMissesClose_owner_flows_Teardown line 1561, col 3 to line 1606, col 60 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Retiring"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "closed", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
-   [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 17: <flows_altTombstoneMissesClose_owner_flows_HostAcceptSession line 1037, col 3 to line 1075, col 54 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Retiring"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "closed", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
-   [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-State 18: <flows_altTombstoneMissesClose_owner_flows_Quiesce line 1612, col 3 to line 1640, col 60 of module flows_altTombstoneMissesClose>
-/\ flows_altTombstoneMissesClose_owner_flows_alloc = "Retiring"
-/\ flows_altTombstoneMissesClose_owner_flows_badPaired = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_vmGen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_abortDiscarded = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toHostPaired = {}
-/\ flows_altTombstoneMissesClose_owner_flows_toGuestAbort = {}
-/\ flows_altTombstoneMissesClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_altTombstoneMissesClose_owner_flows_quiesced = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_gen = 2
-/\ flows_altTombstoneMissesClose_owner_flows_vmUp = TRUE
-/\ flows_altTombstoneMissesClose_owner_flows_phantom = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_claim = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_hf = <<[st |-> "closed", gen |-> 2]>>
-/\ flows_altTombstoneMissesClose_owner_flows_resurrected = FALSE
-/\ flows_altTombstoneMissesClose_owner_flows_flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE],
-   [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_altTombstoneMissesClose_owner_flows_toHostRefused = {}
-
-Back to state 17: <flows_altTombstoneMissesClose_owner_flows_Restore line 977, col 3 to line 995, col 54 of module flows_altTombstoneMissesClose>
+State 17: Stuttering

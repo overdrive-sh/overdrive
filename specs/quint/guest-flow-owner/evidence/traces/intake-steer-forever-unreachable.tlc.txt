@@ -23,7 +23,7 @@ State 1: <Initial predicate>
 /\ intake_live_intake_gen = 0
 /\ intake_live_intake_quiesced = FALSE
 
-State 2: <intake_live_intake_Provision line 714, col 3 to line 723, col 52 of module intake_live>
+State 2: <intake_live_intake_Provision line 712, col 3 to line 721, col 52 of module intake_live>
 /\ intake_live_intake_bindLeft = 1
 /\ intake_live_intake_alloc = "Provisioned"
 /\ intake_live_intake_up = TRUE
@@ -48,32 +48,7 @@ State 2: <intake_live_intake_Provision line 714, col 3 to line 723, col 52 of mo
 /\ intake_live_intake_gen = 1
 /\ intake_live_intake_quiesced = FALSE
 
-State 3: <intake_live_intake_OtherAdmit line 799, col 3 to line 813, col 34 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Provisioned"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> FALSE,
-  relListener |-> FALSE,
-  steerFailed |-> FALSE,
-  resteered |-> FALSE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = FALSE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {}
-/\ intake_live_intake_lastLS = {}
-/\ intake_live_intake_gen = 1
-/\ intake_live_intake_quiesced = FALSE
-
-State 4: <intake_live_intake_Crash line 402, col 3 to line 418, col 52 of module intake_live>
+State 3: <intake_live_intake_Crash line 400, col 3 to line 416, col 52 of module intake_live>
 /\ intake_live_intake_bindLeft = 1
 /\ intake_live_intake_alloc = "Absent"
 /\ intake_live_intake_up = FALSE
@@ -85,7 +60,7 @@ State 4: <intake_live_intake_Crash line 402, col 3 to line 418, col 52 of module
   resteered |-> FALSE,
   revokeKept |-> FALSE,
   capFail |-> FALSE,
-  capRefused |-> TRUE,
+  capRefused |-> FALSE,
   retiringRefused |-> FALSE,
   defected |-> FALSE ]
 /\ intake_live_intake_parked = {}
@@ -98,7 +73,7 @@ State 4: <intake_live_intake_Crash line 402, col 3 to line 418, col 52 of module
 /\ intake_live_intake_gen = 1
 /\ intake_live_intake_quiesced = FALSE
 
-State 5: <intake_live_intake_Restart line 424, col 3 to line 433, col 52 of module intake_live>
+State 4: <intake_live_intake_Restart line 422, col 3 to line 431, col 52 of module intake_live>
 /\ intake_live_intake_bindLeft = 1
 /\ intake_live_intake_alloc = "Absent"
 /\ intake_live_intake_up = TRUE
@@ -110,7 +85,7 @@ State 5: <intake_live_intake_Restart line 424, col 3 to line 433, col 52 of modu
   resteered |-> FALSE,
   revokeKept |-> FALSE,
   capFail |-> FALSE,
-  capRefused |-> TRUE,
+  capRefused |-> FALSE,
   retiringRefused |-> FALSE,
   defected |-> FALSE ]
 /\ intake_live_intake_parked = {}
@@ -123,7 +98,7 @@ State 5: <intake_live_intake_Restart line 424, col 3 to line 433, col 52 of modu
 /\ intake_live_intake_gen = 1
 /\ intake_live_intake_quiesced = FALSE
 
-State 6: <intake_live_intake_Provision line 714, col 3 to line 723, col 52 of module intake_live>
+State 5: <intake_live_intake_Provision line 712, col 3 to line 721, col 52 of module intake_live>
 /\ intake_live_intake_bindLeft = 1
 /\ intake_live_intake_alloc = "Provisioned"
 /\ intake_live_intake_up = TRUE
@@ -135,7 +110,7 @@ State 6: <intake_live_intake_Provision line 714, col 3 to line 723, col 52 of mo
   resteered |-> FALSE,
   revokeKept |-> FALSE,
   capFail |-> FALSE,
-  capRefused |-> TRUE,
+  capRefused |-> FALSE,
   retiringRefused |-> FALSE,
   defected |-> FALSE ]
 /\ intake_live_intake_parked = {}
@@ -148,7 +123,7 @@ State 6: <intake_live_intake_Provision line 714, col 3 to line 723, col 52 of mo
 /\ intake_live_intake_gen = 2
 /\ intake_live_intake_quiesced = FALSE
 
-State 7: <intake_live_intake_SessOpen line 729, col 3 to line 737, col 52 of module intake_live>
+State 6: <intake_live_intake_SessOpen line 727, col 3 to line 735, col 52 of module intake_live>
 /\ intake_live_intake_bindLeft = 1
 /\ intake_live_intake_alloc = "Provisioned"
 /\ intake_live_intake_up = TRUE
@@ -160,7 +135,7 @@ State 7: <intake_live_intake_SessOpen line 729, col 3 to line 737, col 52 of mod
   resteered |-> FALSE,
   revokeKept |-> FALSE,
   capFail |-> FALSE,
-  capRefused |-> TRUE,
+  capRefused |-> FALSE,
   retiringRefused |-> FALSE,
   defected |-> FALSE ]
 /\ intake_live_intake_parked = {}
@@ -173,9 +148,134 @@ State 7: <intake_live_intake_SessOpen line 729, col 3 to line 737, col 52 of mod
 /\ intake_live_intake_gen = 2
 /\ intake_live_intake_quiesced = FALSE
 
-State 8: <intake_live_intake_ListenState line 695, col 3 to line 708, col 52 of module intake_live>
+State 7: <intake_live_intake_ActivateBegin line 355, col 3 to line 370, col 52 of module intake_live>
 /\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Provisioned"
+/\ intake_live_intake_alloc = "Activating"
+/\ intake_live_intake_up = TRUE
+/\ intake_live_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_live_intake_parked = {}
+/\ intake_live_intake_sess = TRUE
+/\ intake_live_intake_oRes = 0
+/\ intake_live_intake_entries = {}
+/\ intake_live_intake_oEnt = 0
+/\ intake_live_intake_lis = {}
+/\ intake_live_intake_lastLS = {}
+/\ intake_live_intake_gen = 2
+/\ intake_live_intake_quiesced = FALSE
+
+State 8: <intake_live_intake_ActivateOk line 628, col 3 to line 654, col 7 of module intake_live>
+/\ intake_live_intake_bindLeft = 1
+/\ intake_live_intake_alloc = "Active"
+/\ intake_live_intake_up = TRUE
+/\ intake_live_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_live_intake_parked = {}
+/\ intake_live_intake_sess = TRUE
+/\ intake_live_intake_oRes = 0
+/\ intake_live_intake_entries = {}
+/\ intake_live_intake_oEnt = 0
+/\ intake_live_intake_lis = {}
+/\ intake_live_intake_lastLS = {}
+/\ intake_live_intake_gen = 2
+/\ intake_live_intake_quiesced = FALSE
+
+State 9: <intake_live_intake_ListenState line 693, col 3 to line 706, col 52 of module intake_live>
+/\ intake_live_intake_bindLeft = 1
+/\ intake_live_intake_alloc = "Active"
+/\ intake_live_intake_up = TRUE
+/\ intake_live_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_live_intake_parked = {}
+/\ intake_live_intake_sess = TRUE
+/\ intake_live_intake_oRes = 0
+/\ intake_live_intake_entries = {}
+/\ intake_live_intake_oEnt = 0
+/\ intake_live_intake_lis = {}
+/\ intake_live_intake_lastLS = {1}
+/\ intake_live_intake_gen = 2
+/\ intake_live_intake_quiesced = FALSE
+
+State 10: <intake_live_intake_ListenState line 693, col 3 to line 706, col 52 of module intake_live>
+/\ intake_live_intake_bindLeft = 1
+/\ intake_live_intake_alloc = "Active"
+/\ intake_live_intake_up = TRUE
+/\ intake_live_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_live_intake_parked = {}
+/\ intake_live_intake_sess = TRUE
+/\ intake_live_intake_oRes = 0
+/\ intake_live_intake_entries = {}
+/\ intake_live_intake_oEnt = 0
+/\ intake_live_intake_lis = {}
+/\ intake_live_intake_lastLS = {1, 2}
+/\ intake_live_intake_gen = 2
+/\ intake_live_intake_quiesced = FALSE
+
+State 11: <intake_live_intake_BindListen line 580, col 3 to line 593, col 52 of module intake_live>
+/\ intake_live_intake_bindLeft = 1
+/\ intake_live_intake_alloc = "Active"
+/\ intake_live_intake_up = TRUE
+/\ intake_live_intake_g = [ actPartial |-> FALSE,
+  actResidue |-> FALSE,
+  actErr |-> FALSE,
+  relListener |-> FALSE,
+  steerFailed |-> FALSE,
+  resteered |-> FALSE,
+  revokeKept |-> FALSE,
+  capFail |-> FALSE,
+  capRefused |-> FALSE,
+  retiringRefused |-> FALSE,
+  defected |-> FALSE ]
+/\ intake_live_intake_parked = {}
+/\ intake_live_intake_sess = TRUE
+/\ intake_live_intake_oRes = 0
+/\ intake_live_intake_entries = {}
+/\ intake_live_intake_oEnt = 0
+/\ intake_live_intake_lis = {1}
+/\ intake_live_intake_lastLS = {1, 2}
+/\ intake_live_intake_gen = 2
+/\ intake_live_intake_quiesced = FALSE
+
+State 12: <intake_live_intake_OtherAdmit line 797, col 3 to line 811, col 34 of module intake_live>
+/\ intake_live_intake_bindLeft = 1
+/\ intake_live_intake_alloc = "Active"
 /\ intake_live_intake_up = TRUE
 /\ intake_live_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
@@ -193,69 +293,19 @@ State 8: <intake_live_intake_ListenState line 695, col 3 to line 708, col 52 of 
 /\ intake_live_intake_oRes = 0
 /\ intake_live_intake_entries = {}
 /\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {}
-/\ intake_live_intake_lastLS = {1}
+/\ intake_live_intake_lis = {1}
+/\ intake_live_intake_lastLS = {1, 2}
 /\ intake_live_intake_gen = 2
 /\ intake_live_intake_quiesced = FALSE
 
-State 9: <intake_live_intake_ActivateBegin line 357, col 3 to line 372, col 52 of module intake_live>
+State 13: <intake_live_intake_SteerMemFail line 849, col 3 to line 851, col 66 of module intake_live>
 /\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Activating"
+/\ intake_live_intake_alloc = "Active"
 /\ intake_live_intake_up = TRUE
 /\ intake_live_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
   relListener |-> FALSE,
-  steerFailed |-> FALSE,
-  resteered |-> FALSE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = TRUE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {}
-/\ intake_live_intake_lastLS = {1}
-/\ intake_live_intake_gen = 2
-/\ intake_live_intake_quiesced = FALSE
-
-State 10: <intake_live_intake_BindListen line 582, col 3 to line 595, col 52 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Activating"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> FALSE,
-  relListener |-> FALSE,
-  steerFailed |-> FALSE,
-  resteered |-> FALSE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = TRUE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {1}
-/\ intake_live_intake_lastLS = {1}
-/\ intake_live_intake_gen = 2
-/\ intake_live_intake_quiesced = FALSE
-
-State 11: <intake_live_intake_SteerMemFail line 851, col 3 to line 853, col 66 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Provisioned"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> TRUE,
-  relListener |-> FALSE,
   steerFailed |-> TRUE,
   resteered |-> FALSE,
   revokeKept |-> FALSE,
@@ -269,170 +319,20 @@ State 11: <intake_live_intake_SteerMemFail line 851, col 3 to line 853, col 66 o
 /\ intake_live_intake_entries = {}
 /\ intake_live_intake_oEnt = 0
 /\ intake_live_intake_lis = {}
-/\ intake_live_intake_lastLS = {1}
+/\ intake_live_intake_lastLS = {1, 2}
 /\ intake_live_intake_gen = 2
 /\ intake_live_intake_quiesced = FALSE
 
-State 12: <intake_live_intake_ActivateBegin line 357, col 3 to line 372, col 52 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Activating"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> TRUE,
-  relListener |-> FALSE,
-  steerFailed |-> TRUE,
-  resteered |-> FALSE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = TRUE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {}
-/\ intake_live_intake_lastLS = {1}
-/\ intake_live_intake_gen = 2
-/\ intake_live_intake_quiesced = FALSE
-
-State 13: <intake_live_intake_BindListen line 582, col 3 to line 595, col 52 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Activating"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> TRUE,
-  relListener |-> FALSE,
-  steerFailed |-> TRUE,
-  resteered |-> FALSE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = TRUE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {1}
-/\ intake_live_intake_lastLS = {1}
-/\ intake_live_intake_gen = 2
-/\ intake_live_intake_quiesced = FALSE
-
-State 14: <intake_live_intake_Steer line 819, col 3 to line 836, col 7 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Activating"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> TRUE,
-  relListener |-> FALSE,
-  steerFailed |-> TRUE,
-  resteered |-> TRUE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = TRUE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {1}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {1}
-/\ intake_live_intake_lastLS = {1}
-/\ intake_live_intake_gen = 2
-/\ intake_live_intake_quiesced = FALSE
-
-State 15: <intake_live_intake_ActivateOk line 630, col 3 to line 656, col 7 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Active"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> TRUE,
-  relListener |-> FALSE,
-  steerFailed |-> TRUE,
-  resteered |-> TRUE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = TRUE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {1}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {1}
-/\ intake_live_intake_lastLS = {1}
-/\ intake_live_intake_gen = 2
-/\ intake_live_intake_quiesced = FALSE
-
-State 16: <intake_live_intake_Quiesce line 769, col 3 to line 780, col 52 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Active"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> TRUE,
-  relListener |-> FALSE,
-  steerFailed |-> TRUE,
-  resteered |-> TRUE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = TRUE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {}
-/\ intake_live_intake_lastLS = {1}
-/\ intake_live_intake_gen = 2
-/\ intake_live_intake_quiesced = TRUE
-
-State 17: <intake_live_intake_Restore line 786, col 3 to line 793, col 52 of module intake_live>
-/\ intake_live_intake_bindLeft = 1
-/\ intake_live_intake_alloc = "Active"
-/\ intake_live_intake_up = TRUE
-/\ intake_live_intake_g = [ actPartial |-> FALSE,
-  actResidue |-> FALSE,
-  actErr |-> TRUE,
-  relListener |-> FALSE,
-  steerFailed |-> TRUE,
-  resteered |-> TRUE,
-  revokeKept |-> FALSE,
-  capFail |-> FALSE,
-  capRefused |-> TRUE,
-  retiringRefused |-> FALSE,
-  defected |-> FALSE ]
-/\ intake_live_intake_parked = {}
-/\ intake_live_intake_sess = TRUE
-/\ intake_live_intake_oRes = 0
-/\ intake_live_intake_entries = {}
-/\ intake_live_intake_oEnt = 0
-/\ intake_live_intake_lis = {}
-/\ intake_live_intake_lastLS = {1}
-/\ intake_live_intake_gen = 2
-/\ intake_live_intake_quiesced = FALSE
-
-State 18: <intake_live_intake_BindFail line 662, col 3 to line 669, col 62 of module intake_live>
+State 14: <intake_live_intake_BindFail line 660, col 3 to line 667, col 62 of module intake_live>
 /\ intake_live_intake_bindLeft = 0
 /\ intake_live_intake_alloc = "Active"
 /\ intake_live_intake_up = TRUE
 /\ intake_live_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
-  actErr |-> TRUE,
+  actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> TRUE,
-  resteered |-> TRUE,
+  resteered |-> FALSE,
   revokeKept |-> FALSE,
   capFail |-> FALSE,
   capRefused |-> TRUE,
@@ -444,20 +344,20 @@ State 18: <intake_live_intake_BindFail line 662, col 3 to line 669, col 62 of mo
 /\ intake_live_intake_entries = {}
 /\ intake_live_intake_oEnt = 0
 /\ intake_live_intake_lis = {}
-/\ intake_live_intake_lastLS = {1}
+/\ intake_live_intake_lastLS = {1, 2}
 /\ intake_live_intake_gen = 2
 /\ intake_live_intake_quiesced = FALSE
 
-State 19: <intake_live_intake_BindListen line 582, col 3 to line 595, col 52 of module intake_live>
+State 15: <intake_live_intake_BindListen line 580, col 3 to line 593, col 52 of module intake_live>
 /\ intake_live_intake_bindLeft = 0
 /\ intake_live_intake_alloc = "Active"
 /\ intake_live_intake_up = TRUE
 /\ intake_live_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
-  actErr |-> TRUE,
+  actErr |-> FALSE,
   relListener |-> FALSE,
   steerFailed |-> TRUE,
-  resteered |-> TRUE,
+  resteered |-> FALSE,
   revokeKept |-> FALSE,
   capFail |-> FALSE,
   capRefused |-> TRUE,
@@ -469,8 +369,8 @@ State 19: <intake_live_intake_BindListen line 582, col 3 to line 595, col 52 of 
 /\ intake_live_intake_entries = {}
 /\ intake_live_intake_oEnt = 0
 /\ intake_live_intake_lis = {1}
-/\ intake_live_intake_lastLS = {1}
+/\ intake_live_intake_lastLS = {1, 2}
 /\ intake_live_intake_gen = 2
 /\ intake_live_intake_quiesced = FALSE
 
-Back to state 18: <intake_live_intake_SteerMemFail line 851, col 3 to line 853, col 66 of module intake_live>
+Back to state 14: <intake_live_intake_SteerMemFail line 849, col 3 to line 851, col 66 of module intake_live>

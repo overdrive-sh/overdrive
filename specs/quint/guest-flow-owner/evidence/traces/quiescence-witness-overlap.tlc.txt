@@ -17,7 +17,7 @@ State 1: <Initial predicate>
 /\ quiesce_ok_quiescence_holders = {}
 
 State 2: <quiesce_ok_quiescence_Damage line 450, col 3 to line 462, col 58 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+/\ quiesce_ok_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE

@@ -1,4 +1,4 @@
-# shared-table-hazard-unpinned: counterexample, 6 state(s) (from the TLC trace)
+# shared-table-hazard-unpinned: counterexample, 5 state(s) (from the TLC trace)
 
 State 1
   up = TRUE
@@ -19,22 +19,16 @@ State 1
 State 2 [BootStep]
   phase = "rules"
 
-State 3 [BootStep]
-  divert = TRUE
+State 3 [RulesPartial]
   phase = "steer"
-  reject = TRUE
+  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
 
 State 4 [BootStep]
   link = "pinned"
   phase = "open"
   route = "local"
 
-State 5 [MtlsPartial]
-  divert = FALSE
-  reject = FALSE
-  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
-
-State 6 [Crash]
+State 5 [Crash]
   up = FALSE
   link = "none"
   phase = "start"

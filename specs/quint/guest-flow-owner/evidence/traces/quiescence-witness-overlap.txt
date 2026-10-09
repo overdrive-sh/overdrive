@@ -14,7 +14,7 @@ State 1
   holders = {}
 
 State 2 [Damage]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 
 State 3 [Damage]
   dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]

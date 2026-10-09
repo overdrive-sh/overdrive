@@ -1,4 +1,4 @@
-# intake-steer-forever-unreachable: counterexample, 19 state(s) (from the TLC trace)
+# intake-steer-forever-unreachable: counterexample, 15 state(s) (from the TLC trace)
 
 State 1
   bindLeft = 1
@@ -19,62 +19,46 @@ State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [OtherAdmit]
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
-
-State 4 [Crash]
+State 3 [Crash]
   alloc = "Absent"
   up = FALSE
 
-State 5 [Restart]
+State 4 [Restart]
   up = TRUE
 
-State 6 [Provision]
+State 5 [Provision]
   alloc = "Provisioned"
   gen = 2
 
-State 7 [SessOpen]
+State 6 [SessOpen]
   sess = TRUE
 
-State 8 [ListenState]
-  lastLS = {1}
-
-State 9 [ActivateBegin]
+State 7 [ActivateBegin]
   alloc = "Activating"
 
-State 10 [BindListen]
-  lis = {1}
-
-State 11 [SteerMemFail]
-  alloc = "Provisioned"
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
-  lis = {}
-
-State 12 [ActivateBegin]
-  alloc = "Activating"
-
-State 13 [BindListen]
-  lis = {1}
-
-State 14 [Steer]
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> TRUE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
-  entries = {1}
-
-State 15 [ActivateOk]
+State 8 [ActivateOk]
   alloc = "Active"
 
-State 16 [Quiesce]
-  entries = {}
-  lis = {}
-  quiesced = TRUE
+State 9 [ListenState]
+  lastLS = {1}
 
-State 17 [Restore]
-  quiesced = FALSE
+State 10 [ListenState]
+  lastLS = {1, 2}
 
-State 18 [BindFail]
-  bindLeft = 0
-
-State 19 [BindListen]
+State 11 [BindListen]
   lis = {1}
 
--> loops back to State 18
+State 12 [OtherAdmit]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
+
+State 13 [SteerMemFail]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
+  lis = {}
+
+State 14 [BindFail]
+  bindLeft = 0
+
+State 15 [BindListen]
+  lis = {1}
+
+-> loops back to State 14
