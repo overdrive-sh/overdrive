@@ -1,0 +1,3991 @@
+{
+  "H4_mtu": {
+    "result": {
+      "1280": {
+        "frame": {
+          "PASS": true,
+          "above_mtu_sent": 64,
+          "counters": {
+            "encoded": 88,
+            "frag_first": 74,
+            "frag_shift": 298,
+            "hybrid_escaped": 88,
+            "redirect_ok": 176,
+            "sent_calls": 180,
+            "tc_decoded": 88
+          },
+          "extra_at_peer": 0,
+          "max_len": 59000,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 74,
+            "Ip:ReasmReqds": 372,
+            "Udp:InDatagrams": 88
+          },
+          "peer_rx": 88,
+          "sender_ack_ok": 88,
+          "sent": 88,
+          "shaped_sent": 88,
+          "tag": "h4_mtu1280_frame"
+        },
+        "plain": {
+          "PASS": true,
+          "above_mtu_sent": 33,
+          "counters": {
+            "encoded": 48,
+            "redirect_ok": 96,
+            "sent_calls": 100,
+            "tc_lenient_pass": 48,
+            "vstrip": 48
+          },
+          "extra_at_peer": 0,
+          "max_len": 7530,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 33,
+            "Ip:ReasmReqds": 126,
+            "Udp:InDatagrams": 48
+          },
+          "peer_rx": 48,
+          "sender_ack_ok": 48,
+          "sent": 48,
+          "shaped_sent": 0,
+          "tag": "h4_mtu1280_plain"
+        },
+        "sizes": [
+          8,
+          16,
+          1238,
+          1239,
+          1240,
+          1241,
+          1242,
+          1246,
+          1247,
+          1248,
+          1249,
+          1250,
+          2494,
+          2495,
+          2496,
+          2497,
+          2498,
+          2502,
+          2503,
+          2504,
+          2505,
+          2506,
+          3750,
+          3751,
+          3752,
+          3753,
+          3754,
+          3758,
+          3759,
+          3760,
+          3761,
+          3762,
+          4096,
+          7518,
+          7519,
+          7520,
+          7521,
+          7522,
+          7526,
+          7527,
+          7528,
+          7529,
+          7530,
+          59000
+        ]
+      },
+      "1400": {
+        "frame": {
+          "PASS": true,
+          "above_mtu_sent": 64,
+          "counters": {
+            "encoded": 88,
+            "frag_first": 74,
+            "frag_shift": 288,
+            "hybrid_escaped": 88,
+            "redirect_ok": 176,
+            "sent_calls": 180,
+            "tc_decoded": 88
+          },
+          "extra_at_peer": 0,
+          "max_len": 59000,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 74,
+            "Ip:ReasmReqds": 362,
+            "Udp:InDatagrams": 88
+          },
+          "peer_rx": 88,
+          "sender_ack_ok": 88,
+          "sent": 88,
+          "shaped_sent": 88,
+          "tag": "h4_mtu1400_frame"
+        },
+        "plain": {
+          "PASS": true,
+          "above_mtu_sent": 33,
+          "counters": {
+            "encoded": 48,
+            "redirect_ok": 96,
+            "sent_calls": 100,
+            "tc_lenient_pass": 48,
+            "vstrip": 48
+          },
+          "extra_at_peer": 0,
+          "max_len": 8250,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 33,
+            "Ip:ReasmReqds": 126,
+            "Udp:InDatagrams": 48
+          },
+          "peer_rx": 48,
+          "sender_ack_ok": 48,
+          "sent": 48,
+          "shaped_sent": 0,
+          "tag": "h4_mtu1400_plain"
+        },
+        "sizes": [
+          8,
+          16,
+          1358,
+          1359,
+          1360,
+          1361,
+          1362,
+          1366,
+          1367,
+          1368,
+          1369,
+          1370,
+          2734,
+          2735,
+          2736,
+          2737,
+          2738,
+          2742,
+          2743,
+          2744,
+          2745,
+          2746,
+          4096,
+          4110,
+          4111,
+          4112,
+          4113,
+          4114,
+          4118,
+          4119,
+          4120,
+          4121,
+          4122,
+          8238,
+          8239,
+          8240,
+          8241,
+          8242,
+          8246,
+          8247,
+          8248,
+          8249,
+          8250,
+          59000
+        ]
+      },
+      "1492": {
+        "frame": {
+          "PASS": true,
+          "above_mtu_sent": 64,
+          "counters": {
+            "encoded": 88,
+            "frag_first": 78,
+            "frag_shift": 300,
+            "hybrid_escaped": 88,
+            "redirect_ok": 176,
+            "sent_calls": 180,
+            "tc_decoded": 88
+          },
+          "extra_at_peer": 0,
+          "max_len": 59000,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 78,
+            "Ip:ReasmReqds": 378,
+            "Udp:InDatagrams": 88
+          },
+          "peer_rx": 88,
+          "sender_ack_ok": 88,
+          "sent": 88,
+          "shaped_sent": 88,
+          "tag": "h4_mtu1492_frame"
+        },
+        "plain": {
+          "PASS": true,
+          "above_mtu_sent": 33,
+          "counters": {
+            "encoded": 48,
+            "redirect_ok": 96,
+            "sent_calls": 100,
+            "tc_lenient_pass": 48,
+            "vstrip": 48
+          },
+          "extra_at_peer": 0,
+          "max_len": 8826,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 33,
+            "Ip:ReasmReqds": 135,
+            "Udp:InDatagrams": 48
+          },
+          "peer_rx": 48,
+          "sender_ack_ok": 48,
+          "sent": 48,
+          "shaped_sent": 0,
+          "tag": "h4_mtu1492_plain"
+        },
+        "sizes": [
+          8,
+          16,
+          1454,
+          1455,
+          1456,
+          1457,
+          1458,
+          1462,
+          1463,
+          1464,
+          1465,
+          1466,
+          2926,
+          2927,
+          2928,
+          2929,
+          2930,
+          2934,
+          2935,
+          2936,
+          2937,
+          2938,
+          4096,
+          4398,
+          4399,
+          4400,
+          4401,
+          4402,
+          4406,
+          4407,
+          4408,
+          4409,
+          4410,
+          8814,
+          8815,
+          8816,
+          8817,
+          8818,
+          8822,
+          8823,
+          8824,
+          8825,
+          8826,
+          59000
+        ]
+      },
+      "9000": {
+        "frame": {
+          "PASS": true,
+          "above_mtu_sent": 84,
+          "counters": {
+            "encoded": 88,
+            "frag_first": 72,
+            "frag_shift": 212,
+            "hybrid_escaped": 88,
+            "redirect_ok": 176,
+            "sent_calls": 180,
+            "tc_decoded": 88
+          },
+          "extra_at_peer": 0,
+          "max_len": 59000,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 72,
+            "Ip:ReasmReqds": 284,
+            "Udp:InDatagrams": 88
+          },
+          "peer_rx": 88,
+          "sender_ack_ok": 88,
+          "sent": 88,
+          "shaped_sent": 88,
+          "tag": "h4_mtu9000_frame"
+        },
+        "plain": {
+          "PASS": true,
+          "above_mtu_sent": 48,
+          "counters": {
+            "encoded": 54,
+            "redirect_ok": 108,
+            "sent_calls": 112,
+            "tc_lenient_pass": 54,
+            "vstrip": 54
+          },
+          "extra_at_peer": 0,
+          "max_len": 53850,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 36,
+            "Ip:ReasmReqds": 132,
+            "Udp:InDatagrams": 54
+          },
+          "peer_rx": 54,
+          "sender_ack_ok": 54,
+          "sent": 54,
+          "shaped_sent": 0,
+          "tag": "h4_mtu9000_plain"
+        },
+        "sizes": [
+          8,
+          16,
+          4096,
+          8958,
+          8959,
+          8960,
+          8961,
+          8962,
+          8966,
+          8967,
+          8968,
+          8969,
+          8970,
+          17934,
+          17935,
+          17936,
+          17937,
+          17938,
+          17942,
+          17943,
+          17944,
+          17945,
+          17946,
+          26910,
+          26911,
+          26912,
+          26913,
+          26914,
+          26918,
+          26919,
+          26920,
+          26921,
+          26922,
+          53838,
+          53839,
+          53840,
+          53841,
+          53842,
+          53846,
+          53847,
+          53848,
+          53849,
+          53850,
+          59000
+        ]
+      }
+    }
+  },
+  "H5_wire": {
+    "all_layouts_of_frame_shaped_above_mtu": [
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            9,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame",
+        "len": 1473,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 1481
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            16,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame",
+        "len": 1480,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 1488
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1472,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame",
+        "len": 2936,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 2944
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame",
+        "len": 2944,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 2952
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            true
+          ],
+          [
+            2952,
+            8,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame",
+        "len": 2952,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 2960
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            true
+          ],
+          [
+            2952,
+            1152,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame",
+        "len": 4096,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 4104
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            true
+          ],
+          [
+            2952,
+            1480,
+            true
+          ],
+          [
+            4432,
+            1480,
+            true
+          ],
+          [
+            5912,
+            1480,
+            true
+          ],
+          [
+            7392,
+            1480,
+            true
+          ],
+          [
+            8872,
+            1480,
+            true
+          ],
+          [
+            10352,
+            1480,
+            true
+          ],
+          [
+            11832,
+            1480,
+            true
+          ],
+          [
+            13312,
+            1480,
+            true
+          ],
+          [
+            14792,
+            1480,
+            true
+          ],
+          [
+            16272,
+            1480,
+            true
+          ],
+          [
+            17752,
+            1480,
+            true
+          ],
+          [
+            19232,
+            1480,
+            true
+          ],
+          [
+            20712,
+            1480,
+            true
+          ],
+          [
+            22192,
+            1480,
+            true
+          ],
+          [
+            23672,
+            1480,
+            true
+          ],
+          [
+            25152,
+            1480,
+            true
+          ],
+          [
+            26632,
+            1480,
+            true
+          ],
+          [
+            28112,
+            1480,
+            true
+          ],
+          [
+            29592,
+            1480,
+            true
+          ],
+          [
+            31072,
+            1480,
+            true
+          ],
+          [
+            32552,
+            1480,
+            true
+          ],
+          [
+            34032,
+            1480,
+            true
+          ],
+          [
+            35512,
+            1480,
+            true
+          ],
+          [
+            36992,
+            1480,
+            true
+          ],
+          [
+            38472,
+            1480,
+            true
+          ],
+          [
+            39952,
+            1480,
+            true
+          ],
+          [
+            41432,
+            1480,
+            true
+          ],
+          [
+            42912,
+            1480,
+            true
+          ],
+          [
+            44392,
+            1480,
+            true
+          ],
+          [
+            45872,
+            1480,
+            true
+          ],
+          [
+            47352,
+            1480,
+            true
+          ],
+          [
+            48832,
+            1480,
+            true
+          ],
+          [
+            50312,
+            1480,
+            true
+          ],
+          [
+            51792,
+            1480,
+            true
+          ],
+          [
+            53272,
+            1480,
+            true
+          ],
+          [
+            54752,
+            1480,
+            true
+          ],
+          [
+            56232,
+            1480,
+            true
+          ],
+          [
+            57712,
+            1296,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame",
+        "len": 59000,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 59008
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            true
+          ],
+          [
+            2952,
+            1152,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame2",
+        "len": 4096,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 4104
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            true
+          ],
+          [
+            2952,
+            1480,
+            true
+          ],
+          [
+            4432,
+            1480,
+            true
+          ],
+          [
+            5912,
+            1480,
+            true
+          ],
+          [
+            7392,
+            1480,
+            true
+          ],
+          [
+            8872,
+            1480,
+            true
+          ],
+          [
+            10352,
+            1480,
+            true
+          ],
+          [
+            11832,
+            1480,
+            true
+          ],
+          [
+            13312,
+            1480,
+            true
+          ],
+          [
+            14792,
+            1480,
+            true
+          ],
+          [
+            16272,
+            1480,
+            true
+          ],
+          [
+            17752,
+            1480,
+            true
+          ],
+          [
+            19232,
+            1480,
+            true
+          ],
+          [
+            20712,
+            1480,
+            true
+          ],
+          [
+            22192,
+            1480,
+            true
+          ],
+          [
+            23672,
+            1480,
+            true
+          ],
+          [
+            25152,
+            1480,
+            true
+          ],
+          [
+            26632,
+            1480,
+            true
+          ],
+          [
+            28112,
+            1480,
+            true
+          ],
+          [
+            29592,
+            1480,
+            true
+          ],
+          [
+            31072,
+            1480,
+            true
+          ],
+          [
+            32552,
+            1480,
+            true
+          ],
+          [
+            34032,
+            1480,
+            true
+          ],
+          [
+            35512,
+            1480,
+            true
+          ],
+          [
+            36992,
+            1480,
+            true
+          ],
+          [
+            38472,
+            1480,
+            true
+          ],
+          [
+            39952,
+            1480,
+            true
+          ],
+          [
+            41432,
+            1480,
+            true
+          ],
+          [
+            42912,
+            1480,
+            true
+          ],
+          [
+            44392,
+            1480,
+            true
+          ],
+          [
+            45872,
+            1480,
+            true
+          ],
+          [
+            47352,
+            1480,
+            true
+          ],
+          [
+            48832,
+            1480,
+            true
+          ],
+          [
+            50312,
+            1480,
+            true
+          ],
+          [
+            51792,
+            1480,
+            true
+          ],
+          [
+            53272,
+            1480,
+            true
+          ],
+          [
+            54752,
+            1480,
+            true
+          ],
+          [
+            56232,
+            1480,
+            true
+          ],
+          [
+            57712,
+            1296,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame2",
+        "len": 59000,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 59008
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            true
+          ],
+          [
+            2952,
+            1152,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame_chain",
+        "len": 4096,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 4104
+      },
+      {
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            true
+          ],
+          [
+            2952,
+            1480,
+            true
+          ],
+          [
+            4432,
+            1480,
+            true
+          ],
+          [
+            5912,
+            1480,
+            true
+          ],
+          [
+            7392,
+            1480,
+            true
+          ],
+          [
+            8872,
+            1480,
+            true
+          ],
+          [
+            10352,
+            1480,
+            true
+          ],
+          [
+            11832,
+            1480,
+            true
+          ],
+          [
+            13312,
+            1480,
+            true
+          ],
+          [
+            14792,
+            1480,
+            true
+          ],
+          [
+            16272,
+            1480,
+            true
+          ],
+          [
+            17752,
+            1480,
+            true
+          ],
+          [
+            19232,
+            1480,
+            true
+          ],
+          [
+            20712,
+            1480,
+            true
+          ],
+          [
+            22192,
+            1480,
+            true
+          ],
+          [
+            23672,
+            1480,
+            true
+          ],
+          [
+            25152,
+            1480,
+            true
+          ],
+          [
+            26632,
+            1480,
+            true
+          ],
+          [
+            28112,
+            1480,
+            true
+          ],
+          [
+            29592,
+            1480,
+            true
+          ],
+          [
+            31072,
+            1480,
+            true
+          ],
+          [
+            32552,
+            1480,
+            true
+          ],
+          [
+            34032,
+            1480,
+            true
+          ],
+          [
+            35512,
+            1480,
+            true
+          ],
+          [
+            36992,
+            1480,
+            true
+          ],
+          [
+            38472,
+            1480,
+            true
+          ],
+          [
+            39952,
+            1480,
+            true
+          ],
+          [
+            41432,
+            1480,
+            true
+          ],
+          [
+            42912,
+            1480,
+            true
+          ],
+          [
+            44392,
+            1480,
+            true
+          ],
+          [
+            45872,
+            1480,
+            true
+          ],
+          [
+            47352,
+            1480,
+            true
+          ],
+          [
+            48832,
+            1480,
+            true
+          ],
+          [
+            50312,
+            1480,
+            true
+          ],
+          [
+            51792,
+            1480,
+            true
+          ],
+          [
+            53272,
+            1480,
+            true
+          ],
+          [
+            54752,
+            1480,
+            true
+          ],
+          [
+            56232,
+            1480,
+            true
+          ],
+          [
+            57712,
+            1296,
+            false
+          ]
+        ],
+        "ip_csum_ok": true,
+        "kind": "frame_chain",
+        "len": 59000,
+        "len_consistent": true,
+        "shaped": true,
+        "udp_len": 59008
+      }
+    ],
+    "match": {
+      "layouts": [
+        {
+          "frags": [
+            [
+              0,
+              16,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 8,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 16
+        },
+        {
+          "frags": [
+            [
+              0,
+              24,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 16,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 24
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 1464,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 1472
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 1465,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 1473
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              8,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 1472,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 1480
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              9,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 1473,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 1481
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              16,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 1480,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 1488
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1472,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 2936,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 2944
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 2944,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 2952
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              8,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 2952,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 2960
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1152,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 4096,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 4104
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1480,
+              true
+            ],
+            [
+              4432,
+              1480,
+              true
+            ],
+            [
+              5912,
+              1480,
+              true
+            ],
+            [
+              7392,
+              1480,
+              true
+            ],
+            [
+              8872,
+              1480,
+              true
+            ],
+            [
+              10352,
+              1480,
+              true
+            ],
+            [
+              11832,
+              1480,
+              true
+            ],
+            [
+              13312,
+              1480,
+              true
+            ],
+            [
+              14792,
+              1480,
+              true
+            ],
+            [
+              16272,
+              1480,
+              true
+            ],
+            [
+              17752,
+              1480,
+              true
+            ],
+            [
+              19232,
+              1480,
+              true
+            ],
+            [
+              20712,
+              1480,
+              true
+            ],
+            [
+              22192,
+              1480,
+              true
+            ],
+            [
+              23672,
+              1480,
+              true
+            ],
+            [
+              25152,
+              1480,
+              true
+            ],
+            [
+              26632,
+              1480,
+              true
+            ],
+            [
+              28112,
+              1480,
+              true
+            ],
+            [
+              29592,
+              1480,
+              true
+            ],
+            [
+              31072,
+              1480,
+              true
+            ],
+            [
+              32552,
+              1480,
+              true
+            ],
+            [
+              34032,
+              1480,
+              true
+            ],
+            [
+              35512,
+              1480,
+              true
+            ],
+            [
+              36992,
+              1480,
+              true
+            ],
+            [
+              38472,
+              1480,
+              true
+            ],
+            [
+              39952,
+              1480,
+              true
+            ],
+            [
+              41432,
+              1480,
+              true
+            ],
+            [
+              42912,
+              1480,
+              true
+            ],
+            [
+              44392,
+              1480,
+              true
+            ],
+            [
+              45872,
+              1480,
+              true
+            ],
+            [
+              47352,
+              1480,
+              true
+            ],
+            [
+              48832,
+              1480,
+              true
+            ],
+            [
+              50312,
+              1480,
+              true
+            ],
+            [
+              51792,
+              1480,
+              true
+            ],
+            [
+              53272,
+              1480,
+              true
+            ],
+            [
+              54752,
+              1480,
+              true
+            ],
+            [
+              56232,
+              1480,
+              true
+            ],
+            [
+              57712,
+              1296,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame",
+          "len": 59000,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 59008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1152,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame2",
+          "len": 4096,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 4104
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1480,
+              true
+            ],
+            [
+              4432,
+              1480,
+              true
+            ],
+            [
+              5912,
+              1480,
+              true
+            ],
+            [
+              7392,
+              1480,
+              true
+            ],
+            [
+              8872,
+              1480,
+              true
+            ],
+            [
+              10352,
+              1480,
+              true
+            ],
+            [
+              11832,
+              1480,
+              true
+            ],
+            [
+              13312,
+              1480,
+              true
+            ],
+            [
+              14792,
+              1480,
+              true
+            ],
+            [
+              16272,
+              1480,
+              true
+            ],
+            [
+              17752,
+              1480,
+              true
+            ],
+            [
+              19232,
+              1480,
+              true
+            ],
+            [
+              20712,
+              1480,
+              true
+            ],
+            [
+              22192,
+              1480,
+              true
+            ],
+            [
+              23672,
+              1480,
+              true
+            ],
+            [
+              25152,
+              1480,
+              true
+            ],
+            [
+              26632,
+              1480,
+              true
+            ],
+            [
+              28112,
+              1480,
+              true
+            ],
+            [
+              29592,
+              1480,
+              true
+            ],
+            [
+              31072,
+              1480,
+              true
+            ],
+            [
+              32552,
+              1480,
+              true
+            ],
+            [
+              34032,
+              1480,
+              true
+            ],
+            [
+              35512,
+              1480,
+              true
+            ],
+            [
+              36992,
+              1480,
+              true
+            ],
+            [
+              38472,
+              1480,
+              true
+            ],
+            [
+              39952,
+              1480,
+              true
+            ],
+            [
+              41432,
+              1480,
+              true
+            ],
+            [
+              42912,
+              1480,
+              true
+            ],
+            [
+              44392,
+              1480,
+              true
+            ],
+            [
+              45872,
+              1480,
+              true
+            ],
+            [
+              47352,
+              1480,
+              true
+            ],
+            [
+              48832,
+              1480,
+              true
+            ],
+            [
+              50312,
+              1480,
+              true
+            ],
+            [
+              51792,
+              1480,
+              true
+            ],
+            [
+              53272,
+              1480,
+              true
+            ],
+            [
+              54752,
+              1480,
+              true
+            ],
+            [
+              56232,
+              1480,
+              true
+            ],
+            [
+              57712,
+              1296,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame2",
+          "len": 59000,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 59008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1152,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame_chain",
+          "len": 4096,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 4104
+        },
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1480,
+              true
+            ],
+            [
+              4432,
+              1480,
+              true
+            ],
+            [
+              5912,
+              1480,
+              true
+            ],
+            [
+              7392,
+              1480,
+              true
+            ],
+            [
+              8872,
+              1480,
+              true
+            ],
+            [
+              10352,
+              1480,
+              true
+            ],
+            [
+              11832,
+              1480,
+              true
+            ],
+            [
+              13312,
+              1480,
+              true
+            ],
+            [
+              14792,
+              1480,
+              true
+            ],
+            [
+              16272,
+              1480,
+              true
+            ],
+            [
+              17752,
+              1480,
+              true
+            ],
+            [
+              19232,
+              1480,
+              true
+            ],
+            [
+              20712,
+              1480,
+              true
+            ],
+            [
+              22192,
+              1480,
+              true
+            ],
+            [
+              23672,
+              1480,
+              true
+            ],
+            [
+              25152,
+              1480,
+              true
+            ],
+            [
+              26632,
+              1480,
+              true
+            ],
+            [
+              28112,
+              1480,
+              true
+            ],
+            [
+              29592,
+              1480,
+              true
+            ],
+            [
+              31072,
+              1480,
+              true
+            ],
+            [
+              32552,
+              1480,
+              true
+            ],
+            [
+              34032,
+              1480,
+              true
+            ],
+            [
+              35512,
+              1480,
+              true
+            ],
+            [
+              36992,
+              1480,
+              true
+            ],
+            [
+              38472,
+              1480,
+              true
+            ],
+            [
+              39952,
+              1480,
+              true
+            ],
+            [
+              41432,
+              1480,
+              true
+            ],
+            [
+              42912,
+              1480,
+              true
+            ],
+            [
+              44392,
+              1480,
+              true
+            ],
+            [
+              45872,
+              1480,
+              true
+            ],
+            [
+              47352,
+              1480,
+              true
+            ],
+            [
+              48832,
+              1480,
+              true
+            ],
+            [
+              50312,
+              1480,
+              true
+            ],
+            [
+              51792,
+              1480,
+              true
+            ],
+            [
+              53272,
+              1480,
+              true
+            ],
+            [
+              54752,
+              1480,
+              true
+            ],
+            [
+              56232,
+              1480,
+              true
+            ],
+            [
+              57712,
+              1296,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "frame_chain",
+          "len": 59000,
+          "len_consistent": true,
+          "shaped": true,
+          "udp_len": 59008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "rand",
+          "len": 1472,
+          "len_consistent": true,
+          "shaped": false,
+          "udp_len": 1480
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "rand",
+          "len": 1473,
+          "len_consistent": true,
+          "shaped": false,
+          "udp_len": 1481
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              1144,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "rand",
+          "len": 4096,
+          "len_consistent": true,
+          "shaped": false,
+          "udp_len": 4104
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              1480,
+              true
+            ],
+            [
+              4440,
+              1480,
+              true
+            ],
+            [
+              5920,
+              1480,
+              true
+            ],
+            [
+              7400,
+              1480,
+              true
+            ],
+            [
+              8880,
+              1480,
+              true
+            ],
+            [
+              10360,
+              1480,
+              true
+            ],
+            [
+              11840,
+              1480,
+              true
+            ],
+            [
+              13320,
+              1480,
+              true
+            ],
+            [
+              14800,
+              1480,
+              true
+            ],
+            [
+              16280,
+              1480,
+              true
+            ],
+            [
+              17760,
+              1480,
+              true
+            ],
+            [
+              19240,
+              1480,
+              true
+            ],
+            [
+              20720,
+              1480,
+              true
+            ],
+            [
+              22200,
+              1480,
+              true
+            ],
+            [
+              23680,
+              1480,
+              true
+            ],
+            [
+              25160,
+              1480,
+              true
+            ],
+            [
+              26640,
+              1480,
+              true
+            ],
+            [
+              28120,
+              1480,
+              true
+            ],
+            [
+              29600,
+              1480,
+              true
+            ],
+            [
+              31080,
+              1480,
+              true
+            ],
+            [
+              32560,
+              1480,
+              true
+            ],
+            [
+              34040,
+              1480,
+              true
+            ],
+            [
+              35520,
+              1480,
+              true
+            ],
+            [
+              37000,
+              1480,
+              true
+            ],
+            [
+              38480,
+              1480,
+              true
+            ],
+            [
+              39960,
+              1480,
+              true
+            ],
+            [
+              41440,
+              1480,
+              true
+            ],
+            [
+              42920,
+              1480,
+              true
+            ],
+            [
+              44400,
+              1480,
+              true
+            ],
+            [
+              45880,
+              1480,
+              true
+            ],
+            [
+              47360,
+              1480,
+              true
+            ],
+            [
+              48840,
+              1480,
+              true
+            ],
+            [
+              50320,
+              1480,
+              true
+            ],
+            [
+              51800,
+              1480,
+              true
+            ],
+            [
+              53280,
+              1480,
+              true
+            ],
+            [
+              54760,
+              1480,
+              true
+            ],
+            [
+              56240,
+              1480,
+              true
+            ],
+            [
+              57720,
+              1288,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "rand",
+          "len": 59000,
+          "len_consistent": true,
+          "shaped": false,
+          "udp_len": 59008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              1144,
+              false
+            ]
+          ],
+          "ip_csum_ok": true,
+          "kind": "decl_1472",
+          "len": 4096,
+          "len_consistent": true,
+          "shaped": false,
+          "udp_len": 4104
+        }
+      ],
+      "not_on_wire_exact": [],
+      "sent": 21,
+      "wire_bad_ip_csum": 0,
+      "wire_bad_len": 0,
+      "wire_datagrams": 21,
+      "wire_exact": 21,
+      "wire_incomplete": 0
+    }
+  },
+  "H6_missing_tc": {
+    "empty": {
+      "PASS": false,
+      "above_mtu_sent": 0,
+      "counters": {
+        "encoded": 3,
+        "hybrid_empty_framed": 3,
+        "redirect_ok": 6,
+        "sent_calls": 10
+      },
+      "extra_at_peer": 3,
+      "max_len": 0,
+      "missing_at_peer": 3,
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 3
+      },
+      "peer_rx": 3,
+      "sender_ack_ok": 0,
+      "sent": 3,
+      "shaped_sent": 0,
+      "tag": "h6_missing_tc_empty"
+    },
+    "judge": {
+      "PASS": false,
+      "above_mtu_sent": 6,
+      "ack_fail_examples": [
+        {
+          "ack_len": 16,
+          "ack_sha_match": false,
+          "conn": false,
+          "err": null,
+          "kind": "frame",
+          "len": 8
+        },
+        {
+          "ack_len": 108,
+          "ack_sha_match": false,
+          "conn": false,
+          "err": null,
+          "kind": "frame",
+          "len": 100
+        },
+        {
+          "ack_len": 1472,
+          "ack_sha_match": false,
+          "conn": false,
+          "err": null,
+          "kind": "frame",
+          "len": 1464
+        },
+        {
+          "ack_len": 1480,
+          "ack_sha_match": false,
+          "conn": false,
+          "err": null,
+          "kind": "frame",
+          "len": 1472
+        },
+        {
+          "ack_len": 4104,
+          "ack_sha_match": false,
+          "conn": false,
+          "err": null,
+          "kind": "frame",
+          "len": 4096
+        },
+        {
+          "ack_len": 59008,
+          "ack_sha_match": false,
+          "conn": false,
+          "err": null,
+          "kind": "frame",
+          "len": 59000
+        }
+      ],
+      "by_kind": {
+        "frame": {
+          "ok": 0,
+          "sent": 6
+        },
+        "nf_chain": {
+          "ok": 6,
+          "sent": 6
+        },
+        "rand": {
+          "ok": 6,
+          "sent": 6
+        }
+      },
+      "counters": {
+        "encoded": 18,
+        "hybrid_escaped": 6,
+        "redirect_ok": 36,
+        "sent_calls": 40,
+        "vstrip": 12
+      },
+      "done": {
+        "connected": false,
+        "dst": "10.250.218.2:7218",
+        "ev": "v18_done",
+        "failed": 6,
+        "local_ports": [
+          35157
+        ],
+        "ok": 12,
+        "s": 0.030398088,
+        "seq": false,
+        "threads": 1
+      },
+      "extra_at_peer": 6,
+      "extra_diag": [
+        {
+          "delta": 8,
+          "extra_len": 16,
+          "kind": "frame",
+          "sent_len": 8
+        },
+        {
+          "delta": 8,
+          "extra_len": 108,
+          "kind": "frame",
+          "sent_len": 100
+        },
+        {
+          "delta": 8,
+          "extra_len": 1472,
+          "kind": "frame",
+          "sent_len": 1464
+        },
+        {
+          "delta": 8,
+          "extra_len": 1480,
+          "kind": "frame",
+          "sent_len": 1472
+        },
+        {
+          "delta": 8,
+          "extra_len": 4104,
+          "kind": "frame",
+          "sent_len": 4096
+        },
+        {
+          "delta": 8,
+          "extra_len": 59008,
+          "kind": "frame",
+          "sent_len": 59000
+        }
+      ],
+      "extra_examples": [
+        {
+          "len": 16,
+          "n": 1,
+          "sha": "02f1ad93b295e78e"
+        },
+        {
+          "len": 108,
+          "n": 1,
+          "sha": "ff8aee0868075bcb"
+        },
+        {
+          "len": 1472,
+          "n": 1,
+          "sha": "238add5f05b41a46"
+        },
+        {
+          "len": 1480,
+          "n": 1,
+          "sha": "c921b4008d917009"
+        },
+        {
+          "len": 4104,
+          "n": 1,
+          "sha": "92a083477c59704d"
+        },
+        {
+          "len": 59008,
+          "n": 1,
+          "sha": "04336a81b677be6c"
+        }
+      ],
+      "max_len": 59000,
+      "missing_at_peer": 6,
+      "missing_examples": [
+        {
+          "conn": false,
+          "kind": "frame",
+          "len": 8,
+          "n": 1,
+          "shaped": true
+        },
+        {
+          "conn": false,
+          "kind": "frame",
+          "len": 100,
+          "n": 1,
+          "shaped": true
+        },
+        {
+          "conn": false,
+          "kind": "frame",
+          "len": 1464,
+          "n": 1,
+          "shaped": true
+        },
+        {
+          "conn": false,
+          "kind": "frame",
+          "len": 1472,
+          "n": 1,
+          "shaped": true
+        },
+        {
+          "conn": false,
+          "kind": "frame",
+          "len": 4096,
+          "n": 1,
+          "shaped": true
+        },
+        {
+          "conn": false,
+          "kind": "frame",
+          "len": 59000,
+          "n": 1,
+          "shaped": true
+        }
+      ],
+      "non_json_output": [
+        ""
+      ],
+      "peer_log_bytes": [
+        790895,
+        794013
+      ],
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 7,
+        "Ip:ReasmReqds": 131,
+        "Udp:InDatagrams": 18
+      },
+      "peer_rx": 18,
+      "rc": 0,
+      "sender_ack_ok": 12,
+      "sent": 18,
+      "shaped_sent": 6,
+      "tag": "h6_missing_tc"
+    }
+  },
+  "H6_programs": {
+    "loaded": "\"programs\":[{\"id\":43109,\"name\":\"verdict\",\"tag\":\"76c18f5a8b902ae5\",\"verified_insns\":884},{\"id\":43110,\"name\":\"strp_parse\",\"tag\":\"2abd9169f6e90deb\",\"verified_insns\":62},{\"id\":43111,\"name\":\"strp_verdict\",\"tag\":\"dd8b5d8c8ab32bb3\",\"verified_insns\":895},{\"id\":43112,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"df202353afc0c231\",\"verified_insns\":465},{\"id\":43114,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":43115,\"name\":\"sockops(/sys/fs/cgroup/gvc-v18-1206518)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"hybrid\"}\n"
+  },
+  "H6_tcx_on_veth": {
+    "bpftool": "xdp:\n\ntc:\n\nflow_dissector:\n\nnetfilter:\n\n"
+  },
+  "H7": {
+    "after_owner_restart": {
+      "PASS": true,
+      "above_mtu_sent": 40,
+      "counters": {
+        "encoded": 40,
+        "frag_first": 20,
+        "frag_shift": 40,
+        "hybrid_escaped": 20,
+        "redirect_ok": 80,
+        "sent_calls": 84,
+        "tc_decoded": 20,
+        "tc_lenient_pass": 20,
+        "vstrip": 20
+      },
+      "extra_at_peer": 0,
+      "max_len": 4096,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 40,
+        "Ip:ReasmReqds": 120,
+        "Udp:InDatagrams": 40
+      },
+      "peer_rx": 40,
+      "sender_ack_ok": 40,
+      "sent": 40,
+      "shaped_sent": 20,
+      "tag": "h7_after_owner_restart_rand"
+    },
+    "result": {
+      "S1_control_other_id": {
+        "id": "0x6e58",
+        "peer_rx_rows": 1,
+        "received": true,
+        "sent_len": 3000,
+        "sport": 45555,
+        "tag": "control (id never seen by the program)"
+      },
+      "S1_peer_snmp_delta": {
+        "Ip:ReasmOKs": 3,
+        "Ip:ReasmReqds": 9,
+        "Udp:InDatagrams": 2,
+        "Udp:InErrors": 1
+      },
+      "S1_victim_again_same_id": {
+        "id": "0x6e57",
+        "peer_rx_rows": 1,
+        "received": true,
+        "sent_len": 3000,
+        "sport": 45555,
+        "tag": "again (entry consumed by the previous last fragment)"
+      },
+      "S1_victim_same_id": {
+        "id": "0x6e57",
+        "peer_rx_rows": 0,
+        "received": false,
+        "sent_len": 3000,
+        "sport": 45555,
+        "tag": "victim (stale id)"
+      },
+      "S2_after_40s": {
+        "PASS": true,
+        "above_mtu_sent": 20,
+        "counters": {
+          "encoded": 20,
+          "redirect_ok": 40,
+          "sent_calls": 44,
+          "tc_lenient_pass": 20,
+          "vstrip": 20
+        },
+        "extra_at_peer": 0,
+        "max_len": 4096,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 20,
+          "Ip:ReasmReqds": 60,
+          "Udp:InDatagrams": 20
+        },
+        "peer_rx": 20,
+        "sender_ack_ok": 20,
+        "sent": 20,
+        "shaped_sent": 0,
+        "tag": "h7_after_40s_rand"
+      },
+      "S2_after_stuff": [
+        {
+          "PASS": true,
+          "above_mtu_sent": 60,
+          "counters": {
+            "encoded": 60,
+            "redirect_ok": 120,
+            "sent_calls": 124,
+            "tc_lenient_pass": 60,
+            "vstrip": 60
+          },
+          "extra_at_peer": 0,
+          "max_len": 4096,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 60,
+            "Ip:ReasmReqds": 180,
+            "Udp:InDatagrams": 60
+          },
+          "peer_rx": 60,
+          "sender_ack_ok": 60,
+          "sent": 60,
+          "shaped_sent": 0,
+          "tag": "h7_after_stuff_rand"
+        },
+        {
+          "PASS": true,
+          "above_mtu_sent": 20,
+          "counters": {
+            "encoded": 20,
+            "frag_first": 20,
+            "frag_shift": 40,
+            "hybrid_escaped": 20,
+            "redirect_ok": 40,
+            "sent_calls": 44,
+            "tc_decoded": 20
+          },
+          "extra_at_peer": 0,
+          "max_len": 4096,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 20,
+            "Ip:ReasmReqds": 60,
+            "Udp:InDatagrams": 20
+          },
+          "peer_rx": 20,
+          "sender_ack_ok": 20,
+          "sent": 20,
+          "shaped_sent": 20,
+          "tag": "h7_after_stuff_frame"
+        }
+      ],
+      "S2_after_stuff_rand_examples": {
+        "extra": [],
+        "missing": []
+      },
+      "S2_last_real_ip_id": 1869,
+      "S2_stuffed": {
+        "count": 4096,
+        "first_id": 1870,
+        "wall_s": 0.36
+      },
+      "S2_wire_real_fragmented_after_stuff": {
+        "example_layouts_in_range": [
+          [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1152,
+              false
+            ]
+          ],
+          [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              1144,
+              false
+            ]
+          ],
+          [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              1144,
+              false
+            ]
+          ]
+        ],
+        "example_layouts_not_in_range": [
+          [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1152,
+              false
+            ]
+          ],
+          [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1152,
+              false
+            ]
+          ],
+          [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1152,
+              false
+            ]
+          ]
+        ],
+        "first_ids": [
+          45320,
+          41494,
+          31331,
+          51212,
+          44818,
+          3595,
+          39207,
+          50184,
+          41979,
+          64812
+        ],
+        "id_in_stuffed_range": 10,
+        "n": 120,
+        "not_in_range_but_incomplete": 0,
+        "of_those_incomplete_or_inconsistent_on_wire": 0
+      },
+      "base": [
+        {
+          "PASS": true,
+          "above_mtu_sent": 10,
+          "counters": {
+            "encoded": 10,
+            "frag_first": 10,
+            "frag_shift": 20,
+            "hybrid_escaped": 10,
+            "redirect_ok": 20,
+            "sent_calls": 24,
+            "tc_decoded": 10
+          },
+          "extra_at_peer": 0,
+          "max_len": 4096,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 10,
+            "Ip:ReasmReqds": 30,
+            "Udp:InDatagrams": 10
+          },
+          "peer_rx": 10,
+          "sender_ack_ok": 10,
+          "sent": 10,
+          "shaped_sent": 10,
+          "tag": "h7_base_frame"
+        },
+        {
+          "PASS": true,
+          "above_mtu_sent": 10,
+          "counters": {
+            "encoded": 10,
+            "redirect_ok": 20,
+            "sent_calls": 24,
+            "tc_lenient_pass": 10,
+            "vstrip": 10
+          },
+          "extra_at_peer": 0,
+          "max_len": 4096,
+          "missing_at_peer": 0,
+          "peer_ns_snmp_delta": {
+            "Ip:ReasmOKs": 10,
+            "Ip:ReasmReqds": 30,
+            "Udp:InDatagrams": 10
+          },
+          "peer_rx": 10,
+          "sender_ack_ok": 10,
+          "sent": 10,
+          "shaped_sent": 0,
+          "tag": "h7_base_rand"
+        }
+      ],
+      "holder": {
+        "peer_saw_from": "10.250.218.1:60657"
+      },
+      "wire_stageA": [
+        {
+          "complete": false,
+          "dport": 7218,
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2952,
+              48,
+              false
+            ],
+            [
+              2960,
+              48,
+              false
+            ]
+          ],
+          "id": 28247,
+          "ip_csum_all_ok": true,
+          "sport": 60657,
+          "udp_len": 3008
+        }
+      ],
+      "wire_victims": [
+        {
+          "complete": true,
+          "dport": 7218,
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              48,
+              false
+            ]
+          ],
+          "head": "d32d81d2e338d011",
+          "id": 28248,
+          "ip_csum_all_ok": true,
+          "len_consistent": true,
+          "payload_len": 3000,
+          "sha": "ff56bc6860dbc778797709e90bc0c036f4c677fd818e5b6d25114883cd274cc0",
+          "sport": 45555,
+          "total_len": 3008,
+          "udp_len": 3008
+        }
+      ]
+    }
+  },
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      23,
+      23
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "1205743 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park,--cells,none --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/vm-increment-b-1791504736/serial.log --console off --vsock cid=3261,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/vm-increment-b-1791504736/ch.log -v\n",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": false,
+    "modules_caused": [],
+    "modules_diff": [],
+    "modules_restored": true,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": false
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=263\n"
+  },
+  "phases": {
+    "h1_empty_both": {
+      "PASS": true,
+      "above_mtu_sent": 0,
+      "counters": {
+        "encoded": 3,
+        "hybrid_empty_framed": 3,
+        "redirect_ok": 6,
+        "sent_calls": 10,
+        "tc_decoded": 3,
+        "tc_decoded_empty": 3
+      },
+      "extra_at_peer": 0,
+      "max_len": 0,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 3
+      },
+      "peer_rx": 3,
+      "sender_ack_ok": 3,
+      "sent": 3,
+      "shaped_sent": 0,
+      "tag": "h1_empty_both"
+    },
+    "h1_empty_conn": {
+      "PASS": true,
+      "above_mtu_sent": 0,
+      "counters": {},
+      "extra_at_peer": 0,
+      "max_len": 0,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 3
+      },
+      "peer_rx": 3,
+      "sender_ack_ok": 3,
+      "sent": 3,
+      "shaped_sent": 0,
+      "tag": "h1_empty_conn"
+    },
+    "h1_frame_conn": {
+      "PASS": true,
+      "above_mtu_sent": 480,
+      "counters": {
+        "encoded": 608,
+        "frag_first": 520,
+        "frag_shift": 5624,
+        "hybrid_escaped": 608,
+        "redirect_ok": 1216,
+        "sent_calls": 1224,
+        "tc_decoded": 608
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 520,
+        "Ip:ReasmReqds": 6144,
+        "Udp:InDatagrams": 608
+      },
+      "peer_rx": 608,
+      "sender_ack_ok": 608,
+      "sent": 608,
+      "shaped_sent": 608,
+      "tag": "h1_frame_conn"
+    },
+    "h1_frame_unconn": {
+      "PASS": true,
+      "above_mtu_sent": 480,
+      "counters": {
+        "encoded": 554,
+        "frag_first": 466,
+        "frag_shift": 4388,
+        "hybrid_escaped": 554,
+        "redirect_ok": 1108,
+        "sent_calls": 1114,
+        "tc_decoded": 554
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 520,
+        "Ip:ReasmReqds": 6144,
+        "Udp:InDatagrams": 608
+      },
+      "peer_rx": 608,
+      "sender_ack_ok": 608,
+      "sent": 608,
+      "shaped_sent": 608,
+      "tag": "h1_frame_unconn"
+    },
+    "h1_seq_conn": {
+      "PASS": true,
+      "above_mtu_sent": 80,
+      "counters": {
+        "encoded": 138,
+        "frag_first": 60,
+        "frag_shift": 384,
+        "hybrid_escaped": 82,
+        "redirect_ok": 276,
+        "sent_calls": 280,
+        "tc_decoded": 82,
+        "tc_lenient_pass": 56,
+        "vstrip": 56
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 92,
+        "Ip:ReasmReqds": 720,
+        "Udp:InDatagrams": 138
+      },
+      "peer_rx": 138,
+      "sender_ack_ok": 138,
+      "sent": 138,
+      "shaped_sent": 82,
+      "tag": "h1_seq_conn"
+    },
+    "h1_seq_unconn": {
+      "PASS": true,
+      "above_mtu_sent": 80,
+      "counters": {
+        "encoded": 138,
+        "frag_first": 60,
+        "frag_shift": 384,
+        "hybrid_escaped": 82,
+        "redirect_ok": 276,
+        "sent_calls": 280,
+        "tc_decoded": 82,
+        "tc_lenient_pass": 56,
+        "vstrip": 56
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 92,
+        "Ip:ReasmReqds": 720,
+        "Udp:InDatagrams": 138
+      },
+      "peer_rx": 138,
+      "sender_ack_ok": 138,
+      "sent": 138,
+      "shaped_sent": 82,
+      "tag": "h1_seq_unconn"
+    },
+    "h2_nearmiss_conn": {
+      "PASS": true,
+      "above_mtu_sent": 105,
+      "counters": {
+        "encoded": 203,
+        "frag_first": 2,
+        "frag_shift": 2,
+        "hybrid_escaped": 3,
+        "redirect_ok": 406,
+        "sent_calls": 414,
+        "tc_decoded": 3,
+        "tc_lenient_pass": 200,
+        "vstrip": 200
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 106,
+        "Ip:ReasmReqds": 812,
+        "Udp:InDatagrams": 195
+      },
+      "peer_rx": 195,
+      "sender_ack_ok": 195,
+      "sent": 195,
+      "shaped_sent": 3,
+      "tag": "h2_nearmiss_conn"
+    },
+    "h2_nearmiss_unconn": {
+      "PASS": true,
+      "above_mtu_sent": 105,
+      "counters": {
+        "encoded": 187,
+        "frag_first": 2,
+        "frag_shift": 2,
+        "hybrid_escaped": 3,
+        "redirect_ok": 374,
+        "sent_calls": 378,
+        "tc_decoded": 3,
+        "tc_lenient_pass": 184,
+        "vstrip": 184
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 106,
+        "Ip:ReasmReqds": 812,
+        "Udp:InDatagrams": 195
+      },
+      "peer_rx": 195,
+      "sender_ack_ok": 195,
+      "sent": 195,
+      "shaped_sent": 3,
+      "tag": "h2_nearmiss_unconn"
+    },
+    "h2_plain": {
+      "PASS": true,
+      "above_mtu_sent": 60,
+      "counters": {
+        "encoded": 80,
+        "redirect_ok": 160,
+        "sent_calls": 164,
+        "tc_lenient_pass": 80,
+        "vstrip": 80
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 60,
+        "Ip:ReasmReqds": 733,
+        "Udp:InDatagrams": 80
+      },
+      "peer_rx": 80,
+      "sender_ack_ok": 80,
+      "sent": 80,
+      "shaped_sent": 0,
+      "tag": "h2_plain"
+    },
+    "h2_zero_ones": {
+      "PASS": true,
+      "above_mtu_sent": 14,
+      "counters": {
+        "encoded": 26,
+        "redirect_ok": 52,
+        "sent_calls": 56,
+        "tc_lenient_pass": 26,
+        "vstrip": 26
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 14,
+        "Ip:ReasmReqds": 108,
+        "Udp:InDatagrams": 26
+      },
+      "peer_rx": 26,
+      "sender_ack_ok": 26,
+      "sent": 26,
+      "shaped_sent": 0,
+      "tag": "h2_zero_ones"
+    },
+    "h3_conc_conn": {
+      "PASS": false,
+      "above_mtu_sent": 901,
+      "counters": {
+        "encoded": 976,
+        "frag_first": 404,
+        "frag_shift": 3759,
+        "hybrid_escaped": 420,
+        "redirect_ok": 1952,
+        "sent_calls": 1972,
+        "tc_decoded": 420,
+        "tc_lenient_pass": 556,
+        "vstrip": 556
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 1,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 928,
+        "Ip:ReasmReqds": 10363,
+        "Udp:InDatagrams": 999
+      },
+      "peer_rx": 999,
+      "sender_ack_ok": 999,
+      "sent": 1000,
+      "shaped_sent": 435,
+      "tag": "h3_conc_conn"
+    },
+    "h3_conc_unconn": {
+      "PASS": true,
+      "above_mtu_sent": 893,
+      "counters": {
+        "encoded": 1000,
+        "frag_first": 410,
+        "frag_shift": 4112,
+        "hybrid_escaped": 425,
+        "redirect_ok": 2000,
+        "sent_calls": 2008,
+        "tc_decoded": 425,
+        "tc_lenient_pass": 575,
+        "vstrip": 575
+      },
+      "extra_at_peer": 0,
+      "max_len": 59000,
+      "missing_at_peer": 0,
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 929,
+        "Ip:ReasmReqds": 10390,
+        "Udp:InDatagrams": 1000
+      },
+      "peer_rx": 1000,
+      "sender_ack_ok": 1000,
+      "sent": 1000,
+      "shaped_sent": 425,
+      "tag": "h3_conc_unconn"
+    }
+  },
+  "plan": {
+    "sizes_1500": [
+      8,
+      9,
+      15,
+      16,
+      17,
+      24,
+      25,
+      64,
+      100,
+      1431,
+      1462,
+      1463,
+      1464,
+      1465,
+      1466,
+      1470,
+      1471,
+      1472,
+      1473,
+      1474,
+      2048,
+      2942,
+      2943,
+      2944,
+      2945,
+      2946,
+      2950,
+      2951,
+      2952,
+      2953,
+      2954,
+      4096,
+      4097,
+      4422,
+      4423,
+      4424,
+      4425,
+      4426,
+      4430,
+      4431,
+      4432,
+      4433,
+      4434,
+      5902,
+      5903,
+      5904,
+      5905,
+      5906,
+      5910,
+      5911,
+      5912,
+      5913,
+      5914,
+      8192,
+      16262,
+      16263,
+      16264,
+      16265,
+      16266,
+      16270,
+      16271,
+      16272,
+      16273,
+      16274,
+      16384,
+      32768,
+      57702,
+      57703,
+      57704,
+      57705,
+      57706,
+      57710,
+      57711,
+      57712,
+      57713,
+      57714,
+      58999,
+      59000
+    ]
+  },
+  "preflight": {
+    "blob_sha256": "662db27fa19d6b3f77248cd7716e13cd9f7afe6e6d9c2ec413308e59c75e9915",
+    "cid": 3312,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ]
+  },
+  "programs": {
+    "loaded": "\"programs\":[{\"id\":43095,\"name\":\"verdict\",\"tag\":\"76c18f5a8b902ae5\",\"verified_insns\":884},{\"id\":43096,\"name\":\"strp_parse\",\"tag\":\"2abd9169f6e90deb\",\"verified_insns\":62},{\"id\":43097,\"name\":\"strp_verdict\",\"tag\":\"dd8b5d8c8ab32bb3\",\"verified_insns\":895},{\"id\":43098,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"df202353afc0c231\",\"verified_insns\":465},{\"id\":43099,\"name\":\"eg_decode_frag(tcx v18-h egress)\",\"tag\":\"11c198a8e99605db\",\"verified_insns\":627},{\"id\":43100,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":43101,\"name\":\"sockops(/sys/fs/cgroup/gvc-v18-1206341)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"hybrid\"}\n"
+  },
+  "substrate": {
+    "guest_uname": "Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux\n",
+    "offhost": "63032: v18-h@if63031: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 16:65:21:f4:52:d3 brd ff:ff:ff:ff:ff:ff link-netns v18-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv18-p0@if63032   UP             10.250.218.2/24 fe80::282f:72ff:fe3d:4312/64 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ngeneric-receive-offload: off\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nState  Recv-Q Send-Q Local Address:Port Peer Address:Port\nUNCONN 0      0       10.250.218.2:7218      0.0.0.0:*   \n",
+    "sha_selftest_guest": "{\"abc\":true,\"empty\":true,\"ev\":\"sha_selftest\",\"million_a\":true}\n",
+    "sha_selftest_host": "{\"abc\":true,\"empty\":true,\"ev\":\"sha_selftest\",\"million_a\":true}\n"
+  },
+  "summary": {
+    "all_phases_pass": {
+      "h1_empty_both": true,
+      "h1_empty_conn": true,
+      "h1_frame_conn": true,
+      "h1_frame_unconn": true,
+      "h1_seq_conn": true,
+      "h1_seq_unconn": true,
+      "h2_nearmiss_conn": true,
+      "h2_nearmiss_unconn": true,
+      "h2_plain": true,
+      "h2_zero_ones": true,
+      "h3_conc_conn": false,
+      "h3_conc_unconn": true,
+      "h6_missing_tc": false,
+      "w_chain": true,
+      "w_decl1472": true,
+      "w_frame": true,
+      "w_frame2": true,
+      "w_rand": true
+    },
+    "phase_results": {
+      "h1_empty_both": {
+        "PASS": true,
+        "above_mtu_sent": 0,
+        "counters": {
+          "encoded": 3,
+          "hybrid_empty_framed": 3,
+          "redirect_ok": 6,
+          "sent_calls": 10,
+          "tc_decoded": 3,
+          "tc_decoded_empty": 3
+        },
+        "extra_at_peer": 0,
+        "max_len": 0,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Udp:InDatagrams": 3
+        },
+        "peer_rx": 3,
+        "sender_ack_ok": 3,
+        "sent": 3,
+        "shaped_sent": 0,
+        "tag": "h1_empty_both"
+      },
+      "h1_empty_conn": {
+        "PASS": true,
+        "above_mtu_sent": 0,
+        "counters": {},
+        "extra_at_peer": 0,
+        "max_len": 0,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Udp:InDatagrams": 3
+        },
+        "peer_rx": 3,
+        "sender_ack_ok": 3,
+        "sent": 3,
+        "shaped_sent": 0,
+        "tag": "h1_empty_conn"
+      },
+      "h1_frame_conn": {
+        "PASS": true,
+        "above_mtu_sent": 480,
+        "counters": {
+          "encoded": 608,
+          "frag_first": 520,
+          "frag_shift": 5624,
+          "hybrid_escaped": 608,
+          "redirect_ok": 1216,
+          "sent_calls": 1224,
+          "tc_decoded": 608
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 520,
+          "Ip:ReasmReqds": 6144,
+          "Udp:InDatagrams": 608
+        },
+        "peer_rx": 608,
+        "sender_ack_ok": 608,
+        "sent": 608,
+        "shaped_sent": 608,
+        "tag": "h1_frame_conn"
+      },
+      "h1_frame_unconn": {
+        "PASS": true,
+        "above_mtu_sent": 480,
+        "counters": {
+          "encoded": 554,
+          "frag_first": 466,
+          "frag_shift": 4388,
+          "hybrid_escaped": 554,
+          "redirect_ok": 1108,
+          "sent_calls": 1114,
+          "tc_decoded": 554
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 520,
+          "Ip:ReasmReqds": 6144,
+          "Udp:InDatagrams": 608
+        },
+        "peer_rx": 608,
+        "sender_ack_ok": 608,
+        "sent": 608,
+        "shaped_sent": 608,
+        "tag": "h1_frame_unconn"
+      },
+      "h1_seq_conn": {
+        "PASS": true,
+        "above_mtu_sent": 80,
+        "counters": {
+          "encoded": 138,
+          "frag_first": 60,
+          "frag_shift": 384,
+          "hybrid_escaped": 82,
+          "redirect_ok": 276,
+          "sent_calls": 280,
+          "tc_decoded": 82,
+          "tc_lenient_pass": 56,
+          "vstrip": 56
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 92,
+          "Ip:ReasmReqds": 720,
+          "Udp:InDatagrams": 138
+        },
+        "peer_rx": 138,
+        "sender_ack_ok": 138,
+        "sent": 138,
+        "shaped_sent": 82,
+        "tag": "h1_seq_conn"
+      },
+      "h1_seq_unconn": {
+        "PASS": true,
+        "above_mtu_sent": 80,
+        "counters": {
+          "encoded": 138,
+          "frag_first": 60,
+          "frag_shift": 384,
+          "hybrid_escaped": 82,
+          "redirect_ok": 276,
+          "sent_calls": 280,
+          "tc_decoded": 82,
+          "tc_lenient_pass": 56,
+          "vstrip": 56
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 92,
+          "Ip:ReasmReqds": 720,
+          "Udp:InDatagrams": 138
+        },
+        "peer_rx": 138,
+        "sender_ack_ok": 138,
+        "sent": 138,
+        "shaped_sent": 82,
+        "tag": "h1_seq_unconn"
+      },
+      "h2_nearmiss_conn": {
+        "PASS": true,
+        "above_mtu_sent": 105,
+        "counters": {
+          "encoded": 203,
+          "frag_first": 2,
+          "frag_shift": 2,
+          "hybrid_escaped": 3,
+          "redirect_ok": 406,
+          "sent_calls": 414,
+          "tc_decoded": 3,
+          "tc_lenient_pass": 200,
+          "vstrip": 200
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 106,
+          "Ip:ReasmReqds": 812,
+          "Udp:InDatagrams": 195
+        },
+        "peer_rx": 195,
+        "sender_ack_ok": 195,
+        "sent": 195,
+        "shaped_sent": 3,
+        "tag": "h2_nearmiss_conn"
+      },
+      "h2_nearmiss_unconn": {
+        "PASS": true,
+        "above_mtu_sent": 105,
+        "counters": {
+          "encoded": 187,
+          "frag_first": 2,
+          "frag_shift": 2,
+          "hybrid_escaped": 3,
+          "redirect_ok": 374,
+          "sent_calls": 378,
+          "tc_decoded": 3,
+          "tc_lenient_pass": 184,
+          "vstrip": 184
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 106,
+          "Ip:ReasmReqds": 812,
+          "Udp:InDatagrams": 195
+        },
+        "peer_rx": 195,
+        "sender_ack_ok": 195,
+        "sent": 195,
+        "shaped_sent": 3,
+        "tag": "h2_nearmiss_unconn"
+      },
+      "h2_plain": {
+        "PASS": true,
+        "above_mtu_sent": 60,
+        "counters": {
+          "encoded": 80,
+          "redirect_ok": 160,
+          "sent_calls": 164,
+          "tc_lenient_pass": 80,
+          "vstrip": 80
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 60,
+          "Ip:ReasmReqds": 733,
+          "Udp:InDatagrams": 80
+        },
+        "peer_rx": 80,
+        "sender_ack_ok": 80,
+        "sent": 80,
+        "shaped_sent": 0,
+        "tag": "h2_plain"
+      },
+      "h2_zero_ones": {
+        "PASS": true,
+        "above_mtu_sent": 14,
+        "counters": {
+          "encoded": 26,
+          "redirect_ok": 52,
+          "sent_calls": 56,
+          "tc_lenient_pass": 26,
+          "vstrip": 26
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 14,
+          "Ip:ReasmReqds": 108,
+          "Udp:InDatagrams": 26
+        },
+        "peer_rx": 26,
+        "sender_ack_ok": 26,
+        "sent": 26,
+        "shaped_sent": 0,
+        "tag": "h2_zero_ones"
+      },
+      "h3_conc_conn": {
+        "PASS": false,
+        "above_mtu_sent": 901,
+        "counters": {
+          "encoded": 976,
+          "frag_first": 404,
+          "frag_shift": 3759,
+          "hybrid_escaped": 420,
+          "redirect_ok": 1952,
+          "sent_calls": 1972,
+          "tc_decoded": 420,
+          "tc_lenient_pass": 556,
+          "vstrip": 556
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 1,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 928,
+          "Ip:ReasmReqds": 10363,
+          "Udp:InDatagrams": 999
+        },
+        "peer_rx": 999,
+        "sender_ack_ok": 999,
+        "sent": 1000,
+        "shaped_sent": 435,
+        "tag": "h3_conc_conn"
+      },
+      "h3_conc_unconn": {
+        "PASS": true,
+        "above_mtu_sent": 893,
+        "counters": {
+          "encoded": 1000,
+          "frag_first": 410,
+          "frag_shift": 4112,
+          "hybrid_escaped": 425,
+          "redirect_ok": 2000,
+          "sent_calls": 2008,
+          "tc_decoded": 425,
+          "tc_lenient_pass": 575,
+          "vstrip": 575
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 929,
+          "Ip:ReasmReqds": 10390,
+          "Udp:InDatagrams": 1000
+        },
+        "peer_rx": 1000,
+        "sender_ack_ok": 1000,
+        "sent": 1000,
+        "shaped_sent": 425,
+        "tag": "h3_conc_unconn"
+      },
+      "h6_missing_tc": {
+        "PASS": false,
+        "above_mtu_sent": 6,
+        "counters": {
+          "encoded": 18,
+          "hybrid_escaped": 6,
+          "redirect_ok": 36,
+          "sent_calls": 40,
+          "vstrip": 12
+        },
+        "extra_at_peer": 6,
+        "max_len": 59000,
+        "missing_at_peer": 6,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 7,
+          "Ip:ReasmReqds": 131,
+          "Udp:InDatagrams": 18
+        },
+        "peer_rx": 18,
+        "sender_ack_ok": 12,
+        "sent": 18,
+        "shaped_sent": 6,
+        "tag": "h6_missing_tc"
+      },
+      "w_chain": {
+        "PASS": true,
+        "above_mtu_sent": 2,
+        "counters": {
+          "encoded": 2,
+          "frag_first": 2,
+          "frag_shift": 41,
+          "hybrid_escaped": 2,
+          "redirect_ok": 4,
+          "sent_calls": 8,
+          "tc_decoded": 2
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 2,
+          "Ip:ReasmReqds": 43,
+          "Udp:InDatagrams": 2
+        },
+        "peer_rx": 2,
+        "sender_ack_ok": 2,
+        "sent": 2,
+        "shaped_sent": 2,
+        "tag": "w_chain"
+      },
+      "w_decl1472": {
+        "PASS": true,
+        "above_mtu_sent": 1,
+        "counters": {
+          "encoded": 1,
+          "redirect_ok": 2,
+          "sent_calls": 6,
+          "tc_lenient_pass": 1,
+          "vstrip": 1
+        },
+        "extra_at_peer": 0,
+        "max_len": 4096,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 1,
+          "Ip:ReasmReqds": 3,
+          "Udp:InDatagrams": 1
+        },
+        "peer_rx": 1,
+        "sender_ack_ok": 1,
+        "sent": 1,
+        "shaped_sent": 0,
+        "tag": "w_decl1472"
+      },
+      "w_frame": {
+        "PASS": true,
+        "above_mtu_sent": 7,
+        "counters": {
+          "encoded": 12,
+          "frag_first": 9,
+          "frag_shift": 49,
+          "hybrid_escaped": 12,
+          "redirect_ok": 24,
+          "sent_calls": 28,
+          "tc_decoded": 12
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 9,
+          "Ip:ReasmReqds": 58,
+          "Udp:InDatagrams": 12
+        },
+        "peer_rx": 12,
+        "sender_ack_ok": 12,
+        "sent": 12,
+        "shaped_sent": 12,
+        "tag": "w_frame"
+      },
+      "w_frame2": {
+        "PASS": true,
+        "above_mtu_sent": 2,
+        "counters": {
+          "encoded": 2,
+          "frag_first": 2,
+          "frag_shift": 41,
+          "hybrid_escaped": 2,
+          "redirect_ok": 4,
+          "sent_calls": 8,
+          "tc_decoded": 2
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 2,
+          "Ip:ReasmReqds": 43,
+          "Udp:InDatagrams": 2
+        },
+        "peer_rx": 2,
+        "sender_ack_ok": 2,
+        "sent": 2,
+        "shaped_sent": 2,
+        "tag": "w_frame2"
+      },
+      "w_rand": {
+        "PASS": true,
+        "above_mtu_sent": 3,
+        "counters": {
+          "encoded": 4,
+          "redirect_ok": 8,
+          "sent_calls": 12,
+          "tc_lenient_pass": 4,
+          "vstrip": 4
+        },
+        "extra_at_peer": 0,
+        "max_len": 59000,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 3,
+          "Ip:ReasmReqds": 45,
+          "Udp:InDatagrams": 4
+        },
+        "peer_rx": 4,
+        "sender_ack_ok": 4,
+        "sent": 4,
+        "shaped_sent": 0,
+        "tag": "w_rand"
+      }
+    }
+  }
+}

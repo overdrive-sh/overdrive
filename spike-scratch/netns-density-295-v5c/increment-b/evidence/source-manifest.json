@@ -1,0 +1,5 @@
+{
+  "superproject_head": "f6157044f3cb65ee6b7fbe00480041dae46d9432",
+  "ch_submodule_head_local": "41a619d191f6472f79a3f22bcb9576c2a516906c",
+  "command": "sudo -n python3 /home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/increment-b/run.py "
+}

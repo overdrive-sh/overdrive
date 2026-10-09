@@ -1,0 +1,7 @@
+{"ack_oob":true,"arm":true,"declare":[],"egress_ifs":[],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1208693,"programs":[{"id":43582,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":43583,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":43584,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":43585,"name":"lo_decode(tcx lo egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":43586,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":43587,"name":"sockops(/sys/fs/cgroup/gvc-spike-1208693)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","tuple_from_peer":true,"udp_park":true,"unframe":"tc"}
+{"ev":"park_pool","slots":256}
+{"cid":3261,"ev":"host_ready","intakes":[]}
+{"cid":3261,"ev":"hello"}
+{"ev":"ctl_closed","t_us":4790837394373}
+{"cid":3261,"ev":"hello"}
+{"dst":"<metal-address>:47501","ev":"fault_refused","flow":1,"left":999999999,"t_us":4790840190045}

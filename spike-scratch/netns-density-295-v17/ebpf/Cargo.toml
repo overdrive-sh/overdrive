@@ -1,0 +1,21 @@
+# V-17 throwaway probe (GH #295). Standalone workspace; never part of crates/.
+[package]
+name = "v17-bpf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aya-ebpf = "0.1.1"
+
+[[bin]]
+name = "v17-bpf"
+path = "src/main.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+debug = "line-tables-only"
+
+[workspace]

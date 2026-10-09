@@ -1,0 +1,567 @@
+{
+  "H3soak": {
+    "result": {
+      "0_unconn": {
+        "PASS": false,
+        "extra_at_peer": 0,
+        "missing_at_peer": 1,
+        "pcap": "pcap-phase-d_h3soak_0.pcap",
+        "sent": 1000
+      },
+      "10_unconn": {
+        "PASS": true,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "sent": 1000
+      },
+      "11_conn": {
+        "PASS": true,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "sent": 1000
+      },
+      "1_conn": {
+        "PASS": true,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "sent": 1000
+      },
+      "2_unconn": {
+        "PASS": false,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-d_h3soak_2.pcap",
+        "sent": 1000
+      },
+      "3_conn": {
+        "PASS": false,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-d_h3soak_3.pcap",
+        "sent": 1000
+      },
+      "4_unconn": {
+        "PASS": true,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "sent": 1000
+      },
+      "5_conn": {
+        "PASS": false,
+        "extra_at_peer": 0,
+        "missing_at_peer": 1,
+        "pcap": "pcap-phase-d_h3soak_5.pcap",
+        "sent": 1000
+      },
+      "6_unconn": {
+        "PASS": false,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-d_h3soak_6.pcap",
+        "sent": 1000
+      },
+      "7_conn": {
+        "PASS": true,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "sent": 1000
+      },
+      "8_unconn": {
+        "PASS": true,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "sent": 1000
+      },
+      "9_conn": {
+        "PASS": false,
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-d_h3soak_9.pcap",
+        "sent": 1000
+      }
+    },
+    "total_missing": 2,
+    "total_sent": 12000
+  },
+  "H7": {
+    "result": {
+      "S1_control_other_id": {
+        "id": "0x6e58",
+        "peer_rx_rows": [
+          {
+            "len": 3000
+          }
+        ],
+        "received_byte_exact": true,
+        "sport": 45555,
+        "tag": "control: an id the program never saw"
+      },
+      "S1_entries_after_stageA": {
+        "entries": 1,
+        "map_id": 68285,
+        "max_entries": 4096,
+        "prog_id": 45964
+      },
+      "S1_entries_after_victim": {
+        "entries": 0,
+        "map_id": 68285,
+        "max_entries": 4096,
+        "prog_id": 45964
+      },
+      "S1_peer_snmp_delta": {
+        "Ip:ReasmFails": 2,
+        "Ip:ReasmOKs": 1,
+        "Ip:ReasmReqds": 9,
+        "Udp:InDatagrams": 1
+      },
+      "S1_victim_again_same_id": {
+        "id": "0x6e57",
+        "peer_rx_rows": [],
+        "received_byte_exact": false,
+        "sport": 45555,
+        "tag": "same id again: the previous train's last fragment consumed the entry"
+      },
+      "S1_victim_same_id": {
+        "id": "0x6e57",
+        "peer_rx_rows": [],
+        "received_byte_exact": false,
+        "sport": 45555,
+        "tag": "unrelated bare datagram, same (src,dst,id) as the stale entry"
+      },
+      "S1_wire_trains": [
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ]
+          ],
+          "i": 0,
+          "id": "0x6e57",
+          "sport": 54464,
+          "udp_len": 3008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              48,
+              false
+            ]
+          ],
+          "i": 1,
+          "id": "0x6e57",
+          "sport": 45555,
+          "udp_len": 3008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              48,
+              false
+            ]
+          ],
+          "i": 2,
+          "id": "0x6e58",
+          "sport": 45555,
+          "udp_len": 3008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              48,
+              false
+            ]
+          ],
+          "i": 3,
+          "id": "0x6e57",
+          "sport": 45555,
+          "udp_len": 3008
+        }
+      ],
+      "S2_after_owner_restart": {
+        "PASS": true,
+        "counters": {
+          "encoded": 80,
+          "frag_first": 40,
+          "frag_shift": 80,
+          "hybrid_escaped": 40,
+          "redirect_ok": 160,
+          "sent_calls": 5756,
+          "tc_decoded": 40,
+          "tc_lenient_pass": 40,
+          "vstrip": 40
+        },
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 80,
+          "Ip:ReasmReqds": 240,
+          "Udp:InDatagrams": 80
+        },
+        "peer_rx": 80,
+        "sender_ack_ok": 80,
+        "sent": 80,
+        "shaped_sent": 40,
+        "tag": "d_s2_after_owner_restart"
+      },
+      "S2_entries_after_40s": {
+        "entries": 4068,
+        "map_id": 68285,
+        "max_entries": 4096,
+        "prog_id": 45964
+      },
+      "S2_entries_after_fill": {
+        "entries": 4096,
+        "map_id": 68285,
+        "max_entries": 4096,
+        "prog_id": 45964
+      },
+      "S2_entries_after_restart": {
+        "entries": 0,
+        "map_id": 68609,
+        "max_entries": 4096,
+        "prog_id": 46124
+      },
+      "S2_entries_after_traffic": {
+        "entries": 4069,
+        "map_id": 68285,
+        "max_entries": 4096,
+        "prog_id": 45964
+      },
+      "S2_fill": {
+        "sent": 4300,
+        "wall_s": 0.73
+      },
+      "S2_frame_after_40s": {
+        "PASS": true,
+        "counters": {
+          "encoded": 20,
+          "frag_first": 20,
+          "frag_shift": 40,
+          "hybrid_escaped": 20,
+          "redirect_ok": 40,
+          "sent_calls": 5679,
+          "tc_decoded": 20
+        },
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 20,
+          "Ip:ReasmReqds": 60,
+          "Udp:InDatagrams": 20
+        },
+        "peer_rx": 20,
+        "sender_ack_ok": 20,
+        "sent": 20,
+        "shaped_sent": 20,
+        "tag": "d_s2_frame_after_40s"
+      },
+      "S2_frame_after_fill": {
+        "PASS": false,
+        "counters": {
+          "encoded": 37,
+          "frag_first": 40,
+          "frag_shift": 74,
+          "hybrid_escaped": 40,
+          "redirect_ok": 77,
+          "sent_calls": 77,
+          "tc_decoded": 40
+        },
+        "extra_at_peer": 0,
+        "missing_at_peer": 3,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmFails": 3,
+          "Ip:ReasmOKs": 37,
+          "Ip:ReasmReqds": 120,
+          "Ip:ReasmTimeout": 3,
+          "Udp:InDatagrams": 37
+        },
+        "peer_rx": 37,
+        "sender_ack_ok": 37,
+        "sent": 40,
+        "shaped_sent": 40,
+        "tag": "d_s2_frame_after_fill"
+      },
+      "S2_rand_after_fill": {
+        "PASS": false,
+        "counters": {
+          "encoded": 379,
+          "frag_shift": 42,
+          "redirect_ok": 779,
+          "sent_calls": 807,
+          "tc_lenient_pass": 400,
+          "vstrip": 400
+        },
+        "extra_at_peer": 0,
+        "missing_at_peer": 21,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmFails": 42,
+          "Ip:ReasmOKs": 379,
+          "Ip:ReasmReqds": 1200,
+          "Ip:ReasmTimeout": 21,
+          "Udp:InDatagrams": 379
+        },
+        "peer_rx": 379,
+        "sender_ack_ok": 379,
+        "sent": 400,
+        "shaped_sent": 0,
+        "tag": "d_s2_rand_after_fill"
+      },
+      "S2_wire": {
+        "bare_shifted_and_id_in_stale_set": 21,
+        "bare_shifted_but_id_not_in_stale_set": 0,
+        "bare_shifted_on_wire": 21,
+        "bare_trains": 400,
+        "bare_with_id_in_stale_set": 24,
+        "crafted_heads_seen": 4300,
+        "crafted_heads_stripped_on_wire": 4300,
+        "example_shifted_layouts": [
+          [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1144,
+              false
+            ]
+          ],
+          [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              1144,
+              false
+            ]
+          ]
+        ],
+        "frame_kept_trains_on_wire": [
+          [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              1152,
+              false
+            ]
+          ],
+          [
+            [
+              0,
+              1472,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              1152,
+              false
+            ]
+          ]
+        ],
+        "real_fragmented_trains_after_fill": 440
+      },
+      "S3_after_congestion": {
+        "PASS": true,
+        "counters": {
+          "encoded": 40,
+          "frag_first": 20,
+          "frag_shift": 40,
+          "hybrid_escaped": 20,
+          "redirect_ok": 80,
+          "sent_calls": 2547,
+          "tc_decoded": 20,
+          "tc_lenient_pass": 20,
+          "vstrip": 20
+        },
+        "extra_at_peer": 0,
+        "missing_at_peer": 0,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmOKs": 40,
+          "Ip:ReasmReqds": 120,
+          "Udp:InDatagrams": 40
+        },
+        "peer_rx": 40,
+        "sender_ack_ok": 40,
+        "sent": 40,
+        "shaped_sent": 20,
+        "tag": "d_s3_after_congestion"
+      },
+      "S3_congested": {
+        "PASS": false,
+        "counters": {
+          "frag_first": 60,
+          "frag_shift": 120,
+          "hybrid_escaped": 60,
+          "redirect_ok": 60,
+          "sent_calls": 44672,
+          "tc_decoded": 60
+        },
+        "extra_at_peer": 0,
+        "missing_at_peer": 60,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmFails": 59,
+          "Ip:ReasmReqds": 120,
+          "Ip:ReasmTimeout": 59
+        },
+        "peer_rx": 0,
+        "sender_ack_ok": 0,
+        "sent": 60,
+        "shaped_sent": 60,
+        "tag": "d_s3_congested_frame"
+      },
+      "S3_entries_after_congestion": {
+        "entries": 0,
+        "map_id": 68609,
+        "max_entries": 4096,
+        "prog_id": 46124
+      },
+      "S3_entries_after_recovery": {
+        "entries": 0,
+        "map_id": 68609,
+        "max_entries": 4096,
+        "prog_id": 46124
+      },
+      "S3_entries_before": {
+        "entries": 0,
+        "map_id": 68609,
+        "max_entries": 4096,
+        "prog_id": 46124
+      },
+      "S3_tc_qdisc_stats": "qdisc tbf 8002: root refcnt 17 rate 4Mbit burst 1600b lat 0us \n Sent 181750 bytes 121 pkt (dropped 60, overlimits 120 requeues 0) \n backlog 0b 0p requeues 0\n",
+      "entries_start": {
+        "entries": 0,
+        "map_id": 68285,
+        "max_entries": 4096,
+        "prog_id": 45964
+      },
+      "holder_from": "10.250.218.1:54464"
+    }
+  },
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      28,
+      23
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "1205743 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park,--cells,none --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/vm-increment-b-1791504736/serial.log --console off --vsock cid=3261,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/vm-increment-b-1791504736/ch.log -v\n1214326 /tmp/v13-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v13-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--linger,yes --cpus boot=2 --memory size=1024M --serial file=/tmp/v13-work/out/vm-matrix-20261009T002757Z/serial.log --console off --vsock cid=3280,backend=vhost-kernel --log-file /tmp/v13-work/out/vm-matrix-20261009T002757Z/ch.log -v\n",
+    "links_unchanged": false,
+    "lo_tcx_unchanged": false,
+    "modules_caused": [
+      "nft_fib",
+      "nft_fib_ipv4"
+    ],
+    "modules_diff": [
+      "nft_fib",
+      "nft_fib_ipv4"
+    ],
+    "modules_restored": false,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": false
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=196\n"
+  },
+  "preflight": {
+    "blob_sha256": "662db27fa19d6b3f77248cd7716e13cd9f7afe6e6d9c2ec413308e59c75e9915",
+    "cid": 3312,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ]
+  },
+  "programs": {
+    "tcx_on_veth": "xdp:\n\ntc:\nv18-h(63042) tcx/egress eg_decode_frag prog_id 45964 link_id 24476 \n\nflow_dissector:\n\nnetfilter:\n\n"
+  },
+  "substrate": {
+    "guest_uname": "Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux\n",
+    "netfilter_modules": "nf_conntrack          196608  6 nf_nat,nft_ct,nft_nat,openvswitch,nft_masq,nf_conncount\nnf_defrag_ipv6         24576  2 nf_conntrack,nft_tproxy\nnf_defrag_ipv4         12288  2 nf_conntrack,nft_tproxy\nnf_tables             409600  75 nft_meta_bridge,nft_reject_ipv4,nft_ct,nft_nat,nft_tproxy,nft_masq,nft_chain_nat,nft_reject\nnfnetlink              20480  2 nf_tables\n",
+    "offhost": "63042: v18-h@if63041: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 16:65:21:f4:52:d3 brd ff:ff:ff:ff:ff:ff link-netns v18-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv18-p0@if63042   UP             10.250.218.2/24 fe80::8b1:8bff:fe16:222f/64 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ngeneric-receive-offload: off\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nState  Recv-Q Send-Q Local Address:Port Peer Address:Port\nUNCONN 0      0       10.250.218.2:7218      0.0.0.0:*   \n"
+  }
+}

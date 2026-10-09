@@ -1,0 +1,127 @@
+[01:11:44] === preflight
+[01:11:44] $ uname -a; uname -r; systemd-detect-virt; echo detect_virt_rc=$?; grep -m1 'model name' /proc/cpuinfo; nproc; free -m  (rc=0)
+[01:11:44]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[01:11:44]     7.0.0-29-generic
+[01:11:44]     none
+[01:11:44]     detect_virt_rc=1
+[01:11:44]     model name	: AMD EPYC 8024P 8-Core Processor
+[01:11:44]     16
+[01:11:44]                    total        used        free      shared  buff/cache   available
+[01:11:44]     Mem:           63868        2714       16799         812       45864       61154
+[01:11:44]     Swap:              0           0           0
+[01:11:44] RESULT preflight.kvm_api_version = 12
+[01:11:44] RESULT preflight.uname_r = "7.0.0-29-generic"
+[01:11:44] RESULT preflight.systemd_detect_virt = "none"
+[01:11:44] RESULT preflight.substrate_ok = true
+[01:11:44] RESULT preflight.modules_before = ["vhost", "vhost_iotlb", "vhost_vsock", "vmw_vmci", "vmw_vsock_virtio_transport_common", "vmw_vsock_vmci_transport", "vsock", "vsock_diag", "vsock_loopback"]
+[01:11:44] RESULT preflight.ch_version = "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0"
+[01:11:44] $ ls -l /dev/vhost-vsock /dev/vsock  (rc=0)
+[01:11:44]     crw-rw---- 1 root kvm  10, 241 Oct  8 22:11 /dev/vhost-vsock
+[01:11:44]     crw-rw-rw- 1 root root 10, 264 Oct  8 22:00 /dev/vsock
+[01:11:44] === guest image
+[01:11:45] $ cd /tmp/v13-work/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /tmp/v13-work/out/initramfs.cpio.gz  (rc=0)
+[01:11:45] $ ip netns add v13-rem  (rc=0)
+[01:11:45] $ ip link add v13-h type veth peer name v13-r  (rc=0)
+[01:11:45] $ ip link set v13-r netns v13-rem  (rc=0)
+[01:11:45] $ ip addr add 172.29.131.1/29 dev v13-h; ip link set v13-h up  (rc=0)
+[01:11:45] $ ip netns exec v13-rem ip addr add 172.29.131.2/29 dev v13-r  (rc=0)
+[01:11:45] $ ip netns exec v13-rem ip addr add 172.29.131.3/29 dev v13-r  (rc=0)
+[01:11:45] $ ip netns exec v13-rem ip link set v13-r up; ip netns exec v13-rem ip link set lo up  (rc=0)
+[01:11:45] $ ping -c1 -W2 172.29.131.2; ping -c1 -W2 172.29.131.3; ip route get 172.29.131.2  (rc=0)
+[01:11:45]     PING 172.29.131.2 (172.29.131.2) 56(84) bytes of data.
+[01:11:45]     64 bytes from 172.29.131.2: icmp_seq=1 ttl=64 time=0.045 ms
+[01:11:45]     
+[01:11:45]     --- 172.29.131.2 ping statistics ---
+[01:11:45]     1 packets transmitted, 1 received, 0% packet loss, time 0ms
+[01:11:45]     rtt min/avg/max/mdev = 0.045/0.045/0.045/0.000 ms
+[01:11:45]     PING 172.29.131.3 (172.29.131.3) 56(84) bytes of data.
+[01:11:45]     64 bytes from 172.29.131.3: icmp_seq=1 ttl=64 time=0.031 ms
+[01:11:45]     
+[01:11:45]     --- 172.29.131.3 ping statistics ---
+[01:11:45]     1 packets transmitted, 1 received, 0% packet loss, time 0ms
+[01:11:45]     rtt min/avg/max/mdev = 0.031/0.031/0.031/0.000 ms
+[01:11:45]     172.29.131.2 dev v13-h src 172.29.131.1 uid 0 
+[01:11:45]         cache
+[01:11:45] launch VM: /tmp/v13-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v13-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--linger,yes --cpus boot=2 --memory size=1024M --serial file=/tmp/v13-work/out/vm-orders-20261009T011144Z/serial.log --console off --vsock cid=3280,backend=vhost-kernel --log-file /tmp/v13-work/out/vm-orders-20261009T011144Z/ch.log -v
+[01:11:47] RESULT boot.guest_ready = true
+[01:11:47] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.38
+net.ipv4.tcp_fwmark_accept = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33m2e:f2:9d:46:54:cf [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+OWNER_READY role=guest pid=110
+GUEST_READY
+
+[01:11:47] RESULT boot.guest_uname = "7.0.0-29-generic"
+[01:11:48] === cell all3-orderGH-jit0: kinds=['out_nonmesh', 'out_mesh', 'in'] order=GH linger=yes n=10
+[01:11:52]   trial 0: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:11:56]   trial 1: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:12:00]   trial 2: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:12:04]   trial 3: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:12:08]   trial 4: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:12:12]   trial 5: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:12:16]   trial 6: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:12:20]   trial 7: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:12:24]   trial 8: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:12:28]   trial 9: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:12:28] RESULT cells.all3-orderGH-jit0 = {"kinds": ["out_nonmesh", "out_mesh", "in"], "order": "GH", "linger": "yes", "hup_abort": "no", "half_msg": "no", "n": 10, "tally": {"out_nonmesh:guest_app": {"RESET": 10}, "out_nonmesh:remote_nonmesh": {"RESET": 3, "EOF": 7}, "out_mesh:guest_app": {"RESET": 10}, "out_mesh:remote_mesh": {"RESET": 10}, "in:guest_app": {"RESET": 10}, "in:external_client": {"RESET": 2, "EOF": 8}}}
+[01:12:28] === cell all3-orderHG-jit0: kinds=['out_nonmesh', 'out_mesh', 'in'] order=HG linger=yes n=10
+[01:12:32]   trial 0: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:12:36]   trial 1: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:12:40]   trial 2: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:12:44]   trial 3: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:12:48]   trial 4: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'EOF', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[01:12:52]   trial 5: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:12:56]   trial 6: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:13:00]   trial 7: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:13:04]   trial 8: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[01:13:08]   trial 9: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[01:13:08] RESULT cells.all3-orderHG-jit0 = {"kinds": ["out_nonmesh", "out_mesh", "in"], "order": "HG", "linger": "yes", "hup_abort": "no", "half_msg": "no", "n": 10, "tally": {"out_nonmesh:guest_app": {"RESET": 10}, "out_nonmesh:remote_nonmesh": {"RESET": 10}, "out_mesh:guest_app": {"RESET": 9, "EOF": 1}, "out_mesh:remote_mesh": {"RESET": 10}, "in:guest_app": {"RESET": 7, "EOF": 3}, "in:external_client": {"RESET": 10}}}
+[01:13:08] === cell all3-orderGH-jit40: kinds=['out_nonmesh', 'out_mesh', 'in'] order=GH linger=yes n=10
+[01:13:12]   trial 0: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:16]   trial 1: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:13:20]   trial 2: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:24]   trial 3: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:28]   trial 4: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:32]   trial 5: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:36]   trial 6: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:40]   trial 7: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:44]   trial 8: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:48]   trial 9: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[01:13:48] RESULT cells.all3-orderGH-jit40 = {"kinds": ["out_nonmesh", "out_mesh", "in"], "order": "GH", "linger": "yes", "hup_abort": "no", "half_msg": "no", "n": 10, "tally": {"out_nonmesh:guest_app": {"RESET": 10}, "out_nonmesh:remote_nonmesh": {"EOF": 8, "RESET": 2}, "out_mesh:guest_app": {"RESET": 10}, "out_mesh:remote_mesh": {"RESET": 10}, "in:guest_app": {"RESET": 10}, "in:external_client": {"EOF": 9, "RESET": 1}}}
+[01:13:48] === cell all3-orderHG-jit40: kinds=['out_nonmesh', 'out_mesh', 'in'] order=HG linger=yes n=10
+[01:13:52]   trial 0: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[01:13:56]   trial 1: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:14:00]   trial 2: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:14:04]   trial 3: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:14:08]   trial 4: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[01:14:12]   trial 5: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:14:16]   trial 6: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:14:20]   trial 7: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'OTHER_ERR', 'in:external_client': 'RESET'}
+[01:14:24]   trial 8: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:14:28]   trial 9: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET', 'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET', 'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[01:14:28] RESULT cells.all3-orderHG-jit40 = {"kinds": ["out_nonmesh", "out_mesh", "in"], "order": "HG", "linger": "yes", "hup_abort": "no", "half_msg": "no", "n": 10, "tally": {"out_nonmesh:guest_app": {"RESET": 10}, "out_nonmesh:remote_nonmesh": {"RESET": 10}, "out_mesh:guest_app": {"RESET": 10}, "out_mesh:remote_mesh": {"RESET": 10}, "in:guest_app": {"EOF": 2, "RESET": 7, "OTHER_ERR": 1}, "in:external_client": {"RESET": 10}}}
+[01:14:28] $ ip netns del v13-rem  (rc=0)
+[01:14:28] RESULT cleanup.modules_caused = ["8021q", "garp", "macvlan", "mrp"]
+[01:14:28] RESULT cleanup.modules_diff = ["8021q", "garp", "macvlan", "mrp"]
+[01:14:28] RESULT cleanup.links_added_removed = {"added": ["v5c-h@if63075    UP             b6:76:fd:98:92:59 <BROADCAST,MULTICAST,UP,LOWER_UP> "], "removed": []}
+[01:14:28] RESULT cleanup.netns_added_removed = {"added": ["v17-host (id: 2)", "v17-peer1 (id: 1)", "v17-peer2 (id: 3)", "v17-peer3 (id: 4)", "v17-peer4 (id: 5)", "v17-peer5 (id: 6)", "v17-peer6 (id: 7)", "v5c-ns (id: 8)"], "removed": []}
+[01:14:28] RESULT cleanup.nft_tables_added_removed = {"added": [], "removed": []}
+[01:14:28] RESULT cleanup.routes_added_removed = {"added": ["10.250.205.0/24 dev v5c-h proto kernel scope link src 10.250.205.1 "], "removed": []}
+[01:14:28] RESULT cleanup.v13_links_left = []
+[01:14:28] RESULT cleanup.v13_netns_left = []
+[01:14:28] RESULT cleanup.v13_cgroups_left = []
+[01:14:28] RESULT cleanup.v13_procs_left = ""
+[01:14:28] === done

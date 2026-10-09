@@ -1,0 +1,334 @@
+[22:16:09] === preflight
+[22:16:09] $ systemd-detect-virt || true (rc=0)
+[22:16:09]     none
+[22:16:09] $ uname -a; grep -m1 'model name' /proc/cpuinfo; nproc; free -m; ls -l /dev/kvm /dev/vhost-vsock || true (rc=0)
+[22:16:09]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[22:16:09]     model name	: AMD EPYC 8024P 8-Core Processor
+[22:16:09]     16
+[22:16:09]                    total        used        free      shared  buff/cache   available
+[22:16:09]     Mem:           63868        1991        5515         166       57237       61877
+[22:16:09]     Swap:              0           0           0
+[22:16:09]     crw-rw---- 1 root kvm 10, 232 Oct  8 22:16 /dev/kvm
+[22:16:09]     crw-rw---- 1 root kvm 10, 241 Oct  8 22:11 /dev/vhost-vsock
+[22:16:09] $ pgrep -af cloud-hypervisor | grep -v pgrep || true (rc=0)
+[22:16:09] === build
+[22:16:10] $ cp -a /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/cargo-home /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/cargo-home (rc=0)
+[22:16:10] $ cp -a /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/ch-target (rc=0)
+[22:17:22] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor (rc=0)
+[22:17:22]        Compiling num_enum v0.7.6
+[22:17:22]        Compiling enumflags2 v0.7.12
+[22:17:22]        Compiling clap_derive v4.6.1
+[22:17:22]        Compiling darling_macro v0.23.0
+[22:17:22]        Compiling landlock v0.4.5
+[22:17:22]        Compiling darling v0.23.0
+[22:17:22]        Compiling env_filter v2.0.0
+[22:17:22]        Compiling serde_with_macros v3.21.0
+[22:17:22]        Compiling option_parser v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/option_parser)
+[22:17:22]        Compiling env_logger v0.11.11
+[22:17:22]        Compiling serde_with v3.21.0
+[22:17:22]        Compiling clap v4.6.1
+[22:17:22]        Compiling vmm-sys-util v0.15.0
+[22:17:22]        Compiling event_monitor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/event_monitor)
+[22:17:22]        Compiling tracer v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tracer)
+[22:17:22]        Compiling vfio-bindings v0.6.2
+[22:17:22]        Compiling iommufd-ioctls v0.2.0
+[22:17:22]        Compiling virtio-queue v0.17.0
+[22:17:22]        Compiling rate_limiter v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/rate_limiter)
+[22:17:22]        Compiling tpm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tpm)
+[22:17:22]        Compiling vhost v0.16.0
+[22:17:22]        Compiling vfio_user v0.1.3
+[22:17:22]        Compiling api_client v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/api_client)
+[22:17:22]        Compiling vm-virtio v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-virtio)
+[22:17:22]        Compiling net_util v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/net_util)
+[22:17:22]        Compiling kvm-bindings v0.14.1
+[22:17:22]        Compiling acpi_tables v0.2.1
+[22:17:22]        Compiling vm-migration v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-migration)
+[22:17:22]        Compiling zstd v0.13.3
+[22:17:22]        Compiling vfio-ioctls v0.7.0
+[22:17:22]        Compiling block v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/block)
+[22:17:22]        Compiling hypervisor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/hypervisor)
+[22:17:22]        Compiling vm-device v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-device)
+[22:17:22]        Compiling arch v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/arch)
+[22:17:22]        Compiling pci v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/pci)
+[22:17:22]        Compiling devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/devices)
+[22:17:22]        Compiling virtio-devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/virtio-devices)
+[22:17:22]        Compiling vmm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vmm)
+[22:17:22]        Compiling cloud-hypervisor v53.0.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/cloud-hypervisor)
+[22:17:22]         Finished `release` profile [optimized] target(s) in 1m 12s
+[22:17:24] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/probe/Cargo.toml (rc=0)
+[22:17:24]        Compiling libc v0.2.190
+[22:17:24]        Compiling v22-probe v0.1.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/probe)
+[22:17:24]         Finished `release` profile [optimized] target(s) in 1.26s
+[22:17:24] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/probe-target/x86_64-unknown-linux-gnu/release/v22-probe /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/ch-target/release/cloud-hypervisor; /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/ch-target/release/cloud-hypervisor --version (rc=0)
+[22:17:24]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/probe-target/x86_64-unknown-linux-gnu/release/v22-probe: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=2adf119077ed944e756857af9948dcc0862f5e5d, not stripped
+[22:17:24]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/ch-target/release/cloud-hypervisor:                      ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=e1898c6c82c121252c716ca6065885e5de60e2b2, stripped
+[22:17:24]     cloud-hypervisor v53.0.0
+[22:17:24]     Migration Protocol Versions: 0
+[22:17:24] $ modprobe --show-depends vmw_vsock_virtio_transport (rc=0)
+[22:17:24]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[22:17:24]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst 
+[22:17:24]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+[22:17:24] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/initramfs-root && find . | cpio -o -H newc --quiet | gzip -9 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/initramfs.cpio.gz (rc=0)
+[22:17:24] launch listener-anchor: /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/vm-listener-anchor-1791497844903/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/vm-listener-anchor-1791497844903/ch.log --vsock cid=3229,backend=vhost-kernel
+[22:17:25] listener-anchor ready after 0.83s: IDENT local_cid=3229 uname=7.0.0-29-generic uptime_s=0.60
+[22:17:25] listeners up on [1234, 1240, 1241, 1243]
+[22:17:25] ########## round 0
+[22:17:25] launch r0-bystander: /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/vm-r0-bystander-1791497845731/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/vm-r0-bystander-1791497845731/ch.log --vsock cid=3221,backend=vhost-kernel
+[22:17:26] r0-bystander ready after 0.82s: IDENT local_cid=3221 uname=7.0.0-29-generic uptime_s=0.60
+[22:17:26] launch r0-old: /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/vm-r0-old-1791497846549/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/vm-r0-old-1791497846549/ch.log --vsock cid=3220,backend=vhost-kernel
+[22:17:27] r0-old ready after 0.82s: IDENT local_cid=3220 uname=7.0.0-29-generic uptime_s=0.60
+[22:17:40] killed old VM: {'rc': -9, 'kill_to_reaped_ms': 18.66, 't_reaped': 1791497860.814652}
+[22:17:44] launch r0-new: /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/vm-r0-new-1791497864828/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-c/vm-r0-new-1791497864828/ch.log --vsock cid=3220,backend=vhost-kernel
+[22:17:45] r0-new ready after 0.82s: IDENT local_cid=3220 uname=7.0.0-29-generic uptime_s=0.60
+[22:17:56] TALLIES {
+ "C3.accepted_count": {
+  "1234": {
+   "accepted=20/20": 1
+  },
+  "1240": {
+   "accepted=20/20": 1
+  },
+  "1241": {
+   "accepted=20/20": 1
+  },
+  "1243": {
+   "accepted=20/20": 1
+  }
+ },
+ "C3.data": {
+  "1234": {
+   "flags=IN+OUT+RDHUP first=DATA:CD second=EOF": 10
+  },
+  "1240": {
+   "flags=IN+OUT+RDHUP first=DATA:CD second=EOF": 10
+  },
+  "1241": {
+   "flags=IN+OUT+RDHUP first=DATA:CD second=EOF": 10
+  },
+  "1243": {
+   "flags=IN+OUT+RDHUP first=DATA:CD second=EOF": 10
+  }
+ },
+ "C3.nodata": {
+  "1234": {
+   "flags=IN+OUT+RDHUP first_read=EOF": 10
+  },
+  "1240": {
+   "flags=IN+OUT+RDHUP first_read=EOF": 10
+  },
+  "1241": {
+   "flags=IN+OUT+RDHUP first_read=EOF": 10
+  },
+  "1243": {
+   "flags=IN+OUT+RDHUP first_read=EOF": 10
+  }
+ },
+ "E.after_new_vm_traffic_same_tuple": {
+  "1234": {
+   "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 5
+  },
+  "1240": {
+   "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 5
+  },
+  "1241": {
+   "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 5
+  },
+  "1243": {
+   "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 5
+  }
+ },
+ "E.after_reuse_before_new_traffic": {
+  "1234": {
+   "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 10
+  },
+  "1240": {
+   "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 10
+  },
+  "1241": {
+   "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 10
+  },
+  "1243": {
+   "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 10
+  }
+ },
+ "E.before_reuse": {
+  "1234": {
+   "flags=IN+OUT+ERR+RDHUP recv=ECONNRESET send=ECONNRESET": 10
+  },
+  "1240": {
+   "flags=IN+OUT+ERR+RDHUP recv=ECONNRESET send=ECONNRESET": 10
+  },
+  "1241": {
+   "flags=IN+OUT+ERR+RDHUP recv=ECONNRESET send=ECONNRESET": 10
+  },
+  "1243": {
+   "flags=IN+OUT+ERR+RDHUP recv=ECONNRESET send=ECONNRESET": 10
+  }
+ },
+ "E.setup": {
+  "1234": {
+   "live flags=IN+OUT": 10
+  },
+  "1240": {
+   "live flags=IN+OUT": 10
+  },
+  "1241": {
+   "live flags=IN+OUT": 10
+  },
+  "1243": {
+   "live flags=IN+OUT": 10
+  }
+ },
+ "bystander": {
+  "1234": {
+   "flags=IN+OUT recv=DATA:BYST send=OK": 3
+  },
+  "1240": {
+   "flags=IN+OUT recv=DATA:BYST send=OK": 3
+  },
+  "1241": {
+   "flags=IN+OUT recv=DATA:BYST send=OK": 3
+  },
+  "1243": {
+   "flags=IN+OUT recv=DATA:BYST send=OK": 3
+  }
+ },
+ "new_vm.connect.E_tuple_dead_socket_still_open": {
+  "1234": {
+   "HOLD port=1234 ok=0 fail=5 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 1
+  },
+  "1240": {
+   "HOLD port=1240 ok=0 fail=5 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 1
+  },
+  "1241": {
+   "HOLD port=1241 ok=0 fail=5 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 1
+  },
+  "1243": {
+   "HOLD port=1243 ok=0 fail=5 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 1
+  }
+ },
+ "new_vm.connect.E_tuple_freed": {
+  "1234": {
+   "HOLD port=1234 ok=5 fail=0": 1
+  },
+  "1240": {
+   "HOLD port=1240 ok=5 fail=0": 1
+  },
+  "1241": {
+   "HOLD port=1241 ok=5 fail=0": 1
+  },
+  "1243": {
+   "HOLD port=1243 ok=5 fail=0": 1
+  }
+ },
+ "new_vm.connect.Q_tuple_stale_entry_closed_by_host": {
+  "1234": {
+   "HOLD port=1234 ok=0 fail=5 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 1
+  },
+  "1240": {
+   "HOLD port=1240 ok=0 fail=5 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 1
+  }
+ },
+ "new_vm.connect.Q_tuple_stale_entry_still_queued": {
+  "1241": {
+   "HOLD port=1241 ok=0 fail=5 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 1
+  },
+  "1243": {
+   "HOLD port=1243 ok=0 fail=5 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 1
+  }
+ },
+ "new_vm.connect.fresh_ports": {
+  "1234": {
+   "HOLD port=1234 ok=10 fail=0": 1
+  },
+  "1240": {
+   "HOLD port=1240 ok=10 fail=0": 1
+  },
+  "1241": {
+   "HOLD port=1241 ok=10 fail=0": 1
+  },
+  "1243": {
+   "HOLD port=1243 ok=10 fail=0": 1
+  }
+ },
+ "queue.early_after_reuse_new_vm_conns.fresh_NQf": {
+  "1234": {
+   "flags=IN+OUT first_read=DATA:NQf": 10
+  },
+  "1240": {
+   "flags=IN+OUT first_read=DATA:NQf": 10
+  }
+ },
+ "queue.early_after_reuse_new_vm_conns.other": {
+  "1234": {
+   "flags=IN+OUT first_read=DATA:NEf": 5
+  },
+  "1240": {
+   "flags=IN+OUT first_read=DATA:NEf": 5
+  }
+ },
+ "queue.early_before_reuse.QN_nodata": {
+  "1234": {
+   "flags=IN+OUT+ERR+RDHUP first_read=ECONNRESET send=ECONNRESET": 10
+  },
+  "1240": {
+   "flags=IN+OUT+ERR+RDHUP first_read=ECONNRESET send=ECONNRESET": 10
+  }
+ },
+ "queue.early_before_reuse.Q_withdata": {
+  "1234": {
+   "flags=IN+OUT+ERR+RDHUP first_read=DATA:QO": 10
+  },
+  "1240": {
+   "flags=IN+OUT+ERR+RDHUP first_read=DATA:QO": 10
+  }
+ },
+ "queue.late_after_reuse.QN_nodata": {
+  "1241": {
+   "flags=IN+OUT+ERR+RDHUP first_read=ECONNRESET send=ECONNRESET": 10
+  },
+  "1243": {
+   "flags=IN+OUT+ERR+RDHUP first_read=ECONNRESET send=ECONNRESET": 10
+  }
+ },
+ "queue.late_after_reuse.Q_withdata": {
+  "1241": {
+   "flags=IN+OUT+ERR+RDHUP first_read=DATA:QO": 10
+  },
+  "1243": {
+   "flags=IN+OUT+ERR+RDHUP first_read=DATA:QO": 10
+  }
+ },
+ "queue.late_after_reuse.fresh_NQf": {
+  "1241": {
+   "flags=IN+OUT first_read=DATA:NQf": 10
+  },
+  "1243": {
+   "flags=IN+OUT first_read=DATA:NQf": 10
+  }
+ },
+ "queue.late_after_reuse.other": {
+  "1241": {
+   "flags=IN+OUT first_read=DATA:NEf": 5
+  },
+  "1243": {
+   "flags=IN+OUT first_read=DATA:NEf": 5
+  }
+ },
+ "queue_empty_at_round_end": {
+  "1234": {
+   "left=0": 1
+  },
+  "1240": {
+   "left=0": 1
+  },
+  "1241": {
+   "left=0": 1
+  },
+  "1243": {
+   "left=0": 1
+  }
+ }
+}
+[22:17:56] EXAMPLES {}
+[22:17:56] done

@@ -1,0 +1,6 @@
+Netid State  Recv-Q Send-Q Local Address:Port       Peer Address:Port      Process                               
+v_str ESTAB  0      0                  *:1365240387         3240:52420      users:(("python3",pid=1164080,fd=13))
+v_str LISTEN 0      0                  *:52423                 *:*          users:(("python3",pid=1164080,fd=9)) 
+v_str LISTEN 0      0                  *:52424                 *:*          users:(("python3",pid=1164080,fd=7)) 
+v_str ESTAB  0      0                  2:52424              3240:4222705839 users:(("python3",pid=1164080,fd=8)) 
+v_str ESTAB  0      0                  2:52423              3240:4222705840                                      

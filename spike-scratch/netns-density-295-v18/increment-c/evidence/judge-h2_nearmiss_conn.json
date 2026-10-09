@@ -1,0 +1,78 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 105,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "badmagic": {
+      "ok": 13,
+      "sent": 13
+    },
+    "badmagic_case": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_1464": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_1472": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_1480": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_59000": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_len": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_m16": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_m7": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_m9": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_max": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_p8": {
+      "ok": 13,
+      "sent": 13
+    },
+    "decl_zero": {
+      "ok": 13,
+      "sent": 13
+    },
+    "magic_only": {
+      "ok": 13,
+      "sent": 13
+    },
+    "nf_chain": {
+      "ok": 13,
+      "sent": 13
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 59000,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 195,
+  "sender_ack_ok": 195,
+  "sent": 195,
+  "shaped_sent": 3,
+  "tag": "h2_nearmiss_conn"
+}

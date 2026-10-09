@@ -1,0 +1,204 @@
+{
+  "PASS": false,
+  "above_mtu_sent": 40,
+  "ack_fail_examples": [
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "frame",
+      "len": 4096
+    }
+  ],
+  "by_kind": {
+    "frame": {
+      "ok": 0,
+      "sent": 40
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 4096,
+  "missing_at_peer": 40,
+  "missing_examples": [
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    }
+  ],
+  "peer_rx": 0,
+  "sender_ack_ok": 0,
+  "sent": 40,
+  "shaped_sent": 40,
+  "tag": "e_s3_congested_1"
+}

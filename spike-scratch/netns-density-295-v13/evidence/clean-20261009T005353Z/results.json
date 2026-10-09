@@ -1,0 +1,106 @@
+{
+  "boot": {
+    "guest_ready": true,
+    "guest_uname": "7.0.0-29-generic"
+  },
+  "cells": {
+    "clean-in-halfmsgno": {
+      "finite_bytes": 2000000,
+      "half_msg": "no",
+      "kind": "in",
+      "n": 10,
+      "tally": {
+        "in:external_client": {
+          "CLEAN": 10
+        },
+        "in:guest_app": {
+          "CLEAN": 10
+        }
+      }
+    },
+    "clean-in-halfmsgyes": {
+      "finite_bytes": 2000000,
+      "half_msg": "yes",
+      "kind": "in",
+      "n": 10,
+      "tally": {
+        "in:external_client": {
+          "CLEAN": 10
+        },
+        "in:guest_app": {
+          "CLEAN": 10
+        }
+      }
+    },
+    "clean-out_nonmesh-halfmsgno": {
+      "finite_bytes": 2000000,
+      "half_msg": "no",
+      "kind": "out_nonmesh",
+      "n": 10,
+      "tally": {
+        "out_nonmesh:guest_app": {
+          "CLEAN": 10
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "CLEAN": 10
+        }
+      }
+    },
+    "clean-out_nonmesh-halfmsgyes": {
+      "finite_bytes": 2000000,
+      "half_msg": "yes",
+      "kind": "out_nonmesh",
+      "n": 10,
+      "tally": {
+        "out_nonmesh:guest_app": {
+          "CLEAN": 10
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "CLEAN": 10
+        }
+      }
+    }
+  },
+  "cleanup": {
+    "links_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "modules_caused": [],
+    "modules_diff": [],
+    "netns_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "nft_tables_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "routes_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "v13_cgroups_left": [],
+    "v13_links_left": [],
+    "v13_netns_left": [],
+    "v13_procs_left": ""
+  },
+  "preflight": {
+    "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0",
+    "kvm_api_version": 12,
+    "modules_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ],
+    "substrate_ok": true,
+    "systemd_detect_virt": "none",
+    "uname_r": "7.0.0-29-generic"
+  }
+}

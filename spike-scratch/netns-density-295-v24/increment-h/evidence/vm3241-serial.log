@@ -1,0 +1,3 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_LOCAL_CID 3241
+[  173.548974] reboot: Power down

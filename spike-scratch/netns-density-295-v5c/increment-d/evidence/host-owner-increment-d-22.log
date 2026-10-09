@@ -1,0 +1,21 @@
+{"ack_oob":true,"arm":true,"declare":[],"egress_ifs":["v5c-h"],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1225938,"programs":[{"id":59556,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":59557,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":59558,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":59560,"name":"eg_decode_frag(tcx v5c-h egress)","tag":"a9285dfbbf33b7ff","verified_insns":627},{"id":59561,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":59562,"name":"sockops(/sys/fs/cgroup/gvc-spike-1225938)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","tuple_from_peer":true,"udp_park":true,"unframe":"tc-frag"}
+{"ev":"park_pool","slots":256}
+{"cid":3261,"ev":"host_ready","intakes":[]}
+{"cid":3261,"ev":"hello"}
+{"ev":"ctl_closed","t_us":4795738891415}
+{"cid":3261,"ev":"hello"}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":1,"left":999999999,"t_us":4795742190152}
+{"dst":"10.250.205.2:47501","ev":"host_dg_installed","flow":3,"local":"10.250.205.1:41057","peer":"10.250.205.2:47501","smode":2,"t_us":4795744498165,"tuple_dst":"10.250.205.2:47501","waited_ms":2}
+{"ev":"host_dg_teardown","flow":3}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":5,"left":999999998,"t_us":4795747807147}
+{"dst":"10.250.205.2:47501","ev":"host_dg_installed","flow":7,"local":"10.250.205.1:50151","peer":"10.250.205.2:47501","smode":2,"t_us":4795750114168,"tuple_dst":"10.250.205.2:47501","waited_ms":2}
+{"ev":"host_dg_teardown","flow":7}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":9,"left":999999997,"t_us":4795753421149}
+{"dst":"10.250.205.2:47501","ev":"host_dg_installed","flow":11,"local":"10.250.205.1:57502","peer":"10.250.205.2:47501","smode":2,"t_us":4795755728156,"tuple_dst":"10.250.205.2:47501","waited_ms":2}
+{"ev":"host_dg_teardown","flow":11}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":13,"left":999999996,"t_us":4795759035156}
+{"dst":"10.250.205.2:47501","ev":"host_dg_installed","flow":15,"local":"10.250.205.1:53834","peer":"10.250.205.2:47501","smode":2,"t_us":4795761342160,"tuple_dst":"10.250.205.2:47501","waited_ms":1}
+{"ev":"host_dg_teardown","flow":15}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":17,"left":999999995,"t_us":4795764649171}
+{"dst":"10.250.205.2:47501","ev":"host_dg_installed","flow":19,"local":"10.250.205.1:44358","peer":"10.250.205.2:47501","smode":2,"t_us":4795766955159,"tuple_dst":"10.250.205.2:47501","waited_ms":0}
+{"ev":"host_dg_teardown","flow":19}

@@ -1,0 +1,190 @@
+{
+  "PASS": false,
+  "above_mtu_sent": 6,
+  "ack_fail_examples": [
+    {
+      "ack_len": 16,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "frame",
+      "len": 8
+    },
+    {
+      "ack_len": 108,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "frame",
+      "len": 100
+    },
+    {
+      "ack_len": 1472,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "frame",
+      "len": 1464
+    },
+    {
+      "ack_len": 1480,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "frame",
+      "len": 1472
+    },
+    {
+      "ack_len": 4104,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "frame",
+      "len": 4096
+    },
+    {
+      "ack_len": 59008,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "frame",
+      "len": 59000
+    }
+  ],
+  "by_kind": {
+    "frame": {
+      "ok": 0,
+      "sent": 6
+    },
+    "nf_chain": {
+      "ok": 6,
+      "sent": 6
+    },
+    "rand": {
+      "ok": 6,
+      "sent": 6
+    }
+  },
+  "extra_at_peer": 6,
+  "extra_diag": [
+    {
+      "delta": 8,
+      "extra_len": 16,
+      "kind": "frame",
+      "sent_len": 8
+    },
+    {
+      "delta": 8,
+      "extra_len": 108,
+      "kind": "frame",
+      "sent_len": 100
+    },
+    {
+      "delta": 8,
+      "extra_len": 1472,
+      "kind": "frame",
+      "sent_len": 1464
+    },
+    {
+      "delta": 8,
+      "extra_len": 1480,
+      "kind": "frame",
+      "sent_len": 1472
+    },
+    {
+      "delta": 8,
+      "extra_len": 4104,
+      "kind": "frame",
+      "sent_len": 4096
+    },
+    {
+      "delta": 8,
+      "extra_len": 59008,
+      "kind": "frame",
+      "sent_len": 59000
+    }
+  ],
+  "extra_examples": [
+    {
+      "len": 16,
+      "n": 1,
+      "sha": "02f1ad93b295e78e"
+    },
+    {
+      "len": 108,
+      "n": 1,
+      "sha": "ff8aee0868075bcb"
+    },
+    {
+      "len": 1472,
+      "n": 1,
+      "sha": "238add5f05b41a46"
+    },
+    {
+      "len": 1480,
+      "n": 1,
+      "sha": "c921b4008d917009"
+    },
+    {
+      "len": 4104,
+      "n": 1,
+      "sha": "92a083477c59704d"
+    },
+    {
+      "len": 59008,
+      "n": 1,
+      "sha": "04336a81b677be6c"
+    }
+  ],
+  "max_len": 59000,
+  "missing_at_peer": 6,
+  "missing_examples": [
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 8,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 100,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 1464,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 1472,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 4096,
+      "n": 1,
+      "shaped": true
+    },
+    {
+      "conn": false,
+      "kind": "frame",
+      "len": 59000,
+      "n": 1,
+      "shaped": true
+    }
+  ],
+  "peer_rx": 18,
+  "sender_ack_ok": 12,
+  "sent": 18,
+  "shaped_sent": 6,
+  "tag": "h6_missing_tc"
+}

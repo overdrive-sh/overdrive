@@ -1,0 +1,11 @@
+{"ack_oob":true,"arm":true,"declare":[],"egress_ifs":["v5c-h"],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1217877,"programs":[{"id":50620,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":50621,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":50622,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":50624,"name":"eg_decode_frag(tcx v5c-h egress)","tag":"a9285dfbbf33b7ff","verified_insns":627},{"id":50625,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":50626,"name":"sockops(/sys/fs/cgroup/gvc-spike-1217877)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","tuple_from_peer":true,"udp_park":true,"unframe":"tc-frag"}
+{"ev":"park_pool","slots":256}
+{"cid":3261,"ev":"host_ready","intakes":[]}
+{"cid":3261,"ev":"hello"}
+{"ev":"ctl_closed","t_us":4792661110999}
+{"cid":3261,"ev":"hello"}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":1,"left":2,"t_us":4792663903071}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":3,"left":1,"t_us":4792663904046}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":5,"left":0,"t_us":4792663905046}
+{"dst":"10.250.205.2:47501","ev":"host_dg_installed","flow":7,"local":"10.250.205.1:34429","peer":"10.250.205.2:47501","smode":2,"t_us":4792663906146,"tuple_dst":"10.250.205.2:47501","waited_ms":0}
+{"ev":"host_dg_teardown","flow":7}

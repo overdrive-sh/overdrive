@@ -1,0 +1,1087 @@
+[
+ {
+  "case": "A-abort-ctl",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 35,
+  "via_ctl": 965,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   694.889,
+   810.142,
+   820.106
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 34,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 589.9370703846216,
+   "min": 0.09128544479608536,
+   "n": 543,
+   "p50": 183.76827705651522,
+   "p99": 567.9842457175255
+  }
+ },
+ {
+  "case": "A-abort-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   613.179,
+   678.239,
+   697.785
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 583.8233735412359,
+   "min": 0.1185741275548935,
+   "n": 775,
+   "p50": 501.07896234840155,
+   "p99": 580.2600206807256
+  }
+ },
+ {
+  "case": "A-owner-sigkill-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   708.806,
+   813.479,
+   815.655
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 550.1221129670739,
+   "min": 5.425112321972847,
+   "n": 442,
+   "p50": 240.40911253541708,
+   "p99": 548.1331124901772
+  }
+ },
+ {
+  "case": "A-quiescence-ctl",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   703.544,
+   835.365,
+   849.175
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 580.3825054317713,
+   "min": 0.147281214594841,
+   "n": 454,
+   "p50": 266.2654835730791,
+   "p99": 567.1062488108873
+  }
+ },
+ {
+  "case": "A-quiescence-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   618.489,
+   695.181,
+   705.396
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 598.7526420503855,
+   "min": 0.2683410421013832,
+   "n": 835,
+   "p50": 500.9473292157054,
+   "p99": 595.1887974515557
+  }
+ },
+ {
+  "case": "A-session-loss-ctl",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 0,
+  "via_ctl": 1000,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   684.904,
+   798.956,
+   814.066
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 540.996809490025,
+   "min": 0.14849752187728882,
+   "n": 460,
+   "p50": 254.10284101963043,
+   "p99": 527.0900288596749
+  }
+ },
+ {
+  "case": "A-session-loss-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   611.164,
+   669.835,
+   676.116
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 564.6825591102242,
+   "min": 0.15677884221076965,
+   "n": 844,
+   "p50": 483.6433418095112,
+   "p99": 563.9355769380927
+  }
+ },
+ {
+  "case": "B-abort-ctl",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   16.652,
+   55.988,
+   65.507
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 1000,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "B-abort-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   5.827,
+   24.399,
+   31.193
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "B-loss-reconnect-close-ctl",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   5.434,
+   46.482,
+   51.637
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "B-loss-reconnect-close-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   7.133,
+   42.393,
+   73.743
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "B-owner-sigkill-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   7.274,
+   40.378,
+   47.166
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "B-quiescence-ctl",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   11.765,
+   41.235,
+   64.985
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "B-quiescence-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   4.026,
+   73.325,
+   80.499
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "B-session-loss-ctl",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   24.223,
+   83.288,
+   87.956
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "B-session-loss-vgonly",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 1000,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   22.102,
+   38.474,
+   44.991
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "E1-no-request-queued",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 0,
+  "rdhup_before_request_read": 100,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   4.267,
+   14.929,
+   14.929
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "E1b-no-request-accepted",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 0,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   2624.214,
+   2629.326,
+   2629.326
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "E2-no-linger-queued",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 100,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   2.249,
+   9.536,
+   9.536
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "E2b-no-linger-accepted",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   607.996,
+   619.494,
+   619.494
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 101.04296170175076,
+   "min": 0.11537689715623856,
+   "n": 100,
+   "p50": 46.97583056986332,
+   "p99": 101.04296170175076
+  }
+ },
+ {
+  "case": "E3-payload-before-close-queued",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 0,
+  "via_vg": 0,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 0,
+  "app_first": {
+   "bytes": 100
+  },
+  "bytes_on_C": 3200,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 100,
+  "read_after_request_EOF": 0,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   3.758,
+   8.506,
+   8.506
+  ],
+  "host_paired_discarded": 100,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "E4-queued-10s-settle",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 100,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   4.228,
+   11.697,
+   11.697
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "E5-sequential-queued",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 100,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   0.251,
+   0.318,
+   0.318
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "E5b-sequential-queued-ctl",
+  "n": 30,
+  "worker_errors": 0,
+  "teardown": 30,
+  "via_vg": 30,
+  "via_ctl": 0,
+  "matched_app": 30,
+  "teardown_ok": 30,
+  "app_first": {
+   "reset": 30
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 30,
+  "rdhup_before_request_read": 30,
+  "read_after_request_EOF": 30,
+  "write_EPIPE": 30,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   0.279,
+   0.361,
+   0.361
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "E6-sequential-accepted-abort",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   300.201,
+   300.347,
+   300.347
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 0.2003433182835579,
+   "min": 0.03705546259880066,
+   "n": 100,
+   "p50": 0.06681308150291443,
+   "p99": 0.2003433182835579
+  }
+ },
+ {
+  "case": "E6-sequential-accepted-quiescence",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   300.206,
+   300.361,
+   300.361
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 0.1655248925089836,
+   "min": 0.03738049417734146,
+   "n": 100,
+   "p50": 0.08255057036876678,
+   "p99": 0.1655248925089836
+  }
+ },
+ {
+  "case": "E6-sequential-accepted-session-loss",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 100,
+  "via_vg": 100,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 100,
+  "app_first": {
+   "reset": 100
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 100,
+  "write_EPIPE": 100,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   300.208,
+   300.307,
+   300.307
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 0.24247262626886368,
+   "min": 0.06252992898225784,
+   "n": 100,
+   "p50": 0.10369531810283661,
+   "p99": 0.24247262626886368
+  }
+ },
+ {
+  "case": "P-accepted-live",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 0,
+  "via_vg": 0,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 0,
+  "app_first": {
+   "bytes": 100
+  },
+  "bytes_on_C": 3100,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 0,
+  "write_EPIPE": 0,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   1412.825,
+   1427.315,
+   1427.315
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "P-queued-live",
+  "n": 100,
+  "worker_errors": 0,
+  "teardown": 0,
+  "via_vg": 0,
+  "via_ctl": 0,
+  "matched_app": 100,
+  "teardown_ok": 0,
+  "app_first": {
+   "bytes": 100
+  },
+  "bytes_on_C": 3100,
+  "request_16B_readable": 100,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 0,
+  "write_EPIPE": 0,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   408.148,
+   412.798,
+   412.798
+  ],
+  "host_paired_discarded": 0,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": null,
+   "min": null,
+   "n": 0,
+   "p50": null,
+   "p99": null
+  }
+ },
+ {
+  "case": "R-paired-blind-abort",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 0,
+  "via_ctl": 1000,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   698.496,
+   821.521,
+   847.035
+  ],
+  "host_paired_discarded": 1000,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 571.18025328964,
+   "min": 0.14511216431856155,
+   "n": 607,
+   "p50": 163.68720773607492,
+   "p99": 562.188059091568
+  }
+ },
+ {
+  "case": "R-paired-blind-quiescence",
+  "n": 1000,
+  "worker_errors": 0,
+  "teardown": 1000,
+  "via_vg": 1000,
+  "via_ctl": 0,
+  "matched_app": 1000,
+  "teardown_ok": 1000,
+  "app_first": {
+   "reset": 1000
+  },
+  "bytes_on_C": 0,
+  "request_16B_readable": 1000,
+  "rdhup_before_request_read": 0,
+  "read_after_request_EOF": 1000,
+  "write_EPIPE": 1000,
+  "leftover_vsock": 0,
+  "leftover_tcp": 0,
+  "accept_to_app_ms_p50_p99_max": [
+   705.896,
+   861.408,
+   867.801
+  ],
+  "host_paired_discarded": 1000,
+  "guest_ctl_discarded": 0,
+  "guest_ctl_unexpected": 0,
+  "close_to_vg_event_ms": {
+   "max": 588.5141054168344,
+   "min": 3.3833226189017296,
+   "n": 514,
+   "p50": 195.18715143203735,
+   "p99": 572.6864524185658
+  }
+ }
+]

@@ -1,0 +1,4 @@
+{"ack_len":4096,"ack_len_bytes":36,"ack_sha_match":true,"conn":false,"ev":"v18","head":"4f56443100000ff8","kind":"frame2","len":4096,"ok":true,"seed":11400714819323206404,"seq":false,"sha":"c9a1f8fa8dc4774031a4a17749effd6aba01be5d41ddc832aeb9d656a5bd7cdd","shaped":true,"t":0}
+{"ack_len":59000,"ack_len_bytes":36,"ack_sha_match":true,"conn":false,"ev":"v18","head":"4f5644310000e670","kind":"frame2","len":59000,"ok":true,"seed":11400714819323214323,"seq":false,"sha":"9ef755ee170c3b1a1300b76de81842ab28a16b62c6560766053316669bf3d7ca","shaped":true,"t":0}
+{"connected":false,"dst":"10.250.218.2:7218","ev":"v18_done","failed":0,"local_ports":[43867],"ok":2,"s":0.005350843,"seq":false,"threads":1}
+

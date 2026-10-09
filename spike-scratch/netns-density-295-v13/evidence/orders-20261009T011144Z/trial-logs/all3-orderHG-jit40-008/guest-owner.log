@@ -1,0 +1,15 @@
+{"ack_oob":true,"arm":true,"ev":"programs_loaded","flush":true,"intake_park":true,"pid":2213,"programs":[{"id":710,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":711,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":712,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":713,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":714,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":715,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":716,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":717,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":718,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":719,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":720,"name":"sockops(root cgroup)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"guest","t_ns":"1791508461586826842","udp_park":true}
+{"ev":"park_pool","slots":256,"t_ns":"1791508461594561422"}
+{"ev":"guest_ready","slots":64,"t_ns":"1791508461599239052","w":"10.99.7.2"}
+{"app":"10.99.7.2:44308","dst":"172.29.131.2:7200","ev":"tcp_connect","flow":1,"park":0,"t_ns":"1791508462725371713"}
+{"app":"10.99.7.2:44314","dst":"172.29.131.3:7201","ev":"tcp_connect","flow":3,"park":1,"t_ns":"1791508463128269391"}
+{"client":"172.29.131.2:54254","ev":"tcp_accept","flow":2,"gport":7300,"t_ns":"1791508463736060706"}
+{"ev":"leg_error","events":8200,"flow":2,"leg":1,"so_error":32,"t_ns":"1791508464099436484"}
+{"age_ms":363,"ev":"flow_closed","flow":2,"kind":2,"reset":true,"t_ns":"1791508464099545719","why":"leg_error"}
+{"ev":"leg_hup","flow":3,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791508464099606580","vsock":true}
+{"ev":"leg_hup","flow":1,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791508464099655865","vsock":true}
+{"ev":"ctl_closed","t_ns":"1791508464099705259"}
+{"age_ms":1374,"ev":"flow_closed","flow":1,"kind":1,"reset":true,"t_ns":"1791508464099774734","why":"ctl_lost"}
+{"age_ms":971,"ev":"flow_closed","flow":3,"kind":1,"reset":true,"t_ns":"1791508464099876887","why":"ctl_lost"}
+---
+OWNER_READY role=guest pid=2213

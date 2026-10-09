@@ -1,0 +1,19 @@
+{"ack_oob":true,"arm":true,"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1222095,"programs":[{"id":56159,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":56160,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":56161,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":56162,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":56163,"name":"sockops(/sys/fs/cgroup/v13-spike-1222095)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","t_ns":"1791508396921221715","udp_park":true}
+{"ev":"park_pool","slots":256,"t_ns":"1791508396930130178"}
+{"cid":3280,"ev":"host_ready","intakes":["172.29.131.1:2720=7300"],"t_ns":"1791508396930205651"}
+{"cid":3280,"ev":"hello","t_ns":"1791508397696571893"}
+{"dst":"172.29.131.2:7200","ev":"host_tcp_connect","flow":1,"t_ns":"1791508398887819309"}
+{"dst":"172.29.131.3:7201","ev":"host_mesh_connect","flow":3,"legf":"127.0.0.1:56151","t_ns":"1791508399291570789"}
+{"client":"172.29.131.2:37354","ev":"host_intake","flow":2,"gport":7300,"park":0,"t_ns":"1791508399895350843"}
+{"ev":"leg_hup","flow":2,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791508400273432653","vsock":true}
+{"ev":"leg_hup","flow":3,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791508400273490490","vsock":true}
+{"ev":"drain_shutdown_write","flow":2,"from_leg":1,"t_ns":"1791508400273581347","timed_out":false}
+{"ev":"drain_shutdown_write","flow":3,"from_leg":1,"t_ns":"1791508400273640466","timed_out":false}
+{"ev":"leg_hup","flow":1,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791508400273733315","vsock":true}
+{"ev":"drain_shutdown_write","flow":1,"from_leg":1,"t_ns":"1791508400273802660","timed_out":false}
+{"ev":"leg_error","events":8200,"flow":1,"leg":1,"so_error":32,"t_ns":"1791508400274582784"}
+{"age_ms":1387,"ev":"flow_closed","flow":1,"kind":1,"reset":true,"t_ns":"1791508400274758970","why":"leg_error"}
+{"ev":"leg_error","events":8200,"flow":3,"leg":1,"so_error":32,"t_ns":"1791508400274850287"}
+{"age_ms":983,"ev":"flow_closed","flow":3,"kind":1,"reset":true,"t_ns":"1791508400275042276","why":"leg_error"}
+{"ev":"ctl_closed","t_ns":"1791508400282913137"}
+{"age_ms":388,"ev":"flow_closed","flow":2,"kind":2,"reset":true,"t_ns":"1791508400283040339","why":"ctl_lost"}

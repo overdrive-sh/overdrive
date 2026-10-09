@@ -1,0 +1,9 @@
+{
+  "machine": "x86_64",
+  "virt": "none",
+  "kvm_chardev": true,
+  "kvm_api": 12,
+  "kvm_create_vm": true,
+  "cpu_virt_ext": true,
+  "uname_r": "7.0.0-29-generic"
+}

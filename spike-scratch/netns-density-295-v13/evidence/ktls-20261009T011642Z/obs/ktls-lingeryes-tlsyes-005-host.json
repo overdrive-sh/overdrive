@@ -1,0 +1,1 @@
+{"bytes_rx":2883375,"bytes_tx":0,"done":true,"events":[{"errno":104,"kind":"rx_err","name":"ECONNRESET","t_ns":"1791508616566465277"}],"finite_tx_shut":false,"first_event":{"errno":104,"kind":"rx_err","name":"ECONNRESET","t_ns":"1791508616566465277"},"local":"172.29.131.3:7201","peer":"172.29.131.1:51340","role":"server","rx_verdict":"RESET","start_ns":"1791508616379317588"}

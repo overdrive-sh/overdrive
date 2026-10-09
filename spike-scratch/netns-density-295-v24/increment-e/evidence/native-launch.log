@@ -1,0 +1,764 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-v24/increment-e/run.py suite=full`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=da74b2c5e49effa384c916d7 pid=1175962
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <metal-target>:/home/ubuntu/overdrive
+
+sent 994,493 bytes  received 10,431 bytes  54,320.22 bytes/sec
+total size is 1,494,961,992  speedup is 1,487.64
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[22:22:18] === preflight (fail-closed substrate probes)
+[22:22:18] $ uname -a; grep -m1 'model name' /proc/cpuinfo; nproc; free -m | head -2; ls -l /dev/kvm /dev/vhost-vsock  (rc=0)
+[22:22:18]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[22:22:18]     model name	: AMD EPYC 8024P 8-Core Processor
+[22:22:18]     16
+[22:22:18]                    total        used        free      shared  buff/cache   available
+[22:22:18]     Mem:           63868        1995        4023         166       58716       61873
+[22:22:18]     crw-rw---- 1 root kvm 10, 232 Oct  8 22:22 /dev/kvm
+[22:22:18]     crw-rw---- 1 root kvm 10, 241 Oct  8 22:11 /dev/vhost-vsock
+[22:22:18] other CH processes at start (not touched): none
+[22:22:18] === build
+[22:22:19] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[22:22:19]         Finished `release` profile [optimized] target(s) in 0.12s
+[22:22:19] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/guest/Cargo.toml  (rc=0)
+[22:22:19]        Compiling v24g v0.1.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/guest)
+[22:22:19]         Finished `release` profile [optimized] target(s) in 0.66s
+[22:22:19] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/guest-target/x86_64-unknown-linux-gnu/release/v24g /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor; /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor --version  (rc=0)
+[22:22:19]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/guest-target/x86_64-unknown-linux-gnu/release/v24g: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=c0685faac0fdeee00bd2c60d95f9dae5a4f311de, not stripped
+[22:22:19]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor:                 ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=0da53e4d228b0157b1f283b2f8978e9c51d0dbaa, stripped
+[22:22:19]     cloud-hypervisor v53.0.0
+[22:22:19]     Migration Protocol Versions: 0
+[22:22:19] $ modprobe --show-depends vmw_vsock_virtio_transport  (rc=0)
+[22:22:19]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[22:22:19]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst 
+[22:22:19]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+[22:22:19] $ modprobe --show-depends vsock_diag  (rc=0)
+[22:22:19]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[22:22:19]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock_diag.ko.zst
+[22:22:20] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-e/v24-initramfs-root && find . | cpio -o -H newc --quiet | gzip -9 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-e/v24-initramfs.cpio.gz  (rc=0)
+[22:22:20] === boot guest CID 3240
+[22:22:20] launch: /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-e/v24-initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-e/v24-vm-3240-1791498140538/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-e/v24-vm-3240-1791498140538/ch.log -v --vsock cid=3240,backend=vhost-kernel
+[22:22:21] guest hello: {'k': 'hello', 'uname_r': '7.0.0-29-generic', 'local_cid': 3240, 't': 677, 'h': 4783947.871870817}
+[22:22:21] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor --version; ss --vsock -a -n -p > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-e/evidence/host-ss-vsock-start.txt; cat /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-e/evidence/host-ss-vsock-start.txt | head -20  (rc=0)
+[22:22:21]     cloud-hypervisor v53.0.0
+[22:22:21]     Migration Protocol Versions: 0
+[22:22:21]     Netid State  Recv-Q Send-Q Local Address:Port       Peer Address:Port      Process                               
+[22:22:21]     v_str ESTAB  0      0                  *:1365240542         3240:52420      users:(("python3",pid=1176678,fd=14))
+[22:22:21]     v_str LISTEN 0      0                  *:52423                 *:*          users:(("python3",pid=1176678,fd=9)) 
+[22:22:21]     v_str LISTEN 0      0                  *:52424                 *:*          users:(("python3",pid=1176678,fd=7)) 
+[22:22:21]     v_str ESTAB  0      0                  2:52424              3240:1165185070 users:(("python3",pid=1176678,fd=8)) 
+[22:22:21]     v_str ESTAB  0      0                  2:52423              3240:1165185071 users:(("python3",pid=1176678,fd=10))
+[22:22:21] === case P-accepted-live: cause=none queued=False n=100 ctl_ignore=False settle_ms=0 hold_ms=1000 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:22:24] {
+ "name": "P-accepted-live",
+ "flow_reports": 100,
+ "decisions": {
+  "routed_then_ended": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 93,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 7
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 100
+ },
+ "bytes_read_by_app_on_C": 3100,
+ "app_first_event": {
+  "bytes": 100
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:22:24] === case P-queued-live: cause=none queued=True n=100 ctl_ignore=False settle_ms=0 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:22:27] {
+ "name": "P-queued-live",
+ "flow_reports": 100,
+ "decisions": {
+  "routed_then_ended": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 100
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 100
+ },
+ "bytes_read_by_app_on_C": 3100,
+ "app_first_event": {
+  "bytes": 100
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:22:27] === case A-abort-vgonly: cause=abort queued=False n=1000 ctl_ignore=True settle_ms=0 hold_ms=600 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:22:58] TIMEOUT waiting for stage events
+[22:22:59] {
+ "name": "A-abort-vgonly",
+ "flow_reports": 1000,
+ "decisions": {
+  "routed_timeout": 708
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 700,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 8
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 708
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 708
+ },
+ "violations_count": 1000,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:22:59] === case A-quiescence-vgonly: cause=quiescence queued=False n=1000 ctl_ignore=True settle_ms=0 hold_ms=600 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:23:29] TIMEOUT waiting for stage events
+[22:23:31] {
+ "name": "A-quiescence-vgonly",
+ "flow_reports": 1000,
+ "decisions": {
+  "routed_timeout": 678
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 650,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 28
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 678
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 678
+ },
+ "violations_count": 1000,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:23:31] === case A-session-loss-vgonly: cause=session-loss queued=False n=1000 ctl_ignore=True settle_ms=0 hold_ms=600 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:24:01] TIMEOUT waiting for stage events
+[22:24:03] {
+ "name": "A-session-loss-vgonly",
+ "flow_reports": 1000,
+ "decisions": {
+  "routed_timeout": 763
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 737,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 26
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 763
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 763
+ },
+ "violations_count": 1000,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:24:03] === case B-abort-vgonly: cause=abort queued=True n=1000 ctl_ignore=True settle_ms=200 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:24:04] {
+ "name": "B-abort-vgonly",
+ "flow_reports": 1000,
+ "decisions": {
+  "teardown_vg": 1000
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 1000
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:24:04] === case B-quiescence-vgonly: cause=quiescence queued=True n=1000 ctl_ignore=True settle_ms=200 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:24:06] {
+ "name": "B-quiescence-vgonly",
+ "flow_reports": 1000,
+ "decisions": {
+  "teardown_vg": 1000
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 1000
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:24:06] === case B-session-loss-vgonly: cause=session-loss queued=True n=1000 ctl_ignore=True settle_ms=200 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:24:08] {
+ "name": "B-session-loss-vgonly",
+ "flow_reports": 1000,
+ "decisions": {
+  "teardown_vg": 1000
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 1000
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:24:08] === case B-loss-reconnect-close-vgonly: cause=loss-reconnect-close queued=True n=1000 ctl_ignore=True settle_ms=200 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:24:11] {
+ "name": "B-loss-reconnect-close-vgonly",
+ "flow_reports": 1000,
+ "decisions": {
+  "teardown_vg": 1000
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 1000
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:24:11] === case A-abort-ctl: cause=abort queued=False n=1000 ctl_ignore=False settle_ms=0 hold_ms=600 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:24:41] TIMEOUT waiting for stage events
+[22:24:42] {
+ "name": "A-abort-ctl",
+ "flow_reports": 1000,
+ "decisions": {
+  "routed_timeout": 778
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 744,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 34
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 778
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 778
+ },
+ "violations_count": 1000,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:24:42] === case A-quiescence-ctl: cause=quiescence queued=False n=1000 ctl_ignore=False settle_ms=0 hold_ms=600 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:25:12] TIMEOUT waiting for stage events
+[22:25:14] {
+ "name": "A-quiescence-ctl",
+ "flow_reports": 1000,
+ "decisions": {
+  "routed_timeout": 726
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 725,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 1
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 726
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 726
+ },
+ "violations_count": 1000,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:25:14] === case A-session-loss-ctl: cause=session-loss queued=False n=1000 ctl_ignore=False settle_ms=0 hold_ms=600 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:25:44] TIMEOUT waiting for stage events
+[22:25:46] {
+ "name": "A-session-loss-ctl",
+ "flow_reports": 1000,
+ "decisions": {
+  "routed_timeout": 796
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 732,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 64
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 796
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 796
+ },
+ "violations_count": 1000,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:25:46] === case B-abort-ctl: cause=abort queued=True n=1000 ctl_ignore=False settle_ms=200 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:25:48] {
+ "name": "B-abort-ctl",
+ "flow_reports": 1000,
+ "decisions": {
+  "teardown_vg": 1000
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 1000
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:25:48] === case B-quiescence-ctl: cause=quiescence queued=True n=1000 ctl_ignore=False settle_ms=200 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:25:50] {
+ "name": "B-quiescence-ctl",
+ "flow_reports": 1000,
+ "decisions": {
+  "teardown_vg": 1000
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 1000
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:25:50] === case B-session-loss-ctl: cause=session-loss queued=True n=1000 ctl_ignore=False settle_ms=200 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:25:52] {
+ "name": "B-session-loss-ctl",
+ "flow_reports": 1000,
+ "decisions": {
+  "teardown_vg": 1000
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 1000
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:25:52] === case B-loss-reconnect-close-ctl: cause=loss-reconnect-close queued=True n=1000 ctl_ignore=False settle_ms=200 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:25:54] {
+ "name": "B-loss-reconnect-close-ctl",
+ "flow_reports": 1000,
+ "decisions": {
+  "teardown_vg": 1000
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 1000
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:25:54] === case R-paired-blind-quiescence: cause=quiescence queued=False n=1000 ctl_ignore=False settle_ms=0 hold_ms=600 linger=True request=True payload=0 paired_blind=True sequential=False
+[22:26:24] TIMEOUT waiting for stage events
+[22:26:25] {
+ "name": "R-paired-blind-quiescence",
+ "flow_reports": 1000,
+ "decisions": {
+  "routed_timeout": 746
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 702,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 43,
+  "rev=0 peek=1/0 request_read=16B/0/eof=False": 1
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 746
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 746
+ },
+ "violations_count": 1000,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:26:25] === case R-paired-blind-abort: cause=abort queued=False n=1000 ctl_ignore=False settle_ms=0 hold_ms=600 linger=True request=True payload=0 paired_blind=True sequential=False
+[22:26:56] TIMEOUT waiting for stage events
+[22:26:57] {
+ "name": "R-paired-blind-abort",
+ "flow_reports": 1000,
+ "decisions": {
+  "routed_timeout": 813
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 727,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 86
+ },
+ "observation_after_hold": {
+  "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 813
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 813
+ },
+ "violations_count": 1000,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:26:57] === case E1-no-request-queued: cause=quiescence queued=True n=100 ctl_ignore=True settle_ms=200 hold_ms=0 linger=True request=False payload=0 paired_blind=False sequential=False
+[22:26:59] {
+ "name": "E1-no-request-queued",
+ "flow_reports": 100,
+ "decisions": {
+  "teardown_vg": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=0/0 request_read=0B/0/eof=True": 100
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 100
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:26:59] === case E1b-no-request-accepted: cause=quiescence queued=False n=100 ctl_ignore=True settle_ms=0 hold_ms=600 linger=True request=False payload=0 paired_blind=False sequential=False
+[22:27:03] {
+ "name": "E1b-no-request-accepted",
+ "flow_reports": 100,
+ "decisions": {
+  "teardown_vg": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=0 peek=-1/EAGAIN request_read=0B/EAGAIN/eof=False": 100
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 100
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:27:03] === case E2-no-linger-queued: cause=quiescence queued=True n=100 ctl_ignore=True settle_ms=200 hold_ms=0 linger=False request=True payload=0 paired_blind=False sequential=False
+[22:27:05] {
+ "name": "E2-no-linger-queued",
+ "flow_reports": 100,
+ "decisions": {
+  "teardown_vg": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 100
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 100
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:27:05] === case E2b-no-linger-accepted: cause=quiescence queued=False n=100 ctl_ignore=True settle_ms=0 hold_ms=600 linger=False request=True payload=0 paired_blind=False sequential=False
+[22:27:07] {
+ "name": "E2b-no-linger-accepted",
+ "flow_reports": 100,
+ "decisions": {
+  "teardown_vg": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=1 peek=1/0 request_read=16B/0/eof=False": 77,
+  "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 23
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 100
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:27:07] === case E3-payload-before-close-queued: cause=quiescence queued=True n=100 ctl_ignore=True settle_ms=200 hold_ms=0 linger=True request=True payload=32 paired_blind=False sequential=False
+[22:27:09] {
+ "name": "E3-payload-before-close-queued",
+ "flow_reports": 100,
+ "decisions": {
+  "routed_then_ended": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 100
+ },
+ "observation_after_hold": {
+  "read=1/0 write=-1/EPIPE so_err=0 rev=8193": 100
+ },
+ "bytes_read_by_app_on_C": 3200,
+ "app_first_event": {
+  "bytes": 100
+ },
+ "violations_count": 100,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:27:09] === case E4-queued-10s-settle: cause=quiescence queued=True n=100 ctl_ignore=True settle_ms=10000 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:27:20] {
+ "name": "E4-queued-10s-settle",
+ "flow_reports": 100,
+ "decisions": {
+  "teardown_vg": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 100
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 100
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:27:20] === case E5-sequential-queued: cause=quiescence queued=True n=100 ctl_ignore=True settle_ms=20 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=True
+[22:27:24] {
+ "name": "E5-sequential-queued",
+ "flow_reports": 100,
+ "decisions": {
+  "teardown_vg": 100
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 100
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 100
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:27:24] === case E5b-sequential-queued-ctl: cause=session-loss queued=True n=30 ctl_ignore=False settle_ms=20 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=True
+[22:27:29] {
+ "name": "E5b-sequential-queued-ctl",
+ "flow_reports": 30,
+ "decisions": {
+  "teardown_vg": 30
+ },
+ "state_at_accept_and_request_read": {
+  "rev=8193 peek=1/0 request_read=16B/0/eof=False": 30
+ },
+ "observation_after_hold": {
+  "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 30
+ },
+ "bytes_read_by_app_on_C": 0,
+ "app_first_event": {
+  "reset": 30
+ },
+ "violations_count": 0,
+ "leftover_1s_after": {
+  "flow_vsock_total": 0,
+  "flow_vsock_by_state": {},
+  "tcp_app_conns": 0,
+  "tcp_app_list": [],
+  "all_vsock_total": 5
+ }
+}
+[22:27:29] === teardown
+[22:27:29] $ ss --vsock -a -n -p > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-e/evidence/host-ss-vsock-end.txt 2>&1; head -20 /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-e/evidence/host-ss-vsock-end.txt  (rc=0)
+[22:27:29]     Netid State  Recv-Q Send-Q Local Address:Port       Peer Address:Port      Process                               
+[22:27:29]     v_str ESTAB  0      0                  *:1365240542         3240:52420      users:(("python3",pid=1176678,fd=14))
+[22:27:29]     v_str LISTEN 0      0                  *:52423                 *:*          users:(("python3",pid=1176678,fd=9)) 
+[22:27:29]     v_str LISTEN 0      0                  *:52424                 *:*          users:(("python3",pid=1176678,fd=7)) 
+[22:27:29]     v_str ESTAB  0      0                  2:52424              3240:1165185070 users:(("python3",pid=1176678,fd=8)) 
+[22:27:29]     v_str ESTAB  0      0                  2:52423              3240:1165185107 users:(("python3",pid=1176678,fd=10))
+[22:27:29] $ pgrep -af 'cloud-hypervisor' | grep -v pgrep || true  (rc=0)
+{"launcher_rc": 0, "wall_s": 443.2}

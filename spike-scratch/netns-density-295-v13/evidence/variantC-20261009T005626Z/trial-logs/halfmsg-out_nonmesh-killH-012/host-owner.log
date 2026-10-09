@@ -1,0 +1,5 @@
+{"ack_oob":true,"arm":true,"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1219582,"programs":[{"id":52846,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":52847,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":52848,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":52849,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":52850,"name":"sockops(/sys/fs/cgroup/v13-spike-1219582)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","t_ns":"1791507523212192342","udp_park":true}
+{"ev":"park_pool","slots":256,"t_ns":"1791507523221067284"}
+{"cid":3280,"ev":"host_ready","intakes":["172.29.131.1:2720=7300"],"t_ns":"1791507523221142387"}
+{"cid":3280,"ev":"hello","t_ns":"1791507524183572563"}
+{"dst":"172.29.131.2:7200","ev":"host_tcp_connect","flow":1,"t_ns":"1791507525146599938"}

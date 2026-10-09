@@ -1,0 +1,43 @@
+{
+  "PASS": false,
+  "above_mtu_sent": 200,
+  "ack_fail_examples": [
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "rand",
+      "len": 4096
+    }
+  ],
+  "by_kind": {
+    "frame": {
+      "ok": 100,
+      "sent": 100
+    },
+    "rand": {
+      "ok": 99,
+      "sent": 100
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 4096,
+  "missing_at_peer": 1,
+  "missing_examples": [
+    {
+      "conn": false,
+      "kind": "rand",
+      "len": 4096,
+      "n": 1,
+      "shaped": false
+    }
+  ],
+  "peer_rx": 199,
+  "sender_ack_ok": 199,
+  "sent": 200,
+  "shaped_sent": 100,
+  "tag": "e_s3_after_congestion"
+}

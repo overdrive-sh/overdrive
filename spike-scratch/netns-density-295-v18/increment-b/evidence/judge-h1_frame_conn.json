@@ -1,0 +1,34 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 480,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "frame": {
+      "ok": 156,
+      "sent": 156
+    },
+    "frame2": {
+      "ok": 150,
+      "sent": 150
+    },
+    "frame3": {
+      "ok": 146,
+      "sent": 146
+    },
+    "frame_chain": {
+      "ok": 156,
+      "sent": 156
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 59000,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 608,
+  "sender_ack_ok": 608,
+  "sent": 608,
+  "shaped_sent": 608,
+  "tag": "h1_frame_conn"
+}

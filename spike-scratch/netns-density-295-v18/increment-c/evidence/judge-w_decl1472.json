@@ -1,0 +1,22 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 1,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "decl_1472": {
+      "ok": 1,
+      "sent": 1
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 4096,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 1,
+  "sender_ack_ok": 1,
+  "sent": 1,
+  "shaped_sent": 0,
+  "tag": "w_decl1472"
+}

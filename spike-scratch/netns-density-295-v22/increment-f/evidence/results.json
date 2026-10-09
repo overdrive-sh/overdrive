@@ -1,0 +1,400 @@
+{
+  "env": {
+    "cid": 3220,
+    "cid_bystander": 3221,
+    "n_per_port_per_round": 250,
+    "other_ch_processes_at_start": "",
+    "ports": [
+      1234,
+      1240,
+      1241,
+      1243
+    ],
+    "rounds": 4,
+    "uname_r": "7.0.0-29-generic",
+    "virt": "none"
+  },
+  "examples": {},
+  "modules_left": [],
+  "modules_unloaded_by_me": [
+    "vsock_diag"
+  ],
+  "pins": {
+    "ch": "0e58b5ba34d28ec64b04a3d1f03448936c9e1fcf74226e79ef8926e1c2f6d196",
+    "guest_kernel": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+    "initramfs": "47662b42d10a5640ed3f4fc42e769b72cb4ae4a7d79708e08de7d330dea63389",
+    "probe": "62ab2cf16d21033c2963f693be85af7936ed62bcdd9e53c002ce41ff93d2748d"
+  },
+  "rounds": [
+    {
+      "kill": {
+        "kill_to_reaped_ms": 29.23,
+        "rc": -9,
+        "t_reaped": 1791498876.485771
+      },
+      "kill_to_new_ready_s": 4.93,
+      "listener_readable_before_kill": {
+        "1234": true,
+        "1240": true,
+        "1241": true,
+        "1243": true
+      },
+      "new_launch_after_reap_ms": 4086.0,
+      "round": 0,
+      "ss_after_kill_before_reuse": {
+        "ESTAB/peer3220": 3000,
+        "ESTAB/peer3221": 12
+      },
+      "ss_after_new_connects": {
+        "ESTAB/peer3220": 3250,
+        "ESTAB/peer3221": 12
+      },
+      "ss_before_kill": {
+        "ESTAB/peer3220": 3000,
+        "ESTAB/peer3221": 12
+      }
+    },
+    {
+      "kill": {
+        "kill_to_reaped_ms": 21.72,
+        "rc": -9,
+        "t_reaped": 1791498907.923713
+      },
+      "kill_to_new_ready_s": 4.91,
+      "listener_readable_before_kill": {
+        "1234": true,
+        "1240": true,
+        "1241": true,
+        "1243": true
+      },
+      "new_launch_after_reap_ms": 4087.3,
+      "round": 1,
+      "ss_after_kill_before_reuse": {
+        "ESTAB/peer3220": 3000,
+        "ESTAB/peer3221": 12
+      },
+      "ss_after_new_connects": {
+        "ESTAB/peer3220": 3250,
+        "ESTAB/peer3221": 12
+      },
+      "ss_before_kill": {
+        "ESTAB/peer3220": 3000,
+        "ESTAB/peer3221": 12
+      }
+    },
+    {
+      "kill": {
+        "kill_to_reaped_ms": 19.09,
+        "rc": -9,
+        "t_reaped": 1791498939.321703
+      },
+      "kill_to_new_ready_s": 4.9,
+      "listener_readable_before_kill": {
+        "1234": true,
+        "1240": true,
+        "1241": true,
+        "1243": true
+      },
+      "new_launch_after_reap_ms": 4086.0,
+      "round": 2,
+      "ss_after_kill_before_reuse": {
+        "ESTAB/peer3220": 3000,
+        "ESTAB/peer3221": 12
+      },
+      "ss_after_new_connects": {
+        "ESTAB/peer3220": 3250,
+        "ESTAB/peer3221": 12
+      },
+      "ss_before_kill": {
+        "ESTAB/peer3220": 3000,
+        "ESTAB/peer3221": 12
+      }
+    },
+    {
+      "kill": {
+        "kill_to_reaped_ms": 36.83,
+        "rc": -9,
+        "t_reaped": 1791498970.7887347
+      },
+      "kill_to_new_ready_s": 4.91,
+      "listener_readable_before_kill": {
+        "1234": true,
+        "1240": true,
+        "1241": true,
+        "1243": true
+      },
+      "new_launch_after_reap_ms": 4088.9,
+      "round": 3,
+      "ss_after_kill_before_reuse": {
+        "ESTAB/peer3220": 3000,
+        "ESTAB/peer3221": 12
+      },
+      "ss_after_new_connects": {
+        "ESTAB/peer3220": 3250,
+        "ESTAB/peer3221": 12
+      },
+      "ss_before_kill": {
+        "ESTAB/peer3220": 3000,
+        "ESTAB/peer3221": 12
+      }
+    }
+  ],
+  "tallies": {
+    "C3.accepted_count": {
+      "1234": {
+        "accepted=500/500": 4
+      },
+      "1240": {
+        "accepted=500/500": 4
+      },
+      "1241": {
+        "accepted=500/500": 4
+      },
+      "1243": {
+        "accepted=500/500": 4
+      }
+    },
+    "C3.data": {
+      "1234": {
+        "flags=IN+OUT+RDHUP first=DATA:CD second=EOF": 1000
+      },
+      "1240": {
+        "flags=IN+OUT+RDHUP first=DATA:CD second=EOF": 1000
+      },
+      "1241": {
+        "flags=IN+OUT+RDHUP first=DATA:CD second=EOF": 1000
+      },
+      "1243": {
+        "flags=IN+OUT+RDHUP first=DATA:CD second=EOF": 1000
+      }
+    },
+    "C3.nodata": {
+      "1234": {
+        "flags=IN+OUT+RDHUP first_read=EOF": 1000
+      },
+      "1240": {
+        "flags=IN+OUT+RDHUP first_read=EOF": 1000
+      },
+      "1241": {
+        "flags=IN+OUT+RDHUP first_read=EOF": 1000
+      },
+      "1243": {
+        "flags=IN+OUT+RDHUP first_read=EOF": 1000
+      }
+    },
+    "E.after_new_vm_traffic_same_tuple": {
+      "1234": {
+        "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 500
+      },
+      "1240": {
+        "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 500
+      },
+      "1241": {
+        "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 500
+      },
+      "1243": {
+        "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 500
+      }
+    },
+    "E.after_reuse_before_new_traffic": {
+      "1234": {
+        "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 1000
+      },
+      "1240": {
+        "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 1000
+      },
+      "1241": {
+        "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 1000
+      },
+      "1243": {
+        "flags=IN+OUT+RDHUP recv=EOF send=EPIPE": 1000
+      }
+    },
+    "E.before_reuse": {
+      "1234": {
+        "flags=IN+OUT+ERR+RDHUP recv=ECONNRESET send=ECONNRESET": 1000
+      },
+      "1240": {
+        "flags=IN+OUT+ERR+RDHUP recv=ECONNRESET send=ECONNRESET": 1000
+      },
+      "1241": {
+        "flags=IN+OUT+ERR+RDHUP recv=ECONNRESET send=ECONNRESET": 1000
+      },
+      "1243": {
+        "flags=IN+OUT+ERR+RDHUP recv=ECONNRESET send=ECONNRESET": 1000
+      }
+    },
+    "E.setup": {
+      "1234": {
+        "live flags=IN+OUT": 1000
+      },
+      "1240": {
+        "live flags=IN+OUT": 1000
+      },
+      "1241": {
+        "live flags=IN+OUT": 1000
+      },
+      "1243": {
+        "live flags=IN+OUT": 1000
+      }
+    },
+    "bystander": {
+      "1234": {
+        "flags=IN+OUT recv=DATA:BYST send=OK": 12
+      },
+      "1240": {
+        "flags=IN+OUT recv=DATA:BYST send=OK": 12
+      },
+      "1241": {
+        "flags=IN+OUT recv=DATA:BYST send=OK": 12
+      },
+      "1243": {
+        "flags=IN+OUT recv=DATA:BYST send=OK": 12
+      }
+    },
+    "new_vm.connect.E_tuple_dead_socket_still_open": {
+      "1234": {
+        "HOLD port=1234 ok=0 fail=125 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 4
+      },
+      "1240": {
+        "HOLD port=1240 ok=0 fail=125 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 4
+      },
+      "1241": {
+        "HOLD port=1241 ok=0 fail=125 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 4
+      },
+      "1243": {
+        "HOLD port=1243 ok=0 fail=125 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 4
+      }
+    },
+    "new_vm.connect.E_tuple_freed": {
+      "1234": {
+        "HOLD port=1234 ok=125 fail=0": 4
+      },
+      "1240": {
+        "HOLD port=1240 ok=125 fail=0": 4
+      },
+      "1241": {
+        "HOLD port=1241 ok=125 fail=0": 4
+      },
+      "1243": {
+        "HOLD port=1243 ok=125 fail=0": 4
+      }
+    },
+    "new_vm.connect.Q_tuple_stale_entry_closed_by_host": {
+      "1234": {
+        "HOLD port=1234 ok=125 fail=0": 4
+      },
+      "1240": {
+        "HOLD port=1240 ok=125 fail=0": 4
+      }
+    },
+    "new_vm.connect.Q_tuple_stale_entry_still_queued": {
+      "1241": {
+        "HOLD port=1241 ok=0 fail=125 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 4
+      },
+      "1243": {
+        "HOLD port=1243 ok=0 fail=125 [\"i=0:Connection reset by peer (os error 104)\", \"i=1:Connect": 4
+      }
+    },
+    "new_vm.connect.fresh_ports": {
+      "1234": {
+        "HOLD port=1234 ok=250 fail=0": 4
+      },
+      "1240": {
+        "HOLD port=1240 ok=250 fail=0": 4
+      },
+      "1241": {
+        "HOLD port=1241 ok=250 fail=0": 4
+      },
+      "1243": {
+        "HOLD port=1243 ok=250 fail=0": 4
+      }
+    },
+    "queue.early_after_reuse_new_vm_conns.fresh_NEf": {
+      "1234": {
+        "flags=IN+OUT first_read=DATA:NEf": 500
+      },
+      "1240": {
+        "flags=IN+OUT first_read=DATA:NEf": 500
+      }
+    },
+    "queue.early_after_reuse_new_vm_conns.fresh_NQc_same_tuple": {
+      "1234": {
+        "flags=IN+OUT first_read=DATA:NQc": 500
+      },
+      "1240": {
+        "flags=IN+OUT first_read=DATA:NQc": 500
+      }
+    },
+    "queue.early_after_reuse_new_vm_conns.fresh_NQf": {
+      "1234": {
+        "flags=IN+OUT first_read=DATA:NQf": 1000
+      },
+      "1240": {
+        "flags=IN+OUT first_read=DATA:NQf": 1000
+      }
+    },
+    "queue.early_before_reuse.QN_nodata": {
+      "1234": {
+        "flags=IN+OUT+ERR+RDHUP first_read=ECONNRESET send=ECONNRESET": 1000
+      },
+      "1240": {
+        "flags=IN+OUT+ERR+RDHUP first_read=ECONNRESET send=ECONNRESET": 1000
+      }
+    },
+    "queue.early_before_reuse.Q_withdata": {
+      "1234": {
+        "flags=IN+OUT+ERR+RDHUP first_read=DATA:QO": 1000
+      },
+      "1240": {
+        "flags=IN+OUT+ERR+RDHUP first_read=DATA:QO": 1000
+      }
+    },
+    "queue.late_after_reuse.QN_nodata": {
+      "1241": {
+        "flags=IN+OUT+ERR+RDHUP first_read=ECONNRESET send=ECONNRESET": 1000
+      },
+      "1243": {
+        "flags=IN+OUT+ERR+RDHUP first_read=ECONNRESET send=ECONNRESET": 1000
+      }
+    },
+    "queue.late_after_reuse.Q_withdata": {
+      "1241": {
+        "flags=IN+OUT+ERR+RDHUP first_read=DATA:QO": 1000
+      },
+      "1243": {
+        "flags=IN+OUT+ERR+RDHUP first_read=DATA:QO": 1000
+      }
+    },
+    "queue.late_after_reuse.fresh_NEf": {
+      "1241": {
+        "flags=IN+OUT first_read=DATA:NEf": 500
+      },
+      "1243": {
+        "flags=IN+OUT first_read=DATA:NEf": 500
+      }
+    },
+    "queue.late_after_reuse.fresh_NQf": {
+      "1241": {
+        "flags=IN+OUT first_read=DATA:NQf": 1000
+      },
+      "1243": {
+        "flags=IN+OUT first_read=DATA:NQf": 1000
+      }
+    },
+    "queue_empty_at_round_end": {
+      "1234": {
+        "left=0": 4
+      },
+      "1240": {
+        "left=0": 4
+      },
+      "1241": {
+        "left=0": 4
+      },
+      "1243": {
+        "left=0": 4
+      }
+    }
+  }
+}

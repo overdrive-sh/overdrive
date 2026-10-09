@@ -1,0 +1,26 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 40,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "frame": {
+      "ok": 20,
+      "sent": 20
+    },
+    "rand": {
+      "ok": 20,
+      "sent": 20
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 4096,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 40,
+  "sender_ack_ok": 40,
+  "sent": 40,
+  "shaped_sent": 20,
+  "tag": "h7_after_owner_restart_rand"
+}

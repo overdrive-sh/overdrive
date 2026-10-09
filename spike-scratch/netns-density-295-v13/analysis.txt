@@ -1,0 +1,102 @@
+== BASELINE matrix (3 runs pooled: N=30+40+40 per cell)
+  in-killG                           in:external_client               n=110  RESET=  7  EOF-class=103  other=0
+  in-killG                           in:guest_app                     n=110  RESET=110  EOF-class=  0  other=0
+  in-killH                           in:external_client               n=110  RESET=110  EOF-class=  0  other=0
+  in-killH                           in:guest_app                     n=110  RESET= 61  EOF-class= 49  other=0
+  out_mesh-killG                     out_mesh:guest_app               n=110  RESET=110  EOF-class=  0  other=0
+  out_mesh-killG                     out_mesh:remote_mesh             n=110  RESET=110  EOF-class=  0  other=0
+  out_mesh-killH                     out_mesh:guest_app               n=110  RESET=106  EOF-class=  4  other=0
+  out_mesh-killH                     out_mesh:remote_mesh             n=110  RESET=110  EOF-class=  0  other=0
+  out_nonmesh-killG                  out_nonmesh:guest_app            n=110  RESET=110  EOF-class=  0  other=0
+  out_nonmesh-killG                  out_nonmesh:remote_nonmesh       n=110  RESET= 12  EOF-class= 98  other=0
+  out_nonmesh-killH                  out_nonmesh:guest_app            n=110  RESET=106  EOF-class=  4  other=0
+  out_nonmesh-killH                  out_nonmesh:remote_nonmesh       n=110  RESET=110  EOF-class=  0  other=0
+== CONTROL: no SO_LINGER anywhere (N=15)
+  ctl-nolinger-in-killG              in:external_client               n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-in-killG              in:guest_app                     n= 15  RESET=  1  EOF-class= 14  other=0
+  ctl-nolinger-in-killH              in:external_client               n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-in-killH              in:guest_app                     n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-out_mesh-killG        out_mesh:guest_app               n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-out_mesh-killG        out_mesh:remote_mesh             n= 15  RESET=  1  EOF-class= 14  other=0
+  ctl-nolinger-out_mesh-killH        out_mesh:guest_app               n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-out_mesh-killH        out_mesh:remote_mesh             n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-out_nonmesh-killG     out_nonmesh:guest_app            n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-out_nonmesh-killG     out_nonmesh:remote_nonmesh       n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-out_nonmesh-killH     out_nonmesh:guest_app            n= 15  RESET=  0  EOF-class= 15  other=0
+  ctl-nolinger-out_nonmesh-killH     out_nonmesh:remote_nonmesh       n= 15  RESET=  0  EOF-class= 15  other=0
+== ORDERS: all three flows at once, both owners killed
+  all3-orderGH-jit0                  in:external_client               n= 10  RESET=  2  EOF-class=  8  other=0
+  all3-orderGH-jit0                  in:guest_app                     n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderGH-jit0                  out_mesh:guest_app               n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderGH-jit0                  out_mesh:remote_mesh             n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderGH-jit0                  out_nonmesh:guest_app            n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderGH-jit0                  out_nonmesh:remote_nonmesh       n= 10  RESET=  3  EOF-class=  7  other=0
+  all3-orderGH-jit40                 in:external_client               n= 10  RESET=  1  EOF-class=  9  other=0
+  all3-orderGH-jit40                 in:guest_app                     n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderGH-jit40                 out_mesh:guest_app               n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderGH-jit40                 out_mesh:remote_mesh             n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderGH-jit40                 out_nonmesh:guest_app            n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderGH-jit40                 out_nonmesh:remote_nonmesh       n= 10  RESET=  2  EOF-class=  8  other=0
+  all3-orderHG-jit0                  in:external_client               n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderHG-jit0                  in:guest_app                     n= 10  RESET=  7  EOF-class=  3  other=0
+  all3-orderHG-jit0                  out_mesh:guest_app               n= 10  RESET=  9  EOF-class=  1  other=0
+  all3-orderHG-jit0                  out_mesh:remote_mesh             n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderHG-jit0                  out_nonmesh:guest_app            n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderHG-jit0                  out_nonmesh:remote_nonmesh       n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderHG-jit40                 in:external_client               n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderHG-jit40                 in:guest_app                     n= 10  RESET=  7  EOF-class=  3  other=0
+  all3-orderHG-jit40                 out_mesh:guest_app               n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderHG-jit40                 out_mesh:remote_mesh             n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderHG-jit40                 out_nonmesh:guest_app            n= 10  RESET= 10  EOF-class=  0  other=0
+  all3-orderHG-jit40                 out_nonmesh:remote_nonmesh       n= 10  RESET= 10  EOF-class=  0  other=0
+== VARIANT B (EPOLLHUP discriminator), N=30
+  hupabort-in-killG                  in:external_client               n= 30  RESET=  5  EOF-class= 25  other=0
+  hupabort-in-killG                  in:guest_app                     n= 30  RESET= 30  EOF-class=  0  other=0
+  hupabort-in-killH                  in:external_client               n= 30  RESET= 30  EOF-class=  0  other=0
+  hupabort-in-killH                  in:guest_app                     n= 30  RESET= 18  EOF-class= 12  other=0
+  hupabort-out_mesh-killG            out_mesh:guest_app               n= 30  RESET= 30  EOF-class=  0  other=0
+  hupabort-out_mesh-killG            out_mesh:remote_mesh             n= 30  RESET= 30  EOF-class=  0  other=0
+  hupabort-out_mesh-killH            out_mesh:guest_app               n= 30  RESET= 29  EOF-class=  1  other=0
+  hupabort-out_mesh-killH            out_mesh:remote_mesh             n= 30  RESET= 30  EOF-class=  0  other=0
+  hupabort-out_nonmesh-killG         out_nonmesh:guest_app            n= 30  RESET= 30  EOF-class=  0  other=0
+  hupabort-out_nonmesh-killG         out_nonmesh:remote_nonmesh       n= 30  RESET=  6  EOF-class= 24  other=0
+  hupabort-out_nonmesh-killH         out_nonmesh:guest_app            n= 30  RESET= 30  EOF-class=  0  other=0
+  hupabort-out_nonmesh-killH         out_nonmesh:remote_nonmesh       n= 30  RESET= 30  EOF-class=  0  other=0
+== VARIANT C (explicit half-close message), N=30
+  halfmsg-in-killG                   in:external_client               n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-in-killG                   in:guest_app                     n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-in-killH                   in:external_client               n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-in-killH                   in:guest_app                     n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-out_mesh-killG             out_mesh:guest_app               n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-out_mesh-killG             out_mesh:remote_mesh             n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-out_mesh-killH             out_mesh:guest_app               n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-out_mesh-killH             out_mesh:remote_mesh             n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-out_nonmesh-killG          out_nonmesh:guest_app            n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-out_nonmesh-killG          out_nonmesh:remote_nonmesh       n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-out_nonmesh-killH          out_nonmesh:guest_app            n= 30  RESET= 30  EOF-class=  0  other=0
+  halfmsg-out_nonmesh-killH          out_nonmesh:remote_nonmesh       n= 30  RESET= 30  EOF-class=  0  other=0
+== kTLS edge case
+   evidence/ktls-20261009T011528Z {'ktls-lingeryes-tlsyes': {'RESET': 20}, 'ktls-lingerno-tlsyes': {'RESET': 20}, 'ktls-lingeryes-tlsno': {'RESET': 20}}
+   evidence/ktls-20261009T011642Z {'ktls-lingeryes-tlsyes': {'RESET': 20}, 'ktls-lingerno-tlsyes': {'EOF': 20}, 'ktls-lingeryes-tlsno': {'RESET': 20}}
+== host-clock observers: first-event latency after the kill (ms), RESET trials
+  in-killG               in:external_client             n=  7 p50=  5.85 max=  8.38
+  in-killH               in:external_client             n=110 p50=  1.04 max=  4.00
+  out_mesh-killG         out_mesh:remote_mesh           n=110 p50= 10.93 max= 22.50
+  out_mesh-killH         out_mesh:remote_mesh           n=110 p50=  1.10 max=  3.03
+  out_nonmesh-killG      out_nonmesh:remote_nonmesh     n= 12 p50=  2.56 max=  5.11
+  out_nonmesh-killH      out_nonmesh:remote_nonmesh     n=110 p50=  1.02 max=  6.71
+== survivor host owner after kill -9 of the guest owner: flow-vsock RDHUP -> ctl_closed gap (ms)
+  out_nonmesh-killG    n=67 gap p50=9.10 min=7.28 max=19.89  {'flow RDHUP first': 67, 'ctl loss only': 2}
+  out_mesh-killG       n=65 gap p50=9.68 min=7.82 max=19.06  {'flow RDHUP first': 65, 'ctl loss only': 2}
+  in-killG             n=76 gap p50=5.49 min=0.22 max=9.64  {'flow RDHUP first': 76, 'ctl loss only': 3}
+== survivor guest owner after kill -9 of the host owner: flow-vsock RDHUP -> ctl_closed gap (ms)
+  out_nonmesh-killH    n=70 gap p50=58us min=54us max=201us  {'flow RDHUP first': 70, 'ctl loss only': 10}
+  out_mesh-killH       n=66 gap p50=59us min=54us max=184us  {'flow RDHUP first': 66, 'ctl loss only': 14}
+  in-killH             n=71 gap p50=129us min=54us max=2928us  {'flow RDHUP first': 71, 'ctl loss only': 9}
+== guest_app first event, host-clock-corrected (ms after first kill), RESET trials; offset error +-2 ms
+  in-killG               in:guest_app             n=110 p50=   1.62 min=   0.90 max=   7.12
+  in-killH               in:guest_app             n= 61 p50=   0.98 min=   0.24 max=  10.44
+  out_mesh-killG         out_mesh:guest_app       n=110 p50=   5.50 min=   3.95 max=  14.34
+  out_mesh-killH         out_mesh:guest_app       n=106 p50=   0.88 min=   0.16 max=  13.30
+  out_nonmesh-killG      out_nonmesh:guest_app    n=110 p50=   4.98 min=   3.87 max=  11.89
+  out_nonmesh-killH      out_nonmesh:guest_app    n=106 p50=   0.83 min=   0.25 max=   6.29

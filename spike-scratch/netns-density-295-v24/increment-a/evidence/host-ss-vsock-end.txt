@@ -1,0 +1,3 @@
+Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess                              
+v_str LISTEN 0      0                  *:52423            *:*    users:(("python3",pid=1155703,fd=8))
+v_str LISTEN 0      0                  *:52424            *:*    users:(("python3",pid=1155703,fd=6))

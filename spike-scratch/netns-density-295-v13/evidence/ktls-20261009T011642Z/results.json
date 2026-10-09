@@ -1,0 +1,78 @@
+{
+  "cells": {
+    "ktls-lingerno-tlsyes": {
+      "linger": "no",
+      "n": 20,
+      "tally": {
+        "EOF": 20
+      },
+      "tls_tx": "yes"
+    },
+    "ktls-lingeryes-tlsno": {
+      "linger": "yes",
+      "n": 20,
+      "tally": {
+        "RESET": 20
+      },
+      "tls_tx": "no"
+    },
+    "ktls-lingeryes-tlsyes": {
+      "linger": "yes",
+      "n": 20,
+      "tally": {
+        "RESET": 20
+      },
+      "tls_tx": "yes"
+    }
+  },
+  "cleanup": {
+    "links_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "modules_caused": [],
+    "modules_diff": [],
+    "netns_added_removed": {
+      "added": [],
+      "removed": [
+        "v17-host (id: 2)",
+        "v17-peer1 (id: 1)",
+        "v17-peer2 (id: 3)",
+        "v17-peer3 (id: 4)",
+        "v17-peer4 (id: 5)",
+        "v17-peer5 (id: 6)",
+        "v17-peer6 (id: 7)"
+      ]
+    },
+    "nft_tables_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "routes_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "v13_cgroups_left": [],
+    "v13_links_left": [],
+    "v13_netns_left": [],
+    "v13_procs_left": ""
+  },
+  "preflight": {
+    "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0",
+    "kvm_api_version": 12,
+    "modules_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ],
+    "substrate_ok": true,
+    "systemd_detect_virt": "none",
+    "uname_r": "7.0.0-29-generic"
+  }
+}

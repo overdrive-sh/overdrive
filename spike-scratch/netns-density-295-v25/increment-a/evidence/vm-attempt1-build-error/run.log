@@ -1,0 +1,69 @@
+[22:18:31] === preflight
+[22:18:31] $ uname -a; uname -r; systemd-detect-virt; echo detect_virt_rc=$?; grep -m1 'model name' /proc/cpuinfo; nproc; free -m  (rc=0)
+[22:18:31]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[22:18:31]     7.0.0-29-generic
+[22:18:31]     none
+[22:18:31]     detect_virt_rc=1
+[22:18:31]     model name	: AMD EPYC 8024P 8-Core Processor
+[22:18:31]     16
+[22:18:31]                    total        used        free      shared  buff/cache   available
+[22:18:31]     Mem:           63868        2013        4865         166       57864       61855
+[22:18:31]     Swap:              0           0           0
+[22:18:31] RESULT preflight.kvm_api_version = 12
+[22:18:31] RESULT preflight.uname_r = "7.0.0-29-generic"
+[22:18:31] RESULT preflight.systemd_detect_virt = "none"
+[22:18:31] RESULT preflight.substrate_ok = true
+[22:18:31] $ ls -l /dev/vhost-vsock /dev/vsock; cat /sys/module/vhost_vsock/refcnt; ps -eLo pid,tid,comm | awk '$3 ~ /^vhost/' | head  (rc=0)
+[22:18:31]     crw-rw---- 1 root kvm  10, 241 Oct  8 22:11 /dev/vhost-vsock
+[22:18:31]     crw-rw-rw- 1 root root 10, 264 Oct  8 22:00 /dev/vsock
+[22:18:31]     0
+[22:18:31] RESULT preflight.vhost_vsock_refcnt_at_start = "0"
+[22:18:31] RESULT preflight.pre_existing_cloud_hypervisor = ""
+[22:18:31] === build
+[22:18:31] $ mkdir -p /home/ubuntu/overdrive/spike-scratch/netns-density-295-v25/out/ch-src && cd /home/ubuntu/overdrive/vendors/cloud-hypervisor && tar --exclude=.git --exclude=target -cf - . | tar -xf - -C /home/ubuntu/overdrive/spike-scratch/netns-density-295-v25/out/ch-src  (rc=0)
+[22:18:31] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-v25/out/ch-src && patch -p1 < /home/ubuntu/overdrive/spike-scratch/netns-density-295-v25/fd-mode.patch  (rc=0)
+[22:18:31]     patching file virtio-devices/src/vsock/vhost_kernel.rs
+[22:18:31]     patching file vmm/src/config.rs
+[22:18:31]     patching file vmm/src/device_manager.rs
+[22:18:31]     patching file vmm/src/vm_config.rs
+[22:18:54] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v25/out/ch-src/Cargo.toml --bin cloud-hypervisor  (rc=101)
+[22:18:54]     570 |     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<File> {
+[22:18:54]         |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[22:18:54]     ...
+[22:18:54]     638 |     pub fn create<P: AsRef<Path>>(path: P) -> io::Result<File> {
+[22:18:54]         |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[22:18:54]     ...
+[22:18:54]     712 |     pub fn create_new<P: AsRef<Path>>(path: P) -> io::Result<File> {
+[22:18:54]         |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[22:18:54]         = help: items from traits can only be used if the trait is in scope
+[22:18:54]     help: there is a method `as_raw_fd` with a similar name, but with different arguments
+[22:18:54]        --> /home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/os/fd/raw.rs:69:5
+[22:18:54]         |
+[22:18:54]      69 |     fn as_raw_fd(&self) -> RawFd;
+[22:18:54]         |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[22:18:54]     help: trait `FromRawFd` which provides `from_raw_fd` is implemented but not in scope; perhaps you want to import it
+[22:18:54]         |
+[22:18:54]      21 + use std::os::fd::FromRawFd;
+[22:18:54]         |
+[22:18:54]     
+[22:18:54]     error[E0599]: no method named `custom_flags` found for mutable reference `&mut OpenOptions` in the current scope
+[22:18:54]        --> virtio-devices/src/vsock/vhost_kernel.rs:226:22
+[22:18:54]         |
+[22:18:54]     223 |                   let file = std::fs::OpenOptions::new()
+[22:18:54]         |  ____________________________-
+[22:18:54]     224 | |                     .read(true)
+[22:18:54]     225 | |                     .write(true)
+[22:18:54]     226 | |                     .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
+[22:18:54]         | |                     -^^^^^^^^^^^^ method not found in `&mut OpenOptions`
+[22:18:54]         | |_____________________|
+[22:18:54]         |
+[22:18:54]         |
+[22:18:54]         = help: items from traits can only be used if the trait is in scope
+[22:18:54]     help: trait `OpenOptionsExt` which provides `custom_flags` is implemented but not in scope; perhaps you want to import it
+[22:18:54]         |
+[22:18:54]      21 + use std::os::unix::fs::OpenOptionsExt;
+[22:18:54]         |
+[22:18:54]     
+[22:18:54]     Some errors have detailed explanations: E0599, E0603.
+[22:18:54]     For more information about an error, try `rustc --explain E0599`.
+[22:18:54]     error: could not compile `virtio-devices` (lib) due to 3 previous errors

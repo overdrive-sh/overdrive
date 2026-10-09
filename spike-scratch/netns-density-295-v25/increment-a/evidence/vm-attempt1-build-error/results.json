@@ -1,0 +1,10 @@
+{
+  "preflight": {
+    "kvm_api_version": 12,
+    "pre_existing_cloud_hypervisor": "",
+    "substrate_ok": true,
+    "systemd_detect_virt": "none",
+    "uname_r": "7.0.0-29-generic",
+    "vhost_vsock_refcnt_at_start": "0"
+  }
+}

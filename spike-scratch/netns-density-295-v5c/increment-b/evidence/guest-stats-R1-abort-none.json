@@ -1,0 +1,1 @@
+{"abort_received":3004,"cells_cleared":3005,"counters":[0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0],"ctl_bytes_read":24032,"ctl_sessions_opened":1,"flows_open":0,"listen_events":4,"requests_written":6010,"t_ms":1791504984607.5588,"udp_associations":3005,"udp_slot_released":1,"udp_teardowns":3004}

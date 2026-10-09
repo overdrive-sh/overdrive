@@ -1,0 +1,171 @@
+{
+  "boot": {
+    "guest_ready": true,
+    "guest_uname": "7.0.0-29-generic"
+  },
+  "cells": {
+    "ctl-nolinger-in-killG": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "in"
+      ],
+      "linger": "no",
+      "n": 15,
+      "order": "G",
+      "tally": {
+        "in:external_client": {
+          "EOF": 15
+        },
+        "in:guest_app": {
+          "EOF": 13,
+          "OTHER_ERR": 1,
+          "RESET": 1
+        }
+      }
+    },
+    "ctl-nolinger-in-killH": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "in"
+      ],
+      "linger": "no",
+      "n": 15,
+      "order": "H",
+      "tally": {
+        "in:external_client": {
+          "EOF": 15
+        },
+        "in:guest_app": {
+          "EOF": 15
+        }
+      }
+    },
+    "ctl-nolinger-out_mesh-killG": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "out_mesh"
+      ],
+      "linger": "no",
+      "n": 15,
+      "order": "G",
+      "tally": {
+        "out_mesh:guest_app": {
+          "EOF": 14,
+          "OTHER_ERR": 1
+        },
+        "out_mesh:remote_mesh": {
+          "EOF": 13,
+          "OTHER_ERR": 1,
+          "RESET": 1
+        }
+      }
+    },
+    "ctl-nolinger-out_mesh-killH": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "out_mesh"
+      ],
+      "linger": "no",
+      "n": 15,
+      "order": "H",
+      "tally": {
+        "out_mesh:guest_app": {
+          "EOF": 15
+        },
+        "out_mesh:remote_mesh": {
+          "EOF": 15
+        }
+      }
+    },
+    "ctl-nolinger-out_nonmesh-killG": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "out_nonmesh"
+      ],
+      "linger": "no",
+      "n": 15,
+      "order": "G",
+      "tally": {
+        "out_nonmesh:guest_app": {
+          "EOF": 15
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "EOF": 15
+        }
+      }
+    },
+    "ctl-nolinger-out_nonmesh-killH": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "out_nonmesh"
+      ],
+      "linger": "no",
+      "n": 15,
+      "order": "H",
+      "tally": {
+        "out_nonmesh:guest_app": {
+          "EOF": 14,
+          "OTHER_ERR": 1
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "EOF": 14,
+          "OTHER_ERR": 1
+        }
+      }
+    }
+  },
+  "cleanup": {
+    "links_added_removed": {
+      "added": [],
+      "removed": [
+        "v5c-h@if63051    UP             b6:76:fd:98:92:59 <BROADCAST,MULTICAST,UP,LOWER_UP> "
+      ]
+    },
+    "modules_caused": [],
+    "modules_diff": [],
+    "netns_added_removed": {
+      "added": [],
+      "removed": [
+        "v5c-ns (id: 1)"
+      ]
+    },
+    "nft_tables_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "routes_added_removed": {
+      "added": [],
+      "removed": [
+        "10.250.205.0/24 dev v5c-h proto kernel scope link src 10.250.205.1 "
+      ]
+    },
+    "v13_cgroups_left": [],
+    "v13_links_left": [],
+    "v13_netns_left": [],
+    "v13_procs_left": ""
+  },
+  "preflight": {
+    "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0",
+    "kvm_api_version": 12,
+    "modules_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ],
+    "substrate_ok": true,
+    "systemd_detect_virt": "none",
+    "uname_r": "7.0.0-29-generic"
+  }
+}

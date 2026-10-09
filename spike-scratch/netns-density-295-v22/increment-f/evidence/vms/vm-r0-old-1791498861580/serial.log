@@ -1,0 +1,23 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.35
+AGENT_READY local_cid=3220
+AGENT_CMD ident => IDENT local_cid=3220 uname=7.0.0-29-generic uptime_s=0.66
+AGENT_CMD hold 1234 250 2100 ET => HOLD port=1234 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1240 250 2600 ET => HOLD port=1240 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1241 250 3100 ET => HOLD port=1241 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1243 250 3600 ET => HOLD port=1243 ok=250 fail=0 errs=[]
+AGENT_CMD close 1234 250 4100 CN 0 => CLOSE port=1234 ok=250 fail=0 errs=[]
+AGENT_CMD close 1234 250 6100 CD 1 => CLOSE port=1234 ok=250 fail=0 errs=[]
+AGENT_CMD close 1240 250 4600 CN 0 => CLOSE port=1240 ok=250 fail=0 errs=[]
+AGENT_CMD close 1240 250 6600 CD 1 => CLOSE port=1240 ok=250 fail=0 errs=[]
+AGENT_CMD close 1241 250 5100 CN 0 => CLOSE port=1241 ok=250 fail=0 errs=[]
+AGENT_CMD close 1241 250 7100 CD 1 => CLOSE port=1241 ok=250 fail=0 errs=[]
+AGENT_CMD close 1243 250 5600 CN 0 => CLOSE port=1243 ok=250 fail=0 errs=[]
+AGENT_CMD close 1243 250 7600 CD 1 => CLOSE port=1243 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1234 250 8100 QO => HOLD port=1234 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1234 250 10100 - => HOLD port=1234 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1240 250 8600 QO => HOLD port=1240 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1240 250 10600 - => HOLD port=1240 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1241 250 9100 QO => HOLD port=1241 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1241 250 11100 - => HOLD port=1241 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1243 250 9600 QO => HOLD port=1243 ok=250 fail=0 errs=[]
+AGENT_CMD hold 1243 250 11600 - => HOLD port=1243 ok=250 fail=0 errs=[]

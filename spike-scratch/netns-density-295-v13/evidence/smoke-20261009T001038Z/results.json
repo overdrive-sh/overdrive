@@ -1,0 +1,132 @@
+{
+  "boot": {
+    "guest_ready": true,
+    "guest_uname": "7.0.0-29-generic"
+  },
+  "cells": {
+    "smoke-in-G": {
+      "kinds": [
+        "in"
+      ],
+      "linger": "yes",
+      "n": 1,
+      "order": "G",
+      "tally": {
+        "in:external_client": {
+          "EOF": 1
+        },
+        "in:guest_app": {
+          "EOF": 1
+        }
+      }
+    },
+    "smoke-in-H": {
+      "kinds": [
+        "in"
+      ],
+      "linger": "yes",
+      "n": 1,
+      "order": "H",
+      "tally": {
+        "in:external_client": {
+          "RESET": 1
+        },
+        "in:guest_app": {
+          "EOF": 1
+        }
+      }
+    },
+    "smoke-out_mesh-G": {
+      "kinds": [
+        "out_mesh"
+      ],
+      "linger": "yes",
+      "n": 1,
+      "order": "G",
+      "tally": {
+        "out_mesh:guest_app": {
+          "RESET": 1
+        },
+        "out_mesh:remote_mesh": {
+          "RESET": 1
+        }
+      }
+    },
+    "smoke-out_mesh-H": {
+      "kinds": [
+        "out_mesh"
+      ],
+      "linger": "yes",
+      "n": 1,
+      "order": "H",
+      "tally": {
+        "out_mesh:guest_app": {
+          "RESET": 1
+        },
+        "out_mesh:remote_mesh": {
+          "RESET": 1
+        }
+      }
+    },
+    "smoke-out_nonmesh-G": {
+      "kinds": [
+        "out_nonmesh"
+      ],
+      "linger": "yes",
+      "n": 1,
+      "order": "G",
+      "tally": {
+        "out_nonmesh:guest_app": {
+          "RESET": 1
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "EOF": 1
+        }
+      }
+    },
+    "smoke-out_nonmesh-H": {
+      "kinds": [
+        "out_nonmesh"
+      ],
+      "linger": "yes",
+      "n": 1,
+      "order": "H",
+      "tally": {
+        "out_nonmesh:guest_app": {
+          "EOF": 1
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "RESET": 1
+        }
+      }
+    }
+  },
+  "cleanup": {
+    "links_unchanged": false,
+    "modules_caused": [],
+    "modules_diff": [],
+    "netns_unchanged": false,
+    "nft_tables_unchanged": true,
+    "routes_unchanged": false,
+    "v13_cgroups_left": [],
+    "v13_procs_left": ""
+  },
+  "preflight": {
+    "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0",
+    "kvm_api_version": 12,
+    "modules_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ],
+    "substrate_ok": true,
+    "systemd_detect_virt": "none",
+    "uname_r": "7.0.0-29-generic"
+  }
+}

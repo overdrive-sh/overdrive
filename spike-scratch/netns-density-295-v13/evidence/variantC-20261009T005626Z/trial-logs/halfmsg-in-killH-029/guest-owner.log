@@ -1,0 +1,9 @@
+{"ack_oob":true,"arm":true,"ev":"programs_loaded","flush":true,"intake_park":true,"pid":5904,"programs":[{"id":3248,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":3249,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":3250,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":3251,"name":"lo_decode(tcx lo egress)","tag":"59011738e914c2f5","verified_insns":423},{"id":3252,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":3253,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":3254,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":3255,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":3256,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":3257,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":3258,"name":"sockops(root cgroup)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"guest","t_ns":"1791507957434743084","udp_park":true}
+{"ev":"park_pool","slots":256,"t_ns":"1791507957442400168"}
+{"ev":"guest_ready","slots":64,"t_ns":"1791507957447158268","w":"10.99.7.2"}
+{"client":"172.29.131.2:56410","ev":"tcp_accept","flow":2,"gport":7300,"t_ns":"1791507958825097681"}
+{"ev":"leg_hup","flow":2,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791507959127018892","vsock":true}
+{"ev":"ctl_closed","t_ns":"1791507959127077069"}
+{"age_ms":302,"ev":"flow_closed","flow":2,"kind":2,"reset":true,"t_ns":"1791507959127155267","why":"ctl_lost"}
+---
+OWNER_READY role=guest pid=5904

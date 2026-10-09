@@ -1,0 +1,42 @@
+{
+  "env": {
+    "cid": 3220,
+    "cid_bystander": 3221,
+    "n_per_port_per_round": 250,
+    "other_ch_processes_at_start": "",
+    "ports": [
+      1234,
+      1240,
+      1241,
+      1243
+    ],
+    "rounds": 4,
+    "uname_r": "7.0.0-29-generic",
+    "virt": "none"
+  },
+  "examples": {},
+  "modules_left": [],
+  "modules_unloaded_by_me": [],
+  "pins": {
+    "ch": "f72bb9c0f4fb72eb1e750e8dfde1a4a090e5034acfbcd5629579133183e7c161",
+    "guest_kernel": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+    "initramfs": "d3f2e05ebc3c214b466b4304f35e52f5041c5e1488f609c8cd6385968a403e8f",
+    "probe": "62ab2cf16d21033c2963f693be85af7936ed62bcdd9e53c002ce41ff93d2748d"
+  },
+  "tallies": {
+    "E.setup": {
+      "1234": {
+        "live flags=IN+OUT": 250
+      },
+      "1240": {
+        "live flags=IN+OUT": 250
+      },
+      "1241": {
+        "live flags=IN+OUT": 250
+      },
+      "1243": {
+        "live flags=IN+OUT": 250
+      }
+    }
+  }
+}

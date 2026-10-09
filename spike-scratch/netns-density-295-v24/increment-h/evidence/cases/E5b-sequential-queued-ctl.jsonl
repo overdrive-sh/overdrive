@@ -1,0 +1,210 @@
+{"k": "host_ctl_end", "peer": [3241, 2754427846], "host_closed": true, "why": "EOFError('host closes')", "h": 4785271.657672008}
+{"k": "session_lost", "n": 7, "t": 69176562, "partial": 0, "errno": 0, "eof": true, "h": 4785271.658095415}
+{"k": "session_up", "n": 8, "t": 69226779, "h": 4785271.708169048}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785271.713455386}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17900, "t": 69258115, "h": 4785271.739396979}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17900, "t_accept": 69258001, "t_c": 69258115, "t_dec": 69258174, "c_port": 43468, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 1, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785271.73950343}
+{"k": "app", "c_port": 43468, "accepted_t": 69258198, "first": "reset", "first_t": 69258202, "end": "reset", "end_t": 69258202, "bytes": 0, "h": 4785271.739541847}
+{"k": "host_ctl_end", "peer": [3241, 2754427847], "host_closed": true, "why": "EOFError('host closes')", "h": 4785271.768060761}
+{"k": "session_lost", "n": 8, "t": 69286919, "partial": 0, "errno": 0, "eof": true, "h": 4785271.773335201}
+{"k": "session_up", "n": 9, "t": 69337185, "h": 4785271.818598953}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785271.828759379}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17901, "t": 69368426, "h": 4785271.849732212}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17901, "t_accept": 69368334, "t_c": 69368426, "t_dec": 69368477, "c_port": 43472, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 1, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785271.849835999}
+{"k": "app", "c_port": 43472, "accepted_t": 69368508, "first": "reset", "first_t": 69368512, "end": "reset", "end_t": 69368512, "bytes": 0, "h": 4785271.849873285}
+{"k": "host_ctl_end", "peer": [3241, 2754427848], "host_closed": true, "why": "EOFError('host closes')", "h": 4785271.879036047}
+{"k": "session_lost", "n": 9, "t": 69397882, "partial": 0, "errno": 0, "eof": true, "h": 4785271.879278002}
+{"k": "session_up", "n": 10, "t": 69448218, "h": 4785271.929630013}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785271.929854622}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17902, "t": 69481330, "h": 4785271.962666548}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17902, "t_accept": 69481187, "t_c": 69481330, "t_dec": 69481421, "c_port": 43484, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785271.962762933}
+{"k": "app", "c_port": 43484, "accepted_t": 69481471, "first": "reset", "first_t": 69481477, "end": "reset", "end_t": 69481477, "bytes": 0, "h": 4785271.962801571}
+{"k": "host_ctl_end", "peer": [3241, 2754427849], "host_closed": true, "why": "EOFError('host closes')", "h": 4785271.980114545}
+{"k": "session_lost", "n": 10, "t": 69499041, "partial": 0, "errno": 0, "eof": true, "h": 4785271.98551843}
+{"k": "session_up", "n": 11, "t": 69549362, "h": 4785272.030803804}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.04045945}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17903, "t": 69580136, "h": 4785272.061460466}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17903, "t_accept": 69579954, "t_c": 69580136, "t_dec": 69580229, "c_port": 43500, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.061617392}
+{"k": "app", "c_port": 43500, "accepted_t": 69580279, "first": "reset", "first_t": 69580285, "end": "reset", "end_t": 69580285, "bytes": 0, "h": 4785272.061671193}
+{"k": "host_ctl_end", "peer": [3241, 2754427850], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.090708016}
+{"k": "session_lost", "n": 11, "t": 69609617, "partial": 0, "errno": 0, "eof": true, "h": 4785272.090950451}
+{"k": "session_up", "n": 12, "t": 69659936, "h": 4785272.141409765}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.152167279}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17904, "t": 69693405, "h": 4785272.174728374}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17904, "t_accept": 69693263, "t_c": 69693405, "t_dec": 69693496, "c_port": 43512, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.17483891}
+{"k": "app", "c_port": 43512, "accepted_t": 69693527, "first": "reset", "first_t": 69693534, "end": "reset", "end_t": 69693534, "bytes": 0, "h": 4785272.174879511}
+{"k": "host_ctl_end", "peer": [3241, 2754427851], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.202421304}
+{"k": "session_lost", "n": 12, "t": 69721337, "partial": 0, "errno": 0, "eof": true, "h": 4785272.207768263}
+{"k": "session_up", "n": 13, "t": 69771609, "h": 4785272.253012075}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.263782119}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17905, "t": 69804648, "h": 4785272.285968759}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17905, "t_accept": 69804504, "t_c": 69804648, "t_dec": 69804735, "c_port": 43526, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.286159016}
+{"k": "app", "c_port": 43526, "accepted_t": 69804786, "first": "reset", "first_t": 69804814, "end": "reset", "end_t": 69804814, "bytes": 0, "h": 4785272.286221379}
+{"k": "host_ctl_end", "peer": [3241, 2754427852], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.314053389}
+{"k": "session_lost", "n": 13, "t": 69832958, "partial": 0, "errno": 0, "eof": true, "h": 4785272.319389632}
+{"k": "session_up", "n": 14, "t": 69883276, "h": 4785272.364724261}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.374394048}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17906, "t": 69913811, "h": 4785272.395132098}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17906, "t_accept": 69913655, "t_c": 69913811, "t_dec": 69913902, "c_port": 43530, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.395269725}
+{"k": "app", "c_port": 43530, "accepted_t": 69913931, "first": "reset", "first_t": 69913937, "end": "reset", "end_t": 69913937, "bytes": 0, "h": 4785272.395314092}
+{"k": "host_ctl_end", "peer": [3241, 2754427853], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.4246402}
+{"k": "session_lost", "n": 14, "t": 69943543, "partial": 0, "errno": 0, "eof": true, "h": 4785272.424862775}
+{"k": "session_up", "n": 15, "t": 69993844, "h": 4785272.475416811}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.485843628}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17907, "t": 70027078, "h": 4785272.508393175}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17907, "t_accept": 70026910, "t_c": 70027078, "t_dec": 70027151, "c_port": 43532, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 1, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.508528299}
+{"k": "app", "c_port": 43532, "accepted_t": 70027206, "first": "reset", "first_t": 70027213, "end": "reset", "end_t": 70027213, "bytes": 0, "h": 4785272.508611304}
+{"k": "host_ctl_end", "peer": [3241, 2754427854], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.536525366}
+{"k": "session_lost", "n": 15, "t": 70055442, "partial": 0, "errno": 0, "eof": true, "h": 4785272.541893968}
+{"k": "session_up", "n": 16, "t": 70105841, "h": 4785272.587395859}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.597142341}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17908, "t": 70138150, "h": 4785272.619469013}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17908, "t_accept": 70137990, "t_c": 70138150, "t_dec": 70138223, "c_port": 43548, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 1, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.619609284}
+{"k": "app", "c_port": 43548, "accepted_t": 70138286, "first": "reset", "first_t": 70138292, "end": "reset", "end_t": 70138293, "bytes": 0, "h": 4785272.61967272}
+{"k": "host_ctl_end", "peer": [3241, 2754427855], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.647390327}
+{"k": "session_lost", "n": 16, "t": 70166287, "partial": 0, "errno": 0, "eof": true, "h": 4785272.647620523}
+{"k": "session_up", "n": 17, "t": 70216694, "h": 4785272.698209702}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.708585893}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17909, "t": 70249122, "h": 4785272.730429727}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17909, "t_accept": 70249033, "t_c": 70249122, "t_dec": 70249164, "c_port": 43554, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 0, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.730533413}
+{"k": "app", "c_port": 43554, "accepted_t": 70249227, "first": "reset", "first_t": 70249233, "end": "reset", "end_t": 70249233, "bytes": 0, "h": 4785272.730572212}
+{"k": "host_ctl_end", "peer": [3241, 2754427856], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.758828059}
+{"k": "session_lost", "n": 17, "t": 70277704, "partial": 0, "errno": 0, "eof": true, "h": 4785272.759029092}
+{"k": "session_up", "n": 18, "t": 70327954, "h": 4785272.809304859}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.814559149}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17910, "t": 70360157, "h": 4785272.841474228}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17910, "t_accept": 70359971, "t_c": 70360157, "t_dec": 70360246, "c_port": 43560, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.841642992}
+{"k": "app", "c_port": 43560, "accepted_t": 70360297, "first": "reset", "first_t": 70360303, "end": "reset", "end_t": 70360303, "bytes": 0, "h": 4785272.841696202}
+{"k": "host_ctl_end", "peer": [3241, 2754427857], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.870035325}
+{"k": "session_lost", "n": 18, "t": 70388921, "partial": 0, "errno": 0, "eof": true, "h": 4785272.87025109}
+{"k": "session_up", "n": 19, "t": 70439213, "h": 4785272.920572235}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785272.930704128}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17911, "t": 70471473, "h": 4785272.952789747}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17911, "t_accept": 70471336, "t_c": 70471473, "t_dec": 70471558, "c_port": 43576, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785272.952940554}
+{"k": "app", "c_port": 43576, "accepted_t": 70471589, "first": "reset", "first_t": 70471595, "end": "reset", "end_t": 70471595, "bytes": 0, "h": 4785272.952982857}
+{"k": "host_ctl_end", "peer": [3241, 2754427858], "host_closed": true, "why": "EOFError('host closes')", "h": 4785272.980957862}
+{"k": "session_lost", "n": 19, "t": 70499870, "partial": 0, "errno": 0, "eof": true, "h": 4785272.981227388}
+{"k": "session_up", "n": 20, "t": 70550207, "h": 4785273.031557827}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.041641788}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17912, "t": 70582595, "h": 4785273.063930712}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17912, "t_accept": 70582460, "t_c": 70582595, "t_dec": 70582680, "c_port": 43584, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.064092937}
+{"k": "app", "c_port": 43584, "accepted_t": 70582724, "first": "reset", "first_t": 70582730, "end": "reset", "end_t": 70582730, "bytes": 0, "h": 4785273.064136412}
+{"k": "host_ctl_end", "peer": [3241, 2754427859], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.091882462}
+{"k": "session_lost", "n": 20, "t": 70610770, "partial": 0, "errno": 0, "eof": true, "h": 4785273.092126529}
+{"k": "session_up", "n": 21, "t": 70661109, "h": 4785273.142468787}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.152622502}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17913, "t": 70693746, "h": 4785273.175061633}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17913, "t_accept": 70693610, "t_c": 70693746, "t_dec": 70693857, "c_port": 43594, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.17518593}
+{"k": "app", "c_port": 43594, "accepted_t": 70693886, "first": "reset", "first_t": 70693892, "end": "reset", "end_t": 70693892, "bytes": 0, "h": 4785273.175226812}
+{"k": "host_ctl_end", "peer": [3241, 2754427860], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.2028654}
+{"k": "session_lost", "n": 21, "t": 70721766, "partial": 0, "errno": 0, "eof": true, "h": 4785273.208153831}
+{"k": "session_up", "n": 22, "t": 70772093, "h": 4785273.253447578}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.262863383}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17914, "t": 70802781, "h": 4785273.284103208}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17914, "t_accept": 70802645, "t_c": 70802781, "t_dec": 70802879, "c_port": 43608, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.284252904}
+{"k": "app", "c_port": 43608, "accepted_t": 70802925, "first": "reset", "first_t": 70802932, "end": "reset", "end_t": 70802932, "bytes": 0, "h": 4785273.284320786}
+{"k": "host_ctl_end", "peer": [3241, 2754427861], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.313130858}
+{"k": "session_lost", "n": 22, "t": 70832054, "partial": 0, "errno": 0, "eof": true, "h": 4785273.318472109}
+{"k": "session_up", "n": 23, "t": 70882360, "h": 4785273.363720277}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.372844503}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17915, "t": 70913875, "h": 4785273.395193758}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17915, "t_accept": 70913723, "t_c": 70913875, "t_dec": 70913965, "c_port": 43620, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.395376053}
+{"k": "app", "c_port": 43620, "accepted_t": 70913993, "first": "reset", "first_t": 70913999, "end": "reset", "end_t": 70914000, "bytes": 0, "h": 4785273.395419418}
+{"k": "host_ctl_end", "peer": [3241, 2754427862], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.423101311}
+{"k": "session_lost", "n": 23, "t": 70942000, "partial": 0, "errno": 0, "eof": true, "h": 4785273.428478787}
+{"k": "session_up", "n": 24, "t": 70992354, "h": 4785273.473701607}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.483252415}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17916, "t": 71023139, "h": 4785273.504456967}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17916, "t_accept": 71022964, "t_c": 71023139, "t_dec": 71023229, "c_port": 43624, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.504578781}
+{"k": "app", "c_port": 43624, "accepted_t": 71023281, "first": "reset", "first_t": 71023287, "end": "reset", "end_t": 71023288, "bytes": 0, "h": 4785273.504635616}
+{"k": "host_ctl_end", "peer": [3241, 2754427863], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.533504557}
+{"k": "session_lost", "n": 24, "t": 71052426, "partial": 0, "errno": 0, "eof": true, "h": 4785273.538852458}
+{"k": "session_up", "n": 25, "t": 71102831, "h": 4785273.58444885}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.594308043}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17917, "t": 71134413, "h": 4785273.615727749}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17917, "t_accept": 71134269, "t_c": 71134413, "t_dec": 71134485, "c_port": 43626, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.6158685}
+{"k": "app", "c_port": 43626, "accepted_t": 71134539, "first": "reset", "first_t": 71134546, "end": "reset", "end_t": 71134546, "bytes": 0, "h": 4785273.615939918}
+{"k": "host_ctl_end", "peer": [3241, 2754427864], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.644547305}
+{"k": "session_lost", "n": 25, "t": 71163451, "partial": 0, "errno": 0, "eof": true, "h": 4785273.649890318}
+{"k": "session_up", "n": 26, "t": 71213895, "h": 4785273.695493641}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.705528789}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17918, "t": 71245545, "h": 4785273.726845109}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17918, "t_accept": 71245454, "t_c": 71245545, "t_dec": 71245587, "c_port": 43642, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 1, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.727025961}
+{"k": "app", "c_port": 43642, "accepted_t": 71245650, "first": "reset", "first_t": 71245656, "end": "reset", "end_t": 71245656, "bytes": 0, "h": 4785273.727074694}
+{"k": "host_ctl_end", "peer": [3241, 2754427865], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.755768641}
+{"k": "session_lost", "n": 26, "t": 71274680, "partial": 0, "errno": 0, "eof": true, "h": 4785273.756011667}
+{"k": "session_up", "n": 27, "t": 71325053, "h": 4785273.806479143}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.811804039}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17919, "t": 71358817, "h": 4785273.840144975}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17919, "t_accept": 71358659, "t_c": 71358817, "t_dec": 71358907, "c_port": 43646, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.840258155}
+{"k": "app", "c_port": 43646, "accepted_t": 71358961, "first": "reset", "first_t": 71358968, "end": "reset", "end_t": 71358968, "bytes": 0, "h": 4785273.840297584}
+{"k": "host_ctl_end", "peer": [3241, 2754427866], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.867817544}
+{"k": "session_lost", "n": 27, "t": 71386716, "partial": 0, "errno": 0, "eof": true, "h": 4785273.873068449}
+{"k": "session_up", "n": 28, "t": 71437068, "h": 4785273.918493544}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785273.923844029}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17920, "t": 71470156, "h": 4785273.951479402}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17920, "t_accept": 71469984, "t_c": 71470156, "t_dec": 71470247, "c_port": 43648, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785273.951654055}
+{"k": "app", "c_port": 43648, "accepted_t": 71470298, "first": "reset", "first_t": 71470305, "end": "reset", "end_t": 71470305, "bytes": 0, "h": 4785273.95171762}
+{"k": "host_ctl_end", "peer": [3241, 2754427867], "host_closed": true, "why": "EOFError('host closes')", "h": 4785273.9791248}
+{"k": "session_lost", "n": 28, "t": 71498037, "partial": 0, "errno": 0, "eof": true, "h": 4785273.979375478}
+{"k": "session_up", "n": 29, "t": 71548360, "h": 4785274.029779858}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.040260536}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17921, "t": 71581449, "h": 4785274.062789973}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17921, "t_accept": 71581308, "t_c": 71581449, "t_dec": 71581536, "c_port": 43650, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.062964185}
+{"k": "app", "c_port": 43650, "accepted_t": 71581587, "first": "reset", "first_t": 71581594, "end": "reset", "end_t": 71581594, "bytes": 0, "h": 4785274.063057476}
+{"k": "host_ctl_end", "peer": [3241, 2754427868], "host_closed": true, "why": "EOFError('host closes')", "h": 4785274.091128825}
+{"k": "session_lost", "n": 29, "t": 71610046, "partial": 0, "errno": 0, "eof": true, "h": 4785274.096455074}
+{"k": "session_up", "n": 30, "t": 71660396, "h": 4785274.141774529}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.1521039}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17922, "t": 71692886, "h": 4785274.174232543}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17922, "t_accept": 71692713, "t_c": 71692886, "t_dec": 71692983, "c_port": 43664, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 3, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.174348658}
+{"k": "app", "c_port": 43664, "accepted_t": 71693067, "first": "reset", "first_t": 71693074, "end": "reset", "end_t": 71693074, "bytes": 0, "h": 4785274.174413025}
+{"k": "host_ctl_end", "peer": [3241, 2754427869], "host_closed": true, "why": "EOFError('host closes')", "h": 4785274.202343572}
+{"k": "session_lost", "n": 30, "t": 71721257, "partial": 0, "errno": 0, "eof": true, "h": 4785274.207680467}
+{"k": "session_up", "n": 31, "t": 71771583, "h": 4785274.252956377}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.2633873}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17923, "t": 71804271, "h": 4785274.28563361}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17923, "t_accept": 71804117, "t_c": 71804271, "t_dec": 71804365, "c_port": 43670, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.285833712}
+{"k": "app", "c_port": 43670, "accepted_t": 71804416, "first": "reset", "first_t": 71804423, "end": "reset", "end_t": 71804423, "bytes": 0, "h": 4785274.285888214}
+{"k": "host_ctl_end", "peer": [3241, 2754427870], "host_closed": true, "why": "EOFError('host closes')", "h": 4785274.313646953}
+{"k": "session_lost", "n": 31, "t": 71832562, "partial": 0, "errno": 0, "eof": true, "h": 4785274.318986301}
+{"k": "session_up", "n": 32, "t": 71882909, "h": 4785274.364356423}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.374437589}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17924, "t": 71913833, "h": 4785274.395137161}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17924, "t_accept": 71913670, "t_c": 71913833, "t_dec": 71913924, "c_port": 43682, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.395306366}
+{"k": "app", "c_port": 43682, "accepted_t": 71913954, "first": "reset", "first_t": 71913961, "end": "reset", "end_t": 71913961, "bytes": 0, "h": 4785274.395383862}
+{"k": "host_ctl_end", "peer": [3241, 2754427871], "host_closed": true, "why": "EOFError('host closes')", "h": 4785274.424678674}
+{"k": "session_lost", "n": 32, "t": 71943596, "partial": 0, "errno": 0, "eof": true, "h": 4785274.430020926}
+{"k": "session_up", "n": 33, "t": 71993925, "h": 4785274.475413232}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.485619336}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17925, "t": 72024997, "h": 4785274.506299008}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17925, "t_accept": 72024858, "t_c": 72024997, "t_dec": 72025102, "c_port": 43692, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.506424437}
+{"k": "app", "c_port": 43692, "accepted_t": 72025132, "first": "reset", "first_t": 72025139, "end": "reset", "end_t": 72025139, "bytes": 0, "h": 4785274.506483176}
+{"k": "host_ctl_end", "peer": [3241, 2754427872], "host_closed": true, "why": "EOFError('host closes')", "h": 4785274.535858809}
+{"k": "session_lost", "n": 33, "t": 72054802, "partial": 0, "errno": 0, "eof": true, "h": 4785274.541195843}
+{"k": "session_up", "n": 34, "t": 72105125, "h": 4785274.586606116}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.596848565}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17926, "t": 72136321, "h": 4785274.617622369}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17926, "t_accept": 72136172, "t_c": 72136321, "t_dec": 72136419, "c_port": 43694, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.617741528}
+{"k": "app", "c_port": 43694, "accepted_t": 72136425, "first": "reset", "first_t": 72136431, "end": "reset", "end_t": 72136431, "bytes": 0, "h": 4785274.617780998}
+{"k": "host_ctl_end", "peer": [3241, 2754427873], "host_closed": true, "why": "EOFError('host closes')", "h": 4785274.647120406}
+{"k": "session_lost", "n": 34, "t": 72166063, "partial": 0, "errno": 0, "eof": true, "h": 4785274.65247665}
+{"k": "session_up", "n": 35, "t": 72216384, "h": 4785274.697814753}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.706861152}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17927, "t": 72247493, "h": 4785274.728796194}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17927, "t_accept": 72247354, "t_c": 72247493, "t_dec": 72247584, "c_port": 43702, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.728905759}
+{"k": "app", "c_port": 43702, "accepted_t": 72247610, "first": "reset", "first_t": 72247616, "end": "reset", "end_t": 72247616, "bytes": 0, "h": 4785274.728941723}
+{"k": "host_ctl_end", "peer": [3241, 2754427874], "host_closed": true, "why": "EOFError('host closes')", "h": 4785274.757102968}
+{"k": "session_lost", "n": 35, "t": 72276032, "partial": 0, "errno": 0, "eof": true, "h": 4785274.762428856}
+{"k": "session_up", "n": 36, "t": 72326358, "h": 4785274.8078072}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.818307838}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17928, "t": 72358454, "h": 4785274.839758391}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17928, "t_accept": 72358314, "t_c": 72358454, "t_dec": 72358550, "c_port": 43706, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.839873785}
+{"k": "app", "c_port": 43706, "accepted_t": 72358558, "first": "reset", "first_t": 72358564, "end": "reset", "end_t": 72358564, "bytes": 0, "h": 4785274.839911902}
+{"k": "host_ctl_end", "peer": [3241, 2754427875], "host_closed": true, "why": "EOFError('host closes')", "h": 4785274.868551076}
+{"k": "session_lost", "n": 36, "t": 72387453, "partial": 0, "errno": 0, "eof": true, "h": 4785274.873872447}
+{"k": "session_up", "n": 37, "t": 72437780, "h": 4785274.919297342}
+{"k": "host_ctl_hello", "peer_cid": 3241, "h": 4785274.92971207}
+{"k": "stage", "label": "E5b-sequential-queued-ctl", "trial": 17929, "t": 72469631, "h": 4785274.950946548}
+{"k": "flow", "label": "E5b-sequential-queued-ctl", "trial": 17929, "t_accept": 72469490, "t_c": 72469631, "t_dec": 72469718, "c_port": 49104, "hold_ms": 0, "pre": {"rev": 8193, "peek_rc": 1, "peek_err": 0}, "req": {"n": 16, "err": 0, "eof": false}, "hold_obs": {"vg_event_t": -1, "vg_event_rev": 0, "abort_ctl_t": -1}, "obs": {"rev": 8193, "peek_rc": 0, "peek_err": 0, "rd_rc": 0, "rd_err": 0, "rd_dt_us": 2, "wr_rc": -1, "wr_err": 32, "so_err": 0}, "paired_sent": false, "fwd_bytes": 0, "decision": "teardown_vg", "h": 4785274.951076834}
+{"k": "app", "c_port": 49104, "accepted_t": 72469744, "first": "reset", "first_t": 72469750, "end": "reset", "end_t": 72469750, "bytes": 0, "h": 4785274.951127911}

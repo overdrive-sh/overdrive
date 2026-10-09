@@ -1,0 +1,232 @@
+[00:33:21] === preflight
+[00:33:21] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[00:33:21]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[00:33:21]     none
+[00:33:21]     model name	: AMD EPYC 8024P 8-Core Processor
+[00:33:21]     16
+[00:33:21]     crw-rw---- 1 root kvm 10, 232 Oct  9 00:30 /dev/kvm
+[00:33:22] substrate probes: {"machine": "x86_64", "virt": "none", "kvm_chardev": true, "kvm_api": 12, "kvm_create_vm": true, "cpu_virt_ext": true, "uname_r": "7.0.0-29-generic"}
+[00:33:22] === build
+[00:33:22] $ sha256sum /tmp/v18-work/prior/cloud-hypervisor; /tmp/v18-work/prior/cloud-hypervisor --version  (rc=0)
+[00:33:22]     bb8f79275fd85a2ff89de33f247e90af6523c6b2db1f7c7de566a14aa8b512a8  /tmp/v18-work/prior/cloud-hypervisor
+[00:33:22]     cloud-hypervisor v53.0.0
+[00:33:22]     Migration Protocol Versions: 0
+[00:33:22] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --offline --manifest-path /tmp/v18-work/bpf/Cargo.toml  (rc=0)
+[00:33:22]         Finished `release` profile [optimized] target(s) in 0.05s
+[00:33:22] $ cargo build --release --target x86_64-unknown-linux-gnu --offline --manifest-path /tmp/v18-work/vfwd/Cargo.toml  (rc=0)
+[00:33:22]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[00:33:22]         |            ^^^^^^
+[00:33:22]     
+[00:33:22]     warning: `vfwd` (bin "vfwd") generated 4 warnings (run `cargo fix --bin "vfwd" -p vfwd` to apply 1 suggestion)
+[00:33:22]         Finished `release` profile [optimized + debuginfo] target(s) in 0.03s
+[00:33:22] $ file /tmp/v18-work/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /tmp/v18-work/prior/cloud-hypervisor /tmp/v18-work/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /tmp/v18-work/prior/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[00:33:22]     /tmp/v18-work/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=74e973e67409235ceb65af73b80c5b9a5e366194, with debug_info, not stripped
+[00:33:22]     /tmp/v18-work/prior/cloud-hypervisor:                                ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[00:33:22]     /tmp/v18-work/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[00:33:22]     cloud-hypervisor v53.0.0
+[00:33:22]     Migration Protocol Versions: 0
+[00:33:22]     bpf-linker 0.0.0
+[00:33:22]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[00:33:22]     rustc 1.95.0 (59807616e 2026-04-14)
+[00:33:22] === guest image
+[00:33:23] $ cd /tmp/v18-work/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /tmp/v18-work/out/initramfs.cpio.gz  (rc=0)
+[00:33:25] launch VM: /tmp/v18-work/prior/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v18-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park,--declare,7300,7301,7302 --cpus boot=2 --memory size=1024M --serial file=/tmp/v18-work/out/vm-increment-e-1791506005/serial.log --console off --vsock cid=3312,backend=vhost-kernel --log-file /tmp/v18-work/out/vm-increment-e-1791506005/ch.log -v
+[00:33:27] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.62
+net.ipv4.tcp_fwmark_accept = 1
+net.ipv4.fwmark_reflect = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33m5e:c5:66:9e:16:8b [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+
+thread 'main' (112) panicked at src/owner.rs:206:18:
+unknown arg 7301
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+   2: vfwd::owner::parse_cfg
+             at ./tmp/v18-work/vfwd/src/owner.rs:206:18
+   3: vfwd::owner::run
+             at ./tmp/v18-work/vfwd/src/owner.rs:659:13
+   4: vfwd::main
+             at ./tmp/v18-work/vfwd/src/main.rs:35:29
+   5: core::ops::function::FnOnce::call_once
+             at ./home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+GUEST_READY
+
+[00:33:28] guest$ uname -a  (rc=0, 0.0s)
+[00:33:28]     Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[00:33:28] $ ip netns add v18-p  (rc=0)
+[00:33:28] $ ip link add v18-h type veth peer name v18-p0  (rc=0)
+[00:33:28] $ ip link set v18-p0 netns v18-p  (rc=0)
+[00:33:28] $ ip addr add 10.250.218.1/24 dev v18-h  (rc=0)
+[00:33:28] $ ip link set v18-h mtu 1500 up  (rc=0)
+[00:33:28] $ ip -n v18-p addr add 10.250.218.2/24 dev v18-p0  (rc=0)
+[00:33:28] $ ip -n v18-p link set v18-p0 mtu 1500 up  (rc=0)
+[00:33:28] $ ip -n v18-p link set lo up  (rc=0)
+[00:33:28] $ ip netns exec v18-p sysctl -w net.core.rmem_max=33554432  (rc=0)
+[00:33:28]     sysctl: setting key "net.core.rmem_max": Operation not permitted
+[00:33:28] $ ip -d link show v18-h; ip -n v18-p -br addr; ethtool -k v18-h | grep -E 'udp|frag|segment|generic-receive|tcp-seg'; ip netns exec v18-p ss -lun  (rc=0)
+[00:33:28]     63048: v18-h@if63047: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+[00:33:28]         link/ether 16:65:21:f4:52:d3 brd ff:ff:ff:ff:ff:ff link-netns v18-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 
+[00:33:28]         veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+[00:33:28]     lo               UNKNOWN        127.0.0.1/8 ::1/128 
+[00:33:28]     v18-p0@if63048   UP             10.250.218.2/24 fe80::c87b:f7ff:fe8c:f0ca/64 
+[00:33:28]     	tx-scatter-gather-fraglist: on
+[00:33:28]     tcp-segmentation-offload: on
+[00:33:28]     	tx-tcp-segmentation: on
+[00:33:28]     	tx-tcp-ecn-segmentation: on
+[00:33:28]     	tx-tcp-mangleid-segmentation: on
+[00:33:28]     	tx-tcp6-segmentation: on
+[00:33:28]     	tx-tcp-accecn-segmentation: on
+[00:33:28]     generic-segmentation-offload: on
+[00:33:28]     generic-receive-offload: off
+[00:33:28]     tx-fcoe-segmentation: off [fixed]
+[00:33:28]     tx-gre-segmentation: on
+[00:33:28]     tx-gre-csum-segmentation: on
+[00:33:28]     tx-ipxip4-segmentation: on
+[00:33:28]     tx-ipxip6-segmentation: on
+[00:33:28]     tx-udp_tnl-segmentation: on
+[00:33:28]     tx-udp_tnl-csum-segmentation: on
+[00:33:28]     tx-tunnel-remcsum-segmentation: off [fixed]
+[00:33:28]     tx-sctp-segmentation: on
+[00:33:28]     tx-esp-segmentation: off [fixed]
+[00:33:28]     tx-udp-segmentation: on
+[00:33:28]     rx-udp_tunnel-port-offload: off [fixed]
+[00:33:28]     rx-udp-gro-forwarding: off
+[00:33:28]     State  Recv-Q Send-Q Local Address:Port Peer Address:Port
+[00:33:28]     UNCONN 0      0       10.250.218.2:7218      0.0.0.0:*
+[00:33:32] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[00:33:32]     OWNER_READY role=guest pid=125
+[00:33:32] $ ip netns exec v18-p sysctl -w net.ipv4.ipfrag_time=2 net.ipv4.ipfrag_high_thresh=134217728 net.ipv4.ipfrag_low_thresh=100663296  (rc=0)
+[00:33:32]     net.ipv4.ipfrag_time = 2
+[00:33:32]     net.ipv4.ipfrag_high_thresh = 134217728
+[00:33:32]     net.ipv4.ipfrag_low_thresh = 100663296
+[00:33:44] $ tc qdisc add dev v18-h root netem delay 20ms limit 1  (rc=0)
+[00:34:02] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame --sizes 4096 --reps 40 --seed 1 --threads 1 --timeout-ms 400   (rc=0, 16.3s, 42 lines)
+[00:34:03] PHASE e_s3_congested_0: PASS=False sent=40 ack_ok=0 peer_rx=0 missing=40 extra=0 shaped=40 escaped_ctr=40 counters={'tc_decoded': 40, 'redirect_ok': 40, 'sent_calls': 42016, 'frag_first': 40, 'frag_shift': 39, 'hybrid_escaped': 40} guest={'udp_capture': 40, 'encoded': 40, 'strp_frames': 40, 'release': 40, 'tc_apport': 40} peer_snmp={'Ip:ReasmReqds': 39, 'Ip:ReasmFails': 38, 'Ip:ReasmTimeout': 38}
+[00:34:21] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame --sizes 4096 --reps 40 --seed 1 --threads 1 --timeout-ms 400   (rc=0, 16.3s, 42 lines)
+[00:34:23] PHASE e_s3_congested_1: PASS=False sent=40 ack_ok=0 peer_rx=0 missing=40 extra=0 shaped=40 escaped_ctr=40 counters={'tc_decoded': 40, 'redirect_ok': 40, 'sent_calls': 41812, 'frag_first': 40, 'frag_shift': 40, 'hybrid_escaped': 40} guest={'udp_capture': 40, 'encoded': 40, 'strp_frames': 40, 'release': 40, 'tc_apport': 40} peer_snmp={'Ip:ReasmReqds': 40, 'Ip:ReasmFails': 39, 'Ip:ReasmTimeout': 39}
+[00:34:40] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame --sizes 4096 --reps 40 --seed 1 --threads 1 --timeout-ms 400   (rc=0, 16.3s, 42 lines)
+[00:34:42] PHASE e_s3_congested_2: PASS=False sent=40 ack_ok=0 peer_rx=0 missing=40 extra=0 shaped=40 escaped_ctr=40 counters={'tc_decoded': 40, 'redirect_ok': 40, 'sent_calls': 41713, 'frag_first': 40, 'frag_shift': 40, 'hybrid_escaped': 40} guest={'udp_capture': 40, 'encoded': 40, 'strp_frames': 40, 'release': 40, 'tc_apport': 40} peer_snmp={'Ip:ReasmReqds': 40, 'Ip:ReasmFails': 39, 'Ip:ReasmTimeout': 39}
+[00:34:42] $ tc qdisc del dev v18-h root  (rc=0)
+[00:34:48] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,rand --sizes 4096 --reps 100 --seed 1 --threads 1 --timeout-ms 2000   (rc=0, 2.3s, 202 lines)
+[00:34:50] PHASE e_s3_after_congestion: PASS=False sent=200 ack_ok=199 peer_rx=199 missing=1 extra=0 shaped=100 escaped_ctr=100 counters={'encoded': 199, 'tc_decoded': 100, 'redirect_ok': 399, 'sent_calls': 13764, 'vstrip': 100, 'frag_first': 100, 'frag_shift': 202, 'hybrid_escaped': 100, 'tc_lenient_pass': 100} guest={'udp_capture': 200, 'recv_rewrite': 199, 'encoded': 200, 'tc_decoded': 199, 'strp_frames': 399, 'release': 200, 'tc_apport': 200} peer_snmp={'Ip:ReasmReqds': 600, 'Ip:ReasmOKs': 199, 'Ip:ReasmFails': 2, 'Ip:ReasmTimeout': 1, 'Udp:InDatagrams': 199}
+[00:34:53] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[00:34:53]     OWNER_READY role=guest pid=172
+[00:34:56] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 300 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 0.5s, 985 lines)
+[00:34:59] PHASE e_small_0: PASS=True sent=983 ack_ok=983 peer_rx=983 missing=0 extra=0 shaped=431 escaped_ctr=431 counters={'encoded': 983, 'tc_decoded': 431, 'redirect_ok': 1966, 'sent_calls': 1975, 'vstrip': 552, 'hybrid_escaped': 431, 'tc_lenient_pass': 552} guest={'udp_capture': 983, 'recv_rewrite': 983, 'encoded': 983, 'tc_decoded': 983, 'strp_frames': 1966, 'release': 983, 'tc_apport': 983} peer_snmp={'Udp:InDatagrams': 983}
+[00:35:01] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 301 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 0.4s, 990 lines)
+[00:35:04] PHASE e_small_1: PASS=True sent=988 ack_ok=988 peer_rx=988 missing=0 extra=0 shaped=414 escaped_ctr=414 counters={'encoded': 988, 'tc_decoded': 414, 'redirect_ok': 1976, 'sent_calls': 8617, 'vstrip': 574, 'hybrid_escaped': 414, 'tc_lenient_pass': 574} guest={'udp_capture': 1004, 'recv_rewrite': 988, 'encoded': 988, 'tc_decoded': 988, 'strp_frames': 1976, 'release': 1004, 'tc_apport': 988} peer_snmp={'Udp:InDatagrams': 988}
+[00:35:09] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 302 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 2.4s, 995 lines)
+[00:35:11] PHASE e_small_2: PASS=False sent=993 ack_ok=991 peer_rx=992 missing=1 extra=0 shaped=438 escaped_ctr=438 counters={'noroute': 2, 'encoded': 991, 'tc_decoded': 438, 'redirect_ok': 1983, 'sent_calls': 13267, 'vstrip': 554, 'hybrid_escaped': 438, 'tc_lenient_pass': 554} guest={'udp_capture': 993, 'recv_rewrite': 991, 'encoded': 993, 'tc_decoded': 991, 'strp_frames': 1984, 'release': 993, 'tc_apport': 993} peer_snmp={'Udp:InDatagrams': 992}
+[00:35:16] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 303 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 2.3s, 991 lines)
+[00:35:18] PHASE e_small_3: PASS=False sent=989 ack_ok=988 peer_rx=988 missing=1 extra=0 shaped=429 escaped_ctr=428 counters={'encoded': 988, 'tc_decoded': 428, 'redirect_ok': 1976, 'sent_calls': 11312, 'vstrip': 560, 'hybrid_escaped': 428, 'tc_lenient_pass': 560} guest={'udp_capture': 1004, 'recv_rewrite': 988, 'redirect_fail': 1, 'encoded': 989, 'tc_decoded': 988, 'strp_frames': 1977, 'release': 1004, 'tc_apport': 989} peer_snmp={'Udp:InDatagrams': 988}
+[00:35:23] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 304 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 2.3s, 980 lines)
+[00:35:26] PHASE e_small_4: PASS=False sent=978 ack_ok=977 peer_rx=977 missing=1 extra=0 shaped=412 escaped_ctr=412 counters={'encoded': 977, 'tc_decoded': 412, 'redirect_ok': 1954, 'sent_calls': 8265, 'vstrip': 565, 'hybrid_escaped': 412, 'tc_lenient_pass': 565} guest={'udp_capture': 978, 'recv_rewrite': 977, 'redirect_fail': 1, 'encoded': 978, 'tc_decoded': 977, 'strp_frames': 1955, 'release': 978, 'tc_apport': 978} peer_snmp={'Udp:InDatagrams': 977}
+[00:35:28] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 305 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 0.4s, 980 lines)
+[00:35:31] PHASE e_small_5: PASS=True sent=978 ack_ok=978 peer_rx=978 missing=0 extra=0 shaped=420 escaped_ctr=420 counters={'encoded': 978, 'tc_decoded': 420, 'redirect_ok': 1956, 'sent_calls': 7750, 'vstrip': 558, 'hybrid_escaped': 420, 'tc_lenient_pass': 558} guest={'udp_capture': 1004, 'recv_rewrite': 978, 'encoded': 978, 'tc_decoded': 978, 'strp_frames': 1956, 'release': 1004, 'tc_apport': 978} peer_snmp={'Udp:InDatagrams': 978}
+[00:35:33] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 306 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 0.4s, 983 lines)
+[00:35:36] PHASE e_small_6: PASS=True sent=981 ack_ok=981 peer_rx=981 missing=0 extra=0 shaped=424 escaped_ctr=424 counters={'encoded': 981, 'tc_decoded': 424, 'redirect_ok': 1962, 'sent_calls': 9016, 'vstrip': 557, 'hybrid_escaped': 424, 'tc_lenient_pass': 557} guest={'udp_capture': 981, 'recv_rewrite': 981, 'encoded': 981, 'tc_decoded': 981, 'strp_frames': 1962, 'release': 981, 'tc_apport': 981} peer_snmp={'Udp:InDatagrams': 981}
+[00:35:39] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 307 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 0.4s, 983 lines)
+[00:35:41] PHASE e_small_7: PASS=True sent=981 ack_ok=981 peer_rx=981 missing=0 extra=0 shaped=433 escaped_ctr=433 counters={'encoded': 981, 'tc_decoded': 433, 'redirect_ok': 1962, 'sent_calls': 9306, 'vstrip': 548, 'hybrid_escaped': 433, 'tc_lenient_pass': 548} guest={'udp_capture': 1004, 'recv_rewrite': 981, 'encoded': 981, 'tc_decoded': 981, 'strp_frames': 1962, 'release': 1004, 'tc_apport': 981} peer_snmp={'Udp:InDatagrams': 981}
+[00:35:44] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 308 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 0.5s, 987 lines)
+[00:35:47] PHASE e_small_8: PASS=True sent=985 ack_ok=985 peer_rx=985 missing=0 extra=0 shaped=423 escaped_ctr=423 counters={'encoded': 985, 'tc_decoded': 423, 'redirect_ok': 1970, 'sent_calls': 1976, 'vstrip': 562, 'hybrid_escaped': 423, 'tc_lenient_pass': 562} guest={'udp_capture': 985, 'recv_rewrite': 985, 'encoded': 985, 'tc_decoded': 985, 'strp_frames': 1970, 'release': 985, 'tc_apport': 985} peer_snmp={'Udp:InDatagrams': 985}
+[00:35:49] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 309 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 0.5s, 987 lines)
+[00:35:52] PHASE e_small_9: PASS=True sent=985 ack_ok=985 peer_rx=985 missing=0 extra=0 shaped=409 escaped_ctr=409 counters={'encoded': 985, 'tc_decoded': 409, 'redirect_ok': 1970, 'sent_calls': 5894, 'vstrip': 576, 'hybrid_escaped': 409, 'tc_lenient_pass': 576} guest={'udp_capture': 1004, 'recv_rewrite': 985, 'encoded': 985, 'tc_decoded': 985, 'strp_frames': 1970, 'release': 1004, 'tc_apport': 985} peer_snmp={'Udp:InDatagrams': 985}
+[00:35:55] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 310 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 0.5s, 981 lines)
+[00:35:57] PHASE e_small_10: PASS=True sent=979 ack_ok=979 peer_rx=979 missing=0 extra=0 shaped=416 escaped_ctr=416 counters={'encoded': 979, 'tc_decoded': 416, 'redirect_ok': 1958, 'sent_calls': 9091, 'vstrip': 563, 'hybrid_escaped': 416, 'tc_lenient_pass': 563} guest={'udp_capture': 979, 'recv_rewrite': 979, 'encoded': 979, 'tc_decoded': 979, 'strp_frames': 1958, 'release': 979, 'tc_apport': 979} peer_snmp={'Udp:InDatagrams': 979}
+[00:36:02] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 8,16,64,100,500,1000,1400,1431,1440 --reps 1 --seed 311 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 2.4s, 977 lines)
+[00:36:05] PHASE e_small_11: PASS=False sent=975 ack_ok=973 peer_rx=975 missing=0 extra=0 shaped=412 escaped_ctr=412 counters={'encoded': 973, 'tc_decoded': 412, 'redirect_ok': 1948, 'sent_calls': 8933, 'vstrip': 563, 'hybrid_escaped': 412, 'tc_lenient_pass': 563} guest={'udp_capture': 1004, 'recv_rewrite': 973, 'encoded': 975, 'tc_decoded': 973, 'strp_frames': 1948, 'release': 1004, 'tc_apport': 975} peer_snmp={'Udp:InDatagrams': 975}
+[00:36:07] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 300 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 0.5s, 1002 lines)
+[00:36:10] PHASE e_big_0: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=448 escaped_ctr=448 counters={'encoded': 1000, 'tc_decoded': 448, 'redirect_ok': 2000, 'sent_calls': 8361, 'vstrip': 552, 'frag_first': 374, 'frag_shift': 2570, 'hybrid_escaped': 448, 'tc_lenient_pass': 552} guest={'udp_capture': 1000, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6229, 'Ip:ReasmOKs': 706, 'Udp:InDatagrams': 1000}
+[00:36:13] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 301 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 0.5s, 1002 lines)
+[00:36:15] PHASE e_big_1: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=426 escaped_ctr=426 counters={'encoded': 1000, 'tc_decoded': 426, 'redirect_ok': 2000, 'sent_calls': 9225, 'vstrip': 574, 'frag_first': 348, 'frag_shift': 2393, 'hybrid_escaped': 426, 'tc_lenient_pass': 574} guest={'udp_capture': 1004, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1004, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 5938, 'Ip:ReasmOKs': 693, 'Udp:InDatagrams': 1000}
+[00:36:20] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 302 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 2.5s, 1002 lines)
+[00:36:23] PHASE e_big_2: PASS=False sent=1000 ack_ok=999 peer_rx=1000 missing=0 extra=0 shaped=445 escaped_ctr=445 counters={'encoded': 999, 'tc_decoded': 445, 'redirect_ok': 1999, 'sent_calls': 8768, 'vstrip': 555, 'frag_first': 359, 'frag_shift': 2277, 'hybrid_escaped': 445, 'tc_lenient_pass': 555} guest={'udp_capture': 1000, 'recv_rewrite': 999, 'encoded': 1000, 'tc_decoded': 999, 'strp_frames': 1999, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 5884, 'Ip:ReasmOKs': 705, 'Udp:InDatagrams': 1000}
+[00:36:25] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 303 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 0.5s, 1002 lines)
+[00:36:28] PHASE e_big_3: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=440 escaped_ctr=440 counters={'encoded': 1000, 'tc_decoded': 440, 'redirect_ok': 2000, 'sent_calls': 6217, 'vstrip': 560, 'frag_first': 365, 'frag_shift': 2350, 'hybrid_escaped': 440, 'tc_lenient_pass': 560} guest={'udp_capture': 1004, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1004, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6237, 'Ip:ReasmOKs': 728, 'Udp:InDatagrams': 1000}
+[00:36:33] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 304 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 2.6s, 1002 lines)
+[00:36:36] PHASE e_big_4: PASS=False sent=1000 ack_ok=999 peer_rx=1000 missing=0 extra=0 shaped=434 escaped_ctr=434 counters={'encoded': 999, 'tc_decoded': 434, 'redirect_ok': 1999, 'sent_calls': 7708, 'vstrip': 566, 'frag_first': 372, 'frag_shift': 2255, 'hybrid_escaped': 434, 'tc_lenient_pass': 566} guest={'udp_capture': 1000, 'recv_rewrite': 999, 'encoded': 1000, 'tc_decoded': 999, 'strp_frames': 1999, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6249, 'Ip:ReasmOKs': 725, 'Udp:InDatagrams': 1000}
+[00:36:40] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 305 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 2.5s, 1002 lines)
+[00:36:43] PHASE e_big_5: PASS=False sent=1000 ack_ok=999 peer_rx=1000 missing=0 extra=0 shaped=442 escaped_ctr=442 counters={'encoded': 999, 'tc_decoded': 442, 'redirect_ok': 1999, 'sent_calls': 7936, 'vstrip': 558, 'frag_first': 374, 'frag_shift': 2715, 'hybrid_escaped': 442, 'tc_lenient_pass': 558} guest={'udp_capture': 1004, 'recv_rewrite': 999, 'encoded': 1000, 'tc_decoded': 999, 'strp_frames': 1999, 'release': 1004, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6399, 'Ip:ReasmOKs': 706, 'Udp:InDatagrams': 1000}
+[00:36:48] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 306 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 2.5s, 1002 lines)
+[00:36:50] PHASE e_big_6: PASS=False sent=1000 ack_ok=999 peer_rx=1000 missing=0 extra=0 shaped=443 escaped_ctr=443 counters={'encoded': 999, 'tc_decoded': 443, 'redirect_ok': 1999, 'sent_calls': 7134, 'vstrip': 557, 'frag_first': 380, 'frag_shift': 3202, 'hybrid_escaped': 443, 'tc_lenient_pass': 557} guest={'udp_capture': 1000, 'recv_rewrite': 999, 'encoded': 1000, 'tc_decoded': 999, 'strp_frames': 1999, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 7193, 'Ip:ReasmOKs': 714, 'Udp:InDatagrams': 1000}
+[00:36:53] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 307 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 0.5s, 1002 lines)
+[00:36:56] PHASE e_big_7: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=452 escaped_ctr=452 counters={'encoded': 1000, 'tc_decoded': 452, 'redirect_ok': 2000, 'sent_calls': 7347, 'vstrip': 548, 'frag_first': 373, 'frag_shift': 2805, 'hybrid_escaped': 452, 'tc_lenient_pass': 548} guest={'udp_capture': 1004, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1004, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6910, 'Ip:ReasmOKs': 707, 'Udp:InDatagrams': 1000}
+[00:36:59] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 308 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 0.5s, 1002 lines)
+[00:37:01] PHASE e_big_8: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=438 escaped_ctr=438 counters={'encoded': 1000, 'tc_decoded': 438, 'redirect_ok': 2000, 'sent_calls': 2012, 'vstrip': 562, 'frag_first': 357, 'frag_shift': 2476, 'hybrid_escaped': 438, 'tc_lenient_pass': 562} guest={'udp_capture': 1000, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6475, 'Ip:ReasmOKs': 701, 'Udp:InDatagrams': 1000}
+[00:37:04] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 309 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 0.5s, 1002 lines)
+[00:37:07] PHASE e_big_9: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=424 escaped_ctr=424 counters={'encoded': 1000, 'tc_decoded': 424, 'redirect_ok': 2000, 'sent_calls': 9009, 'vstrip': 576, 'frag_first': 360, 'frag_shift': 2036, 'hybrid_escaped': 424, 'tc_lenient_pass': 576} guest={'udp_capture': 1004, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1004, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6038, 'Ip:ReasmOKs': 721, 'Udp:InDatagrams': 1000}
+[00:37:11] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 310 --threads 4 --timeout-ms 2000 --random 250   (rc=0, 2.4s, 1002 lines)
+[00:37:14] PHASE e_big_10: PASS=False sent=1000 ack_ok=999 peer_rx=999 missing=1 extra=0 shaped=437 escaped_ctr=437 counters={'encoded': 999, 'tc_decoded': 437, 'redirect_ok': 1998, 'sent_calls': 7267, 'vstrip': 562, 'frag_first': 365, 'frag_shift': 2332, 'hybrid_escaped': 437, 'tc_lenient_pass': 562} guest={'udp_capture': 1000, 'recv_rewrite': 999, 'redirect_fail': 1, 'encoded': 1000, 'tc_decoded': 999, 'strp_frames': 1999, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 5922, 'Ip:ReasmOKs': 711, 'Udp:InDatagrams': 999}
+[00:37:18] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 311 --threads 4 --timeout-ms 2000 --random 250 --connect   (rc=0, 2.3s, 1002 lines)
+[00:37:21] PHASE e_big_11: PASS=False sent=1000 ack_ok=999 peer_rx=1000 missing=0 extra=0 shaped=437 escaped_ctr=437 counters={'encoded': 999, 'tc_decoded': 437, 'redirect_ok': 1999, 'sent_calls': 8609, 'vstrip': 563, 'frag_first': 356, 'frag_shift': 2946, 'hybrid_escaped': 437, 'tc_lenient_pass': 563} guest={'udp_capture': 1004, 'recv_rewrite': 999, 'encoded': 1000, 'tc_decoded': 999, 'strp_frames': 1999, 'release': 1004, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6467, 'Ip:ReasmOKs': 695, 'Udp:InDatagrams': 1000}
+[00:37:25] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 300 --threads 1 --timeout-ms 2000 --random 1000   (rc=0, 1.3s, 1002 lines)
+[00:37:27] PHASE e_serial_0: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=398 escaped_ctr=398 counters={'encoded': 1000, 'tc_decoded': 398, 'redirect_ok': 2000, 'sent_calls': 8296, 'vstrip': 602, 'frag_first': 338, 'frag_shift': 2403, 'hybrid_escaped': 398, 'tc_lenient_pass': 602} guest={'udp_capture': 1000, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6176, 'Ip:ReasmOKs': 699, 'Udp:InDatagrams': 1000}
+[00:37:31] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 301 --threads 1 --timeout-ms 2000 --random 1000 --connect   (rc=0, 1.6s, 1002 lines)
+[00:37:34] PHASE e_serial_1: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=398 escaped_ctr=398 counters={'encoded': 1000, 'tc_decoded': 398, 'redirect_ok': 2000, 'sent_calls': 8631, 'vstrip': 602, 'frag_first': 338, 'frag_shift': 2403, 'hybrid_escaped': 398, 'tc_lenient_pass': 602} guest={'udp_capture': 1001, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1001, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6176, 'Ip:ReasmOKs': 699, 'Udp:InDatagrams': 1000}
+[00:37:37] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 302 --threads 1 --timeout-ms 2000 --random 1000   (rc=0, 1.3s, 1002 lines)
+[00:37:40] PHASE e_serial_2: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=427 escaped_ctr=427 counters={'encoded': 1000, 'tc_decoded': 427, 'redirect_ok': 2000, 'sent_calls': 7062, 'vstrip': 573, 'frag_first': 339, 'frag_shift': 2290, 'hybrid_escaped': 427, 'tc_lenient_pass': 573} guest={'udp_capture': 1000, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6028, 'Ip:ReasmOKs': 702, 'Udp:InDatagrams': 1000}
+[00:37:43] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 303 --threads 1 --timeout-ms 2000 --random 1000 --connect   (rc=0, 1.2s, 1002 lines)
+[00:37:46] PHASE e_serial_3: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=427 escaped_ctr=427 counters={'encoded': 1000, 'tc_decoded': 427, 'redirect_ok': 2000, 'sent_calls': 2990, 'vstrip': 573, 'frag_first': 339, 'frag_shift': 2290, 'hybrid_escaped': 427, 'tc_lenient_pass': 573} guest={'udp_capture': 1001, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1001, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6028, 'Ip:ReasmOKs': 702, 'Udp:InDatagrams': 1000}
+[00:37:49] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 304 --threads 1 --timeout-ms 2000 --random 1000   (rc=0, 1.3s, 1002 lines)
+[00:37:52] PHASE e_serial_4: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=441 escaped_ctr=441 counters={'encoded': 1000, 'tc_decoded': 441, 'redirect_ok': 2000, 'sent_calls': 7432, 'vstrip': 559, 'frag_first': 362, 'frag_shift': 2710, 'hybrid_escaped': 441, 'tc_lenient_pass': 559} guest={'udp_capture': 1000, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1000, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6630, 'Ip:ReasmOKs': 707, 'Udp:InDatagrams': 1000}
+[00:37:56] guest(stream)$ /vfwd v18-send --dst 10.250.218.2:7218 --kinds frame,frame2,frame_chain,rand,nf_chain,decl_len,decl_m9 --sizes 1440,1456,1463,1464,1465,1466,1470,1471,1472,1473,1474,2936,2944,2951,2952,2953,4096,4097,8192,16384,32768,58999,59000 --reps 1 --seed 305 --threads 1 --timeout-ms 2000 --random 1000 --connect   (rc=0, 1.3s, 1002 lines)
+[00:37:58] PHASE e_serial_5: PASS=True sent=1000 ack_ok=1000 peer_rx=1000 missing=0 extra=0 shaped=441 escaped_ctr=441 counters={'encoded': 1000, 'tc_decoded': 441, 'redirect_ok': 2000, 'sent_calls': 8043, 'vstrip': 559, 'frag_first': 362, 'frag_shift': 2710, 'hybrid_escaped': 441, 'tc_lenient_pass': 559} guest={'udp_capture': 1001, 'recv_rewrite': 1000, 'encoded': 1000, 'tc_decoded': 1000, 'strp_frames': 2000, 'release': 1001, 'tc_apport': 1000} peer_snmp={'Ip:ReasmReqds': 6630, 'Ip:ReasmOKs': 707, 'Udp:InDatagrams': 1000}
+[00:37:58] guest$ cat /tmp/owner.out; tail -c 30000 /tmp/owner.log; cat /tmp/owner-stats.json; tail -60 /tmp/sshd.log; tail -20 /tmp/srv7100.log /tmp/srv7101.log  (rc=0, 0.0s)
+[00:37:58]     {"app":"10.99.7.2:40739","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59569,"queued_on_trigger":1481,"slot":30}
+[00:37:58]     {"ev":"udp_teardown","flow":59567,"slot":19,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59569,"slot":30}
+[00:37:58]     {"app":"10.99.7.2:46194","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59571,"queued_on_trigger":2959,"slot":57}
+[00:37:58]     {"ev":"udp_teardown","flow":59569,"slot":30,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59571,"slot":57}
+[00:37:58]     {"app":"10.99.7.2:52527","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59573,"queued_on_trigger":1482,"slot":11}
+[00:37:58]     {"ev":"udp_teardown","flow":59571,"slot":57,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59573,"slot":11}
+[00:37:58]     {"app":"10.99.7.2:55905","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59575,"queued_on_trigger":1482,"slot":15}
+[00:37:58]     {"ev":"udp_teardown","flow":59573,"slot":11,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59575,"slot":15}
+[00:37:58]     {"app":"10.99.7.2:60068","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59577,"queued_on_trigger":2959,"slot":33}
+[00:37:58]     {"ev":"udp_teardown","flow":59575,"slot":15,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59577,"slot":33}
+[00:37:58]     {"app":"10.99.7.2:53586","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59579,"queued_on_trigger":59008,"slot":52}
+[00:37:58]     {"ev":"udp_teardown","flow":59577,"slot":33,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59579,"slot":52}
+[00:37:58]     {"app":"10.99.7.2:54987","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59581,"queued_on_trigger":1471,"slot":39}
+[00:37:58]     {"ev":"udp_teardown","flow":59579,"slot":52,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59581,"slot":39}
+[00:37:58]     {"app":"10.99.7.2:44306","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59583,"queued_on_trigger":59007,"slot":16}
+[00:37:58]     {"ev":"udp_teardown","flow":59581,"slot":39,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59583,"slot":16}
+[00:37:58]     {"app":"10.99.7.2:48354","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59585,"queued_on_trigger":1471,"slot":31}
+[00:37:58]     {"ev":"udp_teardown","flow":59583,"slot":16,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59585,"slot":31}
+[00:37:58]     {"app":"10.99.7.2:46781","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59587,"queued_on_trigger":2944,"slot":0}
+[00:37:58]     {"ev":"udp_teardown","flow":59585,"slot":31,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59587,"slot":0}
+[00:37:58]     {"app":"10.99.7.2:57561","dst":"10.250.218.2:7218","ev":"udp_associate","flow":59589,"queued_on_trigger":59008,"slot":48}
+[00:37:58]     {"ev":"udp_teardown","flow":59587,"slot":0,"why":"app_socket_released"}
+[00:37:58]     {"ev":"udp_paired","flow":59589,"slot":48}
+[00:37:58]     {"ev":"udp_teardown","flow":59589,"slot":48,"why":"app_socket_released"}
+[00:37:58]     {"counters":[0,29950,0,0,29783,0,0,0,0,0,0,3,29795,29783,0,0,119153,59578,29950,0,0,29795,119153,0,0,0,0,0,0,0,0,0,0,0,0,5,0,0,0,0,0],"ctl_bytes_read":238360,"ctl_sessions_opened":1,"flows_open":0,"listen_events":5,"listen_state_sent":3,"paired_received":29795,"park_flush":29795,"requests_written":59590,"t_ms":1791506278683.581,"udp_associations":29795,"udp_slot_released":29950,"udp_teardowns":29795}Server listening on 0.0.0.0 port 22.
+[00:37:58]     ==> /tmp/srv7100.log <==
+[00:37:58]     {"banner":false,"bind":"0.0.0.0:7100","ev":"tcp_server_ready","rst":false}
+[00:37:58]     
+[00:37:58]     ==> /tmp/srv7101.log <==
+[00:37:58]     {"banner":true,"bind":"0.0.0.0:7101","ev":"tcp_server_ready","rst":false}
+[00:37:59] === done

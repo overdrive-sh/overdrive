@@ -1,0 +1,26 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 64,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "frame": {
+      "ok": 44,
+      "sent": 44
+    },
+    "frame_chain": {
+      "ok": 44,
+      "sent": 44
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 59000,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 88,
+  "sender_ack_ok": 88,
+  "sent": 88,
+  "shaped_sent": 88,
+  "tag": "h4_mtu1400_frame"
+}

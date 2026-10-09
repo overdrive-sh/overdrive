@@ -1,0 +1,4 @@
+{"ack_len":4096,"ack_len_bytes":36,"ack_sha_match":true,"conn":false,"ev":"v18","head":"4f56443100000ff8","kind":"frame_chain","len":4096,"ok":true,"seed":11400714819323206404,"seq":false,"sha":"dcb8445ccafa20d1129fcd7a047910150d4afe3480125ea0d859d41b09b4aa11","shaped":true,"t":0}
+{"ack_len":59000,"ack_len_bytes":36,"ack_sha_match":true,"conn":false,"ev":"v18","head":"4f5644310000e670","kind":"frame_chain","len":59000,"ok":true,"seed":11400714819323214323,"seq":false,"sha":"9874db3aea6da391aa361e1247cd50b135b03bbc7a3037b46cc663ba365b3662","shaped":true,"t":0}
+{"connected":false,"dst":"10.250.218.2:7218","ev":"v18_done","failed":0,"local_ports":[40347],"ok":2,"s":0.007552817,"seq":false,"threads":1}
+

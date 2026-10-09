@@ -1,0 +1,11 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29
+AGENT_READY local_cid=3220
+AGENT_CMD ident => IDENT local_cid=3220 uname=7.0.0-29-generic uptime_s=0.60
+AGENT_CMD hold 1234 10 10000 NE => HOLD port=1234 ok=0 fail=10 errs=["i=0:Connection reset by peer (os error 104)", "i=1:Connection reset by peer (os error 104)", "i=2:Connection reset by peer (os error 104)"]
+AGENT_CMD hold 1234 10 22000 NQ => HOLD port=1234 ok=0 fail=10 errs=["i=0:Connection reset by peer (os error 104)", "i=1:Connection reset by peer (os error 104)", "i=2:Connection reset by peer (os error 104)"]
+AGENT_CMD hold 1240 10 10500 NE => HOLD port=1240 ok=0 fail=10 errs=["i=0:Connection reset by peer (os error 104)", "i=1:Connection reset by peer (os error 104)", "i=2:Connection reset by peer (os error 104)"]
+AGENT_CMD hold 1240 10 22500 NQ => HOLD port=1240 ok=0 fail=10 errs=["i=0:Connection reset by peer (os error 104)", "i=1:Connection reset by peer (os error 104)", "i=2:Connection reset by peer (os error 104)"]
+AGENT_CMD hold 1241 10 11000 NE => HOLD port=1241 ok=0 fail=10 errs=["i=0:Connection reset by peer (os error 104)", "i=1:Connection reset by peer (os error 104)", "i=2:Connection reset by peer (os error 104)"]
+AGENT_CMD hold 1241 10 23000 NQ => HOLD port=1241 ok=0 fail=10 errs=["i=0:Connection reset by peer (os error 104)", "i=1:Connection reset by peer (os error 104)", "i=2:Connection reset by peer (os error 104)"]
+AGENT_CMD hold 1243 10 11500 NE => HOLD port=1243 ok=0 fail=10 errs=["i=0:Connection reset by peer (os error 104)", "i=1:Connection reset by peer (os error 104)", "i=2:Connection reset by peer (os error 104)"]
+AGENT_CMD hold 1243 10 23500 NQ => HOLD port=1243 ok=0 fail=10 errs=["i=0:Connection reset by peer (os error 104)", "i=1:Connection reset by peer (os error 104)", "i=2:Connection reset by peer (os error 104)"]

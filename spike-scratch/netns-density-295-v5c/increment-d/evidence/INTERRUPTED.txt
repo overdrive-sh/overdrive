@@ -1,0 +1,1 @@
+increment-d was interrupted by the 30-minute tool limit during R2-burst500-none (ssh hangup killed the run; its cleanup trap did not run to completion in-process but no v5c process, netns, veth or cgroup remained). Everything up to that point is complete; the remainder of the suite is increment-e.

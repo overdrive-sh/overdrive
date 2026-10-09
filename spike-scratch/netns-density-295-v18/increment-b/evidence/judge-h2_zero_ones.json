@@ -1,0 +1,26 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 14,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "ones": {
+      "ok": 13,
+      "sent": 13
+    },
+    "zero": {
+      "ok": 13,
+      "sent": 13
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 59000,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 26,
+  "sender_ack_ok": 26,
+  "sent": 26,
+  "shaped_sent": 0,
+  "tag": "h2_zero_ones"
+}

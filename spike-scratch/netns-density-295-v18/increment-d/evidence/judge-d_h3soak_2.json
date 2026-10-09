@@ -1,0 +1,55 @@
+{
+  "PASS": false,
+  "above_mtu_sent": 594,
+  "ack_fail_examples": [
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "decl_len",
+      "len": 2952
+    }
+  ],
+  "by_kind": {
+    "decl_len": {
+      "ok": 139,
+      "sent": 140
+    },
+    "decl_m9": {
+      "ok": 152,
+      "sent": 152
+    },
+    "frame": {
+      "ok": 133,
+      "sent": 133
+    },
+    "frame2": {
+      "ok": 143,
+      "sent": 143
+    },
+    "frame_chain": {
+      "ok": 141,
+      "sent": 141
+    },
+    "nf_chain": {
+      "ok": 132,
+      "sent": 132
+    },
+    "rand": {
+      "ok": 159,
+      "sent": 159
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 59000,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 1000,
+  "sender_ack_ok": 999,
+  "sent": 1000,
+  "shaped_sent": 417,
+  "tag": "d_h3soak_2"
+}

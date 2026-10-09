@@ -1,0 +1,23 @@
+{
+  "ch_commits_since_v53": "41a619d19 vmm: Add backend=vhost-kernel to --vsock\n9b68dbb57 virtio-devices: vsock: Add vhost-kernel backed vsock device",
+  "ch_submodule_branch": "overdrive/vhost-kernel-vsock",
+  "ch_submodule_dirty": "",
+  "ch_submodule_head": "41a619d191f6472f79a3f22bcb9576c2a516906c",
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-v24/increment-g/run.py suite=full",
+  "spike_sources": {
+    "spike-scratch/netns-density-295-v24/guest-init.sh": "e9c4a5b8554f36a61462f622c51790c8e41857de2d55cb1ba2cf5783d45fe968",
+    "spike-scratch/netns-density-295-v24/guest/Cargo.lock": "c2139cf603c148af9ccbb851bc3e819580e3bb9e2b42400c51101b86c4771884",
+    "spike-scratch/netns-density-295-v24/guest/Cargo.toml": "f3246a4bf6cd203a20fbe7e31115d2d62e3f8a352ff182c53df408d88c6bbbea",
+    "spike-scratch/netns-density-295-v24/guest/src/main.rs": "e8941f65b8de946d442253224e4a26e365bb6dd83583490391a9003683880a53",
+    "spike-scratch/netns-density-295-v24/increment-a/run.py": "219b93f6605f6f4e1a632f90132083d51eda83d51806a96a4bc29446d7fa797a",
+    "spike-scratch/netns-density-295-v24/increment-b/run.py": "9ec43ba16d7f1906b0e35e03d353ed45ae62263195b1b4529fe4c393e9ca0fc7",
+    "spike-scratch/netns-density-295-v24/increment-c/run.py": "7d84c87dced4654e2a8a2ca7124ddc4cca0164ec5aecb4b7f817ba94967203f9",
+    "spike-scratch/netns-density-295-v24/increment-d/run.py": "4052981be111492726395b95179bf73a511aeb533105ce987740548c79cc402d",
+    "spike-scratch/netns-density-295-v24/increment-e/run.py": "91427460d833ac49d3223de89e1caf00efae0cc4b3e4f757ba29d9ba5ff12664",
+    "spike-scratch/netns-density-295-v24/increment-f/run.py": "91427460d833ac49d3223de89e1caf00efae0cc4b3e4f757ba29d9ba5ff12664",
+    "spike-scratch/netns-density-295-v24/increment-g/run.py": "dc84d119f4a3cd7e0097e71f24e13337e654f49efaa910f9dc90db4331785d58",
+    "spike-scratch/netns-density-295-v24/launch.py": "03c1295d3c7ffe8f3e35b0b87d0f6e485782f99dc3551efee7b6d1da4e82e577",
+    "spike-scratch/netns-density-295-v24/rsync-owned-filter.sh": "4cd1a49198a37c578f5cee475d7bb966ad07485c815037e92352bb491e051edc"
+  },
+  "superproject_head": "f6157044f3cb65ee6b7fbe00480041dae46d9432"
+}

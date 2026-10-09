@@ -1,0 +1,21 @@
+{"ack_oob":true,"arm":true,"declare":[],"egress_ifs":[],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":137,"programs":[{"id":28,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":29,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":30,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":31,"name":"lo_decode(tcx lo egress)","tag":"1be1d280222d9e90","verified_insns":465},{"id":32,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":33,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":34,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":35,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":36,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":37,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":38,"name":"sockops(root cgroup)","tag":"d3503b23d0e6960e","verified_insns":260},{"id":39,"name":"listen_start(fexit inet_csk_listen_start)","tag":"4198b5e2f7485261","verified_insns":215},{"id":40,"name":"listen_stop(fexit inet_csk_listen_stop)","tag":"baa4f715ec1b955e","verified_insns":136}],"role":"guest","tuple_from_peer":true,"udp_park":true,"unframe":"tc"}
+{"ev":"park_pool","slots":256}
+{"ev":"ctl_open","t_us":4821439}
+{"ev":"lset_seeded","lset":"{}"}
+{"cells":"none","ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+{"app":"10.99.7.2:44618","dst":"<metal-address>:47501","ev":"udp_associate","flow":1,"queued_on_trigger":72,"slot":0,"t_us":6623387}
+{"ev":"udp_paired","flow":1,"slot":0,"t_us":6624254}
+{"ev":"abort","flow":1,"t_us":6704418}
+{"ev":"cells_cleared","mode":"none","p2_inq_after":0,"p2_inq_before":0,"p4_inq_after":0,"p4_inq_before":0,"slot":0,"t_us":6704514,"why":"abort"}
+{"ev":"udp_teardown","flow":1,"slot":0,"t_us":6704574,"why":"abort"}
+{"app":"10.99.7.2:44618","dst":"<metal-address>:47501","ev":"udp_associate","flow":3,"queued_on_trigger":72,"slot":0,"t_us":6925258}
+{"ev":"udp_paired","flow":3,"slot":0,"t_us":6926101}
+{"ev":"abort","flow":3,"t_us":7007061}
+{"ev":"cells_cleared","mode":"none","p2_inq_after":0,"p2_inq_before":0,"p4_inq_after":0,"p4_inq_before":0,"slot":0,"t_us":7007159,"why":"abort"}
+{"ev":"udp_teardown","flow":3,"slot":0,"t_us":7007219,"why":"abort"}
+{"app":"10.99.7.2:44618","dst":"<metal-address>:47501","ev":"udp_associate","flow":5,"queued_on_trigger":72,"slot":0,"t_us":7227130}
+{"ev":"udp_paired","flow":5,"slot":0,"t_us":7228109}
+{"ev":"abort","flow":5,"t_us":7308456}
+{"ev":"cells_cleared","mode":"none","p2_inq_after":0,"p2_inq_before":0,"p4_inq_after":0,"p4_inq_before":0,"slot":0,"t_us":7308592,"why":"abort"}
+{"ev":"udp_teardown","flow":5,"slot":0,"t_us":7308652,"why":"abort"}
+{"ev":"cells_cleared","mode":"none","p2_inq_after":0,"p2_inq_before":0,"p4_inq_after":0,"p4_inq_before":0,"slot":0,"t_us":7529056,"why":"release_without_association"}

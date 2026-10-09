@@ -1,0 +1,347 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [],
+    "modules_diff": [],
+    "modules_restored": true,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": true
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=128\n"
+  },
+  "preflight": {
+    "blob_sha256": "662db27fa19d6b3f77248cd7716e13cd9f7afe6e6d9c2ec413308e59c75e9915",
+    "cid": 3312,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ]
+  },
+  "programs": {
+    "loaded": "\"programs\":[{\"id\":42934,\"name\":\"verdict\",\"tag\":\"76c18f5a8b902ae5\",\"verified_insns\":884},{\"id\":42935,\"name\":\"strp_parse\",\"tag\":\"2abd9169f6e90deb\",\"verified_insns\":62},{\"id\":42936,\"name\":\"strp_verdict\",\"tag\":\"dd8b5d8c8ab32bb3\",\"verified_insns\":895},{\"id\":42937,\"name\":\"lo_decode(tcx lo egress)\",\"tag\":\"df202353afc0c231\",\"verified_insns\":465},{\"id\":42938,\"name\":\"eg_decode_frag(tcx v18-h egress)\",\"tag\":\"11c198a8e99605db\",\"verified_insns\":627},{\"id\":42939,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"038e16bf070d9335\",\"verified_insns\":41},{\"id\":42940,\"name\":\"sockops(/sys/fs/cgroup/gvc-v18-1203878)\",\"tag\":\"d3503b23d0e6960e\",\"verified_insns\":260}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"hybrid\"}\n"
+  },
+  "smoke": {
+    "judge": {
+      "PASS": true,
+      "above_mtu_sent": 2,
+      "ack_fail_examples": [],
+      "by_kind": {
+        "frame": {
+          "ok": 5,
+          "sent": 5
+        },
+        "rand": {
+          "ok": 5,
+          "sent": 5
+        }
+      },
+      "counters": {
+        "encoded": 10,
+        "frag_first": 3,
+        "frag_shift": 4,
+        "hybrid_escaped": 5,
+        "redirect_ok": 20,
+        "sent_calls": 20,
+        "tc_decoded": 5,
+        "tc_lenient_pass": 5,
+        "vstrip": 5
+      },
+      "done": {
+        "connected": false,
+        "dst": "10.250.218.2:7218",
+        "ev": "v18_done",
+        "failed": 0,
+        "local_ports": [
+          49431
+        ],
+        "ok": 10,
+        "s": 0.010805402,
+        "seq": false,
+        "threads": 1
+      },
+      "extra_at_peer": 0,
+      "extra_diag": [],
+      "extra_examples": [],
+      "max_len": 4096,
+      "missing_at_peer": 0,
+      "missing_examples": [],
+      "non_json_output": [
+        ""
+      ],
+      "peer_log_bytes": [
+        51,
+        1751
+      ],
+      "peer_rx": 10,
+      "rc": 0,
+      "sender_ack_ok": 10,
+      "sent": 10,
+      "shaped_sent": 5,
+      "tag": "smoke"
+    },
+    "wire": [
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            16,
+            false
+          ]
+        ],
+        "head": "4f56443100000000",
+        "id": 14266,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 8,
+        "sha": "00c366e94182302ce5e6dc5e5bf3518bbf36b360d456150f11337ddb1d5afcc1",
+        "sport": 42890,
+        "total_len": 16,
+        "udp_len": 16
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            1472,
+            false
+          ]
+        ],
+        "head": "4f564431000005b0",
+        "id": 12681,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 1464,
+        "sha": "9efb1e074a420c370a4234c76db5a84a5437a6c67c588c0adb1e2cb659ddb10b",
+        "sport": 33460,
+        "total_len": 1472,
+        "udp_len": 1472
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1,
+            false
+          ]
+        ],
+        "head": "4f564431000005b1",
+        "id": 3426,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 1465,
+        "sha": "bf718ac01ae9ebc279fae9702dfe0377938fc08e24ca46c8c8ae9166e4fbb4b3",
+        "sport": 50042,
+        "total_len": 1473,
+        "udp_len": 1473
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            8,
+            false
+          ]
+        ],
+        "head": "4f564431000005b8",
+        "id": 27752,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 1472,
+        "sha": "693cabeb44ecc6b74f95e94c95fced974886421e5234b6e31b120763266a920a",
+        "sport": 50682,
+        "total_len": 1480,
+        "udp_len": 1480
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            1472,
+            true
+          ],
+          [
+            1472,
+            1480,
+            true
+          ],
+          [
+            2952,
+            1152,
+            false
+          ]
+        ],
+        "head": "4f56443100000ff8",
+        "id": 18190,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 4096,
+        "sha": "1bebbf15d63368156874efc74d58a1a78ca5a043c2b6542990995cb8c2ebf766",
+        "sport": 33773,
+        "total_len": 4104,
+        "udp_len": 4104
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            16,
+            false
+          ]
+        ],
+        "head": "4ba2db0b1934f728",
+        "id": 45861,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 8,
+        "sha": "f9b53055bd8a7e89b9a03874b486d9a5b68977fcf828975e27bb1f84614fcd09",
+        "sport": 58166,
+        "total_len": 16,
+        "udp_len": 16
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            1472,
+            false
+          ]
+        ],
+        "head": "8c5506c4b5f7d2d9",
+        "id": 43722,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 1464,
+        "sha": "f827f146cfdb8048fedd31e482d9dcafcee11ccc215bad8fe8d8e17809ac800f",
+        "sport": 41462,
+        "total_len": 1472,
+        "udp_len": 1472
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            1473,
+            false
+          ]
+        ],
+        "head": "886f9a2df356073b",
+        "id": 56898,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 1465,
+        "sha": "2c419153f5d37156926e811014dcfe01592f2bb95b821f61732ee23ba5d38cc0",
+        "sport": 53969,
+        "total_len": 1473,
+        "udp_len": 1473
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            1480,
+            false
+          ]
+        ],
+        "head": "254608006b7e7ac6",
+        "id": 64849,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 1472,
+        "sha": "e9c6ab3a6f0a146e6d83d1d1188c2f24a8135f1072fc3dac3fea3ee8303f1009",
+        "sport": 57005,
+        "total_len": 1480,
+        "udp_len": 1480
+      },
+      {
+        "complete": true,
+        "dport": 7218,
+        "frags": [
+          [
+            0,
+            1480,
+            true
+          ],
+          [
+            1480,
+            1480,
+            true
+          ],
+          [
+            2960,
+            1144,
+            false
+          ]
+        ],
+        "head": "981e9ab2df81aefd",
+        "id": 16819,
+        "ip_csum_all_ok": true,
+        "len_consistent": true,
+        "payload_len": 4096,
+        "sha": "e6aed102601c9c5f8286077c1653fe1a0873c654b95f2a86b4dbfae6413e0ab3",
+        "sport": 54861,
+        "total_len": 4104,
+        "udp_len": 4104
+      }
+    ]
+  },
+  "substrate": {
+    "guest_uname": "Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \ndummy0           UNKNOWN        7e:87:c0:86:10:1d <BROADCAST,NOARP,UP,LOWER_UP> \n",
+    "offhost": "63022: v18-h@if63021: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 16:65:21:f4:52:d3 brd ff:ff:ff:ff:ff:ff link-netns v18-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv18-p0@if63022   UP             10.250.218.2/24 fe80::9090:a2ff:fe4c:6857/64 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ngeneric-receive-offload: off\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nState  Recv-Q Send-Q Local Address:Port Peer Address:Port\nUNCONN 0      0       10.250.218.2:7218      0.0.0.0:*   \n",
+    "sha_selftest_guest": "{\"abc\":true,\"empty\":true,\"ev\":\"sha_selftest\",\"million_a\":true}\n",
+    "sha_selftest_host": "{\"abc\":true,\"empty\":true,\"ev\":\"sha_selftest\",\"million_a\":true}\n"
+  }
+}

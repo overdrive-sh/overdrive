@@ -1,0 +1,2564 @@
+{
+  "cases": {
+    "A-abort-ctl": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "abort",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_ctl": 965,
+        "teardown_vg": 35
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 966,
+        "ctl_discarded": 34,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 4
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.043,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 820.106,
+        "min": 600.365,
+        "p50": 694.889,
+        "p99": 810.142
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 589.9370703846216,
+        "min": 0.09128544479608536,
+        "n": 543,
+        "p50": 183.76827705651522,
+        "p99": 567.9842457175255
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "A-abort-ctl",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 92,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 908
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 543,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "A-abort-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "abort",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 1
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 22.611,
+        "p50": 0.001,
+        "p99": 14.573
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 697.785,
+        "min": 600.104,
+        "p50": 613.179,
+        "p99": 678.239
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 583.8233735412359,
+        "min": 0.1185741275548935,
+        "n": 775,
+        "p50": 501.07896234840155,
+        "p99": 580.2600206807256
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "A-abort-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=0": 225,
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 775
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 57,
+        "rev=0 peek=1/0 request_read=16B/0/eof=False": 1,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 942
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 775,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "A-owner-sigkill-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "owner-sigkill",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 137
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 211.77,
+        "p50": 52.001,
+        "p99": 208.019
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 815.655,
+        "min": 609.275,
+        "p50": 708.806,
+        "p99": 813.479
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 550.1221129670739,
+        "min": 5.425112321972847,
+        "n": 442,
+        "p50": 240.40911253541708,
+        "p99": 548.1331124901772
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "A-owner-sigkill-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=0": 558,
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 442
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 168,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 832
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 442,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "A-quiescence-ctl": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 4
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.086,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 849.175,
+        "min": 600.126,
+        "p50": 703.544,
+        "p99": 835.365
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 580.3825054317713,
+        "min": 0.147281214594841,
+        "n": 454,
+        "p50": 266.2654835730791,
+        "p99": 567.1062488108873
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "A-quiescence-ctl",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 167,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 833
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 454,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "A-quiescence-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 1
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 38.592,
+        "p50": 0.001,
+        "p99": 19.291
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 705.396,
+        "min": 600.107,
+        "p50": 618.489,
+        "p99": 695.181
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 598.7526420503855,
+        "min": 0.2683410421013832,
+        "n": 835,
+        "p50": 500.9473292157054,
+        "p99": 595.1887974515557
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "A-quiescence-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=0": 165,
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 835
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 219,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 781
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 835,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "A-session-loss-ctl": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "session-loss",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_ctl": 1000
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 5
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.09,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 814.066,
+        "min": 600.326,
+        "p50": 684.904,
+        "p99": 798.956
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 540.996809490025,
+        "min": 0.14849752187728882,
+        "n": 460,
+        "p50": 254.10284101963043,
+        "p99": 527.0900288596749
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "A-session-loss-ctl",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 108,
+        "rev=0 peek=1/0 request_read=16B/0/eof=False": 3,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 889
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 460,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "A-session-loss-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "session-loss",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 2
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 23.384,
+        "p50": 0.001,
+        "p99": 15.921
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 676.116,
+        "min": 600.131,
+        "p50": 611.164,
+        "p99": 669.835
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 564.6825591102242,
+        "min": 0.15677884221076965,
+        "n": 844,
+        "p50": 483.6433418095112,
+        "p99": 563.9355769380927
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "A-session-loss-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=0": 156,
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 844
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 84,
+        "rev=0 peek=1/0 request_read=16B/0/eof=False": 1,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 915
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 844,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-abort-ctl": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "abort",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 1000,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 5
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.408,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 65.507,
+        "min": 0.079,
+        "p50": 16.652,
+        "p99": 55.988
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-abort-ctl",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-abort-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "abort",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 2
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.241,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 31.193,
+        "min": 0.089,
+        "p50": 5.827,
+        "p99": 24.399
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-abort-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-loss-reconnect-close-ctl": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "loss-reconnect-close",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.025,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 51.637,
+        "min": 0.158,
+        "p50": 5.434,
+        "p99": 46.482
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-loss-reconnect-close-ctl",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-loss-reconnect-close-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "loss-reconnect-close",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 4
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 1.02,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 73.743,
+        "min": 0.222,
+        "p50": 7.133,
+        "p99": 42.393
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-loss-reconnect-close-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-owner-sigkill-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "owner-sigkill",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 137
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.147,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 47.166,
+        "min": 0.091,
+        "p50": 7.274,
+        "p99": 40.378
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-owner-sigkill-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-quiescence-ctl": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 5
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.016,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 64.985,
+        "min": 0.122,
+        "p50": 11.765,
+        "p99": 41.235
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-quiescence-ctl",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-quiescence-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 2
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.019,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 80.499,
+        "min": 0.088,
+        "p50": 4.026,
+        "p99": 73.325
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-quiescence-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-session-loss-ctl": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "session-loss",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 6
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 2.749,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 87.956,
+        "min": 0.082,
+        "p50": 24.223,
+        "p99": 83.288
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-session-loss-ctl",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "B-session-loss-vgonly": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "session-loss",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 1000
+        },
+        "flow_vsock_total": 1000,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 3
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 1.423,
+        "p50": 0.001,
+        "p99": 0.01
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 44.991,
+        "min": 0.093,
+        "p50": 22.102,
+        "p99": 38.474
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "B-session-loss-vgonly",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 1000
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E1-no-request-queued": {
+      "app_events": 100,
+      "app_first_event": {
+        "reset": 100
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 100
+        },
+        "flow_vsock_total": 100,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.002,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 14.929,
+        "min": 0.807,
+        "p50": 4.267,
+        "p99": 14.929
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "E1-no-request-queued",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": false,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=0/0 request_read=0B/0/eof=True": 100
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E1b-no-request-accepted": {
+      "app_events": 100,
+      "app_first_event": {
+        "reset": 100
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.001,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 2629.326,
+        "min": 2618.127,
+        "p50": 2624.214,
+        "p99": 2629.326
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "E1b-no-request-accepted",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": false,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=0B/EAGAIN/eof=False": 100
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 100,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E2-no-linger-queued": {
+      "app_events": 100,
+      "app_first_event": {
+        "reset": 100
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 100
+        },
+        "flow_vsock_total": 100,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.437,
+        "p50": 0.002,
+        "p99": 0.437
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 9.536,
+        "min": 0.172,
+        "p50": 2.249,
+        "p99": 9.536
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": false,
+      "n": 100,
+      "name": "E2-no-linger-queued",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 100
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E2b-no-linger-accepted": {
+      "app_events": 100,
+      "app_first_event": {
+        "reset": 100
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.001,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 619.494,
+        "min": 600.466,
+        "p50": 607.996,
+        "p99": 619.494
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 101.04296170175076,
+        "min": 0.11537689715623856,
+        "n": 100,
+        "p50": 46.97583056986332,
+        "p99": 101.04296170175076
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": false,
+      "n": 100,
+      "name": "E2b-no-linger-accepted",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 16,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 84
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 100,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E3-payload-before-close-queued": {
+      "app_events": 100,
+      "app_first_event": {
+        "bytes": 100
+      },
+      "bytes_read_by_app_on_C": 3200,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "routed_then_ended": 100
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 100
+        },
+        "flow_vsock_total": 100,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.628,
+        "p50": 0.002,
+        "p99": 0.628
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 100,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 8.506,
+        "min": 0.205,
+        "p50": 3.758,
+        "p99": 8.506
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "E3-payload-before-close-queued",
+      "observation_after_hold": {
+        "read=1/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 32,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 200,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 100
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 0,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 100,
+      "violations_first3": [
+        {
+          "app": {
+            "accepted_t": 52096994,
+            "bytes": 32,
+            "c_port": 57638,
+            "end": "reset",
+            "end_t": 52097003,
+            "first": "bytes",
+            "first_t": 52097001,
+            "h": 4784898.888934952,
+            "k": "app"
+          },
+          "decision": "routed_then_ended",
+          "obs": {
+            "peek_err": 0,
+            "peek_rc": 1,
+            "rd_dt_us": 2,
+            "rd_err": 0,
+            "rd_rc": 1,
+            "rev": 8193,
+            "so_err": 0,
+            "wr_err": 32,
+            "wr_rc": -1
+          },
+          "trial": 17600
+        },
+        {
+          "app": {
+            "accepted_t": 52097065,
+            "bytes": 32,
+            "c_port": 57654,
+            "end": "reset",
+            "end_t": 52097072,
+            "first": "bytes",
+            "first_t": 52097071,
+            "h": 4784898.888949755,
+            "k": "app"
+          },
+          "decision": "routed_then_ended",
+          "obs": {
+            "peek_err": 0,
+            "peek_rc": 1,
+            "rd_dt_us": 3,
+            "rd_err": 0,
+            "rd_rc": 1,
+            "rev": 8193,
+            "so_err": 0,
+            "wr_err": 32,
+            "wr_rc": -1
+          },
+          "trial": 17604
+        },
+        {
+          "app": {
+            "accepted_t": 52097131,
+            "bytes": 32,
+            "c_port": 57656,
+            "end": "reset",
+            "end_t": 52097138,
+            "first": "bytes",
+            "first_t": 52097137,
+            "h": 4784898.888965929,
+            "k": "app"
+          },
+          "decision": "routed_then_ended",
+          "obs": {
+            "peek_err": 0,
+            "peek_rc": 1,
+            "rd_dt_us": 2,
+            "rd_err": 0,
+            "rd_rc": 1,
+            "rev": 8193,
+            "so_err": 0,
+            "wr_err": 32,
+            "wr_rc": -1
+          },
+          "trial": 17605
+        }
+      ]
+    },
+    "E4-queued-10s-settle": {
+      "app_events": 100,
+      "app_first_event": {
+        "reset": 100
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": {
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0
+      },
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 100
+        },
+        "flow_vsock_total": 100,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.021,
+        "p50": 0.002,
+        "p99": 0.021
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 11.697,
+        "min": 0.177,
+        "p50": 4.228,
+        "p99": 11.697
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "E4-queued-10s-settle",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 10000,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 100
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E5-sequential-queued": {
+      "app_events": 100,
+      "app_first_event": {
+        "reset": 100
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.066,
+        "p50": 0.002,
+        "p99": 0.066
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 0.318,
+        "min": 0.198,
+        "p50": 0.251,
+        "p99": 0.318
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "E5-sequential-queued",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": true,
+      "settle_ms": 20,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 100
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E5b-sequential-queued-ctl": {
+      "app_events": 30,
+      "app_first_event": {
+        "reset": 30
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "session-loss",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_vg": 30
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 30,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 37
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.047,
+        "p50": 0.002,
+        "p99": 0.047
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 0.361,
+        "min": 0.234,
+        "p50": 0.279,
+        "p99": 0.361
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 30,
+      "name": "E5b-sequential-queued-ctl",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 30
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": true,
+      "settle_ms": 20,
+      "state_at_accept_and_request_read": {
+        "rev=8193 peek=1/0 request_read=16B/0/eof=False": 30
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 30,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E6-sequential-accepted-abort": {
+      "app_events": 100,
+      "app_first_event": {
+        "reset": 100
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "abort",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 37
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.001,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 300,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 300.347,
+        "min": 300.158,
+        "p50": 300.201,
+        "p99": 300.347
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 0.2003433182835579,
+        "min": 0.03705546259880066,
+        "n": 100,
+        "p50": 0.06681308150291443,
+        "p99": 0.2003433182835579
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "E6-sequential-accepted-abort",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": true,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 64,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 36
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 100,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E6-sequential-accepted-quiescence": {
+      "app_events": 100,
+      "app_first_event": {
+        "reset": 100
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 37
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.001,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 300,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 300.361,
+        "min": 300.146,
+        "p50": 300.206,
+        "p99": 300.361
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 0.1655248925089836,
+        "min": 0.03738049417734146,
+        "n": 100,
+        "p50": 0.08255057036876678,
+        "p99": 0.1655248925089836
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "E6-sequential-accepted-quiescence",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": true,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 55,
+        "rev=0 peek=1/0 request_read=16B/0/eof=False": 1,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 44
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 100,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "E6-sequential-accepted-session-loss": {
+      "app_events": 98,
+      "app_first_event": {
+        "reset": 98
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "session-loss",
+      "ctl_ignore": true,
+      "decisions": {
+        "teardown_vg": 100
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 137
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.001,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 300,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 11734.601,
+        "min": 300.159,
+        "p50": 300.209,
+        "p99": 11734.601
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 0.24247262626886368,
+        "min": 0.06252992898225784,
+        "n": 100,
+        "p50": 0.10369531810283661,
+        "p99": 0.24247262626886368
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "E6-sequential-accepted-session-loss",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": true,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 55,
+        "rev=0 peek=1/0 request_read=16B/0/eof=False": 1,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 44
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 100,
+      "vg_event_during_hold_count": 100,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "P-accepted-live": {
+      "app_events": 100,
+      "app_first_event": {
+        "bytes": 100
+      },
+      "bytes_read_by_app_on_C": 3100,
+      "cause": "none",
+      "ctl_ignore": false,
+      "decisions": {
+        "routed_then_ended": 100
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 1
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 307.194,
+        "p50": 304.167,
+        "p99": 307.194
+      },
+      "hold_ms": 1000,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 100,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 1427.315,
+        "min": 1404.384,
+        "p50": 1412.825,
+        "p99": 1427.315
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "P-accepted-live",
+      "observation_after_hold": {
+        "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 3,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 97
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 0,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "P-queued-live": {
+      "app_events": 100,
+      "app_first_event": {
+        "bytes": 100
+      },
+      "bytes_read_by_app_on_C": 3100,
+      "cause": "none",
+      "ctl_ignore": false,
+      "decisions": {
+        "routed_then_ended": 100
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": {
+        "flow_vsock_by_state": {
+          "1": 100
+        },
+        "flow_vsock_total": 100,
+        "tcp_app_conns": 0
+      },
+      "flow_reports": 100,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 1
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 308.986,
+        "p50": 304.367,
+        "p99": 308.986
+      },
+      "hold_ms": 0,
+      "host_paired_discarded_no_reply": 0,
+      "host_paired_for_open_flow": 100,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 412.798,
+        "min": 401.751,
+        "p50": 408.148,
+        "p99": 412.798
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": null,
+        "min": null,
+        "n": 0,
+        "p50": null,
+        "p99": null
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 100,
+      "name": "P-queued-live",
+      "observation_after_hold": {
+        "read=-1/EAGAIN write=1/0 so_err=0 rev=0": 100
+      },
+      "paired_blind": false,
+      "payload_bytes": 0,
+      "queued": true,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 100
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 0,
+      "vg_event_during_hold_count": 0,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "R-paired-blind-abort": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "abort",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_ctl": 1000
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 1000,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.036,
+        "p50": 0.001,
+        "p99": 0.001
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 1000,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 847.035,
+        "min": 600.502,
+        "p50": 698.496,
+        "p99": 821.521
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 571.18025328964,
+        "min": 0.14511216431856155,
+        "n": 607,
+        "p50": 163.68720773607492,
+        "p99": 562.188059091568
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "R-paired-blind-abort",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": true,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 43,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 957
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 607,
+      "violations_count": 0,
+      "violations_first3": []
+    },
+    "R-paired-blind-quiescence": {
+      "app_events": 1000,
+      "app_first_event": {
+        "reset": 1000
+      },
+      "bytes_read_by_app_on_C": 0,
+      "cause": "quiescence",
+      "ctl_ignore": false,
+      "decisions": {
+        "teardown_vg": 1000
+      },
+      "diag_queued_after_close_before_accept": null,
+      "diag_queued_before_close": null,
+      "flow_reports": 1000,
+      "guest_counters": {
+        "ctl_abort_known": 0,
+        "ctl_discarded": 0,
+        "ctl_unexpected": 0,
+        "flows_tracked": 0,
+        "k": "counters",
+        "session_ups": 7
+      },
+      "guest_read_of_V_g_blocked_ms": {
+        "max": 0.136,
+        "p50": 0.001,
+        "p99": 0.002
+      },
+      "hold_ms": 600,
+      "host_paired_discarded_no_reply": 1000,
+      "host_paired_for_open_flow": 0,
+      "latency_guest_accept_to_app_first_event_ms": {
+        "max": 867.801,
+        "min": 600.183,
+        "p50": 705.896,
+        "p99": 861.408
+      },
+      "latency_host_close_to_vg_event_ms(approx, clock offset ~ms)": {
+        "max": 588.5141054168344,
+        "min": 3.3833226189017296,
+        "n": 514,
+        "p50": 195.18715143203735,
+        "p99": 572.6864524185658
+      },
+      "leftover_1s_after": {
+        "all_vsock_total": 5,
+        "flow_vsock_by_state": {},
+        "flow_vsock_total": 0,
+        "tcp_app_conns": 0,
+        "tcp_app_list": []
+      },
+      "linger": true,
+      "n": 1000,
+      "name": "R-paired-blind-quiescence",
+      "observation_after_hold": {
+        "read=0/0 write=-1/EPIPE so_err=0 rev=8193": 1000
+      },
+      "paired_blind": true,
+      "payload_bytes": 0,
+      "queued": false,
+      "request": true,
+      "sequential": false,
+      "settle_ms": 0,
+      "state_at_accept_and_request_read": {
+        "rev=0 peek=-1/EAGAIN request_read=16B/0/eof=False": 32,
+        "rev=1 peek=1/0 request_read=16B/0/eof=False": 968
+      },
+      "teardown_ok(decision=teardown & app reset/eof & 0 bytes on C)": 1000,
+      "vg_event_during_hold_count": 514,
+      "violations_count": 0,
+      "violations_first3": []
+    }
+  },
+  "cleanup": {
+    "modules_added_and_left": []
+  },
+  "done": {
+    "ok": true
+  },
+  "guest": {
+    "diag_idle": {
+      "all_vsock": [
+        "1:4294967295:4023417566>2:52424",
+        "1:4294967295:4023417567>2:52423",
+        "10:4294967295:52420>4294967295:4294967295",
+        "10:4294967295:52421>4294967295:4294967295",
+        "1:3240:52420>2:1365274625"
+      ],
+      "all_vsock_total": 5,
+      "flow_vsock_by_state": {},
+      "flow_vsock_total": 0,
+      "k": "diag",
+      "tcp_app_conns": 0,
+      "tcp_app_list": []
+    },
+    "hello": {
+      "h": 4784846.790810592,
+      "k": "hello",
+      "local_cid": 3240,
+      "t": 1332,
+      "uname_r": "7.0.0-29-generic"
+    },
+    "serial_boot": "GUEST_BOOT uname_r=7.0.0-29-generic\nGUEST_LOCAL_CID 3240\n"
+  },
+  "preflight": {
+    "host_uname_r": "7.0.0-29-generic",
+    "kvm_api": 12,
+    "modules_at_start": [
+      "acpi_ipmi",
+      "acpi_power_meter",
+      "aesni_intel",
+      "af_packet_diag",
+      "amd64_edac",
+      "amd_atl",
+      "async_memcpy",
+      "async_pq",
+      "async_raid6_recov",
+      "async_tx",
+      "async_xor",
+      "autofs4",
+      "binfmt_misc",
+      "bnxt_en",
+      "bridge",
+      "btrfs",
+      "ccp",
+      "cfg80211",
+      "cpuid",
+      "cxl_acpi",
+      "cxl_core",
+      "cxl_pmem",
+      "cxl_port",
+      "dax_hmem",
+      "dcdbas",
+      "dell_smbios",
+      "dell_wmi_descriptor",
+      "dm_multipath",
+      "dmi_sysfs",
+      "dummy",
+      "edac_mce_amd",
+      "efi_pstore",
+      "einj",
+      "fwctl",
+      "ghash_clmulni_intel",
+      "hkdf",
+      "i2c_algo_bit",
+      "i2c_piix4",
+      "i2c_smbus",
+      "ib_core",
+      "inet_diag",
+      "intel_rapl_common",
+      "intel_rapl_msr",
+      "ipmi_devintf",
+      "ipmi_msghandler",
+      "ipmi_si",
+      "ipmi_ssif",
+      "irqbypass",
+      "k10temp",
+      "kvm",
+      "kvm_amd",
+      "libblake2b",
+      "linear",
+      "llc",
+      "mac_hid",
+      "mgag200",
+      "mptcp_diag",
+      "msr",
+      "netlink_diag",
+      "nf_conncount",
+      "nf_conntrack",
+      "nf_defrag_ipv4",
+      "nf_defrag_ipv6",
+      "nf_nat",
+      "nf_tables",
+      "nf_tproxy_ipv4",
+      "nf_tproxy_ipv6",
+      "nfnetlink",
+      "nft_chain_nat",
+      "nft_masq",
+      "nft_meta_bridge",
+      "nft_nat",
+      "nft_tproxy",
+      "nls_iso8859_1",
+      "nsh",
+      "nvme",
+      "nvme_auth",
+      "nvme_core",
+      "nvme_keyring",
+      "openvswitch",
+      "platform_profile",
+      "psample",
+      "qrtr",
+      "raid0",
+      "raid1",
+      "raid10",
+      "raid456",
+      "raid6_pq",
+      "rapl",
+      "raw_diag",
+      "sch_fq_codel",
+      "spd5118",
+      "stp",
+      "tcp_diag",
+      "tg3",
+      "tls",
+      "udp_diag",
+      "unix_diag",
+      "veth",
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback",
+      "wmi",
+      "wmi_bmof",
+      "xfs",
+      "xor",
+      "xsk_diag"
+    ],
+    "other_cloud_hypervisors_at_start": "",
+    "systemd_detect_virt": "none"
+  }
+}

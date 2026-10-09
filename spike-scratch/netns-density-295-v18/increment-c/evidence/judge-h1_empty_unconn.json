@@ -1,0 +1,22 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 0,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "rand": {
+      "ok": 3,
+      "sent": 3
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 0,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 3,
+  "sender_ack_ok": 3,
+  "sent": 3,
+  "shaped_sent": 0,
+  "tag": "h1_empty_unconn"
+}

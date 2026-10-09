@@ -1,0 +1,30 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 48,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "decl_len": {
+      "ok": 18,
+      "sent": 18
+    },
+    "nf_chain": {
+      "ok": 18,
+      "sent": 18
+    },
+    "rand": {
+      "ok": 18,
+      "sent": 18
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 53850,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 54,
+  "sender_ack_ok": 54,
+  "sent": 54,
+  "shaped_sent": 0,
+  "tag": "h4_mtu9000_plain"
+}

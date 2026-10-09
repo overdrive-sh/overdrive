@@ -1,0 +1,107 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-v24/increment-b/run.py suite=smoke`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=a9ff55f91604d7a0aced0210 pid=1161432
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <metal-target>:/home/ubuntu/overdrive
+
+sent 983,433 bytes  received 4,574 bytes  73,185.70 bytes/sec
+total size is 1,494,866,979  speedup is 1,513.01
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[22:12:54] === preflight (fail-closed substrate probes)
+[22:12:54] $ uname -a; grep -m1 'model name' /proc/cpuinfo; nproc; free -m | head -2; ls -l /dev/kvm /dev/vhost-vsock  (rc=0)
+[22:12:54]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[22:12:54]     model name	: AMD EPYC 8024P 8-Core Processor
+[22:12:54]     16
+[22:12:54]                    total        used        free      shared  buff/cache   available
+[22:12:54]     Mem:           63868        1979        5540         166       57223       61889
+[22:12:54]     crw-rw---- 1 root kvm 10, 232 Oct  8 22:12 /dev/kvm
+[22:12:54]     crw-rw---- 1 root kvm 10, 241 Oct  8 22:11 /dev/vhost-vsock
+[22:12:54] other CH processes at start (not touched): none
+[22:12:54] === build
+[22:12:54] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[22:12:54]         Finished `release` profile [optimized] target(s) in 0.13s
+[22:12:54] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/guest/Cargo.toml  (rc=0)
+[22:12:54]         Finished `release` profile [optimized] target(s) in 0.01s
+[22:12:54] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/guest-target/x86_64-unknown-linux-gnu/release/v24g /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor; /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor --version  (rc=0)
+[22:12:54]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/guest-target/x86_64-unknown-linux-gnu/release/v24g: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=53daca182902a0c484653a3f1ce068f646e20ec1, not stripped
+[22:12:54]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor:                 ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=0da53e4d228b0157b1f283b2f8978e9c51d0dbaa, stripped
+[22:12:54]     cloud-hypervisor v53.0.0
+[22:12:54]     Migration Protocol Versions: 0
+[22:12:54] $ modprobe --show-depends vmw_vsock_virtio_transport  (rc=0)
+[22:12:54]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[22:12:54]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst 
+[22:12:54]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+[22:12:54] $ modprobe --show-depends vsock_diag  (rc=0)
+[22:12:54]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[22:12:54]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock_diag.ko.zst
+[22:12:55] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-b/v24-initramfs-root && find . | cpio -o -H newc --quiet | gzip -9 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-b/v24-initramfs.cpio.gz  (rc=0)
+[22:12:55] === boot guest CID 3240
+[22:12:55] launch: /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-b/v24-initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-b/v24-vm-3240-1791497575395/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/increment-b/v24-vm-3240-1791497575395/ch.log -v --vsock cid=3240,backend=vhost-kernel
+[22:12:55] guest hello: {'k': 'hello', 'uname_r': '7.0.0-29-generic', 'local_cid': 3240, 't': 1504, 'h': 4783382.750555974}
+[22:12:55] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target/release/cloud-hypervisor --version; ss --vsock -a -n -p > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/evidence/host-ss-vsock-start.txt; cat /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/evidence/host-ss-vsock-start.txt | head -20  (rc=0)
+[22:12:55]     cloud-hypervisor v53.0.0
+[22:12:55]     Migration Protocol Versions: 0
+[22:12:55]     Netid State  Recv-Q Send-Q Local Address:Port       Peer Address:Port      Process                               
+[22:12:55]     v_str ESTAB  0      0                  *:1365240385         3240:52420      users:(("python3",pid=1163242,fd=13))
+[22:12:55]     v_str LISTEN 0      0                  *:52423                 *:*          users:(("python3",pid=1163242,fd=8)) 
+[22:12:55]     v_str LISTEN 0      0                  *:52424                 *:*          users:(("python3",pid=1163242,fd=6)) 
+[22:12:55]     v_str ESTAB  0      0                  2:52424              3240:2480690599 users:(("python3",pid=1163242,fd=7)) 
+[22:12:55]     v_str ESTAB  0      0                  2:52423              3240:2480690600 users:(("python3",pid=1163242,fd=9))
+[22:12:55] === case P-queued-live: cause=none queued=True n=5 ctl_ignore=False settle_ms=0 hold_ms=0 linger=True request=True payload=0 paired_blind=False sequential=False
+[22:12:55] === teardown
+[22:12:55] $ ss --vsock -a -n -p > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/evidence/host-ss-vsock-end.txt 2>&1; head -20 /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/evidence/host-ss-vsock-end.txt  (rc=0)
+[22:12:55]     Netid State  Recv-Q Send-Q Local Address:Port       Peer Address:Port      Process                               
+[22:12:55]     v_str ESTAB  0      0                  *:1365240385         3240:52420      users:(("python3",pid=1163242,fd=13))
+[22:12:55]     v_str ESTAB  0      0                  *:1365240386         3240:52421      users:(("python3",pid=1163242,fd=14))
+[22:12:55]     v_str LISTEN 0      0                  *:52423                 *:*          users:(("python3",pid=1163242,fd=8)) 
+[22:12:55]     v_str LISTEN 0      0                  *:52424                 *:*          users:(("python3",pid=1163242,fd=6)) 
+[22:12:55]     v_str ESTAB  0      0                  2:52424              3240:2480690599 users:(("python3",pid=1163242,fd=7)) 
+[22:12:55]     v_str ESTAB  0      0                  2:52423              3240:2480690600 users:(("python3",pid=1163242,fd=9))
+Exception in thread Thread-3 (reader):
+[22:12:56] $ pgrep -af 'cloud-hypervisor' | grep -v pgrep || true  (rc=0)
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/usr/lib/python3.14/threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/run.py", line 197, in reader
+    for line in f:
+                ^
+  File "/usr/lib/python3.14/socket.py", line 725, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+Traceback (most recent call last):
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/run.py", line 599, in <module>
+    {"full": main_suite, "smoke": smoke_suite}[SUITE](vm, cmd)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/run.py", line 577, in smoke_suite
+    run_case(cmd, "P-queued-live", "none", True, 5, False, hold_ms=0)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/run.py", line 428, in run_case
+    socks.append(open_flow(CID, tr, request=request, linger=linger, payload=payload if cause != "none" else b""))
+                 ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/increment-b/run.py", line 339, in open_flow
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: setsockopt() argument 3 must be int, not bytes
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1408[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 182.1}

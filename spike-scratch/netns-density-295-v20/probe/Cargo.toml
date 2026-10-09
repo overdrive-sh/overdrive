@@ -1,0 +1,16 @@
+# V-20 throwaway probe userspace (GH #295). Standalone workspace; never part of crates/.
+[package]
+name = "v20"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aya = "0.13.1"
+libc = "0.2"
+
+[[bin]]
+name = "v20"
+path = "src/main.rs"
+
+[workspace]

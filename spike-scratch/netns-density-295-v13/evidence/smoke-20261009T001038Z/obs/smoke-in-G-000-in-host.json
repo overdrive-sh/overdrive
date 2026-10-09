@@ -1,0 +1,1 @@
+{"bytes_rx":4489216,"bytes_tx":4403200,"done":true,"local":"172.29.131.2:49886","peer":"172.29.131.1:2720","role":"client","rx_end":{"errno":0,"kind":"EOF","name":"","t_ns":"1791504658087684551"},"rx_verdict":"EOF","start_ns":"1791504657780019580","tx_end":{"errno":32,"kind":"ERR","name":"EPIPE","t_ns":"1791504658093466203"}}

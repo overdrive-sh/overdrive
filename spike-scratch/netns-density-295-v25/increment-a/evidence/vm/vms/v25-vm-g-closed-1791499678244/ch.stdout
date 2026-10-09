@@ -1,0 +1,7 @@
+Error: Cloud Hypervisor exited with the following chain of errors:
+  0: Error booting VM
+  1: The VM could not boot
+  2: Error from device manager
+  3: Cannot create vhost-kernel virtio-vsock device
+  4: Failed to set vhost-vsock owner
+  5: failure in vhost ioctl: Bad file descriptor (os error 9)

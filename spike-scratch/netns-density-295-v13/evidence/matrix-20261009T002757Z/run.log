@@ -1,0 +1,331 @@
+[00:27:57] === preflight
+[00:27:57] $ uname -a; uname -r; systemd-detect-virt; echo detect_virt_rc=$?; grep -m1 'model name' /proc/cpuinfo; nproc; free -m  (rc=0)
+[00:27:57]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[00:27:57]     7.0.0-29-generic
+[00:27:57]     none
+[00:27:57]     detect_virt_rc=1
+[00:27:57]     model name	: AMD EPYC 8024P 8-Core Processor
+[00:27:57]     16
+[00:27:57]                    total        used        free      shared  buff/cache   available
+[00:27:57]     Mem:           63868        4570        7830        1499       53663       59298
+[00:27:57]     Swap:              0           0           0
+[00:27:57] RESULT preflight.kvm_api_version = 12
+[00:27:57] RESULT preflight.uname_r = "7.0.0-29-generic"
+[00:27:57] RESULT preflight.systemd_detect_virt = "none"
+[00:27:57] RESULT preflight.substrate_ok = true
+[00:27:57] RESULT preflight.modules_before = ["vhost", "vhost_iotlb", "vhost_vsock", "vmw_vmci", "vmw_vsock_virtio_transport_common", "vmw_vsock_vmci_transport", "vsock", "vsock_diag", "vsock_loopback"]
+[00:27:57] RESULT preflight.ch_version = "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0"
+[00:27:57] $ ls -l /dev/vhost-vsock /dev/vsock  (rc=0)
+[00:27:57]     crw-rw---- 1 root kvm  10, 241 Oct  8 22:11 /dev/vhost-vsock
+[00:27:57]     crw-rw-rw- 1 root root 10, 264 Oct  8 22:00 /dev/vsock
+[00:27:57] === guest image
+[00:27:57] $ cd /tmp/v13-work/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /tmp/v13-work/out/initramfs.cpio.gz  (rc=0)
+[00:27:57] $ ip netns add v13-rem  (rc=0)
+[00:27:57] $ ip link add v13-h type veth peer name v13-r  (rc=0)
+[00:27:57] $ ip link set v13-r netns v13-rem  (rc=0)
+[00:27:57] $ ip addr add 172.29.131.1/29 dev v13-h; ip link set v13-h up  (rc=0)
+[00:27:57] $ ip netns exec v13-rem ip addr add 172.29.131.2/29 dev v13-r  (rc=0)
+[00:27:57] $ ip netns exec v13-rem ip addr add 172.29.131.3/29 dev v13-r  (rc=0)
+[00:27:57] $ ip netns exec v13-rem ip link set v13-r up; ip netns exec v13-rem ip link set lo up  (rc=0)
+[00:27:57] $ ping -c1 -W2 172.29.131.2; ping -c1 -W2 172.29.131.3; ip route get 172.29.131.2  (rc=0)
+[00:27:57]     PING 172.29.131.2 (172.29.131.2) 56(84) bytes of data.
+[00:27:57]     64 bytes from 172.29.131.2: icmp_seq=1 ttl=64 time=0.048 ms
+[00:27:57]     
+[00:27:57]     --- 172.29.131.2 ping statistics ---
+[00:27:57]     1 packets transmitted, 1 received, 0% packet loss, time 0ms
+[00:27:57]     rtt min/avg/max/mdev = 0.048/0.048/0.048/0.000 ms
+[00:27:57]     PING 172.29.131.3 (172.29.131.3) 56(84) bytes of data.
+[00:27:57]     64 bytes from 172.29.131.3: icmp_seq=1 ttl=64 time=0.024 ms
+[00:27:57]     
+[00:27:57]     --- 172.29.131.3 ping statistics ---
+[00:27:57]     1 packets transmitted, 1 received, 0% packet loss, time 0ms
+[00:27:57]     rtt min/avg/max/mdev = 0.024/0.024/0.024/0.000 ms
+[00:27:57]     172.29.131.2 dev v13-h src 172.29.131.1 uid 0 
+[00:27:57]         cache
+[00:27:58] launch VM: /tmp/v13-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v13-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--linger,yes --cpus boot=2 --memory size=1024M --serial file=/tmp/v13-work/out/vm-matrix-20261009T002757Z/serial.log --console off --vsock cid=3280,backend=vhost-kernel --log-file /tmp/v13-work/out/vm-matrix-20261009T002757Z/ch.log -v
+[00:28:00] RESULT boot.guest_ready = true
+[00:28:00] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.38
+net.ipv4.tcp_fwmark_accept = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33m26:5d:7c:06:2c:e8 [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+OWNER_READY role=guest pid=110
+GUEST_READY
+
+[00:28:00] RESULT boot.guest_uname = "7.0.0-29-generic"
+[00:28:01] === cell out_nonmesh-killG: kinds=['out_nonmesh'] order=G linger=yes n=40
+[00:28:04]   trial 0: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:07]   trial 1: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:10]   trial 2: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:13]   trial 3: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:17]   trial 4: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:20]   trial 5: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:24]   trial 6: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:27]   trial 7: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:30]   trial 8: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:34]   trial 9: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:37]   trial 10: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:40]   trial 11: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:43]   trial 12: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:46]   trial 13: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:49]   trial 14: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:52]   trial 15: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:55]   trial 16: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:28:58]   trial 17: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:29:02]   trial 18: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:05]   trial 19: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:08]   trial 20: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:11]   trial 21: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:29:14]   trial 22: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:17]   trial 23: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:21]   trial 24: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:24]   trial 25: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:27]   trial 26: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:30]   trial 27: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:29:33]   trial 28: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:36]   trial 29: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:39]   trial 30: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:43]   trial 31: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:46]   trial 32: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:49]   trial 33: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:52]   trial 34: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:56]   trial 35: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:29:59]   trial 36: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:30:02]   trial 37: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:30:05]   trial 38: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:30:08]   trial 39: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'EOF'}
+[00:30:08] RESULT cells.out_nonmesh-killG = {"kinds": ["out_nonmesh"], "order": "G", "linger": "yes", "hup_abort": "no", "n": 40, "tally": {"out_nonmesh:guest_app": {"RESET": 40}, "out_nonmesh:remote_nonmesh": {"EOF": 37, "RESET": 3}}}
+[00:30:08] === cell out_nonmesh-killH: kinds=['out_nonmesh'] order=H linger=yes n=40
+[00:30:11]   trial 0: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:14]   trial 1: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:17]   trial 2: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:20]   trial 3: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:23]   trial 4: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:26]   trial 5: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:28]   trial 6: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:32]   trial 7: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:35]   trial 8: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:38]   trial 9: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:41]   trial 10: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:44]   trial 11: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:46]   trial 12: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:49]   trial 13: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:52]   trial 14: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:55]   trial 15: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:30:58]   trial 16: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:01]   trial 17: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:04]   trial 18: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:07]   trial 19: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:10]   trial 20: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:13]   trial 21: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:16]   trial 22: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:19]   trial 23: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:22]   trial 24: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:24]   trial 25: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:28]   trial 26: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:30]   trial 27: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:33]   trial 28: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:36]   trial 29: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:39]   trial 30: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:42]   trial 31: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:45]   trial 32: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:48]   trial 33: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:51]   trial 34: {'out_nonmesh:guest_app': 'EOF', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:54]   trial 35: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:31:57]   trial 36: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:32:00]   trial 37: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:32:03]   trial 38: {'out_nonmesh:guest_app': 'EOF', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:32:06]   trial 39: {'out_nonmesh:guest_app': 'RESET', 'out_nonmesh:remote_nonmesh': 'RESET'}
+[00:32:06] RESULT cells.out_nonmesh-killH = {"kinds": ["out_nonmesh"], "order": "H", "linger": "yes", "hup_abort": "no", "n": 40, "tally": {"out_nonmesh:guest_app": {"RESET": 38, "EOF": 2}, "out_nonmesh:remote_nonmesh": {"RESET": 40}}}
+[00:32:06] === cell out_mesh-killG: kinds=['out_mesh'] order=G linger=yes n=40
+[00:32:09]   trial 0: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:12]   trial 1: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:15]   trial 2: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:18]   trial 3: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:21]   trial 4: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:24]   trial 5: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:28]   trial 6: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:30]   trial 7: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:34]   trial 8: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:37]   trial 9: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:40]   trial 10: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:43]   trial 11: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:46]   trial 12: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:49]   trial 13: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:52]   trial 14: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:55]   trial 15: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:32:58]   trial 16: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:01]   trial 17: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:04]   trial 18: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:08]   trial 19: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:11]   trial 20: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:14]   trial 21: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:17]   trial 22: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:20]   trial 23: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:23]   trial 24: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:27]   trial 25: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:30]   trial 26: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:33]   trial 27: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:36]   trial 28: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:39]   trial 29: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:43]   trial 30: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:46]   trial 31: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:49]   trial 32: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:52]   trial 33: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:55]   trial 34: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:33:58]   trial 35: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:01]   trial 36: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:05]   trial 37: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:07]   trial 38: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:11]   trial 39: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:11] RESULT cells.out_mesh-killG = {"kinds": ["out_mesh"], "order": "G", "linger": "yes", "hup_abort": "no", "n": 40, "tally": {"out_mesh:guest_app": {"RESET": 40}, "out_mesh:remote_mesh": {"RESET": 40}}}
+[00:34:11] === cell out_mesh-killH: kinds=['out_mesh'] order=H linger=yes n=40
+[00:34:14]   trial 0: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:17]   trial 1: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:20]   trial 2: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:22]   trial 3: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:26]   trial 4: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:29]   trial 5: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:32]   trial 6: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:35]   trial 7: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:38]   trial 8: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:41]   trial 9: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:43]   trial 10: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:47]   trial 11: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:50]   trial 12: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:53]   trial 13: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:55]   trial 14: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:34:59]   trial 15: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:02]   trial 16: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:05]   trial 17: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:08]   trial 18: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:10]   trial 19: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:13]   trial 20: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:16]   trial 21: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:20]   trial 22: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:22]   trial 23: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:26]   trial 24: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:29]   trial 25: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:31]   trial 26: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:34]   trial 27: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:37]   trial 28: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:40]   trial 29: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:43]   trial 30: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:46]   trial 31: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:49]   trial 32: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:52]   trial 33: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:55]   trial 34: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:35:58]   trial 35: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:36:01]   trial 36: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:36:04]   trial 37: {'out_mesh:guest_app': 'OTHER_ERR', 'out_mesh:remote_mesh': 'RESET'}
+[00:36:07]   trial 38: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:36:11]   trial 39: {'out_mesh:guest_app': 'RESET', 'out_mesh:remote_mesh': 'RESET'}
+[00:36:11] RESULT cells.out_mesh-killH = {"kinds": ["out_mesh"], "order": "H", "linger": "yes", "hup_abort": "no", "n": 40, "tally": {"out_mesh:guest_app": {"RESET": 39, "OTHER_ERR": 1}, "out_mesh:remote_mesh": {"RESET": 40}}}
+[00:36:11] === cell in-killG: kinds=['in'] order=G linger=yes n=40
+[00:36:14]   trial 0: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:17]   trial 1: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:20]   trial 2: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:24]   trial 3: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:27]   trial 4: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:31]   trial 5: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:34]   trial 6: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:37]   trial 7: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:41]   trial 8: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:44]   trial 9: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:47]   trial 10: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:51]   trial 11: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:55]   trial 12: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:36:58]   trial 13: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:01]   trial 14: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:37:05]   trial 15: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:08]   trial 16: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:11]   trial 17: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:37:15]   trial 18: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:18]   trial 19: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:22]   trial 20: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:25]   trial 21: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:29]   trial 22: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:32]   trial 23: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:35]   trial 24: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:39]   trial 25: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:42]   trial 26: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:46]   trial 27: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:49]   trial 28: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:52]   trial 29: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:37:55]   trial 30: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:37:59]   trial 31: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:38:02]   trial 32: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:38:06]   trial 33: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:38:09]   trial 34: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:38:13]   trial 35: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:38:16]   trial 36: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:38:19]   trial 37: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:38:23]   trial 38: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:38:26]   trial 39: {'in:guest_app': 'RESET', 'in:external_client': 'EOF'}
+[00:38:26] RESULT cells.in-killG = {"kinds": ["in"], "order": "G", "linger": "yes", "hup_abort": "no", "n": 40, "tally": {"in:guest_app": {"RESET": 40}, "in:external_client": {"EOF": 36, "RESET": 4}}}
+[00:38:26] === cell in-killH: kinds=['in'] order=H linger=yes n=40
+[00:38:29]   trial 0: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:38:33]   trial 1: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:38:36]   trial 2: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:38:39]   trial 3: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:38:42]   trial 4: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:38:46]   trial 5: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:38:49]   trial 6: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:38:52]   trial 7: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:38:55]   trial 8: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:38:58]   trial 9: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:02]   trial 10: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:05]   trial 11: {'in:guest_app': 'OTHER_ERR', 'in:external_client': 'RESET'}
+[00:39:08]   trial 12: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:39:11]   trial 13: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:14]   trial 14: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:39:17]   trial 15: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:21]   trial 16: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:24]   trial 17: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:27]   trial 18: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:39:30]   trial 19: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:33]   trial 20: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:39:36]   trial 21: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:39]   trial 22: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:39:43]   trial 23: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:46]   trial 24: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:39:49]   trial 25: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:39:52]   trial 26: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:39:55]   trial 27: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:39:59]   trial 28: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:40:02]   trial 29: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:40:05]   trial 30: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:40:08]   trial 31: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:40:11]   trial 32: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:40:15]   trial 33: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:40:17]   trial 34: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:40:21]   trial 35: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:40:24]   trial 36: {'in:guest_app': 'EOF', 'in:external_client': 'RESET'}
+[00:40:27]   trial 37: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:40:30]   trial 38: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:40:33]   trial 39: {'in:guest_app': 'RESET', 'in:external_client': 'RESET'}
+[00:40:33] RESULT cells.in-killH = {"kinds": ["in"], "order": "H", "linger": "yes", "hup_abort": "no", "n": 40, "tally": {"in:guest_app": {"RESET": 22, "EOF": 17, "OTHER_ERR": 1}, "in:external_client": {"RESET": 40}}}
+[00:40:33] $ ip netns del v13-rem  (rc=0)
+[00:40:33] RESULT cleanup.modules_caused = []
+[00:40:33] RESULT cleanup.modules_diff = ["sch_tbf"]
+[00:40:33] RESULT cleanup.links_added_removed = {"added": [], "removed": ["v18-h@if63041    UP             16:65:21:f4:52:d3 <BROADCAST,MULTICAST,UP,LOWER_UP> "]}
+[00:40:33] RESULT cleanup.netns_added_removed = {"added": [], "removed": ["v18-p (id: 1)"]}
+[00:40:33] RESULT cleanup.nft_tables_added_removed = {"added": [], "removed": []}
+[00:40:33] RESULT cleanup.routes_added_removed = {"added": [], "removed": ["10.250.218.0/24 dev v18-h proto kernel scope link src 10.250.218.1 "]}
+[00:40:33] RESULT cleanup.v13_links_left = []
+[00:40:33] RESULT cleanup.v13_netns_left = []
+[00:40:33] RESULT cleanup.v13_cgroups_left = []
+[00:40:33] RESULT cleanup.v13_procs_left = ""
+[00:40:33] === done

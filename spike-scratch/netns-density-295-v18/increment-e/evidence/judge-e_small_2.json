@@ -1,0 +1,71 @@
+{
+  "PASS": false,
+  "above_mtu_sent": 0,
+  "ack_fail_examples": [
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "rand",
+      "len": 100
+    },
+    {
+      "ack_len": null,
+      "ack_sha_match": null,
+      "conn": false,
+      "err": "recv Resource temporarily unavailable (os error 11)",
+      "kind": "rand",
+      "len": 8
+    }
+  ],
+  "by_kind": {
+    "decl_len": {
+      "ok": 141,
+      "sent": 141
+    },
+    "decl_m9": {
+      "ok": 144,
+      "sent": 144
+    },
+    "frame": {
+      "ok": 148,
+      "sent": 148
+    },
+    "frame2": {
+      "ok": 137,
+      "sent": 137
+    },
+    "frame_chain": {
+      "ok": 153,
+      "sent": 153
+    },
+    "nf_chain": {
+      "ok": 135,
+      "sent": 135
+    },
+    "rand": {
+      "ok": 133,
+      "sent": 135
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 1440,
+  "missing_at_peer": 1,
+  "missing_examples": [
+    {
+      "conn": false,
+      "kind": "rand",
+      "len": 100,
+      "n": 1,
+      "shaped": false
+    }
+  ],
+  "peer_rx": 992,
+  "sender_ack_ok": 991,
+  "sent": 993,
+  "shaped_sent": 438,
+  "tag": "e_small_2"
+}

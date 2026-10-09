@@ -1,0 +1,5 @@
+{"ack_oob":true,"arm":true,"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1225535,"programs":[{"id":58428,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":58429,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":58430,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":58431,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":58432,"name":"sockops(/sys/fs/cgroup/v13-spike-1225535)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","t_ns":"1791509268071194520","udp_park":true}
+{"ev":"park_pool","slots":256,"t_ns":"1791509268080080990"}
+{"cid":3280,"ev":"host_ready","intakes":["172.29.131.1:2720=7300"],"t_ns":"1791509268080163154"}
+{"cid":3280,"ev":"hello","t_ns":"1791509268930609001"}
+{"dst":"172.29.131.3:7201","ev":"host_mesh_connect","flow":1,"legf":"127.0.0.1:47907","t_ns":"1791509270007018861"}

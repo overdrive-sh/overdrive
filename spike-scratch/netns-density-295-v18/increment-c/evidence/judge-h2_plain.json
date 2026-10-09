@@ -1,0 +1,22 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 60,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "rand": {
+      "ok": 80,
+      "sent": 80
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 59000,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 80,
+  "sender_ack_ok": 80,
+  "sent": 80,
+  "shaped_sent": 0,
+  "tag": "h2_plain"
+}

@@ -1,0 +1,22 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 2,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "frame2": {
+      "ok": 2,
+      "sent": 2
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 59000,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 2,
+  "sender_ack_ok": 2,
+  "sent": 2,
+  "shaped_sent": 2,
+  "tag": "w_frame2"
+}

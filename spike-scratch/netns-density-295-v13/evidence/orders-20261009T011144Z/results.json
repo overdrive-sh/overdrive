@@ -1,0 +1,209 @@
+{
+  "boot": {
+    "guest_ready": true,
+    "guest_uname": "7.0.0-29-generic"
+  },
+  "cells": {
+    "all3-orderGH-jit0": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "out_nonmesh",
+        "out_mesh",
+        "in"
+      ],
+      "linger": "yes",
+      "n": 10,
+      "order": "GH",
+      "tally": {
+        "in:external_client": {
+          "EOF": 8,
+          "RESET": 2
+        },
+        "in:guest_app": {
+          "RESET": 10
+        },
+        "out_mesh:guest_app": {
+          "RESET": 10
+        },
+        "out_mesh:remote_mesh": {
+          "RESET": 10
+        },
+        "out_nonmesh:guest_app": {
+          "RESET": 10
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "EOF": 7,
+          "RESET": 3
+        }
+      }
+    },
+    "all3-orderGH-jit40": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "out_nonmesh",
+        "out_mesh",
+        "in"
+      ],
+      "linger": "yes",
+      "n": 10,
+      "order": "GH",
+      "tally": {
+        "in:external_client": {
+          "EOF": 9,
+          "RESET": 1
+        },
+        "in:guest_app": {
+          "RESET": 10
+        },
+        "out_mesh:guest_app": {
+          "RESET": 10
+        },
+        "out_mesh:remote_mesh": {
+          "RESET": 10
+        },
+        "out_nonmesh:guest_app": {
+          "RESET": 10
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "EOF": 8,
+          "RESET": 2
+        }
+      }
+    },
+    "all3-orderHG-jit0": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "out_nonmesh",
+        "out_mesh",
+        "in"
+      ],
+      "linger": "yes",
+      "n": 10,
+      "order": "HG",
+      "tally": {
+        "in:external_client": {
+          "RESET": 10
+        },
+        "in:guest_app": {
+          "EOF": 3,
+          "RESET": 7
+        },
+        "out_mesh:guest_app": {
+          "EOF": 1,
+          "RESET": 9
+        },
+        "out_mesh:remote_mesh": {
+          "RESET": 10
+        },
+        "out_nonmesh:guest_app": {
+          "RESET": 10
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "RESET": 10
+        }
+      }
+    },
+    "all3-orderHG-jit40": {
+      "half_msg": "no",
+      "hup_abort": "no",
+      "kinds": [
+        "out_nonmesh",
+        "out_mesh",
+        "in"
+      ],
+      "linger": "yes",
+      "n": 10,
+      "order": "HG",
+      "tally": {
+        "in:external_client": {
+          "RESET": 10
+        },
+        "in:guest_app": {
+          "EOF": 2,
+          "OTHER_ERR": 1,
+          "RESET": 7
+        },
+        "out_mesh:guest_app": {
+          "RESET": 10
+        },
+        "out_mesh:remote_mesh": {
+          "RESET": 10
+        },
+        "out_nonmesh:guest_app": {
+          "RESET": 10
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "RESET": 10
+        }
+      }
+    }
+  },
+  "cleanup": {
+    "links_added_removed": {
+      "added": [
+        "v5c-h@if63075    UP             b6:76:fd:98:92:59 <BROADCAST,MULTICAST,UP,LOWER_UP> "
+      ],
+      "removed": []
+    },
+    "modules_caused": [
+      "8021q",
+      "garp",
+      "macvlan",
+      "mrp"
+    ],
+    "modules_diff": [
+      "8021q",
+      "garp",
+      "macvlan",
+      "mrp"
+    ],
+    "netns_added_removed": {
+      "added": [
+        "v17-host (id: 2)",
+        "v17-peer1 (id: 1)",
+        "v17-peer2 (id: 3)",
+        "v17-peer3 (id: 4)",
+        "v17-peer4 (id: 5)",
+        "v17-peer5 (id: 6)",
+        "v17-peer6 (id: 7)",
+        "v5c-ns (id: 8)"
+      ],
+      "removed": []
+    },
+    "nft_tables_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "routes_added_removed": {
+      "added": [
+        "10.250.205.0/24 dev v5c-h proto kernel scope link src 10.250.205.1 "
+      ],
+      "removed": []
+    },
+    "v13_cgroups_left": [],
+    "v13_links_left": [],
+    "v13_netns_left": [],
+    "v13_procs_left": ""
+  },
+  "preflight": {
+    "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0",
+    "kvm_api_version": 12,
+    "modules_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ],
+    "substrate_ok": true,
+    "systemd_detect_virt": "none",
+    "uname_r": "7.0.0-29-generic"
+  }
+}

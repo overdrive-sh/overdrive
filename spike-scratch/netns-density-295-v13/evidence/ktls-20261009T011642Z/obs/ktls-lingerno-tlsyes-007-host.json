@@ -1,0 +1,1 @@
+{"bytes_rx":2825625,"bytes_tx":0,"done":true,"events":[{"errno":0,"kind":"rx_eof","name":"","t_ns":"1791508673963162863"}],"finite_tx_shut":false,"first_event":{"errno":0,"kind":"rx_eof","name":"","t_ns":"1791508673963162863"},"local":"172.29.131.3:7201","peer":"172.29.131.1:57990","role":"server","rx_verdict":"EOF","start_ns":"1791508673775081607"}

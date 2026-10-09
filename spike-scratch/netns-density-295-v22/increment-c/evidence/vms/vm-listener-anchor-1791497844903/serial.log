@@ -1,0 +1,3 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29
+AGENT_READY local_cid=3229
+AGENT_CMD ident => IDENT local_cid=3229 uname=7.0.0-29-generic uptime_s=0.60

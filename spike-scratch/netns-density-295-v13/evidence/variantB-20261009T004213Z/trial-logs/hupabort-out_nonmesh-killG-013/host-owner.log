@@ -1,0 +1,9 @@
+{"ack_oob":true,"arm":true,"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1217252,"programs":[{"id":49414,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":49415,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":49416,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":49417,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":49418,"name":"sockops(/sys/fs/cgroup/v13-spike-1217252)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","t_ns":"1791506577975295722","udp_park":true}
+{"ev":"park_pool","slots":256,"t_ns":"1791506577984227494"}
+{"cid":3280,"ev":"host_ready","intakes":["172.29.131.1:2720=7300"],"t_ns":"1791506577984301265"}
+{"cid":3280,"ev":"hello","t_ns":"1791506578788587971"}
+{"dst":"172.29.131.2:7200","ev":"host_tcp_connect","flow":1,"t_ns":"1791506579986371817"}
+{"ev":"leg_hup","flow":1,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791506580296753436","vsock":true}
+{"ev":"drain_shutdown_write","flow":1,"from_leg":1,"t_ns":"1791506580296853327","timed_out":false}
+{"ev":"ctl_closed","t_ns":"1791506580306131721"}
+{"age_ms":320,"ev":"flow_closed","flow":1,"kind":1,"reset":true,"t_ns":"1791506580306224641","why":"ctl_lost"}

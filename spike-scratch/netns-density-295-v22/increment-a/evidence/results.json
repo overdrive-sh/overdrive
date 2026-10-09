@@ -1,0 +1,36 @@
+{
+  "env": {
+    "cid": 3220,
+    "cid_bystander": 3221,
+    "n_per_port_per_round": 10,
+    "other_ch_processes_at_start": "",
+    "ports": [
+      1234,
+      1240,
+      1241,
+      1243
+    ],
+    "rounds": 1,
+    "uname_r": "7.0.0-29-generic",
+    "virt": "none"
+  },
+  "examples": {},
+  "modules_left": [
+    "vmw_vsock_virtio_transport_common",
+    "vsock"
+  ],
+  "modules_unloaded_by_me": [
+    "vhost_vsock",
+    "vmw_vsock_virtio_transport_common",
+    "vsock",
+    "vhost",
+    "vhost_iotlb"
+  ],
+  "pins": {
+    "ch": "e4af1e1b133914912a7c93bb11dd2796933388f5270121e66a82a26fda488dfa",
+    "guest_kernel": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+    "initramfs": "d78940ad8250e5a28dfc285df05c03bccfc36cbeb026eb1a04a77e34264abfa1",
+    "probe": "22131ac9a8b2d456725752894f28c0bc4521cdfc1cd56410fe6a208282c510ea"
+  },
+  "tallies": {}
+}

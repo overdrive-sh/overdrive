@@ -1,0 +1,66 @@
+[00:13:49] === preflight
+[00:13:49] $ uname -a; uname -r; systemd-detect-virt; echo detect_virt_rc=$?; grep -m1 'model name' /proc/cpuinfo; nproc; free -m  (rc=0)
+[00:13:49]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[00:13:49]     7.0.0-29-generic
+[00:13:49]     none
+[00:13:49]     detect_virt_rc=1
+[00:13:49]     model name	: AMD EPYC 8024P 8-Core Processor
+[00:13:49]     16
+[00:13:49]                    total        used        free      shared  buff/cache   available
+[00:13:49]     Mem:           63868        4363        5114        1482       56569       59505
+[00:13:49]     Swap:              0           0           0
+[00:13:49] RESULT preflight.kvm_api_version = 12
+[00:13:49] RESULT preflight.uname_r = "7.0.0-29-generic"
+[00:13:49] RESULT preflight.systemd_detect_virt = "none"
+[00:13:49] RESULT preflight.substrate_ok = true
+[00:13:49] RESULT preflight.modules_before = ["vhost", "vhost_iotlb", "vhost_vsock", "vmw_vmci", "vmw_vsock_virtio_transport_common", "vmw_vsock_vmci_transport", "vsock", "vsock_diag", "vsock_loopback"]
+[00:13:49] RESULT preflight.ch_version = "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0"
+[00:13:49] $ ls -l /dev/vhost-vsock /dev/vsock  (rc=0)
+[00:13:49]     crw-rw---- 1 root kvm  10, 241 Oct  8 22:11 /dev/vhost-vsock
+[00:13:49]     crw-rw-rw- 1 root root 10, 264 Oct  8 22:00 /dev/vsock
+[00:13:49] === guest image
+[00:13:50] $ cd /tmp/v13-work/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /tmp/v13-work/out/initramfs.cpio.gz  (rc=0)
+[00:13:50] $ ip netns add v13-rem  (rc=0)
+[00:13:50] $ ip link add v13-h type veth peer name v13-r  (rc=0)
+[00:13:50] $ ip link set v13-r netns v13-rem  (rc=0)
+[00:13:50] $ ip addr add 172.29.131.1/29 dev v13-h; ip link set v13-h up  (rc=0)
+[00:13:50] $ ip netns exec v13-rem ip addr add 172.29.131.2/29 dev v13-r  (rc=0)
+[00:13:50] $ ip netns exec v13-rem ip addr add 172.29.131.3/29 dev v13-r  (rc=0)
+[00:13:50] $ ip netns exec v13-rem ip link set v13-r up; ip netns exec v13-rem ip link set lo up  (rc=0)
+[00:13:50] $ ping -c1 -W2 172.29.131.2; ping -c1 -W2 172.29.131.3; ip route get 172.29.131.2  (rc=0)
+[00:13:50]     PING 172.29.131.2 (172.29.131.2) 56(84) bytes of data.
+[00:13:50]     64 bytes from 172.29.131.2: icmp_seq=1 ttl=64 time=0.053 ms
+[00:13:50]     
+[00:13:50]     --- 172.29.131.2 ping statistics ---
+[00:13:50]     1 packets transmitted, 1 received, 0% packet loss, time 0ms
+[00:13:50]     rtt min/avg/max/mdev = 0.053/0.053/0.053/0.000 ms
+[00:13:50]     PING 172.29.131.3 (172.29.131.3) 56(84) bytes of data.
+[00:13:50]     64 bytes from 172.29.131.3: icmp_seq=1 ttl=64 time=0.035 ms
+[00:13:50]     
+[00:13:50]     --- 172.29.131.3 ping statistics ---
+[00:13:50]     1 packets transmitted, 1 received, 0% packet loss, time 0ms
+[00:13:50]     rtt min/avg/max/mdev = 0.035/0.035/0.035/0.000 ms
+[00:13:50]     172.29.131.2 dev v13-h src 172.29.131.1 uid 0 
+[00:13:50]         cache
+[00:13:50] EXCEPTION Traceback (most recent call last):
+  File "/tmp/v13-work/run.py", line 497, in main
+    start_host_owner()
+    ~~~~~~~~~~~~~~~~^^
+  File "/tmp/v13-work/run.py", line 284, in start_host_owner
+    if p.poll() is not None: raise RuntimeError("host owner died at start")
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: host owner died at start
+
+[00:13:50] RESULT harness.exception = "Traceback (most recent call last):\n  File \"/tmp/v13-work/run.py\", line 497, in main\n    start_host_owner()\n    ~~~~~~~~~~~~~~~~^^\n  File \"/tmp/v13-work/run.py\", line 284, in start_host_owner\n    if p.poll() is not None: raise RuntimeError(\"host owner died at start\")\n                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: host owner died at start\n"
+[00:13:50] $ ip netns del v13-rem  (rc=0)
+[00:13:50] RESULT cleanup.modules_caused = []
+[00:13:51] RESULT cleanup.modules_diff = []
+[00:13:51] RESULT cleanup.links_added_removed = {"added": [], "removed": []}
+[00:13:51] RESULT cleanup.netns_added_removed = {"added": [], "removed": []}
+[00:13:51] RESULT cleanup.nft_tables_added_removed = {"added": [], "removed": []}
+[00:13:51] RESULT cleanup.routes_added_removed = {"added": [], "removed": []}
+[00:13:51] RESULT cleanup.v13_links_left = []
+[00:13:51] RESULT cleanup.v13_netns_left = []
+[00:13:51] RESULT cleanup.v13_cgroups_left = []
+[00:13:51] RESULT cleanup.v13_procs_left = ""
+[00:13:51] === done

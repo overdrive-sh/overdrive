@@ -1,0 +1,879 @@
+{
+  "S1b": {
+    "result": {
+      "control_other_id": {
+        "id": "0x6e58",
+        "received_byte_exact": true,
+        "tag": "control: an id the program never saw"
+      },
+      "entries_after_stageA": {
+        "entries": 1,
+        "map_id": 71432,
+        "max_entries": 4096,
+        "prog_id": 47455
+      },
+      "entries_after_victim": {
+        "entries": 0,
+        "map_id": 71432,
+        "max_entries": 4096,
+        "prog_id": 47455
+      },
+      "peer_snmp_delta": {
+        "Ip:ReasmFails": 2,
+        "Ip:ReasmOKs": 2,
+        "Ip:ReasmReqds": 9,
+        "Ip:ReasmTimeout": 1,
+        "Udp:InDatagrams": 2
+      },
+      "same_id_again_after_3s": {
+        "id": "0x6e57",
+        "received_byte_exact": true,
+        "tag": "same id again after the peer's queue expired; entry was consumed"
+      },
+      "victim_same_id": {
+        "id": "0x6e57",
+        "received_byte_exact": false,
+        "tag": "unrelated bare datagram, same (src,dst,id) as the stale entry"
+      },
+      "wire_trains": [
+        {
+          "frags": [
+            [
+              0,
+              1472,
+              true
+            ]
+          ],
+          "id": "0x6e57",
+          "sport": 42677,
+          "udp_len": 3008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1472,
+              1480,
+              true
+            ],
+            [
+              2952,
+              48,
+              false
+            ]
+          ],
+          "id": "0x6e57",
+          "sport": 45555,
+          "udp_len": 3008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              48,
+              false
+            ]
+          ],
+          "id": "0x6e58",
+          "sport": 45555,
+          "udp_len": 3008
+        },
+        {
+          "frags": [
+            [
+              0,
+              1480,
+              true
+            ],
+            [
+              1480,
+              1480,
+              true
+            ],
+            [
+              2960,
+              48,
+              false
+            ]
+          ],
+          "id": "0x6e57",
+          "sport": 45555,
+          "udp_len": 3008
+        }
+      ]
+    }
+  },
+  "S3b": {
+    "result": {
+      "after_congestion_traffic": {
+        "PASS": false,
+        "counters": {
+          "encoded": 199,
+          "frag_first": 100,
+          "frag_shift": 202,
+          "hybrid_escaped": 100,
+          "redirect_ok": 399,
+          "sent_calls": 13764,
+          "tc_decoded": 100,
+          "tc_lenient_pass": 100,
+          "vstrip": 100
+        },
+        "extra_at_peer": 0,
+        "missing_at_peer": 1,
+        "peer_ns_snmp_delta": {
+          "Ip:ReasmFails": 2,
+          "Ip:ReasmOKs": 199,
+          "Ip:ReasmReqds": 600,
+          "Ip:ReasmTimeout": 1,
+          "Udp:InDatagrams": 199
+        },
+        "peer_rx": 199,
+        "sender_ack_ok": 199,
+        "sent": 200,
+        "shaped_sent": 100,
+        "tag": "e_s3_after_congestion"
+      },
+      "congested_runs": [
+        {
+          "entries_after": {
+            "entries": 40,
+            "map_id": 71432,
+            "max_entries": 4096,
+            "prog_id": 47455
+          },
+          "phase": {
+            "PASS": false,
+            "counters": {
+              "frag_first": 40,
+              "frag_shift": 39,
+              "hybrid_escaped": 40,
+              "redirect_ok": 40,
+              "sent_calls": 42016,
+              "tc_decoded": 40
+            },
+            "extra_at_peer": 0,
+            "missing_at_peer": 40,
+            "peer_ns_snmp_delta": {
+              "Ip:ReasmFails": 38,
+              "Ip:ReasmReqds": 39,
+              "Ip:ReasmTimeout": 38
+            },
+            "peer_rx": 0,
+            "sender_ack_ok": 0,
+            "sent": 40,
+            "shaped_sent": 40,
+            "tag": "e_s3_congested_0"
+          }
+        },
+        {
+          "entries_after": {
+            "entries": 80,
+            "map_id": 71432,
+            "max_entries": 4096,
+            "prog_id": 47455
+          },
+          "phase": {
+            "PASS": false,
+            "counters": {
+              "frag_first": 40,
+              "frag_shift": 40,
+              "hybrid_escaped": 40,
+              "redirect_ok": 40,
+              "sent_calls": 41812,
+              "tc_decoded": 40
+            },
+            "extra_at_peer": 0,
+            "missing_at_peer": 40,
+            "peer_ns_snmp_delta": {
+              "Ip:ReasmFails": 39,
+              "Ip:ReasmReqds": 40,
+              "Ip:ReasmTimeout": 39
+            },
+            "peer_rx": 0,
+            "sender_ack_ok": 0,
+            "sent": 40,
+            "shaped_sent": 40,
+            "tag": "e_s3_congested_1"
+          }
+        },
+        {
+          "entries_after": {
+            "entries": 120,
+            "map_id": 71432,
+            "max_entries": 4096,
+            "prog_id": 47455
+          },
+          "phase": {
+            "PASS": false,
+            "counters": {
+              "frag_first": 40,
+              "frag_shift": 40,
+              "hybrid_escaped": 40,
+              "redirect_ok": 40,
+              "sent_calls": 41713,
+              "tc_decoded": 40
+            },
+            "extra_at_peer": 0,
+            "missing_at_peer": 40,
+            "peer_ns_snmp_delta": {
+              "Ip:ReasmFails": 39,
+              "Ip:ReasmReqds": 40,
+              "Ip:ReasmTimeout": 39
+            },
+            "peer_rx": 0,
+            "sender_ack_ok": 0,
+            "sent": 40,
+            "shaped_sent": 40,
+            "tag": "e_s3_congested_2"
+          }
+        }
+      ],
+      "entries_after_qdisc_removed": {
+        "entries": 120,
+        "map_id": 71432,
+        "max_entries": 4096,
+        "prog_id": 47455
+      },
+      "entries_after_traffic": {
+        "entries": 119,
+        "map_id": 71432,
+        "max_entries": 4096,
+        "prog_id": 47455
+      },
+      "entries_before": {
+        "entries": 0,
+        "map_id": 71432,
+        "max_entries": 4096,
+        "prog_id": 47455
+      },
+      "qdisc_stats": "qdisc netem 8003: root refcnt 17 limit 1 delay 20ms seed 3990311653176551760\n Sent 180390 bytes 123 pkt (dropped 120, overlimits 0 requeues 0) \n backlog 0b 0p requeues 0\n"
+    }
+  },
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      28,
+      28
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "1205743 /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park,--cells,none --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/vm-increment-b-1791504736/serial.log --console off --vsock cid=3261,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v5c/out/vm-increment-b-1791504736/ch.log -v\n1214326 /tmp/v13-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v13-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--linger,yes --cpus boot=2 --memory size=1024M --serial file=/tmp/v13-work/out/vm-matrix-20261009T002757Z/serial.log --console off --vsock cid=3280,backend=vhost-kernel --log-file /tmp/v13-work/out/vm-matrix-20261009T002757Z/ch.log -v\n",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": false,
+    "modules_caused": [
+      "sch_netem"
+    ],
+    "modules_diff": [
+      "sch_netem"
+    ],
+    "modules_restored": false,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": false
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=172\n"
+  },
+  "preflight": {
+    "blob_sha256": "662db27fa19d6b3f77248cd7716e13cd9f7afe6e6d9c2ec413308e59c75e9915",
+    "cid": 3312,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ]
+  },
+  "programs": {
+    "tcx_on_veth": "xdp:\n\ntc:\nv18-h(63048) tcx/egress eg_decode_frag prog_id 47455 link_id 24737 \n\nflow_dissector:\n\nnetfilter:\n\n"
+  },
+  "soak_big": {
+    "result": {
+      "0_unconn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "10_unconn": {
+        "PASS": false,
+        "ack_ok": 999,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "never_reached_egress",
+            "conn": false,
+            "kind": "nf_chain",
+            "len": 2951,
+            "shaped": false
+          }
+        ],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 999,
+        "missing_at_peer": 1,
+        "pcap": "pcap-phase-e_big_10.pcap (deleted after classification to bound evidence size)",
+        "peer_rx": 999,
+        "sent": 1000,
+        "wire_bad_trains": 0
+      },
+      "11_conn": {
+        "PASS": false,
+        "ack_ok": 999,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": true,
+            "kind": "frame_chain",
+            "len": 59000,
+            "shaped": true
+          }
+        ],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-e_big_11.pcap (deleted after classification to bound evidence size)",
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": 0
+      },
+      "1_conn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "2_unconn": {
+        "PASS": false,
+        "ack_ok": 999,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": false,
+            "kind": "frame_chain",
+            "len": 32768,
+            "shaped": true
+          }
+        ],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-e_big_2.pcap (deleted after classification to bound evidence size)",
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": 0
+      },
+      "3_conn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "4_unconn": {
+        "PASS": false,
+        "ack_ok": 999,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": false,
+            "kind": "decl_m9",
+            "len": 1464,
+            "shaped": false
+          }
+        ],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-e_big_4.pcap (deleted after classification to bound evidence size)",
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": 0
+      },
+      "5_conn": {
+        "PASS": false,
+        "ack_ok": 999,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": true,
+            "kind": "rand",
+            "len": 1471,
+            "shaped": false
+          }
+        ],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-e_big_5.pcap (deleted after classification to bound evidence size)",
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": 0
+      },
+      "6_unconn": {
+        "PASS": false,
+        "ack_ok": 999,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": false,
+            "kind": "frame",
+            "len": 16384,
+            "shaped": true
+          }
+        ],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-e_big_6.pcap (deleted after classification to bound evidence size)",
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": 0
+      },
+      "7_conn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "8_unconn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "9_conn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      }
+    }
+  },
+  "soak_serial": {
+    "result": {
+      "0_unconn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "1_conn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1001,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "2_unconn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "3_conn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1001,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "4_unconn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1000,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      },
+      "5_conn": {
+        "PASS": true,
+        "ack_ok": 1000,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 1000,
+        "guest_udp_capture": 1001,
+        "host_drop_counters": {},
+        "host_verdict_total": 1000,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 1000,
+        "sent": 1000,
+        "wire_bad_trains": null
+      }
+    }
+  },
+  "soak_small": {
+    "result": {
+      "0_unconn": {
+        "PASS": true,
+        "ack_ok": 983,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 983,
+        "guest_udp_capture": 983,
+        "host_drop_counters": {},
+        "host_verdict_total": 983,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 983,
+        "sent": 983,
+        "wire_bad_trains": null
+      },
+      "10_unconn": {
+        "PASS": true,
+        "ack_ok": 979,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 979,
+        "guest_udp_capture": 979,
+        "host_drop_counters": {},
+        "host_verdict_total": 979,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 979,
+        "sent": 979,
+        "wire_bad_trains": null
+      },
+      "11_conn": {
+        "PASS": false,
+        "ack_ok": 973,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": true,
+            "kind": "frame_chain",
+            "len": 16,
+            "shaped": true
+          },
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": true,
+            "kind": "frame2",
+            "len": 1431,
+            "shaped": true
+          }
+        ],
+        "guest_encoded": 975,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 975,
+        "missing_at_peer": 0,
+        "pcap": "pcap-phase-e_small_11.pcap (deleted after classification to bound evidence size)",
+        "peer_rx": 975,
+        "sent": 975,
+        "wire_bad_trains": 0
+      },
+      "1_conn": {
+        "PASS": true,
+        "ack_ok": 988,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 988,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 988,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 988,
+        "sent": 988,
+        "wire_bad_trains": null
+      },
+      "2_unconn": {
+        "PASS": false,
+        "ack_ok": 991,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "never_reached_egress",
+            "conn": false,
+            "kind": "rand",
+            "len": 100,
+            "shaped": false
+          },
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": false,
+            "kind": "rand",
+            "len": 8,
+            "shaped": false
+          }
+        ],
+        "guest_encoded": 993,
+        "guest_udp_capture": 993,
+        "host_drop_counters": {
+          "noroute": 2
+        },
+        "host_verdict_total": 992,
+        "missing_at_peer": 1,
+        "pcap": "pcap-phase-e_small_2.pcap",
+        "peer_rx": 992,
+        "sent": 993,
+        "wire_bad_trains": 0
+      },
+      "3_conn": {
+        "PASS": false,
+        "ack_ok": 988,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "ack_lost_after_delivery",
+            "conn": true,
+            "kind": "frame_chain",
+            "len": 64,
+            "shaped": true
+          }
+        ],
+        "guest_encoded": 989,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 988,
+        "missing_at_peer": 1,
+        "pcap": "pcap-phase-e_small_3.pcap",
+        "peer_rx": 988,
+        "sent": 989,
+        "wire_bad_trains": 0
+      },
+      "4_unconn": {
+        "PASS": false,
+        "ack_ok": 977,
+        "extra_at_peer": 0,
+        "failures": [
+          {
+            "class": "never_reached_egress",
+            "conn": false,
+            "kind": "decl_m9",
+            "len": 100,
+            "shaped": false
+          }
+        ],
+        "guest_encoded": 978,
+        "guest_udp_capture": 978,
+        "host_drop_counters": {},
+        "host_verdict_total": 977,
+        "missing_at_peer": 1,
+        "pcap": "pcap-phase-e_small_4.pcap (deleted after classification to bound evidence size)",
+        "peer_rx": 977,
+        "sent": 978,
+        "wire_bad_trains": 0
+      },
+      "5_conn": {
+        "PASS": true,
+        "ack_ok": 978,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 978,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 978,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 978,
+        "sent": 978,
+        "wire_bad_trains": null
+      },
+      "6_unconn": {
+        "PASS": true,
+        "ack_ok": 981,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 981,
+        "guest_udp_capture": 981,
+        "host_drop_counters": {},
+        "host_verdict_total": 981,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 981,
+        "sent": 981,
+        "wire_bad_trains": null
+      },
+      "7_conn": {
+        "PASS": true,
+        "ack_ok": 981,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 981,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 981,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 981,
+        "sent": 981,
+        "wire_bad_trains": null
+      },
+      "8_unconn": {
+        "PASS": true,
+        "ack_ok": 985,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 985,
+        "guest_udp_capture": 985,
+        "host_drop_counters": {},
+        "host_verdict_total": 985,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 985,
+        "sent": 985,
+        "wire_bad_trains": null
+      },
+      "9_conn": {
+        "PASS": true,
+        "ack_ok": 985,
+        "extra_at_peer": 0,
+        "failures": [],
+        "guest_encoded": 985,
+        "guest_udp_capture": 1004,
+        "host_drop_counters": {},
+        "host_verdict_total": 985,
+        "missing_at_peer": 0,
+        "pcap": null,
+        "peer_rx": 985,
+        "sent": 985,
+        "wire_bad_trains": null
+      }
+    }
+  },
+  "substrate": {
+    "guest_uname": "Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux\n",
+    "offhost": "63048: v18-h@if63047: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 16:65:21:f4:52:d3 brd ff:ff:ff:ff:ff:ff link-netns v18-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv18-p0@if63048   UP             10.250.218.2/24 fe80::c87b:f7ff:fe8c:f0ca/64 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ngeneric-receive-offload: off\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nState  Recv-Q Send-Q Local Address:Port Peer Address:Port\nUNCONN 0      0       10.250.218.2:7218      0.0.0.0:*   \n"
+  }
+}

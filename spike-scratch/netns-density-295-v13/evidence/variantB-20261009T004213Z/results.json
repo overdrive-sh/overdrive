@@ -1,0 +1,163 @@
+{
+  "boot": {
+    "guest_ready": true,
+    "guest_uname": "7.0.0-29-generic"
+  },
+  "cells": {
+    "hupabort-in-killG": {
+      "hup_abort": "yes",
+      "kinds": [
+        "in"
+      ],
+      "linger": "yes",
+      "n": 30,
+      "order": "G",
+      "tally": {
+        "in:external_client": {
+          "EOF": 25,
+          "RESET": 5
+        },
+        "in:guest_app": {
+          "RESET": 30
+        }
+      }
+    },
+    "hupabort-in-killH": {
+      "hup_abort": "yes",
+      "kinds": [
+        "in"
+      ],
+      "linger": "yes",
+      "n": 30,
+      "order": "H",
+      "tally": {
+        "in:external_client": {
+          "RESET": 30
+        },
+        "in:guest_app": {
+          "EOF": 11,
+          "OTHER_ERR": 1,
+          "RESET": 18
+        }
+      }
+    },
+    "hupabort-out_mesh-killG": {
+      "hup_abort": "yes",
+      "kinds": [
+        "out_mesh"
+      ],
+      "linger": "yes",
+      "n": 30,
+      "order": "G",
+      "tally": {
+        "out_mesh:guest_app": {
+          "RESET": 30
+        },
+        "out_mesh:remote_mesh": {
+          "RESET": 30
+        }
+      }
+    },
+    "hupabort-out_mesh-killH": {
+      "hup_abort": "yes",
+      "kinds": [
+        "out_mesh"
+      ],
+      "linger": "yes",
+      "n": 30,
+      "order": "H",
+      "tally": {
+        "out_mesh:guest_app": {
+          "EOF": 1,
+          "RESET": 29
+        },
+        "out_mesh:remote_mesh": {
+          "RESET": 30
+        }
+      }
+    },
+    "hupabort-out_nonmesh-killG": {
+      "hup_abort": "yes",
+      "kinds": [
+        "out_nonmesh"
+      ],
+      "linger": "yes",
+      "n": 30,
+      "order": "G",
+      "tally": {
+        "out_nonmesh:guest_app": {
+          "RESET": 30
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "EOF": 24,
+          "RESET": 6
+        }
+      }
+    },
+    "hupabort-out_nonmesh-killH": {
+      "hup_abort": "yes",
+      "kinds": [
+        "out_nonmesh"
+      ],
+      "linger": "yes",
+      "n": 30,
+      "order": "H",
+      "tally": {
+        "out_nonmesh:guest_app": {
+          "RESET": 30
+        },
+        "out_nonmesh:remote_nonmesh": {
+          "RESET": 30
+        }
+      }
+    }
+  },
+  "cleanup": {
+    "links_added_removed": {
+      "added": [
+        "v5c-h@if63051    UP             b6:76:fd:98:92:59 <BROADCAST,MULTICAST,UP,LOWER_UP> "
+      ],
+      "removed": []
+    },
+    "modules_caused": [],
+    "modules_diff": [],
+    "netns_added_removed": {
+      "added": [
+        "v5c-ns (id: 1)"
+      ],
+      "removed": []
+    },
+    "nft_tables_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "routes_added_removed": {
+      "added": [
+        "10.250.205.0/24 dev v5c-h proto kernel scope link src 10.250.205.1 "
+      ],
+      "removed": []
+    },
+    "v13_cgroups_left": [],
+    "v13_links_left": [],
+    "v13_netns_left": [],
+    "v13_procs_left": ""
+  },
+  "preflight": {
+    "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0",
+    "kvm_api_version": 12,
+    "modules_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ],
+    "substrate_ok": true,
+    "systemd_detect_virt": "none",
+    "uname_r": "7.0.0-29-generic"
+  }
+}

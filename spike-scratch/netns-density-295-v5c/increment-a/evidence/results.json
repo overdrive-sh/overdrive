@@ -1,0 +1,285 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": false,
+    "modules_diff": [
+      "vsock_diag"
+    ],
+    "modules_loaded_during_run_left_in_place": [
+      "vsock_diag"
+    ],
+    "my_vm_alive": false,
+    "netns_unchanged": false,
+    "routes_unchanged": false,
+    "tcx_unchanged": true
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells none": "OWNER_READY role=guest pid=137\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells recreate": "OWNER_READY role=guest pid=151\n"
+  },
+  "preflight": {
+    "cid": 3261,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "substrate": {
+      "kvm_api_version": 12,
+      "machine": "x86_64",
+      "systemd_detect_virt": "none",
+      "vmx_svm": [
+        "svm"
+      ]
+    },
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_loopback"
+    ]
+  },
+  "scenario": {
+    "smoke-none/none": {
+      "app": [
+        {
+          "ev": "cycle",
+          "phase": "cycle",
+          "r": {
+            "got": 65,
+            "head": "ES00000018?F",
+            "i": 0,
+            "mismatch": false,
+            "ok": true,
+            "rtt_us": 1692,
+            "want": 65
+          },
+          "t_ms": 1791504567581.3816,
+          "tag": "S"
+        },
+        {
+          "ev": "cycle",
+          "phase": "cycle",
+          "r": {
+            "got": 65,
+            "head": "ES00000129@G",
+            "i": 1,
+            "mismatch": false,
+            "ok": true,
+            "rtt_us": 1632,
+            "want": 65
+          },
+          "t_ms": 1791504567883.112,
+          "tag": "S"
+        },
+        {
+          "ev": "cycle",
+          "phase": "cycle",
+          "r": {
+            "got": 65,
+            "head": "ES0000023:AH",
+            "i": 2,
+            "mismatch": false,
+            "ok": true,
+            "rtt_us": 1993,
+            "want": 65
+          },
+          "t_ms": 1791504568185.2148,
+          "tag": "S"
+        },
+        {
+          "connected": true,
+          "cycles": 3,
+          "dst": "<metal-address>:47501",
+          "ev": "udp_cycle",
+          "gap_ms": 300,
+          "local": "10.99.7.2:44618",
+          "mismatches": 0,
+          "ok": 3,
+          "s": 0.905747089,
+          "size": 64,
+          "tag": "S",
+          "timeouts": 0
+        }
+      ],
+      "cells": "none",
+      "guest_events": {
+        "abort": 3,
+        "cells_cleared": 4,
+        "refused": 0,
+        "udp_associate": 3,
+        "udp_paired": 3,
+        "udp_teardown": 3
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 3,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 3,
+        "host_dg_teardown": 3
+      },
+      "host_extra": [
+        "--abort-dst",
+        "<metal-address>:47501",
+        "--abort-after-ms",
+        "80"
+      ],
+      "rec": [
+        {
+          "from": "<metal-address>:52379",
+          "head": "5330303030303031383f464d545b6269",
+          "len": 64,
+          "n": 1,
+          "t_ms": 1791504567625.0989,
+          "tag": "S000000"
+        },
+        {
+          "from": "<metal-address>:33467",
+          "head": "53303030303031323940474e555c636a",
+          "len": 64,
+          "n": 2,
+          "t_ms": 1791504567926.8928,
+          "tag": "S000001"
+        },
+        {
+          "from": "<metal-address>:36573",
+          "head": "53303030303032333a41484f565d646b",
+          "len": 64,
+          "n": 3,
+          "t_ms": 1791504568228.9556,
+          "tag": "S000002"
+        }
+      ],
+      "t_start": 1791504567.320833
+    },
+    "smoke-recreate/recreate": {
+      "app": [
+        {
+          "ev": "cycle",
+          "phase": "cycle",
+          "r": {
+            "got": 65,
+            "head": "ES00000018?F",
+            "i": 0,
+            "mismatch": false,
+            "ok": true,
+            "rtt_us": 2274,
+            "want": 65
+          },
+          "t_ms": 1791504572540.2056,
+          "tag": "S"
+        },
+        {
+          "ev": "cycle",
+          "phase": "cycle",
+          "r": {
+            "got": 65,
+            "head": "ES00000129@G",
+            "i": 1,
+            "mismatch": false,
+            "ok": true,
+            "rtt_us": 1729,
+            "want": 65
+          },
+          "t_ms": 1791504572842.0708,
+          "tag": "S"
+        },
+        {
+          "ev": "cycle",
+          "phase": "cycle",
+          "r": {
+            "got": 65,
+            "head": "ES0000023:AH",
+            "i": 2,
+            "mismatch": false,
+            "ok": true,
+            "rtt_us": 2966,
+            "want": 65
+          },
+          "t_ms": 1791504573145.1702,
+          "tag": "S"
+        },
+        {
+          "connected": true,
+          "cycles": 3,
+          "dst": "<metal-address>:47501",
+          "ev": "udp_cycle",
+          "gap_ms": 300,
+          "local": "10.99.7.2:40753",
+          "mismatches": 0,
+          "ok": 3,
+          "s": 0.907405905,
+          "size": 64,
+          "tag": "S",
+          "timeouts": 0
+        }
+      ],
+      "cells": "recreate",
+      "guest_events": {
+        "abort": 3,
+        "cells_cleared": 4,
+        "refused": 0,
+        "udp_associate": 3,
+        "udp_paired": 3,
+        "udp_teardown": 3
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 3,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 3,
+        "host_dg_teardown": 3
+      },
+      "host_extra": [
+        "--abort-dst",
+        "<metal-address>:47501",
+        "--abort-after-ms",
+        "80"
+      ],
+      "rec": [
+        {
+          "from": "<metal-address>:36796",
+          "head": "5330303030303031383f464d545b6269",
+          "len": 64,
+          "n": 1,
+          "t_ms": 1791504572583.9468,
+          "tag": "S000000"
+        },
+        {
+          "from": "<metal-address>:41605",
+          "head": "53303030303031323940474e555c636a",
+          "len": 64,
+          "n": 2,
+          "t_ms": 1791504572885.8765,
+          "tag": "S000001"
+        },
+        {
+          "from": "<metal-address>:55152",
+          "head": "53303030303032333a41484f565d646b",
+          "len": 64,
+          "n": 3,
+          "t_ms": 1791504573188.9453,
+          "tag": "S000002"
+        }
+      ],
+      "t_start": 1791504572.2798526
+    }
+  },
+  "substrate": {
+    "guest_uname": "Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux\ntcp_diag inet_diag dummy vmw_vsock_virtio_transport vmw_vsock_virtio_transport_common vsock "
+  }
+}

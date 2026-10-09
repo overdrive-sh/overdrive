@@ -1,0 +1,8 @@
+GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.29
+AGENT_READY local_cid=3221
+AGENT_CMD ident => IDENT local_cid=3221 uname=7.0.0-29-generic uptime_s=0.60
+AGENT_CMD hold 1234 3 26100 BY => HOLD port=1234 ok=3 fail=0 errs=[]
+AGENT_CMD hold 1240 3 26600 BY => HOLD port=1240 ok=3 fail=0 errs=[]
+AGENT_CMD hold 1241 3 27100 BY => HOLD port=1241 ok=3 fail=0 errs=[]
+AGENT_CMD hold 1243 3 27600 BY => HOLD port=1243 ok=3 fail=0 errs=[]
+AGENT_CMD tick BYST2 => TICK held=12 ok=12 fail=0

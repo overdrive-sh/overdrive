@@ -1,0 +1,18 @@
+{"ack_oob":true,"arm":true,"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1222120,"programs":[{"id":56231,"name":"verdict","tag":"29dea242dbfa0f6b","verified_insns":453},{"id":56232,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":56233,"name":"strp_verdict","tag":"0c76fd5cdccd1622","verified_insns":464},{"id":56234,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":56235,"name":"sockops(/sys/fs/cgroup/v13-spike-1222120)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","t_ns":"1791508421039234194","udp_park":true}
+{"ev":"park_pool","slots":256,"t_ns":"1791508421048108085"}
+{"cid":3280,"ev":"host_ready","intakes":["172.29.131.1:2720=7300"],"t_ns":"1791508421048184850"}
+{"cid":3280,"ev":"hello","t_ns":"1791508421901573228"}
+{"dst":"172.29.131.2:7200","ev":"host_tcp_connect","flow":1,"t_ns":"1791508423002053880"}
+{"dst":"172.29.131.3:7201","ev":"host_mesh_connect","flow":3,"legf":"127.0.0.1:55529","t_ns":"1791508423406356390"}
+{"client":"172.29.131.2:53624","ev":"host_intake","flow":2,"gport":7300,"park":0,"t_ns":"1791508424011455529"}
+{"ev":"leg_hup","flow":2,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791508424355523627","vsock":true}
+{"ev":"drain_shutdown_write","flow":2,"from_leg":1,"t_ns":"1791508424355618489","timed_out":false}
+{"ev":"leg_hup","flow":3,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791508424355655725","vsock":true}
+{"ev":"leg_hup","flow":1,"hup":false,"leg":1,"mask":8192,"rdhup":true,"t_ns":"1791508424355704459","vsock":true}
+{"ev":"leg_error","events":8200,"flow":2,"leg":1,"so_error":32,"t_ns":"1791508424355752912"}
+{"age_ms":345,"ev":"flow_closed","flow":2,"kind":2,"reset":true,"t_ns":"1791508424355870839","why":"leg_error"}
+{"ev":"drain_shutdown_write","flow":1,"from_leg":1,"t_ns":"1791508424355928466","timed_out":false}
+{"ev":"drain_shutdown_write","flow":3,"from_leg":1,"t_ns":"1791508424355986203","timed_out":false}
+{"ev":"ctl_closed","t_ns":"1791508424364028191"}
+{"age_ms":1362,"ev":"flow_closed","flow":1,"kind":1,"reset":true,"t_ns":"1791508424364101642","why":"ctl_lost"}
+{"age_ms":958,"ev":"flow_closed","flow":3,"kind":1,"reset":true,"t_ns":"1791508424364215213","why":"ctl_lost"}

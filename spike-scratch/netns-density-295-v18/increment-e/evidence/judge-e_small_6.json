@@ -1,0 +1,46 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 0,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "decl_len": {
+      "ok": 118,
+      "sent": 118
+    },
+    "decl_m9": {
+      "ok": 137,
+      "sent": 137
+    },
+    "frame": {
+      "ok": 145,
+      "sent": 145
+    },
+    "frame2": {
+      "ok": 143,
+      "sent": 143
+    },
+    "frame_chain": {
+      "ok": 136,
+      "sent": 136
+    },
+    "nf_chain": {
+      "ok": 145,
+      "sent": 145
+    },
+    "rand": {
+      "ok": 157,
+      "sent": 157
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 1440,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 981,
+  "sender_ack_ok": 981,
+  "sent": 981,
+  "shaped_sent": 424,
+  "tag": "e_small_6"
+}

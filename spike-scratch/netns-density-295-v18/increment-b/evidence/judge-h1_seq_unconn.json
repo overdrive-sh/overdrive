@@ -1,0 +1,38 @@
+{
+  "PASS": true,
+  "above_mtu_sent": 80,
+  "ack_fail_examples": [],
+  "by_kind": {
+    "frame": {
+      "ok": 28,
+      "sent": 28
+    },
+    "frame2": {
+      "ok": 26,
+      "sent": 26
+    },
+    "frame_chain": {
+      "ok": 28,
+      "sent": 28
+    },
+    "nf_chain": {
+      "ok": 28,
+      "sent": 28
+    },
+    "rand": {
+      "ok": 28,
+      "sent": 28
+    }
+  },
+  "extra_at_peer": 0,
+  "extra_diag": [],
+  "extra_examples": [],
+  "max_len": 59000,
+  "missing_at_peer": 0,
+  "missing_examples": [],
+  "peer_rx": 138,
+  "sender_ack_ok": 138,
+  "sent": 138,
+  "shaped_sent": 82,
+  "tag": "h1_seq_unconn"
+}

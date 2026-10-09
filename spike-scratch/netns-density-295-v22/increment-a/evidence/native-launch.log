@@ -1,0 +1,109 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-v22/increment-a/run.py 1 10`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f697e311f4f932a90b4e2f43 pid=1146395
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <metal-target>:/home/ubuntu/overdrive
+
+sent 4,296,695 bytes  received 48,456 bytes  193,117.82 bytes/sec
+total size is 1,500,377,338  speedup is 345.30
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[21:59:26] === preflight
+[21:59:26] $ systemd-detect-virt || true (rc=0)
+[21:59:26]     none
+[21:59:26] $ uname -a; grep -m1 'model name' /proc/cpuinfo; nproc; free -m; ls -l /dev/kvm /dev/vhost-vsock || true (rc=0)
+[21:59:26]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[21:59:26]     model name	: AMD EPYC 8024P 8-Core Processor
+[21:59:26]     16
+[21:59:26]                    total        used        free      shared  buff/cache   available
+[21:59:26]     Mem:           63868        1960        7430         166       55353       61908
+[21:59:26]     Swap:              0           0           0
+[21:59:26]     crw-rw---- 1 root kvm 10, 232 Oct  8 21:59 /dev/kvm
+[21:59:26]     crw-rw---- 1 root kvm 10, 241 Oct  5 21:08 /dev/vhost-vsock
+[21:59:26] $ pgrep -af cloud-hypervisor | grep -v pgrep || true (rc=0)
+[21:59:26] === build
+[21:59:26] $ cp -a /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/cargo-home /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/cargo-home (rc=0)
+[21:59:27] $ cp -a /home/ubuntu/overdrive/spike-scratch/netns-density-295-ch-vhost-vsock/out/ch-target /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/ch-target (rc=0)
+[22:00:39] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor (rc=0)
+[22:00:39]        Compiling landlock v0.4.5
+[22:00:39]        Compiling num_enum v0.7.6
+[22:00:39]        Compiling option_parser v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/option_parser)
+[22:00:39]        Compiling env_logger v0.11.11
+[22:00:39]        Compiling vm-allocator v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-allocator)
+[22:00:39]        Compiling linux-loader v0.13.2
+[22:00:39]        Compiling darling_macro v0.23.0
+[22:00:39]        Compiling darling v0.23.0
+[22:00:39]        Compiling serde_with_macros v3.21.0
+[22:00:39]        Compiling clap v4.6.1
+[22:00:39]        Compiling serde_with v3.21.0
+[22:00:39]        Compiling vmm-sys-util v0.15.0
+[22:00:39]        Compiling event_monitor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/event_monitor)
+[22:00:39]        Compiling tracer v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tracer)
+[22:00:39]        Compiling vfio-bindings v0.6.2
+[22:00:39]        Compiling iommufd-ioctls v0.2.0
+[22:00:39]        Compiling virtio-queue v0.17.0
+[22:00:39]        Compiling rate_limiter v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/rate_limiter)
+[22:00:39]        Compiling tpm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tpm)
+[22:00:39]        Compiling vhost v0.16.0
+[22:00:39]        Compiling rustls-webpki v0.103.13
+[22:00:39]        Compiling api_client v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/api_client)
+[22:00:39]        Compiling vfio_user v0.1.3
+[22:00:39]        Compiling vm-virtio v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-virtio)
+[22:00:39]        Compiling net_util v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/net_util)
+[22:00:39]        Compiling kvm-bindings v0.14.1
+[22:00:39]        Compiling acpi_tables v0.2.1
+[22:00:39]        Compiling zstd v0.13.3
+[22:00:39]        Compiling block v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/block)
+[22:00:39]        Compiling vfio-ioctls v0.7.0
+[22:00:39]        Compiling vm-migration v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-migration)
+[22:00:39]        Compiling hypervisor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/hypervisor)
+[22:00:39]        Compiling vm-device v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-device)
+[22:00:39]        Compiling arch v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/arch)
+[22:00:39]        Compiling pci v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/pci)
+[22:00:39]        Compiling virtio-devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/virtio-devices)
+[22:00:39]        Compiling devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/devices)
+[22:00:39]        Compiling vmm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vmm)
+[22:00:39]        Compiling cloud-hypervisor v53.0.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/cloud-hypervisor)
+[22:00:39]         Finished `release` profile [optimized] target(s) in 1m 12s
+[22:00:40] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/probe/Cargo.toml (rc=0)
+[22:00:40]        Compiling libc v0.2.190
+[22:00:40]        Compiling v22-probe v0.1.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/probe)
+[22:00:40]         Finished `release` profile [optimized] target(s) in 1.26s
+[22:00:40] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/probe-target/x86_64-unknown-linux-gnu/release/v22-probe /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/ch-target/release/cloud-hypervisor; /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/ch-target/release/cloud-hypervisor --version (rc=0)
+[22:00:40]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/probe-target/x86_64-unknown-linux-gnu/release/v22-probe: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=d8ae85466d39c997ac8199113ca6a5d8b404528e, not stripped
+[22:00:40]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/ch-target/release/cloud-hypervisor:                      ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=c9a7d49d2502af6b2f4194a1054a7a07fd8cc72c, stripped
+[22:00:40]     cloud-hypervisor v53.0.0
+[22:00:40]     Migration Protocol Versions: 0
+[22:00:40] $ modprobe --show-depends vmw_vsock_virtio_transport (rc=0)
+[22:00:40]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[22:00:40]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst 
+[22:00:40]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+[22:00:41] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/initramfs-root && find . | cpio -o -H newc --quiet | gzip -9 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/initramfs.cpio.gz (rc=0)
+[22:00:41] launch listener-anchor: /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=1 --memory size=512M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/vm-listener-anchor-1791496841639/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/out/increment-a/vm-listener-anchor-1791496841639/ch.log --vsock cid=3229,backend=vhost-kernel
+[22:02:14] TALLIES {}
+[22:02:14] EXAMPLES {}
+[22:02:14] done
+Traceback (most recent call last):
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/increment-a/run.py", line 439, in <module>
+    boot.ready()
+    ~~~~~~~~~~^^
+  File "/home/ubuntu/overdrive/spike-scratch/netns-density-295-v22/increment-a/run.py", line 164, in ready
+    raise RuntimeError(f"{self.name} not ready")
+RuntimeError: listener-anchor not ready
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1408[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+{"launcher_rc": 1, "wall_s": 240.8}

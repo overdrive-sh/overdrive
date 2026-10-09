@@ -1,0 +1,64 @@
+[01:15:28] === preflight
+[01:15:28] $ uname -a; uname -r; systemd-detect-virt; echo detect_virt_rc=$?; grep -m1 'model name' /proc/cpuinfo; nproc; free -m  (rc=0)
+[01:15:28]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[01:15:28]     7.0.0-29-generic
+[01:15:28]     none
+[01:15:28]     detect_virt_rc=1
+[01:15:28]     model name	: AMD EPYC 8024P 8-Core Processor
+[01:15:28]     16
+[01:15:28]                    total        used        free      shared  buff/cache   available
+[01:15:28]     Mem:           63868        3209       16303         816       45868       60659
+[01:15:28]     Swap:              0           0           0
+[01:15:28] RESULT preflight.kvm_api_version = 12
+[01:15:28] RESULT preflight.uname_r = "7.0.0-29-generic"
+[01:15:28] RESULT preflight.systemd_detect_virt = "none"
+[01:15:28] RESULT preflight.substrate_ok = true
+[01:15:28] RESULT preflight.modules_before = ["vhost", "vhost_iotlb", "vhost_vsock", "vmw_vmci", "vmw_vsock_virtio_transport_common", "vmw_vsock_vmci_transport", "vsock", "vsock_diag", "vsock_loopback"]
+[01:15:28] RESULT preflight.ch_version = "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0"
+[01:15:28] $ ls -l /dev/vhost-vsock /dev/vsock  (rc=0)
+[01:15:28]     crw-rw---- 1 root kvm  10, 241 Oct  8 22:11 /dev/vhost-vsock
+[01:15:28]     crw-rw-rw- 1 root root 10, 264 Oct  8 22:00 /dev/vsock
+[01:15:28] === guest image
+[01:15:29] $ cd /tmp/v13-work/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /tmp/v13-work/out/initramfs.cpio.gz  (rc=0)
+[01:15:29] $ ip netns add v13-rem  (rc=0)
+[01:15:29] $ ip link add v13-h type veth peer name v13-r  (rc=0)
+[01:15:29] $ ip link set v13-r netns v13-rem  (rc=0)
+[01:15:29] $ ip addr add 172.29.131.1/29 dev v13-h; ip link set v13-h up  (rc=0)
+[01:15:29] $ ip netns exec v13-rem ip addr add 172.29.131.2/29 dev v13-r  (rc=0)
+[01:15:29] $ ip netns exec v13-rem ip addr add 172.29.131.3/29 dev v13-r  (rc=0)
+[01:15:29] $ ip netns exec v13-rem ip link set v13-r up; ip netns exec v13-rem ip link set lo up  (rc=0)
+[01:15:29] $ ping -c1 -W2 172.29.131.2; ping -c1 -W2 172.29.131.3; ip route get 172.29.131.2  (rc=0)
+[01:15:29]     PING 172.29.131.2 (172.29.131.2) 56(84) bytes of data.
+[01:15:29]     64 bytes from 172.29.131.2: icmp_seq=1 ttl=64 time=0.041 ms
+[01:15:29]     
+[01:15:29]     --- 172.29.131.2 ping statistics ---
+[01:15:29]     1 packets transmitted, 1 received, 0% packet loss, time 0ms
+[01:15:29]     rtt min/avg/max/mdev = 0.041/0.041/0.041/0.000 ms
+[01:15:29]     PING 172.29.131.3 (172.29.131.3) 56(84) bytes of data.
+[01:15:29]     64 bytes from 172.29.131.3: icmp_seq=1 ttl=64 time=0.047 ms
+[01:15:29]     
+[01:15:29]     --- 172.29.131.3 ping statistics ---
+[01:15:29]     1 packets transmitted, 1 received, 0% packet loss, time 0ms
+[01:15:29]     rtt min/avg/max/mdev = 0.047/0.047/0.047/0.000 ms
+[01:15:29]     172.29.131.2 dev v13-h src 172.29.131.1 uid 0 
+[01:15:29]         cache
+[01:15:29] $ lsmod | grep -E '^tls ' || true  (rc=0)
+[01:15:29]     tls                   163840  0
+[01:15:43]   ktls-lingeryes-tlsyes: {'RESET': 20}
+[01:15:43] RESULT cells.ktls-lingeryes-tlsyes = {"linger": "yes", "tls_tx": "yes", "n": 20, "tally": {"RESET": 20}}
+[01:15:57]   ktls-lingerno-tlsyes: {'RESET': 20}
+[01:15:57] RESULT cells.ktls-lingerno-tlsyes = {"linger": "no", "tls_tx": "yes", "n": 20, "tally": {"RESET": 20}}
+[01:16:11]   ktls-lingeryes-tlsno: {'RESET': 20}
+[01:16:11] RESULT cells.ktls-lingeryes-tlsno = {"linger": "yes", "tls_tx": "no", "n": 20, "tally": {"RESET": 20}}
+[01:16:11] $ ip netns del v13-rem  (rc=0)
+[01:16:11] RESULT cleanup.modules_caused = []
+[01:16:11] RESULT cleanup.modules_diff = []
+[01:16:11] RESULT cleanup.links_added_removed = {"added": [], "removed": []}
+[01:16:11] RESULT cleanup.netns_added_removed = {"added": [], "removed": []}
+[01:16:11] RESULT cleanup.nft_tables_added_removed = {"added": [], "removed": []}
+[01:16:11] RESULT cleanup.routes_added_removed = {"added": [], "removed": []}
+[01:16:11] RESULT cleanup.v13_links_left = []
+[01:16:11] RESULT cleanup.v13_netns_left = []
+[01:16:11] RESULT cleanup.v13_cgroups_left = []
+[01:16:11] RESULT cleanup.v13_procs_left = ""
+[01:16:11] === done

@@ -1,0 +1,8086 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      23,
+      17
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "1220489 /tmp/v13-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v13-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--linger,yes --cpus boot=2 --memory size=1024M --serial file=/tmp/v13-work/out/vm-controls-20261009T010635Z/serial.log --console off --vsock cid=3280,backend=vhost-kernel --log-file /tmp/v13-work/out/vm-controls-20261009T010635Z/ch.log -v\n",
+    "links_unchanged": false,
+    "modules_diff": [],
+    "modules_loaded_during_run_left_in_place": [],
+    "my_vm_alive": false,
+    "netns_unchanged": true,
+    "routes_unchanged": true,
+    "tcx_unchanged": true
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells empty": "OWNER_READY role=guest pid=1616\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells empty --udp-slots 1": "OWNER_READY role=guest pid=1047\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells empty --udp-slots 2": "OWNER_READY role=guest pid=641\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells empty --udp-slots 2 --pair-deadline-ms 800": "OWNER_READY role=guest pid=691\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells none": "OWNER_READY role=guest pid=1545\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells none --udp-slots 1": "OWNER_READY role=guest pid=917\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells none --udp-slots 2": "OWNER_READY role=guest pid=460\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells none --udp-slots 2 --pair-deadline-ms 800": "OWNER_READY role=guest pid=510\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells recreate": "OWNER_READY role=guest pid=1688\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells recreate --udp-slots 1": "OWNER_READY role=guest pid=1177\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells recreate --udp-slots 2": "OWNER_READY role=guest pid=826\n",
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --cells recreate --udp-slots 2 --pair-deadline-ms 800": "OWNER_READY role=guest pid=877\n"
+  },
+  "preflight": {
+    "cid": 3261,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "substrate": {
+      "kvm_api_version": 12,
+      "machine": "x86_64",
+      "systemd_detect_virt": "none",
+      "vmx_svm": [
+        "svm"
+      ]
+    },
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ]
+  },
+  "scenario": {
+    "A1-empty/empty": {
+      "bad_cycles": [],
+      "cells": "empty",
+      "dest_received": 200,
+      "dest_unique": 200,
+      "expected_associations": 200,
+      "guest_events": {
+        "abort": 200,
+        "cells_cleared": 201,
+        "refused": 0,
+        "udp_associate": 200,
+        "udp_paired": 200,
+        "udp_teardown": 200
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 200,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 200,
+        "host_dg_teardown": 200
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "80"
+      ],
+      "summary": {
+        "connected": true,
+        "cycles": 200,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 250,
+        "local": "10.99.7.2:49930",
+        "mismatches": 0,
+        "ok": 200,
+        "s": 50.440989466,
+        "size": 64,
+        "tag": "A",
+        "timeouts": 0
+      },
+      "t_start": 1791506653.086311
+    },
+    "A1-none/none": {
+      "bad_cycles": [],
+      "cells": "none",
+      "dest_received": 200,
+      "dest_unique": 200,
+      "expected_associations": 200,
+      "guest_events": {
+        "abort": 200,
+        "cells_cleared": 201,
+        "refused": 0,
+        "udp_associate": 200,
+        "udp_paired": 200,
+        "udp_teardown": 200
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 200,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 200,
+        "host_dg_teardown": 200
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "80"
+      ],
+      "summary": {
+        "connected": true,
+        "cycles": 200,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 250,
+        "local": "10.99.7.2:40510",
+        "mismatches": 0,
+        "ok": 200,
+        "s": 50.443045921,
+        "size": 64,
+        "tag": "A",
+        "timeouts": 0
+      },
+      "t_start": 1791506595.1448624
+    },
+    "A1-recreate/recreate": {
+      "bad_cycles": [],
+      "cells": "recreate",
+      "dest_received": 200,
+      "dest_unique": 200,
+      "expected_associations": 200,
+      "guest_events": {
+        "abort": 200,
+        "cells_cleared": 201,
+        "refused": 0,
+        "udp_associate": 200,
+        "udp_paired": 200,
+        "udp_teardown": 200
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 200,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 200,
+        "host_dg_teardown": 200
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "80"
+      ],
+      "summary": {
+        "connected": true,
+        "cycles": 200,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 250,
+        "local": "10.99.7.2:47269",
+        "mismatches": 0,
+        "ok": 200,
+        "s": 50.45571656,
+        "size": 64,
+        "tag": "A",
+        "timeouts": 0
+      },
+      "t_start": 1791506710.6216712
+    },
+    "A1u-recreate/recreate": {
+      "bad_cycles": [],
+      "cells": "recreate",
+      "dest_received": 200,
+      "dest_unique": 200,
+      "expected_associations": 200,
+      "guest_events": {
+        "abort": 200,
+        "cells_cleared": 201,
+        "refused": 0,
+        "udp_associate": 200,
+        "udp_paired": 200,
+        "udp_teardown": 200
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 200,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 200,
+        "host_dg_teardown": 200
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "80"
+      ],
+      "summary": {
+        "connected": false,
+        "cycles": 200,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 250,
+        "local": "0.0.0.0:33946",
+        "mismatches": 0,
+        "ok": 200,
+        "s": 50.455476648,
+        "size": 64,
+        "tag": "A",
+        "timeouts": 0
+      },
+      "t_start": 1791506768.1415815
+    },
+    "B1-abort-empty/empty": {
+      "A_frames_delivered": 0,
+      "A_sample": [],
+      "cells": "empty",
+      "dest_total": 60,
+      "guest_events": {
+        "abort": 20,
+        "cells_cleared": 40,
+        "refused": 0,
+        "udp_associate": 40,
+        "udp_paired": 20,
+        "udp_teardown": 40
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 20,
+        "host_dg_installed": 20,
+        "host_dg_teardown": 20
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "abort"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B02",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B03",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B04",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B05",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B06",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B07",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B08",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B09",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B10",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B11",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B12",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B13",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B14",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 15,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B15",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 16,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B16",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 17,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B17",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 18,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B18",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 19,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B19",
+            "timeouts": 0
+          }
+        }
+      ],
+      "reps": 20,
+      "reps_B_exactly_once_in_order": 20,
+      "reps_then_all_echoed": 20,
+      "reps_then_mismatches": 0,
+      "t_start": 1791507347.9374225
+    },
+    "B1-abort-none/none": {
+      "A_frames_delivered": 95,
+      "A_sample": [
+        "A00000000?",
+        "A00000001@",
+        "A00000002A",
+        "A00000003B",
+        "A00000004C",
+        "A01000000?",
+        "A01000001@",
+        "A01000002A",
+        "A01000003B",
+        "A01000004C"
+      ],
+      "cells": "none",
+      "dest_total": 149,
+      "guest_events": {
+        "abort": 20,
+        "cells_cleared": 40,
+        "refused": 0,
+        "udp_associate": 40,
+        "udp_paired": 20,
+        "udp_teardown": 40
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 20,
+        "host_dg_installed": 20,
+        "host_dg_teardown": 20
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "abort"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B02",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B03",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B04",
+            "timeouts": 2
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B05",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B06",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B07",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B08",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B09",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B10",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B11",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B12",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B13",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B14",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 15,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B15",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 16,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B16",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 17,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B17",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 18,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B18",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 19,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B19",
+            "timeouts": 3
+          }
+        }
+      ],
+      "reps": 20,
+      "reps_B_exactly_once_in_order": 16,
+      "reps_then_all_echoed": 0,
+      "reps_then_mismatches": 9,
+      "t_start": 1791507129.1942627
+    },
+    "B1-abort-recreate/recreate": {
+      "A_frames_delivered": 0,
+      "A_sample": [],
+      "cells": "recreate",
+      "dest_total": 60,
+      "guest_events": {
+        "abort": 20,
+        "cells_cleared": 40,
+        "refused": 0,
+        "udp_associate": 40,
+        "udp_paired": 20,
+        "udp_teardown": 40
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 20,
+        "host_dg_installed": 20,
+        "host_dg_teardown": 20
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "abort"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B02",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B03",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B04",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B05",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B06",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B07",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B08",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B09",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B10",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B11",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B12",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B13",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B14",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 15,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B15",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 16,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B16",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 17,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B17",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 18,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B18",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 19,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B19",
+            "timeouts": 0
+          }
+        }
+      ],
+      "reps": 20,
+      "reps_B_exactly_once_in_order": 20,
+      "reps_then_all_echoed": 20,
+      "reps_then_mismatches": 0,
+      "t_start": 1791507437.798357
+    },
+    "B1-refused-empty/empty": {
+      "A_frames_delivered": 0,
+      "A_sample": [],
+      "cells": "empty",
+      "dest_total": 120,
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 80,
+        "refused": 40,
+        "udp_associate": 80,
+        "udp_paired": 40,
+        "udp_teardown": 80
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 40,
+        "host_dg_installed": 40,
+        "host_dg_teardown": 40
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "refused"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B02",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B03",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B04",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B05",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B06",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B07",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B08",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B09",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B10",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B11",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B12",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B13",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B14",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 15,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B15",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 16,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B16",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 17,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B17",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 18,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B18",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 19,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B19",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 20,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B20",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 21,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B21",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 22,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B22",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 23,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B23",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 24,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B24",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 25,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B25",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 26,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B26",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 27,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B27",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 28,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B28",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 29,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B29",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 30,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B30",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 31,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B31",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 32,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B32",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 33,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B33",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 34,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B34",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 35,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B35",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 36,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B36",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 37,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B37",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 38,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B38",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 39,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B39",
+            "timeouts": 0
+          }
+        }
+      ],
+      "reps": 40,
+      "reps_B_exactly_once_in_order": 40,
+      "reps_then_all_echoed": 40,
+      "reps_then_mismatches": 0,
+      "t_start": 1791507309.198304
+    },
+    "B1-refused-none/none": {
+      "A_frames_delivered": 195,
+      "A_sample": [
+        "A00000000?",
+        "A00000001@",
+        "A00000002A",
+        "A00000003B",
+        "A00000004C",
+        "A01000000?",
+        "A01000001@",
+        "A01000002A",
+        "A01000003B",
+        "A01000004C"
+      ],
+      "cells": "none",
+      "dest_total": 309,
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 80,
+        "refused": 40,
+        "udp_associate": 80,
+        "udp_paired": 40,
+        "udp_teardown": 80
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 40,
+        "host_dg_installed": 40,
+        "host_dg_teardown": 40
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "refused"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B02",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B03",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B04",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B05",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B06",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B07",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B08",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B09",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B10",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B11",
+            "timeouts": 2
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B12",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B13",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B14",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 15,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B15",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 16,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B16",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 17,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B17",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 18,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B18",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 19,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B19",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 20,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B20",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 21,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B21",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 22,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B22",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 23,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B23",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 24,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B24",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 25,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B25",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 26,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B26",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 27,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B27",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 28,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B28",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 29,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B29",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 30,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B30",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 31,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B31",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 32,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B32",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 33,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B33",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 34,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B34",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 35,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B35",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 36,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B36",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 37,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B37",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 38,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B38",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 39,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B39",
+            "timeouts": 3
+          }
+        }
+      ],
+      "reps": 40,
+      "reps_B_exactly_once_in_order": 37,
+      "reps_then_all_echoed": 0,
+      "reps_then_mismatches": 18,
+      "t_start": 1791506938.9667258
+    },
+    "B1-refused-recreate/recreate": {
+      "A_frames_delivered": 0,
+      "A_sample": [],
+      "cells": "recreate",
+      "dest_total": 120,
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 80,
+        "refused": 40,
+        "udp_associate": 80,
+        "udp_paired": 40,
+        "udp_teardown": 80
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 40,
+        "host_dg_installed": 40,
+        "host_dg_teardown": 40
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "refused"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B02",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B03",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B04",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B05",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B06",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B07",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B08",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B09",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B10",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B11",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B12",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B13",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B14",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 15,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B15",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 16,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B16",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 17,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B17",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 18,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B18",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 19,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B19",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 20,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B20",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 21,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B21",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 22,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B22",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 23,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B23",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 24,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B24",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 25,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B25",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 26,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B26",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 27,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B27",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 28,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B28",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 29,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B29",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 30,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B30",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 31,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B31",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 32,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B32",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 33,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B33",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 34,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B34",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 35,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B35",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 36,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B36",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 37,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B37",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 38,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B38",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 39,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B39",
+            "timeouts": 0
+          }
+        }
+      ],
+      "reps": 40,
+      "reps_B_exactly_once_in_order": 40,
+      "reps_then_all_echoed": 40,
+      "reps_then_mismatches": 0,
+      "t_start": 1791507399.0667303
+    },
+    "B1-silent-empty/empty": {
+      "A_frames_delivered": 0,
+      "A_sample": [],
+      "cells": "empty",
+      "dest_total": 45,
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 30,
+        "refused": 0,
+        "udp_associate": 30,
+        "udp_paired": 15,
+        "udp_teardown": 30
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2",
+        "--pair-deadline-ms",
+        "800"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 15,
+        "host_dg_teardown": 15
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "silent"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B02",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B03",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B04",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B05",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B06",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B07",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B08",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B09",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B10",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B11",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B12",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B13",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B14",
+            "timeouts": 0
+          }
+        }
+      ],
+      "reps": 15,
+      "reps_B_exactly_once_in_order": 15,
+      "reps_then_all_echoed": 15,
+      "reps_then_mismatches": 0,
+      "t_start": 1791507369.6443381
+    },
+    "B1-silent-none/none": {
+      "A_frames_delivered": 70,
+      "A_sample": [
+        "A00000000?",
+        "A00000001@",
+        "A00000002A",
+        "A00000003B",
+        "A00000004C",
+        "A01000000?",
+        "A01000001@",
+        "A01000002A",
+        "A01000003B",
+        "A01000004C"
+      ],
+      "cells": "none",
+      "dest_total": 110,
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 30,
+        "refused": 0,
+        "udp_associate": 30,
+        "udp_paired": 15,
+        "udp_teardown": 30
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2",
+        "--pair-deadline-ms",
+        "800"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 15,
+        "host_dg_teardown": 15
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "silent"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 3,
+            "ok": 0,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B02",
+            "timeouts": 2
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B03",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B04",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B05",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B06",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B07",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B08",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B09",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B10",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B11",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B12",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B13",
+            "timeouts": 3
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "B14",
+            "timeouts": 3
+          }
+        }
+      ],
+      "reps": 15,
+      "reps_B_exactly_once_in_order": 12,
+      "reps_then_all_echoed": 0,
+      "reps_then_mismatches": 6,
+      "t_start": 1791507224.1678493
+    },
+    "B1-silent-recreate/recreate": {
+      "A_frames_delivered": 0,
+      "A_sample": [],
+      "cells": "recreate",
+      "dest_total": 45,
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 30,
+        "refused": 0,
+        "udp_associate": 30,
+        "udp_paired": 15,
+        "udp_teardown": 30
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "2",
+        "--pair-deadline-ms",
+        "800"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 15,
+        "host_dg_teardown": 15
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--fault-odd",
+        "yes",
+        "--refuse-with",
+        "silent"
+      ],
+      "per_rep": [
+        {
+          "k": 0,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B00",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 1,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B01",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 2,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B02",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 3,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B03",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 4,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B04",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 5,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B05",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 6,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B06",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 7,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B07",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 8,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B08",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 9,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B09",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 10,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B10",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 11,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B11",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 12,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B12",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 13,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B13",
+            "timeouts": 0
+          }
+        },
+        {
+          "k": 14,
+          "rc": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "B14",
+            "timeouts": 0
+          }
+        }
+      ],
+      "reps": 15,
+      "reps_B_exactly_once_in_order": 15,
+      "reps_then_all_echoed": 15,
+      "reps_then_mismatches": 0,
+      "t_start": 1791507459.4065256
+    },
+    "B2-empty/empty": {
+      "A_at_Y_sample": [],
+      "A_frames_at_Y": 0,
+      "X_received": 0,
+      "X_sample": [],
+      "Y_received": 90,
+      "cells": "empty",
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 60,
+        "refused": 0,
+        "udp_associate": 60,
+        "udp_paired": 30,
+        "udp_teardown": 60
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "1"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 60,
+        "host_dg_teardown": 60
+      },
+      "host_extra": [
+        "--pair-delay-ms",
+        "700",
+        "--pair-delay-dst",
+        "10.250.205.2"
+      ],
+      "per_rep": [
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:34287",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702774191,
+            "size": 200,
+            "tag": "B00",
+            "timeouts": 0
+          },
+          "k": 0
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:45234",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703402557,
+            "size": 200,
+            "tag": "B01",
+            "timeouts": 0
+          },
+          "k": 1
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:38062",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704634531,
+            "size": 200,
+            "tag": "B02",
+            "timeouts": 0
+          },
+          "k": 2
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46473",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703693795,
+            "size": 200,
+            "tag": "B03",
+            "timeouts": 0
+          },
+          "k": 3
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:49381",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702705498,
+            "size": 200,
+            "tag": "B04",
+            "timeouts": 0
+          },
+          "k": 4
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:33347",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702739529,
+            "size": 200,
+            "tag": "B05",
+            "timeouts": 0
+          },
+          "k": 5
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:43087",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702516033,
+            "size": 200,
+            "tag": "B06",
+            "timeouts": 0
+          },
+          "k": 6
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:34229",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.706689915,
+            "size": 200,
+            "tag": "B07",
+            "timeouts": 0
+          },
+          "k": 7
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:52551",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702652488,
+            "size": 200,
+            "tag": "B08",
+            "timeouts": 0
+          },
+          "k": 8
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:58123",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703606634,
+            "size": 200,
+            "tag": "B09",
+            "timeouts": 0
+          },
+          "k": 9
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:56830",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703015895,
+            "size": 200,
+            "tag": "B10",
+            "timeouts": 0
+          },
+          "k": 10
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:44837",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702514421,
+            "size": 200,
+            "tag": "B11",
+            "timeouts": 0
+          },
+          "k": 11
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:58332",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704206056,
+            "size": 200,
+            "tag": "B12",
+            "timeouts": 0
+          },
+          "k": 12
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:42502",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704261911,
+            "size": 200,
+            "tag": "B13",
+            "timeouts": 0
+          },
+          "k": 13
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:51416",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703426013,
+            "size": 200,
+            "tag": "B14",
+            "timeouts": 0
+          },
+          "k": 14
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46265",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.70313258,
+            "size": 200,
+            "tag": "B15",
+            "timeouts": 0
+          },
+          "k": 15
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:50707",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703678463,
+            "size": 200,
+            "tag": "B16",
+            "timeouts": 0
+          },
+          "k": 16
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:42662",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704710055,
+            "size": 200,
+            "tag": "B17",
+            "timeouts": 0
+          },
+          "k": 17
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46778",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703369588,
+            "size": 200,
+            "tag": "B18",
+            "timeouts": 0
+          },
+          "k": 18
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:58741",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703175094,
+            "size": 200,
+            "tag": "B19",
+            "timeouts": 0
+          },
+          "k": 19
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:35033",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704972199,
+            "size": 200,
+            "tag": "B20",
+            "timeouts": 0
+          },
+          "k": 20
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:43168",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.70279943,
+            "size": 200,
+            "tag": "B21",
+            "timeouts": 0
+          },
+          "k": 21
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:42243",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.70256745,
+            "size": 200,
+            "tag": "B22",
+            "timeouts": 0
+          },
+          "k": 22
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:43714",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702642544,
+            "size": 200,
+            "tag": "B23",
+            "timeouts": 0
+          },
+          "k": 23
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:54063",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703521216,
+            "size": 200,
+            "tag": "B24",
+            "timeouts": 0
+          },
+          "k": 24
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:38349",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703289577,
+            "size": 200,
+            "tag": "B25",
+            "timeouts": 0
+          },
+          "k": 25
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:33865",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703768868,
+            "size": 200,
+            "tag": "B26",
+            "timeouts": 0
+          },
+          "k": 26
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:54541",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703249527,
+            "size": 200,
+            "tag": "B27",
+            "timeouts": 0
+          },
+          "k": 27
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:53937",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702670635,
+            "size": 200,
+            "tag": "B28",
+            "timeouts": 0
+          },
+          "k": 28
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:33376",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702371095,
+            "size": 200,
+            "tag": "B29",
+            "timeouts": 0
+          },
+          "k": 29
+        }
+      ],
+      "reps": 30,
+      "reps_B_exactly_once_in_order_at_Y": 30,
+      "reps_cycle_all_ok": 30,
+      "reps_mismatches": 0,
+      "t_start": 1791507536.308738
+    },
+    "B2-none/none": {
+      "A_at_Y_sample": [
+        "A00000000?",
+        "A00000001@",
+        "A00000002A",
+        "A00000003B",
+        "A00000004C"
+      ],
+      "A_frames_at_Y": 5,
+      "X_received": 0,
+      "X_sample": [],
+      "Y_received": 5,
+      "cells": "none",
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 60,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 1,
+        "udp_teardown": 60
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "1"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 60
+      },
+      "host_extra": [
+        "--pair-delay-ms",
+        "700",
+        "--pair-delay-dst",
+        "10.250.205.2"
+      ],
+      "per_rep": [
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:58475",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000163406,
+            "size": 200,
+            "tag": "B00",
+            "timeouts": 3
+          },
+          "k": 0
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:42578",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000260212,
+            "size": 200,
+            "tag": "B01",
+            "timeouts": 3
+          },
+          "k": 1
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46761",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000265329,
+            "size": 200,
+            "tag": "B02",
+            "timeouts": 3
+          },
+          "k": 2
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46078",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000136977,
+            "size": 200,
+            "tag": "B03",
+            "timeouts": 3
+          },
+          "k": 3
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:58137",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000178859,
+            "size": 200,
+            "tag": "B04",
+            "timeouts": 3
+          },
+          "k": 4
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46616",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000268634,
+            "size": 200,
+            "tag": "B05",
+            "timeouts": 3
+          },
+          "k": 5
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46931",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000246612,
+            "size": 200,
+            "tag": "B06",
+            "timeouts": 3
+          },
+          "k": 6
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:51562",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000150176,
+            "size": 200,
+            "tag": "B07",
+            "timeouts": 3
+          },
+          "k": 7
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:57914",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000241072,
+            "size": 200,
+            "tag": "B08",
+            "timeouts": 3
+          },
+          "k": 8
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:55580",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000249716,
+            "size": 200,
+            "tag": "B09",
+            "timeouts": 3
+          },
+          "k": 9
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:38153",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.0002725,
+            "size": 200,
+            "tag": "B10",
+            "timeouts": 3
+          },
+          "k": 10
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:56930",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000533463,
+            "size": 200,
+            "tag": "B11",
+            "timeouts": 3
+          },
+          "k": 11
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:35496",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.00028563,
+            "size": 200,
+            "tag": "B12",
+            "timeouts": 3
+          },
+          "k": 12
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46165",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000266932,
+            "size": 200,
+            "tag": "B13",
+            "timeouts": 3
+          },
+          "k": 13
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:33951",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000288534,
+            "size": 200,
+            "tag": "B14",
+            "timeouts": 3
+          },
+          "k": 14
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:55598",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000275635,
+            "size": 200,
+            "tag": "B15",
+            "timeouts": 3
+          },
+          "k": 15
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:47607",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000300612,
+            "size": 200,
+            "tag": "B16",
+            "timeouts": 3
+          },
+          "k": 16
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:39656",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000301054,
+            "size": 200,
+            "tag": "B17",
+            "timeouts": 3
+          },
+          "k": 17
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:43982",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000289035,
+            "size": 200,
+            "tag": "B18",
+            "timeouts": 3
+          },
+          "k": 18
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:57574",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000349456,
+            "size": 200,
+            "tag": "B19",
+            "timeouts": 3
+          },
+          "k": 19
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:55101",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000175745,
+            "size": 200,
+            "tag": "B20",
+            "timeouts": 3
+          },
+          "k": 20
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46145",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000158158,
+            "size": 200,
+            "tag": "B21",
+            "timeouts": 3
+          },
+          "k": 21
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:51561",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000203176,
+            "size": 200,
+            "tag": "B22",
+            "timeouts": 3
+          },
+          "k": 22
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:47478",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000390448,
+            "size": 200,
+            "tag": "B23",
+            "timeouts": 3
+          },
+          "k": 23
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:50646",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000365851,
+            "size": 200,
+            "tag": "B24",
+            "timeouts": 3
+          },
+          "k": 24
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:42079",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000393181,
+            "size": 200,
+            "tag": "B25",
+            "timeouts": 3
+          },
+          "k": 25
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:33434",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000492621,
+            "size": 200,
+            "tag": "B26",
+            "timeouts": 3
+          },
+          "k": 26
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:50975",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000326601,
+            "size": 200,
+            "tag": "B27",
+            "timeouts": 3
+          },
+          "k": 27
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:33412",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000357628,
+            "size": 200,
+            "tag": "B28",
+            "timeouts": 3
+          },
+          "k": 28
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:39114",
+            "mismatches": 0,
+            "ok": 0,
+            "s": 0.000137236,
+            "size": 200,
+            "tag": "B29",
+            "timeouts": 3
+          },
+          "k": 29
+        }
+      ],
+      "reps": 30,
+      "reps_B_exactly_once_in_order_at_Y": 0,
+      "reps_cycle_all_ok": 0,
+      "reps_mismatches": 0,
+      "t_start": 1791507488.8271143
+    },
+    "B2-recreate/recreate": {
+      "A_at_Y_sample": [],
+      "A_frames_at_Y": 0,
+      "X_received": 0,
+      "X_sample": [],
+      "Y_received": 90,
+      "cells": "recreate",
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 60,
+        "refused": 0,
+        "udp_associate": 60,
+        "udp_paired": 30,
+        "udp_teardown": 60
+      },
+      "guest_extra": [
+        "--udp-slots",
+        "1"
+      ],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 60,
+        "host_dg_teardown": 60
+      },
+      "host_extra": [
+        "--pair-delay-ms",
+        "700",
+        "--pair-delay-dst",
+        "10.250.205.2"
+      ],
+      "per_rep": [
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:49777",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.70400242,
+            "size": 200,
+            "tag": "B00",
+            "timeouts": 0
+          },
+          "k": 0
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:58390",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702671567,
+            "size": 200,
+            "tag": "B01",
+            "timeouts": 0
+          },
+          "k": 1
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:52930",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704273257,
+            "size": 200,
+            "tag": "B02",
+            "timeouts": 0
+          },
+          "k": 2
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:36977",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.70396918,
+            "size": 200,
+            "tag": "B03",
+            "timeouts": 0
+          },
+          "k": 3
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:55633",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703538131,
+            "size": 200,
+            "tag": "B04",
+            "timeouts": 0
+          },
+          "k": 4
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:59710",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703559884,
+            "size": 200,
+            "tag": "B05",
+            "timeouts": 0
+          },
+          "k": 5
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:54784",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703403448,
+            "size": 200,
+            "tag": "B06",
+            "timeouts": 0
+          },
+          "k": 6
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:60093",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703458882,
+            "size": 200,
+            "tag": "B07",
+            "timeouts": 0
+          },
+          "k": 7
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:50352",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703871984,
+            "size": 200,
+            "tag": "B08",
+            "timeouts": 0
+          },
+          "k": 8
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:56946",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.70388298,
+            "size": 200,
+            "tag": "B09",
+            "timeouts": 0
+          },
+          "k": 9
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:39064",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703478211,
+            "size": 200,
+            "tag": "B10",
+            "timeouts": 0
+          },
+          "k": 10
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:46235",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703541416,
+            "size": 200,
+            "tag": "B11",
+            "timeouts": 0
+          },
+          "k": 11
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:34500",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.70357076,
+            "size": 200,
+            "tag": "B12",
+            "timeouts": 0
+          },
+          "k": 12
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:35938",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702768293,
+            "size": 200,
+            "tag": "B13",
+            "timeouts": 0
+          },
+          "k": 13
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:45620",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703759424,
+            "size": 200,
+            "tag": "B14",
+            "timeouts": 0
+          },
+          "k": 14
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:40512",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703119902,
+            "size": 200,
+            "tag": "B15",
+            "timeouts": 0
+          },
+          "k": 15
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:33583",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704357805,
+            "size": 200,
+            "tag": "B16",
+            "timeouts": 0
+          },
+          "k": 16
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:34837",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.702742574,
+            "size": 200,
+            "tag": "B17",
+            "timeouts": 0
+          },
+          "k": 17
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:51363",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703243618,
+            "size": 200,
+            "tag": "B18",
+            "timeouts": 0
+          },
+          "k": 18
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:52624",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703485863,
+            "size": 200,
+            "tag": "B19",
+            "timeouts": 0
+          },
+          "k": 19
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:56223",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.70363713,
+            "size": 200,
+            "tag": "B20",
+            "timeouts": 0
+          },
+          "k": 20
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:52285",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703232151,
+            "size": 200,
+            "tag": "B21",
+            "timeouts": 0
+          },
+          "k": 21
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:58049",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703273112,
+            "size": 200,
+            "tag": "B22",
+            "timeouts": 0
+          },
+          "k": 22
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:40934",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703219551,
+            "size": 200,
+            "tag": "B23",
+            "timeouts": 0
+          },
+          "k": 23
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:47044",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704276232,
+            "size": 200,
+            "tag": "B24",
+            "timeouts": 0
+          },
+          "k": 24
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:40430",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703320984,
+            "size": 200,
+            "tag": "B25",
+            "timeouts": 0
+          },
+          "k": 25
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:54062",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703302246,
+            "size": 200,
+            "tag": "B26",
+            "timeouts": 0
+          },
+          "k": 26
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:38426",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703656098,
+            "size": 200,
+            "tag": "B27",
+            "timeouts": 0
+          },
+          "k": 27
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:47529",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.704177273,
+            "size": 200,
+            "tag": "B28",
+            "timeouts": 0
+          },
+          "k": 28
+        },
+        {
+          "cycle": {
+            "connected": true,
+            "cycles": 3,
+            "dst": "10.250.205.2:47502",
+            "ev": "udp_cycle",
+            "gap_ms": 0,
+            "local": "10.99.7.2:33742",
+            "mismatches": 0,
+            "ok": 3,
+            "s": 0.703301425,
+            "size": 200,
+            "tag": "B29",
+            "timeouts": 0
+          },
+          "k": 29
+        }
+      ],
+      "reps": 30,
+      "reps_B_exactly_once_in_order_at_Y": 30,
+      "reps_cycle_all_ok": 30,
+      "reps_mismatches": 0,
+      "t_start": 1791507604.9623775
+    },
+    "B3-empty/empty": {
+      "cells": "empty",
+      "guest_events": {
+        "abort": 25,
+        "cells_cleared": 50,
+        "refused": 0,
+        "udp_associate": 50,
+        "udp_paired": 50,
+        "udp_teardown": 50
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 25,
+        "fault_partial_frame": 25,
+        "fault_refused": 0,
+        "host_dg_installed": 50,
+        "host_dg_teardown": 50
+      },
+      "host_extra": [
+        "--partial-dst",
+        "10.250.205.2:47503",
+        "--fault-odd",
+        "yes"
+      ],
+      "per_rep": [
+        {
+          "first_bad": [],
+          "k": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q00",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 1,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q01",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 2,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q02",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 3,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q03",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 4,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q04",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 5,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q05",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 6,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q06",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 7,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q07",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 8,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q08",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 9,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q09",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 10,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q10",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 11,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q11",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 12,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q12",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 13,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q13",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 14,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q14",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 15,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q15",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 16,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q16",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 17,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q17",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 18,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q18",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 19,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q19",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 20,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q20",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 21,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q21",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 22,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q22",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 23,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q23",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 24,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q24",
+            "timeouts": 0
+          }
+        }
+      ],
+      "reps": 25,
+      "reps_then_all_echoed": 25,
+      "t_start": 1791507819.5258086,
+      "then_mismatches": 0,
+      "then_timeouts": 0
+    },
+    "B3-none/none": {
+      "cells": "none",
+      "guest_events": {
+        "abort": 25,
+        "cells_cleared": 50,
+        "refused": 0,
+        "udp_associate": 50,
+        "udp_paired": 50,
+        "udp_teardown": 50
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 25,
+        "fault_partial_frame": 25,
+        "fault_refused": 0,
+        "host_dg_installed": 50,
+        "host_dg_teardown": 50
+      },
+      "host_extra": [
+        "--partial-dst",
+        "10.250.205.2:47503",
+        "--fault-odd",
+        "yes"
+      ],
+      "per_rep": [
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1526
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q00",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 1,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q01",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1505
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 2,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q02",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1507
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 3,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q03",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 4,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q04",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 5,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q05",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 6,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q06",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1507
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 7,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q07",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1507
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 8,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q08",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 9,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q09",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1507
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 10,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q10",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 11,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q11",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 12,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q12",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1536
+            }
+          ],
+          "k": 13,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q13",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 14,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q14",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1505
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 15,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q15",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 16,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q16",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 17,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q17",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1507
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1536
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 18,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q18",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 19,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q19",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 20,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q20",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 21,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q21",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1536
+            }
+          ],
+          "k": 22,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q22",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 23,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q23",
+            "timeouts": 3
+          }
+        },
+        {
+          "first_bad": [
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 0,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1506
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 1,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            },
+            {
+              "err": "recv Resource temporarily unavailable (os error 11)",
+              "i": 2,
+              "ok": false,
+              "timeout": true,
+              "waited_ms": 1535
+            }
+          ],
+          "k": 24,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 0,
+            "tag": "Q24",
+            "timeouts": 3
+          }
+        }
+      ],
+      "reps": 25,
+      "reps_then_all_echoed": 0,
+      "t_start": 1791507673.5520372,
+      "then_mismatches": 0,
+      "then_timeouts": 75
+    },
+    "B3-recreate/recreate": {
+      "cells": "recreate",
+      "guest_events": {
+        "abort": 25,
+        "cells_cleared": 50,
+        "refused": 0,
+        "udp_associate": 50,
+        "udp_paired": 50,
+        "udp_teardown": 50
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 25,
+        "fault_partial_frame": 25,
+        "fault_refused": 0,
+        "host_dg_installed": 50,
+        "host_dg_teardown": 50
+      },
+      "host_extra": [
+        "--partial-dst",
+        "10.250.205.2:47503",
+        "--fault-odd",
+        "yes"
+      ],
+      "per_rep": [
+        {
+          "first_bad": [],
+          "k": 0,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q00",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 1,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q01",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 2,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q02",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 3,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q03",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 4,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q04",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 5,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q05",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 6,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q06",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 7,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q07",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 8,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q08",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 9,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q09",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 10,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q10",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 11,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q11",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 12,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q12",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 13,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q13",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 14,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q14",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 15,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q15",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 16,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q16",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 17,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q17",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 18,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q18",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 19,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q19",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 20,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q20",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 21,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q21",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 22,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q22",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 23,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q23",
+            "timeouts": 0
+          }
+        },
+        {
+          "first_bad": [],
+          "k": 24,
+          "then": {
+            "cycles": 3,
+            "ev": "udp_then",
+            "mismatches": 0,
+            "ok": 3,
+            "tag": "Q24",
+            "timeouts": 0
+          }
+        }
+      ],
+      "reps": 25,
+      "reps_then_all_echoed": 25,
+      "t_start": 1791507850.515676,
+      "then_mismatches": 0,
+      "then_timeouts": 0
+    },
+    "B4-k0-empty/empty": {
+      "cells": "empty",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:39432",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.000889879,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 61,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 61,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "0"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:45622",
+        "mismatches": 0,
+        "ok": 47,
+        "s": 24.703153081,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 13
+      },
+      "t_start": 1791508001.9362183
+    },
+    "B4-k0-none/none": {
+      "cells": "none",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:44626",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.002293171,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 61,
+        "cells_cleared": 63,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 61,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "0"
+      ],
+      "mismatch_cycles": [
+        {
+          "got": 30009,
+          "head": "ZUD1..u1EL00",
+          "i": 12,
+          "mismatch": true,
+          "ok": false,
+          "rtt_us": 2682,
+          "want": 30001
+        }
+      ],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:48321",
+        "mismatches": 1,
+        "ok": 51,
+        "s": 22.163809765,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 8
+      },
+      "t_start": 1791507881.473853
+    },
+    "B4-k0-recreate/recreate": {
+      "cells": "recreate",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:38089",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.001657464,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 61,
+        "cells_cleared": 63,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 61,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "0"
+      ],
+      "mismatch_cycles": [
+        {
+          "got": 30009,
+          "head": "ZUD1..u1EL00",
+          "i": 16,
+          "mismatch": true,
+          "ok": false,
+          "rtt_us": 2575,
+          "want": 30001
+        }
+      ],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:51907",
+        "mismatches": 1,
+        "ok": 51,
+        "s": 22.196429557,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 8
+      },
+      "t_start": 1791508127.8204558
+    },
+    "B4-k1-empty/empty": {
+      "cells": "empty",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:33371",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.001777966,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "1"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:35137",
+        "mismatches": 0,
+        "ok": 58,
+        "s": 19.191541883,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 2
+      },
+      "t_start": 1791508032.4315164
+    },
+    "B4-k1-none/none": {
+      "cells": "none",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:34296",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.002263156,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "1"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:58167",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.154774012,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791507909.0358374
+    },
+    "B4-k1-recreate/recreate": {
+      "cells": "recreate",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:38985",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.0024849,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "1"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:55537",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.161776771,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791508155.111347
+    },
+    "B4-k2-empty/empty": {
+      "cells": "empty",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:36673",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.001964456,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "2"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:51380",
+        "mismatches": 0,
+        "ok": 59,
+        "s": 18.67074422,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 1
+      },
+      "t_start": 1791508057.2234457
+    },
+    "B4-k2-none/none": {
+      "cells": "none",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:58236",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.001564705,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "2"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:39221",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.163432012,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791507932.2538006
+    },
+    "B4-k2-recreate/recreate": {
+      "cells": "recreate",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:33886",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.001282831,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "2"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:36395",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.170152857,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791508178.9705155
+    },
+    "B4-k4-empty/empty": {
+      "cells": "empty",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:54240",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.002882207,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "4"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:54833",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.167983432,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791508081.4918113
+    },
+    "B4-k4-none/none": {
+      "cells": "none",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:34961",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.001885117,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "4"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:37019",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.166632749,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791507955.5129347
+    },
+    "B4-k4-recreate/recreate": {
+      "cells": "recreate",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:45842",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.001283311,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "4"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:52719",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.174785258,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791508202.1361516
+    },
+    "B4-k8-empty/empty": {
+      "cells": "empty",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:49992",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.00241931,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "8"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:37445",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.16730494,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791508104.6583467
+    },
+    "B4-k8-none/none": {
+      "cells": "none",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:35320",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.002182915,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "8"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:52793",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.160286568,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791507978.675917
+    },
+    "B4-k8-recreate/recreate": {
+      "cells": "recreate",
+      "final_probe": {
+        "connected": true,
+        "cycles": 1,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 0,
+        "local": "10.99.7.2:43089",
+        "mismatches": 0,
+        "ok": 1,
+        "s": 0.001563803,
+        "size": 64,
+        "tag": "F",
+        "timeouts": 0
+      },
+      "guest_events": {
+        "abort": 60,
+        "cells_cleared": 62,
+        "refused": 0,
+        "udp_associate": 61,
+        "udp_paired": 61,
+        "udp_teardown": 61
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 60,
+        "fault_partial_frame": 0,
+        "fault_refused": 0,
+        "host_dg_installed": 61,
+        "host_dg_teardown": 61
+      },
+      "host_extra": [
+        "--abort-dst",
+        "10.250.205.2:47501",
+        "--abort-after-ms",
+        "8"
+      ],
+      "mismatch_cycles": [],
+      "summary": {
+        "connected": true,
+        "cycles": 60,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:36130",
+        "mismatches": 0,
+        "ok": 60,
+        "s": 18.174884247,
+        "size": 30000,
+        "tag": "L",
+        "timeouts": 0
+      },
+      "t_start": 1791508225.5068533
+    },
+    "R1-abort-empty/empty": {
+      "app": [
+        {
+          "connected": true,
+          "count": 1,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 3000,
+          "local": "10.99.7.2:55269",
+          "sent_ok": 1,
+          "t_ms": 1791506871805.0825,
+          "tag": "A"
+        }
+      ],
+      "cells": "empty",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 1,
+        "cells_cleared": 2,
+        "refused": 0,
+        "udp_associate": 1,
+        "udp_paired": 0,
+        "udp_teardown": 1
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 1,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--refuse-with",
+        "abort"
+      ],
+      "t_start": 1791506871.546687
+    },
+    "R1-abort-none/none": {
+      "app": [
+        {
+          "connected": true,
+          "count": 1,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 3000,
+          "local": "10.99.7.2:38650",
+          "sent_ok": 1,
+          "t_ms": 1791506833820.6433,
+          "tag": "A"
+        }
+      ],
+      "cells": "none",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 2680,
+        "cells_cleared": 2681,
+        "refused": 0,
+        "udp_associate": 2681,
+        "udp_paired": 0,
+        "udp_teardown": 2680
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 2991,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--refuse-with",
+        "abort"
+      ],
+      "t_start": 1791506833.5621207
+    },
+    "R1-abort-recreate/recreate": {
+      "app": [
+        {
+          "connected": true,
+          "count": 1,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 3000,
+          "local": "10.99.7.2:35419",
+          "sent_ok": 1,
+          "t_ms": 1791506909180.6785,
+          "tag": "A"
+        }
+      ],
+      "cells": "recreate",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 1,
+        "cells_cleared": 2,
+        "refused": 0,
+        "udp_associate": 1,
+        "udp_paired": 0,
+        "udp_teardown": 1
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 1,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--refuse-with",
+        "abort"
+      ],
+      "t_start": 1791506908.9223654
+    },
+    "R1-refused-empty/empty": {
+      "app": [
+        {
+          "connected": true,
+          "count": 1,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 3000,
+          "local": "10.99.7.2:46778",
+          "sent_ok": 1,
+          "t_ms": 1791506863918.3782,
+          "tag": "A"
+        }
+      ],
+      "cells": "empty",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 2,
+        "refused": 1,
+        "udp_associate": 1,
+        "udp_paired": 0,
+        "udp_teardown": 1
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 1,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--refuse-with",
+        "refused"
+      ],
+      "t_start": 1791506863.6596522
+    },
+    "R1-refused-none/none": {
+      "app": [
+        {
+          "connected": true,
+          "count": 1,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 3000,
+          "local": "10.99.7.2:54324",
+          "sent_ok": 1,
+          "t_ms": 1791506826152.3496,
+          "tag": "A"
+        }
+      ],
+      "cells": "none",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 2935,
+        "refused": 2934,
+        "udp_associate": 2934,
+        "udp_paired": 0,
+        "udp_teardown": 2934
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 3189,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--refuse-with",
+        "refused"
+      ],
+      "t_start": 1791506825.8942552
+    },
+    "R1-refused-recreate/recreate": {
+      "app": [
+        {
+          "connected": true,
+          "count": 1,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 3000,
+          "local": "10.99.7.2:52130",
+          "sent_ok": 1,
+          "t_ms": 1791506901597.1086,
+          "tag": "A"
+        }
+      ],
+      "cells": "recreate",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 2,
+        "refused": 1,
+        "udp_associate": 1,
+        "udp_paired": 0,
+        "udp_teardown": 1
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 1,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000",
+        "--refuse-with",
+        "refused"
+      ],
+      "t_start": 1791506901.3395925
+    },
+    "R2-burst500-empty/empty": {
+      "app": [
+        {
+          "connected": true,
+          "count": 500,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 1500,
+          "local": "10.99.7.2:46933",
+          "sent_ok": 500,
+          "t_ms": 1791506887555.968,
+          "tag": "A"
+        }
+      ],
+      "cells": "empty",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 8,
+        "refused": 7,
+        "udp_associate": 7,
+        "udp_paired": 0,
+        "udp_teardown": 7
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 7,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000"
+      ],
+      "t_start": 1791506887.2890425
+    },
+    "R2-burst500-none/none": {
+      "app": [
+        {
+          "connected": true,
+          "count": 500,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 1500,
+          "local": "10.99.7.2:47918",
+          "sent_ok": 500,
+          "t_ms": 1791506850362.472,
+          "tag": "A"
+        }
+      ],
+      "cells": "none",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 1838,
+        "refused": 1837,
+        "udp_associate": 1838,
+        "udp_paired": 0,
+        "udp_teardown": 1837
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 2061,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000"
+      ],
+      "t_start": 1791506850.0930135
+    },
+    "R2-burst500-recreate/recreate": {
+      "app": [
+        {
+          "connected": true,
+          "count": 500,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 1500,
+          "local": "10.99.7.2:39153",
+          "sent_ok": 500,
+          "t_ms": 1791506925361.1228,
+          "tag": "A"
+        }
+      ],
+      "cells": "recreate",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 8,
+        "refused": 7,
+        "udp_associate": 7,
+        "udp_paired": 0,
+        "udp_teardown": 7
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 7,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000"
+      ],
+      "t_start": 1791506925.093612
+    },
+    "R2-paced10-empty/empty": {
+      "app": [
+        {
+          "connected": true,
+          "count": 10,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 1500,
+          "local": "10.99.7.2:38539",
+          "sent_ok": 10,
+          "t_ms": 1791506881292.8037,
+          "tag": "A"
+        }
+      ],
+      "cells": "empty",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 11,
+        "refused": 10,
+        "udp_associate": 10,
+        "udp_paired": 0,
+        "udp_teardown": 10
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 10,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000"
+      ],
+      "t_start": 1791506879.0327027
+    },
+    "R2-paced10-none/none": {
+      "app": [
+        {
+          "connected": true,
+          "count": 10,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 1500,
+          "local": "10.99.7.2:43613",
+          "sent_ok": 10,
+          "t_ms": 1791506843489.3022,
+          "tag": "A"
+        }
+      ],
+      "cells": "none",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 3011,
+        "refused": 3011,
+        "udp_associate": 3011,
+        "udp_paired": 0,
+        "udp_teardown": 3011
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 3317,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000"
+      ],
+      "t_start": 1791506841.2295892
+    },
+    "R2-paced10-recreate/recreate": {
+      "app": [
+        {
+          "connected": true,
+          "count": 10,
+          "dst": "10.250.205.2:47501",
+          "errs": [],
+          "ev": "udp_burst",
+          "hold_ms": 1500,
+          "local": "10.99.7.2:36275",
+          "sent_ok": 10,
+          "t_ms": 1791506918766.9402,
+          "tag": "A"
+        }
+      ],
+      "cells": "recreate",
+      "dest_received": [],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 11,
+        "refused": 10,
+        "udp_associate": 10,
+        "udp_paired": 0,
+        "udp_teardown": 10
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 10,
+        "host_dg_installed": 0,
+        "host_dg_teardown": 0
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "1000000000"
+      ],
+      "t_start": 1791506916.5070405
+    },
+    "R3-empty/empty": {
+      "cells": "empty",
+      "dest_received": [
+        "R0000034;B",
+        "R0000045<C",
+        "R0000056=D",
+        "R0000067>E",
+        "R0000078?F"
+      ],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 4,
+        "refused": 3,
+        "udp_associate": 4,
+        "udp_paired": 1,
+        "udp_teardown": 4
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 3,
+        "host_dg_installed": 1,
+        "host_dg_teardown": 1
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "3"
+      ],
+      "per_cycle_ok": [
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "summary": {
+        "connected": true,
+        "cycles": 8,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:54860",
+        "mismatches": 0,
+        "ok": 5,
+        "s": 3.168601548,
+        "size": 64,
+        "tag": "R",
+        "timeouts": 3
+      },
+      "t_start": 1791506893.584157
+    },
+    "R3-none/none": {
+      "cells": "none",
+      "dest_received": [
+        "R00000018?",
+        "R00000129@",
+        "R0000023:A",
+        "R0000034;B",
+        "R0000045<C",
+        "R0000056=D",
+        "R0000067>E",
+        "R0000078?F"
+      ],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 4,
+        "refused": 3,
+        "udp_associate": 4,
+        "udp_paired": 1,
+        "udp_teardown": 4
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 3,
+        "host_dg_installed": 1,
+        "host_dg_teardown": 1
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "3"
+      ],
+      "per_cycle_ok": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "summary": {
+        "connected": true,
+        "cycles": 8,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:55859",
+        "mismatches": 0,
+        "ok": 8,
+        "s": 2.411486917,
+        "size": 64,
+        "tag": "R",
+        "timeouts": 0
+      },
+      "t_start": 1791506856.7651753
+    },
+    "R3-recreate/recreate": {
+      "cells": "recreate",
+      "dest_received": [
+        "R0000034;B",
+        "R0000045<C",
+        "R0000056=D",
+        "R0000067>E",
+        "R0000078?F"
+      ],
+      "guest_events": {
+        "abort": 0,
+        "cells_cleared": 4,
+        "refused": 3,
+        "udp_associate": 4,
+        "udp_paired": 1,
+        "udp_teardown": 4
+      },
+      "guest_extra": [],
+      "host_events": {
+        "fault_abort_sent": 0,
+        "fault_partial_frame": 0,
+        "fault_refused": 3,
+        "host_dg_installed": 1,
+        "host_dg_teardown": 1
+      },
+      "host_extra": [
+        "--refuse-dst",
+        "10.250.205.2:47501",
+        "--refuse-n",
+        "3"
+      ],
+      "per_cycle_ok": [
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "summary": {
+        "connected": true,
+        "cycles": 8,
+        "dst": "10.250.205.2:47501",
+        "ev": "udp_cycle",
+        "gap_ms": 300,
+        "local": "10.99.7.2:56990",
+        "mismatches": 0,
+        "ok": 5,
+        "s": 3.159849577,
+        "size": 64,
+        "tag": "R",
+        "timeouts": 3
+      },
+      "t_start": 1791506931.2551324
+    }
+  },
+  "substrate": {
+    "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0\n",
+    "fixture": "63052: v5c-h@if63051: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether b6:76:fd:98:92:59 brd ff:ff:ff:ff:ff:ff link-netns v5c-ns promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv5c-p@if63052    UP             10.250.205.2/24 fe80::29:6bff:fe23:fe90/64 \n10.250.205.0/24 dev v5c-p proto kernel scope link src 10.250.205.2 \n",
+    "guest_uname": "Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux\ntcp_diag inet_diag dummy vmw_vsock_virtio_transport vmw_vsock_virtio_transport_common vsock "
+  }
+}

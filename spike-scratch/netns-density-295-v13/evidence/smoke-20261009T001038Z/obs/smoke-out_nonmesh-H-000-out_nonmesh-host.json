@@ -1,0 +1,1 @@
+{"bytes_rx":4579328,"bytes_tx":4571136,"done":true,"local":"172.29.131.2:7200","peer":"172.29.131.1:47514","role":"server","rx_end":{"errno":104,"kind":"ERR","name":"ECONNRESET","t_ns":"1791504648827206822"},"rx_verdict":"RESET","start_ns":"1791504648522071198","tx_end":{"errno":32,"kind":"ERR","name":"EPIPE","t_ns":"1791504648827209887"}}

@@ -1,0 +1,300 @@
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14000], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14001], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14002], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14003], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14004], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14005], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14006], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14007], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14008], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 14009], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18000], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-0\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18001], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-1\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18002], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-2\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18003], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-3\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18004], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-4\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18005], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-5\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18006], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-6\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18007], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-7\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18008], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-8\n"}
+{"claim": "C3", "round": 0, "port": 1234, "peer": [3220, 18009], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-9\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14500], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14501], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14502], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14503], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14504], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14505], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14506], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14507], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14508], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 14509], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18500], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-0\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18501], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-1\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18502], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-2\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18503], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-3\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18504], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-4\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18505], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-5\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18506], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-6\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18507], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-7\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18508], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-8\n"}
+{"claim": "C3", "round": 0, "port": 1240, "peer": [3220, 18509], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-9\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15000], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15001], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15002], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15003], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15004], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15005], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15006], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15007], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15008], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 15009], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19000], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-0\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19001], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-1\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19002], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-2\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19003], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-3\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19004], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-4\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19005], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-5\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19006], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-6\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19007], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-7\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19008], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-8\n"}
+{"claim": "C3", "round": 0, "port": 1241, "peer": [3220, 19009], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-9\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15500], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15501], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15502], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15503], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15504], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15505], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15506], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15507], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15508], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 15509], "kind": "nodata", "flags": "IN+OUT+RDHUP", "first": "EOF", "data": ""}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19500], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-0\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19501], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-1\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19502], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-2\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19503], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-3\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19504], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-4\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19505], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-5\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19506], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-6\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19507], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-7\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19508], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-8\n"}
+{"claim": "C3", "round": 0, "port": 1243, "peer": [3220, 19509], "kind": "data", "flags": "IN+OUT+RDHUP", "first": "DATA", "data": "CD-9\n"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10000], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10001], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10002], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10003], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10004], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10005], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10006], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10007], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10008], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1234, "peer": [3220, 10009], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22000], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-0\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22001], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-1\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22002], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-2\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22003], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-3\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22004], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-4\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22005], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-5\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22006], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-6\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22007], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-7\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22008], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-8\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "Q_withdata", "peer": [3220, 22009], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-9\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26000], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26001], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26002], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26003], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26004], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26005], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26006], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26007], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26008], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1234, "set": "QN_nodata", "peer": [3220, 26009], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10500], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10501], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10502], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10503], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10504], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10505], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10506], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10507], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10508], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1240, "peer": [3220, 10509], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22500], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-0\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22501], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-1\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22502], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-2\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22503], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-3\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22504], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-4\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22505], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-5\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22506], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-6\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22507], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-7\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22508], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-8\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "Q_withdata", "peer": [3220, 22509], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-9\n"}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26500], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26501], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26502], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26503], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26504], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26505], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26506], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26507], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26508], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "early_before_reuse", "round": 0, "port": 1240, "set": "QN_nodata", "peer": [3220, 26509], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11000], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11001], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11002], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11003], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11004], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11005], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11006], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11007], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11008], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1241, "peer": [3220, 11009], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11500], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11501], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11502], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11503], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11504], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11505], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11506], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11507], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11508], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "before_reuse", "round": 0, "port": 1243, "peer": [3220, 11509], "flags": "IN+OUT+ERR+RDHUP", "recv": "ECONNRESET", "send": "ECONNRESET"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10000], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10001], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10002], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10003], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10004], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10005], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10006], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10007], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10008], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1234, "peer": [3220, 10009], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10500], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10501], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10502], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10503], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10504], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10505], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10506], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10507], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10508], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1240, "peer": [3220, 10509], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11000], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11001], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11002], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11003], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11004], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11005], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11006], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11007], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11008], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1241, "peer": [3220, 11009], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11500], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11501], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11502], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11503], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11504], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11505], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11506], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11507], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11508], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "E", "phase": "after_reuse", "round": 0, "port": 1243, "peer": [3220, 11509], "flags": "IN+OUT+RDHUP", "recv": "EOF", "send": "EPIPE"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "other", "peer": [3220, 10005], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-0\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "other", "peer": [3220, 10006], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-1\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "other", "peer": [3220, 10007], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-2\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "other", "peer": [3220, 10008], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-3\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "other", "peer": [3220, 10009], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-4\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30000], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-0\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30001], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-1\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30002], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-2\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30003], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-3\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30004], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-4\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30005], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-5\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30006], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-6\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30007], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-7\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30008], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-8\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1234, "set": "fresh_NQf", "peer": [3220, 30009], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-9\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "other", "peer": [3220, 10505], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-0\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "other", "peer": [3220, 10506], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-1\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "other", "peer": [3220, 10507], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-2\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "other", "peer": [3220, 10508], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-3\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "other", "peer": [3220, 10509], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-4\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30500], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-0\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30501], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-1\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30502], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-2\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30503], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-3\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30504], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-4\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30505], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-5\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30506], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-6\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30507], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-7\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30508], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-8\n"}
+{"claim": "queue", "phase": "early_after_reuse_new_vm_conns", "round": 0, "port": 1240, "set": "fresh_NQf", "peer": [3220, 30509], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-9\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23000], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-0\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23001], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-1\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23002], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-2\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23003], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-3\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23004], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-4\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23005], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-5\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23006], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-6\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23007], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-7\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23008], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-8\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "Q_withdata", "peer": [3220, 23009], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-9\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27000], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27001], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27002], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27003], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27004], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27005], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27006], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27007], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27008], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "QN_nodata", "peer": [3220, 27009], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "other", "peer": [3220, 11005], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-0\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "other", "peer": [3220, 11006], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-1\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "other", "peer": [3220, 11007], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-2\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "other", "peer": [3220, 11008], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-3\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "other", "peer": [3220, 11009], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-4\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31000], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-0\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31001], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-1\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31002], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-2\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31003], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-3\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31004], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-4\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31005], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-5\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31006], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-6\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31007], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-7\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31008], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-8\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1241, "set": "fresh_NQf", "peer": [3220, 31009], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-9\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23500], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-0\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23501], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-1\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23502], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-2\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23503], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-3\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23504], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-4\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23505], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-5\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23506], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-6\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23507], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-7\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23508], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-8\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "Q_withdata", "peer": [3220, 23509], "flags": "IN+OUT+ERR+RDHUP", "first_read": "DATA:QO", "send": null, "data": "QO-9\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27500], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27501], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27502], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27503], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27504], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27505], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27506], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27507], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27508], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "QN_nodata", "peer": [3220, 27509], "flags": "IN+OUT+ERR+RDHUP", "first_read": "ECONNRESET", "send": "ECONNRESET", "data": ""}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "other", "peer": [3220, 11505], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-0\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "other", "peer": [3220, 11506], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-1\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "other", "peer": [3220, 11507], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-2\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "other", "peer": [3220, 11508], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-3\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "other", "peer": [3220, 11509], "flags": "IN+OUT", "first_read": "DATA:NEf", "send": null, "data": "NEf-4\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31500], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-0\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31501], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-1\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31502], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-2\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31503], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-3\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31504], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-4\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31505], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-5\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31506], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-6\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31507], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-7\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31508], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-8\n"}
+{"claim": "queue", "phase": "late_after_reuse", "round": 0, "port": 1243, "set": "fresh_NQf", "peer": [3220, 31509], "flags": "IN+OUT", "first_read": "DATA:NQf", "send": null, "data": "NQf-9\n"}

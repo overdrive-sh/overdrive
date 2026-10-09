@@ -1,0 +1,16 @@
+{"ack_oob":true,"arm":true,"declare":[],"egress_ifs":["v5c-h"],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":1226792,"programs":[{"id":59724,"name":"verdict","tag":"5f61753433e18fc2","verified_insns":884},{"id":59725,"name":"strp_parse","tag":"22614579d5370f67","verified_insns":62},{"id":59726,"name":"strp_verdict","tag":"4c631b1fcdb0e5f6","verified_insns":895},{"id":59728,"name":"eg_decode_frag(tcx v5c-h egress)","tag":"a9285dfbbf33b7ff","verified_insns":627},{"id":59729,"name":"sent(fexit skb_send_sock)","tag":"038e16bf070d9335","verified_insns":41},{"id":59730,"name":"sockops(/sys/fs/cgroup/gvc-spike-1226792)","tag":"d3503b23d0e6960e","verified_insns":260}],"role":"host","tuple_from_peer":true,"udp_park":true,"unframe":"tc-frag"}
+{"ev":"park_pool","slots":256}
+{"cid":3261,"ev":"host_ready","intakes":[]}
+{"cid":3261,"ev":"hello"}
+{"ev":"ctl_closed","t_us":4796181855909}
+{"cid":3261,"ev":"hello"}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":1,"left":999999999,"t_us":4796185155178}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":3,"left":999999998,"t_us":4796187961139}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":5,"left":999999997,"t_us":4796190768145}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":7,"left":999999996,"t_us":4796193573193}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":9,"left":999999995,"t_us":4796196380158}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":11,"left":999999994,"t_us":4796199187163}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":13,"left":999999993,"t_us":4796201994156}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":15,"left":999999992,"t_us":4796204800154}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":17,"left":999999991,"t_us":4796207606212}
+{"dst":"10.250.205.2:47501","ev":"fault_refused","flow":19,"left":999999990,"t_us":4796210411206}

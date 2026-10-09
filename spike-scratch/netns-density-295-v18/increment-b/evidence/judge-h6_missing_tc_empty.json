@@ -1,0 +1,68 @@
+{
+  "PASS": false,
+  "above_mtu_sent": 0,
+  "ack_fail_examples": [
+    {
+      "ack_len": 8,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "rand",
+      "len": 0
+    },
+    {
+      "ack_len": 8,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "rand",
+      "len": 0
+    },
+    {
+      "ack_len": 8,
+      "ack_sha_match": false,
+      "conn": false,
+      "err": null,
+      "kind": "rand",
+      "len": 0
+    }
+  ],
+  "by_kind": {
+    "rand": {
+      "ok": 0,
+      "sent": 3
+    }
+  },
+  "extra_at_peer": 3,
+  "extra_diag": [
+    {
+      "delta": 8,
+      "extra_len": 8,
+      "kind": "rand",
+      "sent_len": 0
+    }
+  ],
+  "extra_examples": [
+    {
+      "len": 8,
+      "n": 3,
+      "sha": "00c366e94182302c"
+    }
+  ],
+  "max_len": 0,
+  "missing_at_peer": 3,
+  "missing_examples": [
+    {
+      "conn": false,
+      "kind": "rand",
+      "len": 0,
+      "n": 3,
+      "shaped": false
+    }
+  ],
+  "peer_rx": 3,
+  "sender_ack_ok": 0,
+  "sent": 3,
+  "shaped_sent": 0,
+  "tag": "h6_missing_tc_empty"
+}

@@ -1,0 +1,47 @@
+{
+  "cleanup": {
+    "links_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "modules_caused": [],
+    "modules_diff": [],
+    "netns_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "nft_tables_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "routes_added_removed": {
+      "added": [],
+      "removed": []
+    },
+    "v13_cgroups_left": [],
+    "v13_links_left": [],
+    "v13_netns_left": [],
+    "v13_procs_left": ""
+  },
+  "harness": {
+    "exception": "Traceback (most recent call last):\n  File \"/tmp/v13-work/run.py\", line 497, in main\n    start_host_owner()\n    ~~~~~~~~~~~~~~~~^^\n  File \"/tmp/v13-work/run.py\", line 284, in start_host_owner\n    if p.poll() is not None: raise RuntimeError(\"host owner died at start\")\n                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: host owner died at start\n"
+  },
+  "preflight": {
+    "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0",
+    "kvm_api_version": 12,
+    "modules_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ],
+    "substrate_ok": true,
+    "systemd_detect_virt": "none",
+    "uname_r": "7.0.0-29-generic"
+  }
+}
