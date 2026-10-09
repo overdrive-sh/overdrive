@@ -1,0 +1,39 @@
+[driver 08:16:09] substrate preflight
+[driver 08:16:09] substrate OK x86_64 /dev/kvm virt=none kver=7.0.0-29-generic
+[driver 08:16:09] fork CH=/home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor sha256=bb8f79275fd85a2ff89de33f247e90af6523c6b2db1f7c7de566a14aa8b512a8 ver=cloud-hypervisor v53.0.0
+[driver 08:16:09] build forge.ko
+[driver 08:16:11] build guest_client (static)
+[driver 08:16:11] build host_listener
+[driver 08:16:11] assemble initramfs
+[driver 08:16:11] modprobe vsockmon (we loaded it)
+[driver 08:16:11] vsockmon link v10-vsockmon0 up
+[driver 08:16:11] === scenario control (mode=plain forge=0 cid=3271) ===
+[driver 08:17:21]   listener accepts=2 peer_cids=[3271,]
+[driver 08:17:21]   wire frames src_cid=0 (forged): 0
+0 ; src_cid=3271 (real): 8
+[driver 08:17:24] === scenario forge3272 (mode=plain forge=3272 cid=3271) ===
+[driver 08:18:34]   listener accepts=0
+0 peer_cids=[]
+[driver 08:18:34]   wire frames src_cid=3272 (forged): 2 ; src_cid=3271 (real): 0
+[driver 08:18:37] === scenario forge2 (mode=plain forge=2 cid=3271) ===
+[driver 08:19:47]   listener accepts=0
+0 peer_cids=[]
+[driver 08:19:47]   wire frames src_cid=2 (forged): 2 ; src_cid=3271 (real): 0
+[driver 08:19:50] === scenario midstream (mode=midstream forge=3272 cid=3271) ===
+[driver 08:21:00]   listener accepts=1 peer_cids=[3271,]
+[driver 08:21:00]   wire frames src_cid=3272 (forged): 1 ; src_cid=3271 (real): 3
+[driver 08:21:00] done; evidence in /tmp/v10-20261009T081533Z/evidence
+[driver 08:21:00] cleanup
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "/usr/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 361, in raw_decode
+    obj, end = self.scan_once(s, idx)
+               ~~~~~~~~~~~~~~^^^^^^^^
+json.decoder.JSONDecodeError: Expecting ',' delimiter: line 1 column 141 (char 140)
+[driver 08:21:00] rmmod vsockmon (we loaded it)

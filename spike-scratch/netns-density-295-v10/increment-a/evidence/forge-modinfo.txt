@@ -1,0 +1,4 @@
+filename:       /tmp/v10-20261009T081533Z/forge.ko
+name:           vsock_forge
+vermagic:       7.0.0-29-generic SMP preempt mod_unload modversions 
+parm:           forge_cid:nonzero => override virtio_transport_get_local_cid() return (forge src_cid) (uint)

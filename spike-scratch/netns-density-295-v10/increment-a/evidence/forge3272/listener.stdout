@@ -1,0 +1,4 @@
+[host_listener] listening type=STREAM port=1234 on VMADDR_CID_ANY
+[host_listener] listening type=SEQPACKET port=1235 on VMADDR_CID_ANY
+[host_listener] ready stream_fd=5 seqpacket_fd=6 run=70s
+[host_listener] SUMMARY accepts=0

@@ -1,0 +1,7 @@
+{"scenario":"control","mode":"plain","forge":0,"guest_cid":3271,"listener_accepts":2,"listener_peer_cids":"3271,","wire_frames_src_forged":0
+0,"wire_frames_src_real":8}
+{"scenario":"forge3272","mode":"plain","forge":3272,"guest_cid":3271,"listener_accepts":0
+0,"listener_peer_cids":"","wire_frames_src_forged":2,"wire_frames_src_real":0}
+{"scenario":"forge2","mode":"plain","forge":2,"guest_cid":3271,"listener_accepts":0
+0,"listener_peer_cids":"","wire_frames_src_forged":2,"wire_frames_src_real":0}
+{"scenario":"midstream","mode":"midstream","forge":3272,"guest_cid":3271,"listener_accepts":1,"listener_peer_cids":"3271,","wire_frames_src_forged":1,"wire_frames_src_real":3}

@@ -1,0 +1,20 @@
+make: Entering directory '/tmp/v10-20261009T081533Z/forge'
+make -C /lib/modules/7.0.0-29-generic/build M=/tmp/v10-20261009T081533Z/forge modules
+make[1]: Entering directory '/usr/src/linux-headers-7.0.0-29-generic'
+make[2]: Entering directory '/tmp/v10-20261009T081533Z/forge'
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  You are using:           gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+warning: pahole version differs from the one used to build the kernel
+  The kernel was built with: 131
+  You are using:             0
+  CC [M]  vsock_forge.o
+  MODPOST Module.symvers
+  CC [M]  vsock_forge.mod.o
+  CC [M]  .module-common.o
+  LD [M]  vsock_forge.ko
+  BTF [M] vsock_forge.ko
+Skipping BTF generation for vsock_forge.ko due to unavailability of vmlinux
+make[2]: Leaving directory '/tmp/v10-20261009T081533Z/forge'
+make[1]: Leaving directory '/usr/src/linux-headers-7.0.0-29-generic'
+make: Leaving directory '/tmp/v10-20261009T081533Z/forge'

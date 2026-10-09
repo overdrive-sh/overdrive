@@ -1,0 +1,10 @@
+=== modules after cleanup ===
+vsock_diag             12288  0
+vhost_vsock            28672  0
+vhost                  69632  1 vhost_vsock
+vhost_iotlb            16384  1 vhost
+vsock_loopback         12288  0
+vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+vmw_vsock_vmci_transport    53248  0
+vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+vmw_vmci              106496  1 vmw_vsock_vmci_transport

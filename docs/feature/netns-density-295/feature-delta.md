@@ -16551,9 +16551,9 @@ simulation, cleanup, or process-boundary gate (charter §6).
 
 ## Wave: DESIGN / [REF] vsock Attachment Replacement DESIGN — PROPOSED 2026-10-05
 
-**Status (2026-10-09): DISTILL starts when § *What blocks DISTILL* is
-empty — the Quint round-9 re-run and the user's ruling on V-10.** Earlier
-status, kept as the
+**Status (2026-10-09): § *What blocks DISTILL* is empty — V-10 ran and
+HOLDS (P-48) and the Quint round-9 re-run is recorded; DISTILL is
+unblocked.** Earlier status, kept as the
 record: **HANDED TO DISTILL (user decision, 2026-10-08). Every decision in the
 index below is APPROVED by the user (2026-10-05, 2026-10-06, 2026-10-07 or
 2026-10-08, as dated); ADR-0145 to ADR-0176 are Accepted (user approval
@@ -16588,9 +16588,10 @@ ATTR-TOKEN's session claim. Each is remediated by the decisions
 ATTR-LIVE-CLAIM, CELL-RECREATE, HALFCLOSE-SIGNAL (ADR-0180), USO-NO-SEGMENT,
 IFACE-NO-STACK (ADR-0181), FRAG-MAP-LIFECYCLE, INTAKE-TAG-MAP and D26-PINS, each
 **approved under the user's 2026-10-09 remediation directive** (§ *Spike
-remediation decisions, round 2 — 2026-10-09*). V-10's packet-level spike was
-halted and stays Open pending the user's ruling. What blocks DISTILL is that
-ruling and the Quint round-9 re-run (§ *What blocks DISTILL*).
+remediation decisions, round 2 — 2026-10-09*). V-10's packet-level spike has
+since run and HOLDS (P-48, `spike/findings-v10.md`), and the Quint round-9
+re-run is recorded (172/172 checks meet expect, `verify-evidence` passes);
+nothing blocks DISTILL (§ *What blocks DISTILL*).
 
 - DELIVER stays stopped at 08-04. Roadmap `validation.status` stays `pending`.
   `roadmap.json` is not edited by this revision.
@@ -16913,6 +16914,7 @@ All native runs: qualified metal (AMD EPYC 8024P, no nesting), stock Ubuntu
 | P-45 | **V-18 (A-22).** Frame-shaped payloads above the MTU, fragmented and fragment-shifted, byte-exact: 8,565 datagrams, 0 corrupted, 0 lost in the unframe path, every 8-byte boundary ±2 at MTU 1,500 and MTUs 1,280 / 1,400 / 1,492 / 9,000; lookalikes never stripped; wire capture reassembles (21/21). **Fragment-tracking map falsified:** a first fragment whose train's last fragment never passed the program leaves its entry forever; the next datagram with the same (source, destination, id) is shifted and lost (S1); a full map (4,096) makes later kept-frame datagrams lose their tails (S2); an ordinary congested qdisc produces such entries (S3: 40 per run, never expiring). A separate ~0.05% loss appeared only under concurrency, upstream of the host verdict or on the reply leg, never after egress | `spike/findings-v18.md`; `spike-scratch/netns-density-295-v18/` (increments d, e for S1–S3; b, c invalid) | 7.0.0-29; one machine; no USO, IPv6, reordering; > 59,000 B is #309 |
 | P-46 | **V-20 (A-24, M-1).** An entry in a socket-storage map created with `BPF_F_CLONE` on an intake listener is copied to every accepted child and visible to `sock_ops` at `PASSIVE_ESTABLISHED`: 10,000/10,000, including children that wrote and FIN'd before `accept()`, syncookie and TCP Fast Open children, concurrent accepts, children of a closed or re-created listener; leg-C children with the same local address and port in the same cgroup untagged 10,000/10,000; active sockets never tagged; a map without the flag never inherits. The clone flag is a property of the map, not of an entry | `spike/findings-v20.md`; `spike-scratch/netns-density-295-v20/` | Lima 7.0.0-34 aarch64 and metal 7.0.0-29 x86_64; aya 0.13.1 creates such maps only with help (F-2); IPv6, `SO_REUSEPORT` and MPTCP not tested |
 | P-47 | **V-21 (A-25, B-1).** A marked-socket output rule rejects every locally delivered destination before a byte leaves: 0 of 20 marked dials reached a service (TCP `ECONNREFUSED` in 0.1–0.7 ms; UDP `connect()` succeeds, first `send()` `EPERM`); `gateway:53` and off-host reachable; unmarked unaffected; an address added after the check rejected; no bypass by v4-mapped IPv6, `SO_BINDTODEVICE` or a 59,000 B datagram. Holes the rule's construction must close: a `ct state established,related accept` before it lets a marked UDP socket on a reused source port through; separate delete and add transactions leak (559–1,446 connects); `reject with tcp reset` passes UDP and `drop` hangs TCP; `SO_BROADCAST` lets broadcast and multicast past `fib daddr type local` (closed by `!= unicast`); marks with extra bits escape an exact-value match | `spike/findings-v21.md`; `spike-scratch/netns-density-295-v21/` | Lima 7.0.0-34 aarch64 and metal 7.0.0-29 x86_64; netns stand-in for the root namespace; userspace sends, not the forwarder's redirect |
+| P-48 | **V-10 (A-8, K-A1).** A guest forging its vsock `src_cid` cannot make the host deliver a connection or datagram attributed to another CID: the host `vhost_vsock_handle_tx_kick` `kfree_skb`s any packet whose header `src_cid` ≠ the device's host-set `guest_cid` before it reaches any `AF_VSOCK` socket. Control (`forge_cid=0`) accepts 2 with peer CID 3271; forging a sibling CID (3272) and the host CID (2) each yield `accepts=0`, `connect()` `ETIMEDOUT`, no host response (strict equality to the assigned CID, not a block-list); STREAM, SEQPACKET and mid-stream forging all fail (a connection established real then forged mid-stream is never re-attributed). A-8 / K-A1 holds at the packet level; ATTR-TOKEN / ATTR-LIVE-CLAIM stay the defense for the distinct CID reuse-across-launches concern (K-A2′, V-22), which this item does not touch | `spike/findings-v10.md`; `spike-scratch/netns-density-295-v10/` | Kernel 7.0.0-29 host and guest, x86_64 metal, fork CH v53.0.0 `backend=vhost-kernel`; forge via a `kretprobe` override of `virtio_transport_get_local_cid()`, method-independent (the host checks received header bytes); one kernel — 6.18 re-run folds into RERUN-618 / V-28 |
 
 #### Assumptions needing focused validation (none may be treated as true)
 
@@ -16924,12 +16926,13 @@ A-18, A-20, A-21, A-22, A-24 and A-25 were validated or falsified in part by
 V-13, V-5(c), V-16, V-17, V-18, V-20 and V-21, are recorded as P-41 to P-47,
 and each falsified part is remediated (§ *Spike remediation decisions,
 round 2 — 2026-10-09*); they are removed from this table. A-8 / V-10 is
-contract-shaping and its spike was halted; it blocks DISTILL until the user
-rules on it (§ *What blocks DISTILL*).
+contract-shaping; its packet-level spike ran and HOLDS (P-48,
+`spike/findings-v10.md`), discharging the last contract-shaping DISTILL
+blocker (§ *What blocks DISTILL*).
 
 | # | Assumption | Validation | Blocks |
 |---|---|---|---|
-| A-8 | A crafted guest driver cannot make vhost deliver a packet with a foreign `src_cid` (packet level; bind level is P-17) | V-10 (pending the user's ruling) | DISTILL; DELIVER security evidence (10-02 replacement) |
+| A-8 | A crafted guest driver cannot make vhost deliver a packet with a foreign `src_cid` (packet level; bind level is P-17) | **Proven by V-10** (P-48, `spike/findings-v10.md`; packet level) and P-17 (bind level) | DELIVER security evidence (10-02 replacement) |
 | A-9 | Forwarding-owner loss is fail-closed in the production composition | V-8 | DELIVER 10-02 replacement |
 | A-11 | The startup probe (loopback vsock) proves module, sockmap, verdict, framing and drain support; it does not prove the vhost data path | Earned Trust gold test | DELIVER new step 4 |
 | A-14 | A host-local connect to an address covered by `local <prefix> dev lo src <gateway>` takes `<gateway>` as its source | V-12 | DELIVER new step 9 |
@@ -16980,12 +16983,12 @@ independent review r12 is answered, further review is waived by the user
 (ATTR-TOKEN, INTAKE-BIND, INTAKE-PORTS, PREFIX-REPLY, and round 2's
 ATTR-LIVE-CLAIM, CELL-RECREATE, HALFCLOSE-SIGNAL, USO-NO-SEGMENT,
 IFACE-NO-STACK, FRAG-MAP-LIFECYCLE, INTAKE-TAG-MAP, D26-PINS) are approved
-under the user's 2026-10-09 remediation directive. Only V-10 awaits the
-user. "Open validations" are DELIVER-blocking proof obligations
+under the user's 2026-10-09 remediation directive. Every contract-shaping
+row has run. "Open validations" are DELIVER-blocking proof obligations
 (§ *Validation plan*), not conditions on the approval; V-22, V-24, V-25,
-V-26, V-5(c), V-13, V-16, V-17, V-18, V-20 and V-21 have run (P-37 to P-47).
-What blocks DISTILL is V-10, the remaining contract-shaping row (pending the
-user's ruling), and the Quint round-9 re-run (§ *What blocks DISTILL*).
+V-26, V-5(c), V-13, V-16, V-17, V-18, V-20, V-21 and V-10 have run (P-37 to
+P-48). No contract-shaping validation item is open; DISTILL is unblocked
+(§ *What blocks DISTILL*).
 
 | ID | Decision (one sentence) | Status | ADR | Open validations |
 |---|---|---|---|---|
@@ -17015,7 +17018,7 @@ user's ruling), and the Quint round-9 re-run (§ *What blocks DISTILL*).
 | D15-R1 | Residual behaviour changes after re-derivation (§ *D15 re-derivation*): a host-local connect before activation is refused at once instead of going unanswered | **APPROVED 2026-10-05** (acknowledged) | 0173 | — |
 | D16 | A VM's CID is `GUEST_CID_BASE + lease_offset`, computed once in `assign`, never persisted; `assign` is next-fit (M-9) | **APPROVED 2026-10-05**; next-fit correction **APPROVED 2026-10-06** | [0156](../../product/architecture/adr-0156-guest-cid-derived-from-admission-lease.md) | — |
 | D16-CLAIM | `assign` takes a lease only together with a host-kernel claim of its CID on a new `/dev/vhost-vsock` instance (atomic in the kernel; `EADDRINUSE` skips the offset for this call only; every free offset held elsewhere → typed non-terminal `GuestCidsHeldElsewhere`); the move-only claimed device is handed to the fork by descriptor and `serve` closes its copy once the VMM holds it; so no launch ever fails on a CID clash, with no per-workload memory and no restart caveat | Approved by user 2026-10-07; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL | [0170](../../product/architecture/adr-0170-admission-claims-each-guest-cid-on-the-host-kernel-and-hands-the-claimed-device-to-the-vmm.md) | V-25 done (P-39; CLAIM-PINS) |
-| D17 | The beacon is accepted by one node-shared `AF_VSOCK` listener (`VMADDR_CID_ANY`:1234) and attributed by peer CID together with the launch token its READY carries (ATTR-TOKEN) | **APPROVED 2026-10-05**; launch token and the claim's live-launch step (ATTR-LIVE-CLAIM) approved under the user's 2026-10-09 remediation directive | [0157](../../product/architecture/adr-0157-beacon-on-node-shared-vsock-listener-keyed-by-peer-cid.md), [0177](../../product/architecture/adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md) | V-10 (packet level; pending the user's ruling); V-22 done (P-37) |
+| D17 | The beacon is accepted by one node-shared `AF_VSOCK` listener (`VMADDR_CID_ANY`:1234) and attributed by peer CID together with the launch token its READY carries (ATTR-TOKEN) | **APPROVED 2026-10-05**; launch token and the claim's live-launch step (ATTR-LIVE-CLAIM) approved under the user's 2026-10-09 remediation directive | [0157](../../product/architecture/adr-0157-beacon-on-node-shared-vsock-listener-keyed-by-peer-cid.md), [0177](../../product/architecture/adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md) | V-10 done (P-48; packet level); V-22 done (P-37) |
 | D18 | Out-of-band pairing with install-at-establishment and kernel parking; the acceptor reads the request before installing its accepted vsock (H-1); admission is one step with flow-table registration and a continuation stops for a closed flow (U-1) | **APPROVED 2026-10-05**; U-1 approved by user 2026-10-06 | [0158](../../product/architecture/adr-0158-flows-are-paired-out-of-band-with-install-at-establishment-and-kernel-parking.md) | — |
 | D18a | The control session is a dedicated per-VM vsock session to host port 1243, owned by the guest-flow owner — not multiplexed on the beacon; one live session per CID by atomic claim; a control message for an unknown or closed flow is discarded and counted, no reply, SLOT-ABORT excepted (U-5), relying on K-A4 for host-opened flows; a session is claimed only after its opening record names the CID's current launch token (ATTR-TOKEN) | **APPROVED 2026-10-05**; U-5 pinned 2026-10-06 and **confirmed by the user 2026-10-06**; launch token, the claim's live-token step (ATTR-LIVE-CLAIM) and the `HalfClose` / `HalfCloseAck` messages (HALFCLOSE-SIGNAL) approved under the user's 2026-10-09 remediation directive | [0166](../../product/architecture/adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md), [0177](../../product/architecture/adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md) | V-22 done (P-37), V-24 done (P-38) |
 | D19 | Unpinned process-owned links; exit fails closed (scope: guest forwarding objects; the guest-prefix steering is pinned node infrastructure, D8a-LOOKUP / ADR-0171) | **APPROVED 2026-10-05** (#312) | [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md) | V-8 |
@@ -20507,7 +20510,8 @@ remediation decisions (ATTR-LIVE-CLAIM, CELL-RECREATE, HALFCLOSE-SIGNAL,
 USO-NO-SEGMENT, IFACE-NO-STACK, FRAG-MAP-LIFECYCLE, D26-PINS; approved under
 the user's 2026-10-09 remediation directive) and the proven facts P-41 to
 P-47. The scenarios resting on V-10 (packet-level peer-CID authenticity)
-wait for the user's ruling on it. R5-1, R5-2, R5-3 and R5-25 are also the
+are supported by its proven fact P-48 (`spike/findings-v10.md`). R5-1, R5-2,
+R5-3 and R5-25 are also the
 Tier-3 CI tests that discharge A-33 (the shipped steering program is
 correct). Scenarios that the
 Quint specification covers
@@ -20586,7 +20590,7 @@ recorded before running (`.claude/rules/spike.md`).
 | V-7 | Pinned 6.18 kernel parity | **Withdrawn** — user ruling KVER (2026-10-06): kernel versioning is not a gate | — |
 | V-8 | Fail-closed in the production composition: owner SIGKILL, leg-F loss, control-session loss; seeded sim for quiesce/restore (no link-detach injection: on the appliance only Overdrive could detach a held link, D19-LINKS) | Open (spike FC1/FC2 partial, P-27) | DELIVER (10-02 replacement) |
 | V-9 | Density and costs through production at 1 / 64 / 1,024 / 4,096 / 16,384 attachments: audit and quiesce bounds; per-flow fds, threads and CPU separately for the forwarder, the parking-cell hop, and the leg-F hop; DNS association setup cost; cross-VM traffic with guests booted; **listen-state lag p50/p99 at the pinned load profile (M-6)**; **boot time and kernel memory of creating the 65,536-cell host pool, and guest READY latency with 4,096 guest cells and 1,024 UDP slots (M-10)**; **host fds and kernel memory held by pending TcpConnects to unresponsive destinations for the host's SYN-retry time (D15-R3)**; **the steering map's kernel memory at creation and at full occupancy (`GUEST_INTAKE_STEERING_MAX` entries; predicted about 4 MiB and 20 MiB, D8a-CAP)**; **the `sk_lookup` program's per-lookup cost at density — every TCP SYN and UDP datagram whose socket is looked up in the host root namespace runs it, not only prefix traffic — as added latency and CPU per lookup for non-prefix and prefix destinations at 0 and full map occupancy (L-4)**; **intake binds (INTAKE-BIND): 16 listeners on each of 16,384 workload addresses and `GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX` on one address, all in the intake block — every bind succeeds; host outbound connect port availability unchanged from a run without intakes**; **guest UDP delivery under concurrent associations through the production owner, every loss attributed to its stage (guest capture, pairing and parking, host verdict, egress, reply leg) — V-18 saw ~0.05% lost only under concurrency, upstream of the host verdict or on the reply leg (P-45); a loss in the pairing or parking path is a defect of DELIVER step 5's owner path, and one with no attributable stage is surfaced to the user**; **control-session message throughput and per-flow half-close latency under a close storm (every flow of 1,024 Active allocations closing cleanly at once; four control messages per clean close, HALFCLOSE-SIGNAL)**. A result outside a pinned bound (lag p99 > 2 ms, ADR-0124's 5 s, an intake bind refused) is surfaced to the user, never relaxed silently | Open | DELIVER (replaces 08-04 / 10-05) |
-| V-10 | Peer-CID authenticity at packet level (crafted guest driver forging `src_cid`) | **Bind level proven** (P-17); packet level **Open — the packet-level spike was halted; pending the user's ruling** | DISTILL (contract-shaping, § *Contract-shaping classification*) until the user rules; DELIVER security evidence step (10-02 replacement). It tests a host-kernel property (vhost stamps the device's CID on every guest packet, `drivers/vhost/vsock.c`) on which peer-CID attribution (ADR-0157, ADR-0177) rests; a falsification is a security decision that returns to DESIGN |
+| V-10 | Peer-CID authenticity at packet level (crafted guest driver forging `src_cid`) | **Bind level proven** (P-17); packet level **proven — ran and HOLDS** (P-48, `spike/findings-v10.md`): the host drops any forged `src_cid` before delivery | DELIVER security evidence step (10-02 replacement). It tests a host-kernel property (vhost stamps the device's CID on every guest packet, `drivers/vhost/vsock.c`) on which peer-CID attribution (ADR-0157, ADR-0177) rests; the spike confirmed it holds. No longer a DISTILL blocker |
 | V-11 | Off-host framed datagrams unframed in the host kernel without a per-VM attachment | **Proven (bounded)** — P-29–P-31: hybrid and fragment-aware TC work for every size; non-fragment-aware TC fails above MTU; verdict-only drops empties. Bounds: no second machine (veth netns + NIC to 1.1.1.1 / TEST-NET), 7.0.0-29 only, no USO NIC, single egress interface, frame-shaped payload above MTU untested | — |
 | V-12 | Does a host-local connect to a guest address take the `local` route's preferred source (the gateway)? | Open | DELIVER step 9 acceptance only. Reclassified: it decides only which client address the guest sees for platform clients (D15 identity); no steering, policy or safety rule keys on the source (D8a keys on destination), so a falsification changes one D15 row, surfaced to the user |
 | V-13 | `SO_LINGER{1,0}` on owner-held sockets: kill -9 the guest owner, then the host owner, mid-transfer; the guest application, the non-mesh remote destination and the mesh remote peer each observe a reset (`ECONNRESET`), not EOF (H-5). Prediction: reset everywhere | **Done 2026-10-09 — FALSIFIED as stated.** Holds for every far end the dying owner holds (110/110 per cell, kTLS 20/20); falsified for far ends the surviving owner holds (EOF in up to 103/110: the survivor took the dead owner's flow vsock end as a half-close before control-session loss). Remediated by HALFCLOSE-SIGNAL (ADR-0180) (P-42, `spike/findings-v13.md`, kernel 7.0.0-29). The mesh remote peer with the survivor holding (row 12) was inconclusive on the stand-in leg-F and is R5-10's Tier-3 cell | — (contract-shaping; ran before acceptance). Production matrix: R5-10, DELIVER step 7. 6.18 re-run: V-28 |
@@ -20863,8 +20867,9 @@ contract-shaping validation before the design is accepted").** The
 contract-shaping items V-22, V-24, V-25 and V-26 (P-37 to P-40) and V-5(c),
 V-13, V-16, V-17, V-18, V-20 and V-21 (P-41 to P-47) have run, and their
 results are in the design (§ *Spike remediation decisions — 2026-10-09* and
-§ *Spike remediation decisions, round 2 — 2026-10-09*). Every row still
-Open, classified by what its falsification clause would change:
+§ *Spike remediation decisions, round 2 — 2026-10-09*). V-10, the one
+contract-shaping row, has since run and HOLDS (P-48). Each remaining
+validation row, classified by what its falsification clause would change:
 
 | Row | Class | Why |
 |---|---|---|
@@ -20873,27 +20878,32 @@ Open, classified by what its falsification clause would change:
 | V-9 | DELIVER | Bounds and costs; a result outside a pinned bound is surfaced to the user |
 | V-12 | DELIVER step 9 | Decides one D15 row (which source address the guest sees for platform clients); nothing keys on the source (row) |
 | V-28 | none (KVER) | A re-run of probes already passed (row) |
-| V-10 | **contract-shaping** | A forged `src_cid` would void peer-CID attribution, which ADR-0157 and ADR-0177 rest on; a security decision returns to DESIGN. Its packet-level spike was halted; the user rules on it |
+| V-10 | **contract-shaping — ran, HOLDS** | A forged `src_cid` would void peer-CID attribution, which ADR-0157 and ADR-0177 rest on. **Ran and HOLDS (P-48, `spike/findings-v10.md`):** the host drops any packet whose `src_cid` ≠ the device's assigned CID before delivery, so attribution is authentic at the packet level. No longer open; nothing returns to DESIGN |
 
 The rows run on 2026-10-09 (V-5(c), V-13, V-16, V-17, V-18, V-20, V-21)
 were written before the rule existed; each ran before DISTILL and is
 discharged or remediated in the round-2 decisions. V-16e (a hardware-USO
 NIC) is not contract-shaping under USO-NO-SEGMENT (V-16 row).
 
-**What blocks DISTILL:**
+**What blocks DISTILL: nothing.** Both former blockers are resolved, and no
+contract-shaping validation item is open — DISTILL is unblocked.
 
-1. **V-10, pending the user's ruling.** Its packet-level spike was halted;
-   it stays Open until the user rules on running it or on its
-   classification.
-2. **The Quint round-9 re-run** (§ *Formal protocol model*, round 9): the
-   first round-9 run found a counterexample against ATTR-TOKEN's session
-   claim, answered by ATTR-LIVE-CLAIM; HALFCLOSE-SIGNAL and CELL-RECREATE
-   add protocol state. The `quint-modeler` applies the listed changes,
-   re-runs, records the run and resolves any counterexample before DISTILL.
+1. **V-10 ran and HOLDS (P-48, `spike/findings-v10.md`).** A guest forging
+   its vsock `src_cid` cannot make the host deliver a connection or datagram
+   attributed to another CID; the host `kfree_skb`s the forged packet before
+   it reaches any socket (STREAM, SEQPACKET and mid-stream forging all fail),
+   so peer-CID attribution (A-8 / K-A1) is authentic at the packet level.
+   The design needs no change: ATTR-TOKEN / ATTR-LIVE-CLAIM remain the
+   defense for the distinct CID reuse-across-launches concern (K-A2′, V-22),
+   which V-10 does not touch.
+2. **The Quint round-9 re-run is done** (§ *Formal protocol model*, round 9):
+   the applied changes (ATTR-LIVE-CLAIM, HALFCLOSE-SIGNAL, CELL-RECREATE)
+   re-run clean — 172/172 checks meet their expected outcome and
+   `verify-evidence` passes, recorded.
 
-Nothing else blocks DISTILL: V-22, V-24, V-25, V-26 and the round-2 rows
-are discharged, and every 2026-10-09 decision is approved under the user's
-2026-10-09 remediation directive. Revisions 5–12 were
+V-22, V-24, V-25, V-26 and the round-2 rows are discharged, and every
+2026-10-09 decision is approved under the user's 2026-10-09 remediation
+directive. Revisions 5–12 were
 reviewed through r12, whose findings are answered, and the user waived a
 further review on 2026-10-08; the 2026-10-09 remediation and its round 2
 were each reviewed independently once (`nw-solution-architect-reviewer`;
@@ -21445,7 +21455,7 @@ fact the model assumes rather than checks:
 
 | ID | Assumption | Discharged by |
 |---|---|---|
-| K-A1 | Peer-CID attribution is authentic (vhost stamps the device's CID) | V-10 (bind level proven, P-17; packet level open) |
+| K-A1 | Peer-CID attribution is authentic (vhost stamps the device's CID) | V-10 (bind level proven, P-17; packet level proven, P-48 — the host drops any forged `src_cid` before delivery, `spike/findings-v10.md`) |
 | K-A2 | A released vhost device's connections, accept-queue entries included, are reset before the CID is reassigned | **Falsified by V-22** for accept-queue entries with buffered bytes (P-37). Replaced by K-A2′ |
 | K-A2′ | At VMM death, established host connections of the CID fail at their next I/O; a queued connection with a buffered first record is accepted later — after the CID's reuse included, and after the launch's teardown — with the CID as peer and the record readable; one with no buffered record fails its first read. Attribution therefore uses the CID's live launch token, compared in the claim's step (ATTR-TOKEN, ATTR-LIVE-CLAIM), never the peer CID alone | Measured, P-37 (V-22). Modelled in round 9 |
 | K-A3 | A socket installed before its request is read hands the request to the verdict, which drops it | Proven by the P-23 controls; R5-9 (Tier-3) keeps it as a regression. No V-item needed |
@@ -22408,8 +22418,8 @@ V-18, V-20, V-21; P-41 to P-47), and the first Quint round-9 run found a
 counterexample against ATTR-TOKEN's session claim. Each decision below is
 **approved under the user's 2026-10-09 remediation directive** ("if design
 needs changing, then you remediate, and then proceed to DISTILL"); each is
-surfaced to the user with this revision. V-10 stays Open pending the user's
-ruling (its packet-level spike was halted).
+surfaced to the user with this revision. V-10's packet-level spike has since
+run and HOLDS (P-48, `spike/findings-v10.md`).
 
 1. **ATTR-LIVE-CLAIM (Quint round 9, design defect; ADR-0177, ADR-0166,
    ADR-0157).** *Contract:* a CID has a live launch token only while its

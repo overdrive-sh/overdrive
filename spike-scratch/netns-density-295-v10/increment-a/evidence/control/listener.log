@@ -1,0 +1,6 @@
+1791533771.520 listening type=STREAM port=1234 on VMADDR_CID_ANY
+1791533771.520 listening type=SEQPACKET port=1235 on VMADDR_CID_ANY
+1791533771.520 ready stream_fd=5 seqpacket_fd=6 run=70s
+1791533775.928 ACCEPT STREAM peer_cid=3271 peer_port=4191148806 bytes=20 data="V10-STREAM-from-3271"
+1791533775.931 ACCEPT SEQPACKET peer_cid=3271 peer_port=4191148807 bytes=17 data="V10-SEQ-from-3271"
+1791533841.010 SUMMARY accepts=2

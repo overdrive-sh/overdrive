@@ -1,0 +1,1 @@
+/tmp/v10-20261009T081533Z/client: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=0962606df3ade86dd21473fd1f013dfddd231940, for GNU/Linux 3.2.0, not stripped

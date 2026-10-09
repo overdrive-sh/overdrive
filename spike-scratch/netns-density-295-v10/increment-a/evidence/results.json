@@ -1,0 +1,25 @@
+{
+  "feature": "netns-density-295",
+  "validation_item": "V-10",
+  "question": "Can a guest crafting vsock packets with a forged src_cid make the HOST deliver a connection/datagram attributed to a CID other than the one the host assigned (3271)?",
+  "verdict": "HOLDS (A-8/K-A1 confirmed; forged src_cid is dropped by the host, never delivered as a foreign CID)",
+  "kernel": "7.0.0-29-generic",
+  "arch": "x86_64",
+  "virt": "none",
+  "ch_fork_sha256": "bb8f79275fd85a2ff89de33f247e90af6523c6b2db1f7c7de566a14aa8b512a8",
+  "ch_version": "cloud-hypervisor v53.0.0",
+  "guest_kernel_sha256": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+  "forge_mechanism": "kretprobe on virtio_transport_get_local_cid() in the guest kernel (vermagic 7.0.0-29-generic), overriding the return so the guest common layer stamps a forged src_cid into every outgoing virtio_vsock_hdr",
+  "note_results_jsonl": "the raw results.jsonl on-host had a cosmetic grep -c '0\\n0' artifact in zero-count fields; the integers below are the verified counts from listener.log/capture.log and match the streamed driver output",
+  "scenarios": [
+    {"scenario": "control",   "mode": "plain",     "forge_cid": 0,    "guest_cid": 3271, "listener_accepts": 2, "listener_peer_cids": "3271", "wire_frames_src_forged": 0, "wire_frames_src_real": 8, "note": "STREAM+SEQPACKET both accepted; host attributes the real CID 3271; full handshake on the wire (REQUEST 3271->2, RESPONSE 2->3271)"},
+    {"scenario": "forge3272", "mode": "plain",     "forge_cid": 3272, "guest_cid": 3271, "listener_accepts": 0, "listener_peer_cids": "", "wire_frames_src_forged": 2, "wire_frames_src_real": 0, "note": "forged REQUESTs (src_cid=3272) reached the host wire via the vhost tap but were dropped; no host RESPONSE; guest connect() ETIMEDOUT(110); host accepted nothing"},
+    {"scenario": "forge2",    "mode": "plain",     "forge_cid": 2,    "guest_cid": 3271, "listener_accepts": 0, "listener_peer_cids": "", "wire_frames_src_forged": 2, "wire_frames_src_real": 0, "note": "forging the host's own CID (2) is likewise dropped (src_cid 2 != guest_cid 3271); ETIMEDOUT"},
+    {"scenario": "midstream", "mode": "midstream", "forge_cid": 3272, "guest_cid": 3271, "listener_accepts": 1, "listener_peer_cids": "3271", "wire_frames_src_forged": 1, "wire_frames_src_real": 3, "note": "connection established and attributed to real 3271; the PRE message delivered; after flipping forge on, the forged-src_cid packet was dropped and the connection stayed attributed to 3271 (no re-attribution)"}
+  ],
+  "subclaims": {
+    "connection": "HOLDS - forged-src_cid REQUEST dropped; no accept with foreign CID",
+    "datagram_seqpacket": "HOLDS - forged-src_cid SEQPACKET dropped; no recv with foreign CID",
+    "across_handshake": "HOLDS - established connection stays bound to the real CID; mid-stream forged packets dropped"
+  }
+}

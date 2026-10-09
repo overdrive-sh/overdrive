@@ -1,0 +1,4 @@
+1791533917.202 listening type=STREAM port=1234 on VMADDR_CID_ANY
+1791533917.202 listening type=SEQPACKET port=1235 on VMADDR_CID_ANY
+1791533917.202 ready stream_fd=5 seqpacket_fd=6 run=70s
+1791533987.288 SUMMARY accepts=0

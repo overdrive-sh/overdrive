@@ -1,0 +1,3 @@
+uname_r=7.0.0-29-generic
+arch=x86_64
+virt=none
