@@ -167,11 +167,43 @@ against the implementation and compares state after every step.
   call on the production owner through its driving ports, with `Sim*` adapters
   at the driven ports. A driver that re-implements the protocol in test code
   checks the model against itself — reject it as testing theater.
-- **State projection reads observable state.** The driver's `State` is
-  projected from the owner's public observation surface (its accessors, audit
-  facts, or observation rows), not from private fields reached for the test.
-  If the owner exposes no way to observe a modelled variable, that is a
-  testability gap to surface for design approval, not licence to add API.
+- **Every action handler calls the owner.** Every action the `switch!` maps
+  reaches a driving-port call on the production owner. A handler with an empty
+  body, `Ok(())`, `todo!()`, or a body that only updates the driver's own maps
+  is a rejection: the step advances the model and leaves the implementation
+  untouched, so the per-step comparison passes vacuously, or fails for a reason
+  unrelated to the implementation. A catch-all `_ => {}` arm is the same defect
+  applied to every unmapped action. Let `switch!` fail on an unmapped action,
+  or bail with the action name.
+- **State projection reads only the owner's pinned accessors.** The driver's
+  `State` is projected from the owner's public observation surface: the
+  accessors, audit facts, or observation rows the design pins for each
+  modelled variable (`.claude/rules/design.md` § "Pin the observable
+  projection the conformance driver reads"). `State::from_driver` never reads a
+  `Sim*` adapter's internals, never reads the driver's own bookkeeping (a map
+  the driver maintains, a counter it increments, a constant it returns), and
+  never reaches private fields. A projection built from the driver's own
+  records compares the model with the model.
+
+  One exception applies. A `Sim*` adapter may feed the projection when it is
+  the authentic arbiter of a driven-port fact that the owner does not hold, and
+  the design names it as such (for example the kernel's holder table behind a
+  claim port). The read carries an inline justification marker
+  (`// conformance-lint: sim-arbiter-ok <reason>`, see below), and a Tier-3
+  test proves the real adapter reports the same fact. Without that pairing,
+  the conformance test only shows that the owner agrees with the simulator.
+- **A missing production API is a DESIGN gap. Do not gate it out.**
+  Drivers compile under `integration-tests` like every other integration
+  test. A driver whose activating DELIVER step has not landed stays compiled
+  and is marked `#[ignore = "pending DELIVER <step>"]`, per § "RED acceptance
+  scaffolds and activation". Never wrap a driver in `#![cfg(any())]`,
+  `#[cfg(any())]`, `cfg(not(all()))`, `cfg(false)`, or any other always-false
+  predicate. Such a gate turns the file into an empty compilation unit, so
+  `cargo check` stays green while the body references types that do not exist
+  and handlers that do nothing. If the driver cannot compile because the
+  owner's driving port or pinned accessor does not exist, that is a design gap.
+  Surface it for design approval. It is not something to hide from the
+  compiler.
 - **One spec, one oracle.** Tests reference the spec in place
   (`specs/quint/<subsystem>/…`). Never copy or fork the spec into a crate; a
   divergence between the spec and the test oracle is the drift this lane exists
@@ -187,15 +219,63 @@ against the implementation and compares state after every step.
   integration, faults and schedules the model abstracts away — and the
   § "DISTILL — prove composed system behavior" requirements still apply.
   Kernel behaviour the model assumes is still proven at Tier 3.
-- **Placement and lane.** Conformance tests live with the owning crate's
-  acceptance or integration tests and follow § "Integration vs unit gating":
-  they spawn the `quint` CLI, so they run under `integration-tests` through
-  `cargo xtask lima run --` (the Lima template provisions the pinned Quint
-  toolchain).
+- **Placement and lane.** A conformance driver lives in the production
+  owner's crate, as a `#[cfg(all(test, feature = "integration-tests"))]`
+  module under that crate's `src/`. There it reaches the owner's real
+  constructor and crate-private I/O seam, and it works for a binary-only
+  crate. That placement counts as "with the owning crate's tests". It reads
+  the owner's public read-only observation accessors pinned in the design.
+  Only a conformance test that spans several owners through the exported
+  server handler, or a real-kernel landing test, lives in `tests/conformance`
+  (§ "Root-level system conformance"). Conformance tests follow § "Integration
+  vs unit gating": they spawn the `quint` CLI, so they run under
+  `integration-tests` through `cargo xtask lima run --` (the Lima template
+  provisions the pinned Quint toolchain).
 - **DISTILL completeness.** Every invariant in the spec has at least one
   conformance test path that exercises the modelled actions it constrains, and
   the scenario specification records which spec, run, and invariant each test
   replays.
+
+### Per-driver checklist (DISTILL completeness critic)
+
+For every conformance driver, the completeness critic records a yes for each
+item, and cites the line that establishes it:
+
+1. The driver sits in the owning crate's `src/` behind
+   `#[cfg(all(test, feature = "integration-tests"))]`, or in
+   `tests/conformance` when it spans several owners; its only gate is
+   `integration-tests`. No always-false `cfg` appears anywhere in the file. A driver that is not
+   yet active carries a reasoned `#[ignore = "pending DELIVER <step>"]`.
+2. The driver struct holds the production owner, or the production
+   composition that contains it, as a field. A driver whose fields are only
+   `Sim*` adapters and maps has nothing to drive.
+3. Every action in the spec's `step` relation is mapped. Each mapped handler
+   calls an owner driving port named in the feature-delta. No handler is
+   empty, `Ok(())`, `todo!()`, or bookkeeping-only. There is no silent `_`
+   arm.
+4. Each `State` field corresponds to a spec variable. `from_driver` reads that
+   field through the accessor the design pins for it, and the critic names the
+   accessor.
+5. `from_driver` reads no `Sim*` adapter, except a marked arbiter read that
+   cites its paired Tier-3 test. It reads no driver-maintained map, counter,
+   or literal.
+6. The spec is referenced in place. Both `#[quint_test]` pins for the named
+   runs and `#[quint_run]` randomized traces are present.
+
+`cargo xtask conformance-lint` checks items 1, 3 and 5 syntactically over
+every file that uses quint-connect (a `quint_connect` path, `#[quint_run]` or
+`#[quint_test]`) under `crates/*/src/**/*.rs` and `tests/conformance/tests/*.rs`.
+A file without quint-connect is ignored. It runs in CI and in pre-push. It
+cannot judge whether a non-empty handler calls the right port, or whether a
+method named like an accessor is pinned by the design. Those judgements belong
+to the critic.
+
+**Symptoms during review:** `#![cfg(any())]` or `#[cfg(any())] mod pending_…`
+on a driver; a header comment explaining that the body is "complete against
+the pinned shapes" while the handlers are `{}`; an `observe_*` helper on the
+driver that returns the driver's own map or a literal `0`; a `Sim*` adapter
+field on the driver read inside `from_driver`; a driver struct with no field
+for the production owner; `_ => {}` in `switch!`.
 
 ---
 

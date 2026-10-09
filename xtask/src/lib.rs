@@ -7,6 +7,7 @@
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::unnecessary_wraps)]
 
 pub mod cloexec_lint;
+pub mod conformance_lint;
 pub mod dev_setup;
 pub mod dst_lint;
 pub mod mutants;

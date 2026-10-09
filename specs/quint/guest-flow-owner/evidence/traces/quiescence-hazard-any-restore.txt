@@ -1,4 +1,4 @@
-# quiescence-hazard-any-restore: counterexample, 7 state(s) (from the TLC trace)
+# quiescence-hazard-any-restore: counterexample, 6 state(s) (from the TLC trace)
 
 State 1
   holders = {}
@@ -10,11 +10,11 @@ State 1
   stop = "none"
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
   up = TRUE
-  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
+  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
   att = [IpRules |-> 0, FlowListeners |-> 0]
 
 State 2 [Damage]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+  dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
 
 State 3 [RecQuiesce]
   holders = {"IpRules"}
@@ -24,17 +24,14 @@ State 3 [RecQuiesce]
 
 State 4 [RecRepair]
   rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
-
-State 5 [Damage]
   dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 
-State 6 [RecQuiesce]
+State 5 [RecQuiesce]
   holders = {"IpRules", "FlowListeners"}
   rec = [IpRules |-> "repaired", FlowListeners |-> "held"]
   g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
 
-State 7 [RecRestore]
+State 6 [RecRestore]
   holders = {}
   latch = FALSE
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]

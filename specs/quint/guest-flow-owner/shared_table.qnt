@@ -1,32 +1,37 @@
 // -*- mode: Bluespec; -*-
 /**
- * Guest-flow owner (netns-density-295) — steering concern 4: the shared nft table left partial by
- * Overdrive itself (K-D3): the mTLS worker's convergence stopping part-way (at boot step 8 or at
- * runtime) and a `serve` crash between its batches; the partial table persisting while `serve` is
- * down and converged again at boot step 8; the steering's independence from the table; the leg-C
- * bypass window; the table repair completing under the IpRules recovery's hold (D8a-HOLD).
+ * Guest-flow owner (netns-density-295) — steering concern 4: the shared nft table left absent by
+ * Overdrive itself (K-D3, U-QP-1): the mTLS worker's single-transaction write at boot step 8 failing
+ * on a node with no table, or a later replacement failing (the table stays as it was); the absent
+ * table persisting while `serve` is down and converged again at boot step 8; the steering's
+ * independence from the table; the leg-C bypass window; the table repair completing under the
+ * IpRules recovery's hold (D8a-HOLD).
  *
  * Design artifact and DISTILL oracle. Models the design text, not an implementation.
  * Source of truth: feature-delta.md § "vsock Attachment Replacement DESIGN" — § Composition (boot
  * steps 8, 9 and the ordering invariant: "The nft table is not a precondition of the route"),
- * § Earned Trust ("the shared nft table left partial at boot step 8 (boot keeps the route …)"),
- * Gate G-V5, § Required boundary scenarios R5-30, § Formal protocol model (concern 4, K-D3);
- * ADR-0171, ADR-0169, ADR-0152.
+ * § Earned Trust ("the shared nft table left absent at boot step 8 (boot keeps the route …)"),
+ * Gate G-V5, § Required boundary scenarios R5-30, § Formal protocol model (concern 4, K-D3),
+ * § Conformance observation surface and action map (QPROJ-7 `shared_table_state`) and U-QP-1
+ * (spec change S-5); ADR-0171, ADR-0169, ADR-0152.
  *
  * Abstraction:
- *   - The table's constant rules in two parts: `divert` (prefix traffic to leg-C) and `reject`
- *     (output reject / prerouting drop of non-exempt prefix traffic). Each nft batch is atomic
- *     (K-D3); a partial table is any state other than both present.
- *   - Boot: steps 1–7 one step; step 8 (`start_shared_owner`: leg-C, then the rules) may stop
- *     part-way — boot continues with the table partial — or `serve` may crash between its batches;
- *     step 9 (concern 1) converges the pinned steering and the route `local` as one step.
+ *   - The table is written and replaced only in single nft transactions (D26-PINS F-2, boot step 8),
+ *     so it has exactly two states, `absent` and `complete` (U-QP-1): the divert rule (prefix
+ *     traffic to leg-C) and the reject / drop rule (non-exempt prefix traffic) are present together
+ *     or not at all. A failed first write leaves it absent; a failed replacement and a crash leave
+ *     it as it was (the replaced-over table has the same constant rules and is `complete`).
+ *   - Boot: steps 1–7 one step; step 8 (`start_shared_owner`: leg-C, then the table's transaction)
+ *     succeeds (the table is complete) or its transaction fails (the table stays as it was; boot
+ *     continues); `serve` may crash at any step; step 9 (concern 1) converges the pinned steering
+ *     and the route `local` as one step.
  *   - One allocation, Active, its guest listening on declared port 1; port 2 is not declared. The
  *     owner's bring-up (bind, listen, steer) is one step (steer failures: concern 2).
- *   - Recoveries: IpRules (damage = the table partial) and FlowListeners (a listener-task exit,
+ *   - Recoveries: IpRules (damage = the table absent) and FlowListeners (a listener-task exit,
  *     recurring at any time), with named holders as in concern 3.
  *
  * OFF names design rules switched off (hazard/shared_table_hazards.qnt):
- *   steeringInNft  D8a-LOOKUP: the steering decision lives in the shared table (a partial
+ *   steeringInNft  D8a-LOOKUP: the steering decision lives in the shared table (a failed
  *                  convergence can drop it)
  *   unpinned       D8a-LOOKUP / ADR-0159: the steering is process-owned (gone while serve is down)
  *   nonLoopback    D8a-LOOKUP: the program also assigns non-loopback ingress
@@ -45,16 +50,13 @@ module shared_table {
   val MAXATT: int = 2
   val ALLOW_CRASH: bool = CFG == "ok"
   val REPAIR_FAILS: int = if (CFG == "ok") 1 else -1
-  // the partial states of the table (each batch atomic, K-D3)
-  val PARTIAL: Set[(bool, bool)] = Set((true, false), (false, true), (false, false))
 
-  type Ghost = { partialUp: bool, crashPartial: bool, bypassed: bool, reopenEarly: bool }
-  val g0: Ghost = { partialUp: false, crashPartial: false, bypassed: false, reopenEarly: false }
+  type Ghost = { absentUp: bool, bypassed: bool, reopenEarly: bool }
+  val g0: Ghost = { absentUp: false, bypassed: false, reopenEarly: false }
 
   var up: bool
   var phase: str            // start | rules | steer | open
-  var divert: bool
-  var reject: bool
+  var table: str            // absent | complete  (single-transaction writes only, U-QP-1)
   var link: str             // none | pinned  (the pinned steering link running this boot's program)
   var route: str            // absent | local
   var lis: Set[int]
@@ -67,10 +69,10 @@ module shared_table {
   var g: Ghost
 
   val open: bool = up and phase == "open"
-  val complete: bool = divert and reject
-  def damaged(c: str): bool = if (c == "IpRules") not(complete) else flDmg
+  val complete: bool = table == "complete"
+  def damaged(c: str): bool = if (c == "IpRules") table == "absent" else flDmg
   val net: Net = {
-    marked: open, legC: up and phase != "start", divert: divert, reject: reject, route: route,
+    marked: open, legC: up and phase != "start", divert: complete, reject: complete, route: route,
     steer: if (link == "pinned") "ours" else "none", entries: entries, lis: lis,
     assignRemote: bug("nonLoopback"),
   }
@@ -82,7 +84,7 @@ module shared_table {
   val att0: str -> int = COMPONENTS.mapBy(c => 0)
   def dec(x: int): int = if (x < 0) x else x - 1
 
-  action keepTable = all { divert' = divert, reject' = reject }
+  action keepTable = all { table' = table }
   action keepRec = all { holders' = holders, rec' = rec, att' = att }
   action keepNode = all { link' = link, route' = route }
   // process-scoped state lost at a serve exit
@@ -92,7 +94,7 @@ module shared_table {
   }
 
   action init = all {
-    up' = true, phase' = "start", divert' = false, reject' = false, link' = "none", route' = "absent",
+    up' = true, phase' = "start", table' = "absent", link' = "none", route' = "absent",
     lis' = Set(), entries' = Set(), holders' = Set(), rec' = recIdle, att' = att0, flDmg' = false,
     repLeft' = REPAIR_FAILS, g' = g0,
   }
@@ -101,42 +103,36 @@ module shared_table {
   action BootStep = all {
     up, phase != "open",
     if (phase == "start") all { phase' = "rules", keepTable, keepNode }
-    // step 8: leg-C, then the constant rules (converged complete)
-    else if (phase == "rules") all { phase' = "steer", divert' = true, reject' = true, keepNode }
+    // step 8: leg-C, then the table's single transaction (succeeds: the table is complete)
+    else if (phase == "rules") all { phase' = "steer", table' = "complete", keepNode }
     // step 9: this boot's program loaded and swapped into the pinned link (concern 1); then the route `local`
     else all { phase' = "open", keepTable, link' = "pinned", route' = "local" },
     up' = up, lis' = lis, entries' = entries, keepRec, flDmg' = flDmg, repLeft' = repLeft, g' = g,
   }
-  // step 8 stops part-way (the mTLS worker fails): boot keeps going with the table partial
-  action RulesPartial = {
-    nondet t = PARTIAL.oneOf()
-    all { up, phase == "rules",
-      phase' = "steer", divert' = t._1, reject' = t._2, keepNode,
-      up' = up, lis' = lis, entries' = entries, keepRec, flDmg' = flDmg, repLeft' = repLeft,
-      g' = { ...g, partialUp: true } }
-  }
-  // serve dies (crash, graceful shutdown); at step 8 it may die between two batches
-  action Crash = {
-    nondet t = PARTIAL.oneOf()
-    all { ALLOW_CRASH, up,
-      up' = false, phase' = "start", exitProcess, repLeft' = repLeft,
-      divert' = if (phase == "rules") t._1 else divert, reject' = if (phase == "rules") t._2 else reject,
-      g' = { ...g, crashPartial: g.crashPartial or (phase == "rules" and t != (divert, reject)) } }
-  }
+  // step 8's transaction fails (the mTLS worker): the table stays as it was — absent on a node that
+  // never had one, complete after an earlier boot — and boot keeps going
+  action RulesFail = all { up, phase == "rules",
+    phase' = "steer", keepTable, keepNode,
+    up' = up, lis' = lis, entries' = entries, keepRec, flDmg' = flDmg, repLeft' = repLeft,
+    g' = { ...g, absentUp: g.absentUp or table == "absent" } }
+  // serve dies (crash, graceful shutdown) at any step: a transaction in progress leaves the table as
+  // it was
+  action Crash = all { ALLOW_CRASH, up,
+    up' = false, phase' = "start", exitProcess, keepTable, repLeft' = repLeft, g' = g }
   action Restart = all { not(up),
     up' = true, phase' = "start", keepTable, keepNode, lis' = lis, entries' = entries, keepRec,
     flDmg' = flDmg, repLeft' = repLeft, g' = g }
 
   // ------------------------------------------------------------------ runtime faults (Overdrive's own)
-  // the mTLS worker's convergence of the shared table stops part-way (steeringInNft: it can drop the
-  // steering held in the table)
-  action MtlsPartial = {
-    nondet t = PARTIAL.oneOf()
+  // the mTLS worker's replacement transaction of the shared table fails: the table stays as it was
+  // (a stutter in the design; no Overdrive write leaves it absent while serving). steeringInNft: the
+  // steering held in the table is dropped by the replacement transaction
+  action MtlsReplaceFail = {
     nondet dropSteer = Set(false, bug("steeringInNft")).oneOf()
     all { open,
-      divert' = t._1, reject' = t._2, link' = if (dropSteer) "none" else link, route' = route,
+      keepTable, link' = if (dropSteer) "none" else link, route' = route,
       up' = up, phase' = phase, lis' = lis, entries' = entries, keepRec, flDmg' = flDmg,
-      repLeft' = repLeft, g' = { ...g, partialUp: true } }
+      repLeft' = repLeft, g' = g }
   }
   action ListenerTaskExit = all { open, not(flDmg),
     flDmg' = true, up' = up, phase' = phase, keepTable, keepNode, lis' = lis, entries' = entries,
@@ -147,7 +143,7 @@ module shared_table {
   action BringUp(p: int): bool = all { serving(p), not(lis.contains(p)),
     lis' = lis.union(Set(p)), entries' = entries.union(Set(p)),
     up' = up, phase' = phase, keepTable, keepNode, keepRec, flDmg' = flDmg, repLeft' = repLeft,
-    g' = { ...g, bypassed: g.bypassed or (not(divert) and not(reject)) } }
+    g' = { ...g, bypassed: g.bypassed or table == "absent" } }
 
   // ------------------------------------------------------------------ recoveries (D8a-HOLD)
   action common = all { up' = up, phase' = phase, repLeft' = repLeft }
@@ -159,7 +155,7 @@ module shared_table {
   // the repair converges component c only: IpRules → the table complete; FlowListeners → the task
   action RecRepair(c: str): bool = all {
     open, rec.get(c) == "held", att.get(c) < MAXATT,
-    divert' = (divert or c == "IpRules"), reject' = (reject or c == "IpRules"),
+    table' = (if (c == "IpRules") "complete" else table),
     flDmg' = (flDmg and c != "FlowListeners"),
     rec' = rec.set(c, "repaired"), holders' = holders, att' = att, lis' = lis, entries' = entries,
     keepNode, common, g' = g,
@@ -195,17 +191,17 @@ module shared_table {
   action step = {
     nondet c = COMPONENTS.oneOf()
     nondet p = PORTS.oneOf()
-    any { BootStep, RulesPartial, Crash, Restart, MtlsPartial, ListenerTaskExit, BringUp(p),
+    any { BootStep, RulesFail, Crash, Restart, MtlsReplaceFail, ListenerTaskExit, BringUp(p),
           recStep(c), RepFail(c) }
   }
 
   // ------------------------------------------------------------------ invariants
-  // (11, K-D3) with the shared table in any state — complete, partial or absent — no connection to the
+  // (11, K-D3) with the shared table in either state — complete or absent — no connection to the
   // prefix reaches a host service
   val NoWildcardReached: bool = not(exposedOn(net, PORTS))
   // (K-L5) remote traffic never reaches an intake directly
   val RemoteNeverDirect: bool = PORTS.forall(p => landsAt("remote", p) != "intake")
-  // (K-L4) while serve is down — the partial table persisting — nothing is delivered to a host socket
+  // (K-L4) while serve is down — an absent table persisting — nothing is delivered to a host socket
   val NothingDeliveredWhileDown: bool = not(up) implies not(deliveredOn(net, PORTS))
   // (D8a-HOLD) forwarding never reopens while another recovery holds without having repaired
   val NoReopenBeforeRepair: bool = not(g.reopenEarly)
@@ -220,12 +216,11 @@ module shared_table {
   // ------------------------------------------------------------------ witnesses (expected violated)
   // the leg-C bypass window exists (documented: ADR-0124 bound, ended by the IpRules recovery)
   val WitnessNoBypass: bool = not(bypassed)
-  val WitnessNoPartialWhileUp: bool = not(open and not(complete))
-  val WitnessNoPartialWhileDown: bool = not(not(up) and not(complete) and route == "local")
-  val WitnessNoCrashBetweenBatches: bool = not(g.crashPartial)
+  val WitnessNoAbsentWhileUp: bool = not(open and not(complete))
+  val WitnessNoAbsentWhileDown: bool = not(not(up) and not(complete) and route == "local")
 
   // ------------------------------------------------------------------ liveness (TLC)
-  val recVars = (rec, holders, divert, reject, flDmg)
+  val recVars = (rec, holders, table, flDmg)
   // fairness of the IpRules recovery's own steps and of boot only (none for the other recovery, the
   // owner, faults or restart)
   temporal IpRulesFair: bool = and {
@@ -233,7 +228,7 @@ module shared_table {
     weakFair(RecRedo("IpRules"), recVars), weakFair(RecRestore("IpRules"), recVars),
     weakFair(FailStop("IpRules"), (recVars, up)), weakFair(BootStep, (up, phase)),
   }
-  // (D8a-HOLD, concern 4) after the table is left partial, the IpRules recovery's repair completes
+  // (D8a-HOLD, concern 4) after the table is left absent, the IpRules recovery's repair completes
   // under its hold — the table is converged complete again — or serve stops; the repair is never
   // pre-empted forever. (The leg-C bypass itself ends at that recovery's first quiesce, which closes
   // every intake listener, so a property about the bypass ending holds trivially: not checked.)
@@ -241,8 +236,8 @@ module shared_table {
 }
 
 // ------------------------------------------------------------------ design instances
-// crash at any step (between step-8 batches included), the mTLS worker failing part-way at boot and at
-// runtime (unbounded), listener-task exits (unbounded), one repair failure
+// crash at any step, the mTLS worker's transaction failing at boot step 8 and at runtime (unbounded;
+// a failed replacement leaves the table as it was), listener-task exits (unbounded), one repair failure
 module table_ok { import shared_table(OFF = Set(), CFG = "ok").* from "./shared_table" }
 // no crash; a repair may fail forever
 module table_live { import shared_table(OFF = Set(), CFG = "live").* from "./shared_table" }

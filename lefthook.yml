@@ -243,6 +243,17 @@ pre-push:
     # Doctests are not re-run here — they run scoped per-crate in the
     # pre-commit hook above, which catches broken rustdoc examples at
     # commit time.
+    # Hollow Quint-conformance-driver gate — the same check CI runs in the
+    # dst-lint job. Purely syntactic (no Lima needed); runs before the
+    # suite so a hollow driver fails fast. Scans every quint-connect driver in
+    # crates/*/src/**/*.rs and tests/conformance/tests/*.rs. See
+    # `xtask/src/conformance_lint.rs`.
+    conformance-lint:
+      run: cargo xtask conformance-lint
+      fail_text: |
+        A conformance driver is hollow (always-false cfg, empty action
+        handler, or a State projection off Sim*/driver bookkeeping). See
+        .claude/rules/testing.md § "Quint conformance".
     nextest:
       run: cargo xtask lima run -- cargo nextest run --workspace --features integration-tests
       fail_text: |

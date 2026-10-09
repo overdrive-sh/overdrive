@@ -27,7 +27,7 @@ State 1: <Initial predicate>
 /\ lease_ok_cid_lease_exitsLeft = 1
 /\ lease_ok_cid_lease_errsLeft = 1
 
-State 2: <lease_ok_cid_lease_OrphanExit line 558, col 3 to line 567, col 52 of module lease_ok>
+State 2: <lease_ok_cid_lease_OrphanExit line 498, col 3 to line 507, col 52 of module lease_ok>
 /\ lease_ok_cid_lease_pend = {}
 /\ lease_ok_cid_lease_walker = 0
 /\ lease_ok_cid_lease_al = << [ st |-> "wait",
@@ -56,7 +56,7 @@ State 2: <lease_ok_cid_lease_OrphanExit line 558, col 3 to line 567, col 52 of m
 /\ lease_ok_cid_lease_exitsLeft = 1
 /\ lease_ok_cid_lease_errsLeft = 1
 
-State 3: <lease_ok_cid_lease_AssignBegin line 594, col 3 to line 652, col 38 of module lease_ok>
+State 3: <lease_ok_cid_lease_AssignBegin line 655, col 3 to line 713, col 38 of module lease_ok>
 /\ lease_ok_cid_lease_pend = {}
 /\ lease_ok_cid_lease_walker = 1
 /\ lease_ok_cid_lease_al = << [ st |-> "wait",
@@ -85,7 +85,7 @@ State 3: <lease_ok_cid_lease_AssignBegin line 594, col 3 to line 652, col 38 of 
 /\ lease_ok_cid_lease_exitsLeft = 1
 /\ lease_ok_cid_lease_errsLeft = 1
 
-State 4: <lease_ok_cid_lease_AssignTry line 658, col 3 to line 754, col 38 of module lease_ok>
+State 4: <lease_ok_cid_lease_AssignTry line 736, col 3 to line 832, col 38 of module lease_ok>
 /\ lease_ok_cid_lease_pend = {}
 /\ lease_ok_cid_lease_walker = 0
 /\ lease_ok_cid_lease_al = << [ st |-> "admitted",
@@ -114,7 +114,7 @@ State 4: <lease_ok_cid_lease_AssignTry line 658, col 3 to line 754, col 38 of mo
 /\ lease_ok_cid_lease_exitsLeft = 1
 /\ lease_ok_cid_lease_errsLeft = 1
 
-State 5: <lease_ok_cid_lease_LaunchBegin line 365, col 3 to line 394, col 52 of module lease_ok>
+State 5: <lease_ok_cid_lease_LaunchBegin line 305, col 3 to line 334, col 52 of module lease_ok>
 /\ lease_ok_cid_lease_pend = {}
 /\ lease_ok_cid_lease_walker = 0
 /\ lease_ok_cid_lease_al = << [ st |-> "launching",
@@ -143,7 +143,7 @@ State 5: <lease_ok_cid_lease_LaunchBegin line 365, col 3 to line 394, col 52 of 
 /\ lease_ok_cid_lease_exitsLeft = 1
 /\ lease_ok_cid_lease_errsLeft = 1
 
-State 6: <lease_ok_cid_lease_CreateOk line 400, col 3 to line 449, col 38 of module lease_ok>
+State 6: <lease_ok_cid_lease_CreateOk line 340, col 3 to line 389, col 38 of module lease_ok>
 /\ lease_ok_cid_lease_pend = {}
 /\ lease_ok_cid_lease_walker = 0
 /\ lease_ok_cid_lease_al = << [ st |-> "running",

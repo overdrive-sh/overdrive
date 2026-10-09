@@ -1,94 +1,74 @@
 State 1: <Initial predicate>
-/\ table_bugNonLoopback_shared_table_g = [ partialUp |-> FALSE,
-  crashPartial |-> FALSE,
-  bypassed |-> FALSE,
-  reopenEarly |-> FALSE ]
+/\ table_bugNonLoopback_shared_table_g = [absentUp |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE]
 /\ table_bugNonLoopback_shared_table_phase = "start"
 /\ table_bugNonLoopback_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ table_bugNonLoopback_shared_table_flDmg = FALSE
 /\ table_bugNonLoopback_shared_table_holders = {}
 /\ table_bugNonLoopback_shared_table_repLeft = 1
-/\ table_bugNonLoopback_shared_table_reject = FALSE
 /\ table_bugNonLoopback_shared_table_route = "absent"
 /\ table_bugNonLoopback_shared_table_lis = {}
 /\ table_bugNonLoopback_shared_table_link = "none"
 /\ table_bugNonLoopback_shared_table_entries = {}
+/\ table_bugNonLoopback_shared_table_table = "absent"
 /\ table_bugNonLoopback_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ table_bugNonLoopback_shared_table_divert = FALSE
 /\ table_bugNonLoopback_shared_table_up = TRUE
 
-State 2: <table_bugNonLoopback_shared_table_BootStep line 298, col 3 to line 325, col 44 of module table_bugNonLoopback>
-/\ table_bugNonLoopback_shared_table_g = [ partialUp |-> FALSE,
-  crashPartial |-> FALSE,
-  bypassed |-> FALSE,
-  reopenEarly |-> FALSE ]
+State 2: <table_bugNonLoopback_shared_table_BootStep line 287, col 3 to line 313, col 44 of module table_bugNonLoopback>
+/\ table_bugNonLoopback_shared_table_g = [absentUp |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE]
 /\ table_bugNonLoopback_shared_table_phase = "rules"
 /\ table_bugNonLoopback_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ table_bugNonLoopback_shared_table_flDmg = FALSE
 /\ table_bugNonLoopback_shared_table_holders = {}
 /\ table_bugNonLoopback_shared_table_repLeft = 1
-/\ table_bugNonLoopback_shared_table_reject = FALSE
 /\ table_bugNonLoopback_shared_table_route = "absent"
 /\ table_bugNonLoopback_shared_table_lis = {}
 /\ table_bugNonLoopback_shared_table_link = "none"
 /\ table_bugNonLoopback_shared_table_entries = {}
+/\ table_bugNonLoopback_shared_table_table = "absent"
 /\ table_bugNonLoopback_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ table_bugNonLoopback_shared_table_divert = FALSE
 /\ table_bugNonLoopback_shared_table_up = TRUE
 
-State 3: <table_bugNonLoopback_shared_table_RulesPartial line 332, col 5 to line 352, col 79 of module table_bugNonLoopback>
-/\ table_bugNonLoopback_shared_table_g = [ partialUp |-> TRUE,
-  crashPartial |-> FALSE,
-  bypassed |-> FALSE,
-  reopenEarly |-> FALSE ]
+State 3: <table_bugNonLoopback_shared_table_RulesFail line 319, col 3 to line 341, col 7 of module table_bugNonLoopback>
+/\ table_bugNonLoopback_shared_table_g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> FALSE]
 /\ table_bugNonLoopback_shared_table_phase = "steer"
 /\ table_bugNonLoopback_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ table_bugNonLoopback_shared_table_flDmg = FALSE
 /\ table_bugNonLoopback_shared_table_holders = {}
 /\ table_bugNonLoopback_shared_table_repLeft = 1
-/\ table_bugNonLoopback_shared_table_reject = FALSE
 /\ table_bugNonLoopback_shared_table_route = "absent"
 /\ table_bugNonLoopback_shared_table_lis = {}
 /\ table_bugNonLoopback_shared_table_link = "none"
 /\ table_bugNonLoopback_shared_table_entries = {}
+/\ table_bugNonLoopback_shared_table_table = "absent"
 /\ table_bugNonLoopback_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ table_bugNonLoopback_shared_table_divert = FALSE
 /\ table_bugNonLoopback_shared_table_up = TRUE
 
-State 4: <table_bugNonLoopback_shared_table_BootStep line 298, col 3 to line 325, col 44 of module table_bugNonLoopback>
-/\ table_bugNonLoopback_shared_table_g = [ partialUp |-> TRUE,
-  crashPartial |-> FALSE,
-  bypassed |-> FALSE,
-  reopenEarly |-> FALSE ]
+State 4: <table_bugNonLoopback_shared_table_BootStep line 287, col 3 to line 313, col 44 of module table_bugNonLoopback>
+/\ table_bugNonLoopback_shared_table_g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> FALSE]
 /\ table_bugNonLoopback_shared_table_phase = "open"
 /\ table_bugNonLoopback_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ table_bugNonLoopback_shared_table_flDmg = FALSE
 /\ table_bugNonLoopback_shared_table_holders = {}
 /\ table_bugNonLoopback_shared_table_repLeft = 1
-/\ table_bugNonLoopback_shared_table_reject = FALSE
 /\ table_bugNonLoopback_shared_table_route = "local"
 /\ table_bugNonLoopback_shared_table_lis = {}
 /\ table_bugNonLoopback_shared_table_link = "pinned"
 /\ table_bugNonLoopback_shared_table_entries = {}
+/\ table_bugNonLoopback_shared_table_table = "absent"
 /\ table_bugNonLoopback_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ table_bugNonLoopback_shared_table_divert = FALSE
 /\ table_bugNonLoopback_shared_table_up = TRUE
 
-State 5: <table_bugNonLoopback_shared_table_BringUp line 615, col 3 to line 642, col 7 of module table_bugNonLoopback>
-/\ table_bugNonLoopback_shared_table_g = [ partialUp |-> TRUE,
-  crashPartial |-> FALSE,
-  bypassed |-> TRUE,
-  reopenEarly |-> FALSE ]
+State 5: <table_bugNonLoopback_shared_table_BringUp line 706, col 3 to line 732, col 7 of module table_bugNonLoopback>
+/\ table_bugNonLoopback_shared_table_g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> FALSE]
 /\ table_bugNonLoopback_shared_table_phase = "open"
 /\ table_bugNonLoopback_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ table_bugNonLoopback_shared_table_flDmg = FALSE
 /\ table_bugNonLoopback_shared_table_holders = {}
 /\ table_bugNonLoopback_shared_table_repLeft = 1
-/\ table_bugNonLoopback_shared_table_reject = FALSE
 /\ table_bugNonLoopback_shared_table_route = "local"
 /\ table_bugNonLoopback_shared_table_lis = {1}
 /\ table_bugNonLoopback_shared_table_link = "pinned"
 /\ table_bugNonLoopback_shared_table_entries = {1}
+/\ table_bugNonLoopback_shared_table_table = "absent"
 /\ table_bugNonLoopback_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ table_bugNonLoopback_shared_table_divert = FALSE
 /\ table_bugNonLoopback_shared_table_up = TRUE

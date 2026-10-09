@@ -32,37 +32,38 @@ State 2 [step]
   gen = 1
 
 State 3 [step]
-  alloc = "Retiring"
+  vmUp = TRUE
+  vmGen = 1
 
 State 4 [step]
-  alloc = "Absent"
+  alloc = "Retiring"
 
 State 5 [step]
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
+
+State 6 [step]
+  vmUp = FALSE
+
+State 7 [step]
+  alloc = "Absent"
+
+State 8 [step]
   alloc = "Provisioned"
   gen = 2
 
-State 6 [step]
+State 9 [step]
   vmUp = TRUE
   vmGen = 2
 
-State 7 [step]
+State 10 [step]
   sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
-State 8 [step]
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-
-State 9 [step]
-  flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-
-State 10 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-
 State 11 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "reading", gen |-> 2]>>
+  sess = <<[st |-> "reading", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
 State 12 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
-  claim = 2
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "none", gen |-> 0]>>
+  claim = 1
 
 State 13 [step]
   alloc = "Active"
@@ -71,12 +72,13 @@ State 14 [step]
   hf = <<[st |-> "req", gen |-> 2]>>
 
 State 15 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
-  alloc = "Retiring"
   hf = <<[st |-> "closed", gen |-> 2]>>
-  claim = 0
+  toGuestAbort = {1}
 
 State 16 [step]
-  flows = << [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+  sess = <<[st |-> "closed", gen |-> 2], [st |-> "none", gen |-> 0]>>
+  alloc = "Retiring"
+  toGuestAbort = {}
+  claim = 0
 
 -> stutters forever in State 16

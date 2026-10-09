@@ -1,4 +1,4 @@
-# owner-flows-hazard-beacon-no-live-recheck: counterexample, 8 state(s) (from the TLC trace)
+# owner-flows-hazard-beacon-no-live-recheck: counterexample, 7 state(s) (from the TLC trace)
 
 State 1
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -37,17 +37,14 @@ State 3 [step]
   vmGen = 1
 
 State 4 [step]
-  alloc = "Retiring"
-
-State 5 [step]
   bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 6 [step]
+State 5 [step]
   bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 7 [step]
+State 6 [step]
   drvLive = FALSE
 
-State 8 [step]
+State 7 [step]
   bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
   bclaim = 1

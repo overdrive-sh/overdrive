@@ -20,7 +20,7 @@
 #   - fmt-clippy
 #   - test
 #   - dst
-#   - dst-lint
+#   - dst-lint        (also runs conformance-lint)
 #   - yaml-free-cli
 #   - mutants-diff
 #   - bpf-build       (added in #23 — Phase 2.1)
@@ -673,6 +673,16 @@ jobs:
 
       - name: cargo xtask dst-lint
         run: cargo xtask dst-lint
+
+      # Hollow Quint-conformance-driver gate (.claude/rules/testing.md
+      # § "Quint conformance"): rejects always-false `cfg` gates, empty
+      # action handlers, and `State::from_driver` projections that read
+      # `Sim*` state or only driver bookkeeping in every quint-connect
+      # driver (crates/*/src/**/*.rs, tests/conformance/tests/*.rs).
+      # Purely syntactic, so it
+      # shares this job's toolchain and cache.
+      - name: cargo xtask conformance-lint
+        run: cargo xtask conformance-lint
 
   # -------------------------------------------------------------------
   # YAML-free CLI — ADR-0019 dependency-graph gate.

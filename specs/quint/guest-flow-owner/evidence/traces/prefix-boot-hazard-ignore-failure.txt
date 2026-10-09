@@ -1,4 +1,4 @@
-# prefix-boot-hazard-ignore-failure: counterexample, 7 state(s) (from the TLC trace)
+# prefix-boot-hazard-ignore-failure: counterexample, 6 state(s) (from the TLC trace)
 
 State 1
   crashLeft = -1
@@ -24,18 +24,14 @@ State 2 [Restart]
 State 3 [BootStep]
   phase = "load"
 
-State 4 [BootStep]
-  phase = "swap"
-  loaded = TRUE
-
-State 5 [Fail]
+State 4 [Fail]
   failLeft = 0
-  phase = "pin"
+  phase = "swap"
 
-State 6 [BootStep]
+State 5 [BootStep]
   phase = "route"
 
-State 7 [BootStep]
+State 6 [BootStep]
   route = "local"
   g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> TRUE, crashLocal |-> FALSE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
   estab = TRUE

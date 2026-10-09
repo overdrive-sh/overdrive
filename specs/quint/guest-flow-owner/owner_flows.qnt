@@ -68,7 +68,7 @@
  *     so the guest's own token check on a TcpAccept request (ATTR-TOKEN) never fails in this
  *     abstraction and is not modelled; TCPACCEPT-END (the guest ends a flow whose V_g reads EOF
  *     after the request) is the GuestSeesHostClose / GuestQueueReset pair.
- *   - Half-close (`hc`, CFG "half"): per side ("g" guest owner, "h" host owner) the outer leg and
+ *   - Half-close (`hc`, CFG "half", "half_host", "half_guest"): per side ("g" guest owner, "h" host owner) the outer leg and
  *     its far end (the guest application; the destination or inbound client), the flow vsock and
  *     the control session. The flow vsock's end-of-stream (`vEnd`) and the control session's
  *     messages (`ch`, FIFO per direction) are independent channels with no order between them.
@@ -112,11 +112,15 @@
 module owner_flows {
   // ------------------------------------------------------------------ parameters
   const OFF: Set[str]
-  const CFG: str            // "core" | "beacon" | "half"
+  const CFG: str            // "core" | "beacon" | "half" | "half_host" | "half_guest"
 
   val CORE: bool = CFG == "core"
   val BEACON: bool = CFG == "beacon"
-  val HALF: bool = CFG == "half"
+  // `half` is the design instance. `half_host` / `half_guest` (S-4) are the conformance instances, one
+  // per owner under test: `HcPeerDefectEnd(s)` is a defect of `s`'s own code, which a production owner
+  // under test does not exhibit, so it is enabled only for the side NOT under test (the stimulus).
+  val HALF: bool = CFG == "half" or CFG == "half_host" or CFG == "half_guest"
+  val UNDER: str = if (CFG == "half_host") "h" else if (CFG == "half_guest") "g" else "none"
 
   val CONNS: Set[int] = Set(1, 2)
   val BCONNS: Set[int] = Set(1, 2)
@@ -856,7 +860,7 @@ module owner_flows {
   }
   // an Overdrive defect: s ends its flow vsock without the handshake while its session lives
   action HcPeerDefectEnd(s: str): bool = all {
-    HALF, hcAlive(s), not(hc.vEndSent.get(s)), not(hc.ctlDown),
+    HALF, s != UNDER, hcAlive(s), not(hc.vEndSent.get(s)), not(hc.ctlDown),
     hcSet({ ...hcEndVsock(hc, s), faulted: true }),
   }
 
@@ -1050,3 +1054,9 @@ module flows_ok { import owner_flows(OFF = Set(), CFG = "core").* from "./owner_
 module flows_beacon { import owner_flows(OFF = Set(), CFG = "beacon").* from "./owner_flows" }
 // the design, half-close: one paired TCP flow (TcpConnect or TcpAccept), both owners, faults per side
 module flows_half { import owner_flows(OFF = Set(), CFG = "half").* from "./owner_flows" }
+// conformance (S-4), the host owner under test: as `flows_half`, with the guest's defect enabled and the
+// host's disabled. A closed flow's fields at a side are history: once `open(s)` is false the owner holds
+// nothing of the flow and a driver compares nothing else of side `s`.
+module flows_half_host { import owner_flows(OFF = Set(), CFG = "half_host").* from "./owner_flows" }
+// conformance (S-4), the guest owner under test: the host's defect enabled, the guest's disabled
+module flows_half_guest { import owner_flows(OFF = Set(), CFG = "half_guest").* from "./owner_flows" }

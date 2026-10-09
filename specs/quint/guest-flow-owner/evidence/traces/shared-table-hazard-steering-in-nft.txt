@@ -3,14 +3,13 @@
 State 1
   route = "absent"
   holders = {}
-  divert = FALSE
   lis = {}
   repLeft = 1
+  table = "absent"
   att = [IpRules |-> 0, FlowListeners |-> 0]
   entries = {}
-  g = [ partialUp |-> FALSE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  g = [absentUp |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE]
   phase = "start"
-  reject = FALSE
   flDmg = FALSE
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   up = TRUE
@@ -20,17 +19,13 @@ State 2 [BootStep]
   phase = "rules"
 
 State 3 [BootStep]
-  divert = TRUE
+  table = "complete"
   phase = "steer"
-  reject = TRUE
 
 State 4 [BootStep]
   route = "local"
   phase = "open"
   link = "pinned"
 
-State 5 [MtlsPartial]
-  divert = FALSE
-  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
-  reject = FALSE
+State 5 [MtlsReplaceFail]
   link = "none"

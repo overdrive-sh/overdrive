@@ -301,6 +301,45 @@ same way as `Lifecycle Gate Ownership`.
 - **Environment faults** the design claims to survive (crash at each step,
   foreign mutation of shared kernel state, restart) are modelled as actions.
 
+### Pin the observable projection the conformance driver reads
+
+DISTILL replays the spec against production through a `quint-connect` driver
+(`.claude/rules/testing.md` § "Quint conformance"), and that driver compares
+its `State` with the spec's state after every step. The comparison is only as
+honest as the place `State` is read from. **For every variable the spec
+models, the design pins the production owner's observable accessor that
+yields it**, and names that accessor in the feature-delta interface contract
+beside the owner's other public surface: the owner, the accessor's signature,
+and the model variable it projects. The driving ports that the spec's actions
+map onto are pinned the same way.
+
+An unpinned projection is a design gap, with the same severity as an
+assumption that has no discharging validation item. "State is projected from
+the owner's observable surface" with no accessor named leaves the driver
+author to choose between inventing API, which CLAUDE.md § "Implement to the
+design" forbids, and reading whatever is within reach: a `Sim*` adapter's
+internals, the driver's own bookkeeping, or a hardcoded value. Either way the
+comparison no longer tests the owner. A driver that reads its own
+bookkeeping compares the model with itself.
+
+Ghost variables that exist only to state an invariant need the same decision.
+Either the owner exposes the fact as an audit or observation accessor, or the
+spec marks the variable model-only and the driver does not project it. The
+design must not leave it implicit.
+
+A `Sim*` adapter may serve as the source of a projected variable only when it
+is the authentic arbiter of a driven-port fact. An example is the host kernel's
+holder table for a claimed identifier, which the owner does not hold. The
+design names that adapter as the source and pairs it with a Tier-3 scenario
+that proves the real adapter reports the same fact.
+
+**Symptoms during review:** a `Formal protocol model` section or feature-delta
+that says "projected from the observable surface" without naming an accessor;
+a modelled variable with no row in the interface contract; a DISTILL handoff
+note that the projection is "a testability boundary DELIVER must expose"; a
+conformance `State` field fed from a `Sim*` adapter that the design does not
+name as an arbiter.
+
 ### Running it
 
 The architect does not write or run the model in its own context. It
@@ -408,6 +447,11 @@ The DESIGN reviewer blocks approval when any of the following is true:
   the `Formal protocol model` section is absent, has unrun checks, lacks a
   hazard variant per rule, carries an unresolved counterexample, or leaves an
   assumption with no discharging validation item;
+- a spec-modelled variable has no pinned owner accessor in the feature-delta
+  interface contract, or the action-to-driving-port mapping is unpinned
+  (§ "Pin the observable projection the conformance driver reads"), or a
+  `Sim*` adapter feeds a projected variable without being named as the
+  arbiter and paired with a real-adapter Tier-3 scenario;
 - a contract-shaping validation item (§ "Run contract-shaping validation
   before the design is accepted") is still Open.
 

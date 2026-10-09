@@ -44,7 +44,7 @@ State 1: <Initial predicate>
 /\ flows_altPendingWait_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 2: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, col 50 of module flows_altPendingWait>
+State 2: <flows_altPendingWait_owner_flows_step line 3516, col 9 to line 3517, col 50 of module flows_altPendingWait>
 /\ flows_altPendingWait_owner_flows_badPaired = FALSE
 /\ flows_altPendingWait_owner_flows_gen = 0
 /\ flows_altPendingWait_owner_flows_crossMsg = FALSE
@@ -54,9 +54,9 @@ State 2: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_abortDiscarded = {}
 /\ flows_altPendingWait_owner_flows_toGuestAbort = {}
 /\ flows_altPendingWait_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> TRUE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> TRUE, h |-> FALSE],
+  farHc |-> [g |-> TRUE, h |-> FALSE],
   ann |-> [g |-> "none", h |-> "none"],
   acked |-> [g |-> FALSE, h |-> FALSE],
   ackDue |-> [g |-> FALSE, h |-> FALSE],
@@ -66,7 +66,7 @@ State 2: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
   dead |-> [g |-> FALSE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<"Paired">>],
+  ch |-> [g |-> <<>>, h |-> <<>>],
   vEnd |-> [g |-> FALSE, h |-> FALSE],
   vEndSent |-> [g |-> FALSE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
@@ -90,7 +90,7 @@ State 2: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 3: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, col 50 of module flows_altPendingWait>
+State 3: <flows_altPendingWait_owner_flows_step line 3516, col 9 to line 3517, col 50 of module flows_altPendingWait>
 /\ flows_altPendingWait_owner_flows_badPaired = FALSE
 /\ flows_altPendingWait_owner_flows_gen = 0
 /\ flows_altPendingWait_owner_flows_crossMsg = FALSE
@@ -100,9 +100,9 @@ State 3: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_abortDiscarded = {}
 /\ flows_altPendingWait_owner_flows_toGuestAbort = {}
 /\ flows_altPendingWait_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> TRUE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> TRUE, h |-> FALSE],
+  farHc |-> [g |-> TRUE, h |-> FALSE],
   ann |-> [g |-> "none", h |-> "none"],
   acked |-> [g |-> FALSE, h |-> FALSE],
   ackDue |-> [g |-> FALSE, h |-> FALSE],
@@ -112,7 +112,7 @@ State 3: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
   dead |-> [g |-> FALSE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<"Paired">>],
+  ch |-> [g |-> <<>>, h |-> <<>>],
   vEnd |-> [g |-> FALSE, h |-> TRUE],
   vEndSent |-> [g |-> FALSE, h |-> TRUE],
   held |-> [g |-> FALSE, h |-> FALSE],
@@ -136,7 +136,7 @@ State 3: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 4: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, col 50 of module flows_altPendingWait>
+State 4: <flows_altPendingWait_owner_flows_step line 3516, col 9 to line 3517, col 50 of module flows_altPendingWait>
 /\ flows_altPendingWait_owner_flows_badPaired = FALSE
 /\ flows_altPendingWait_owner_flows_gen = 0
 /\ flows_altPendingWait_owner_flows_crossMsg = FALSE
@@ -146,9 +146,9 @@ State 4: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_abortDiscarded = {}
 /\ flows_altPendingWait_owner_flows_toGuestAbort = {}
 /\ flows_altPendingWait_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> TRUE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> TRUE, h |-> FALSE],
+  farHc |-> [g |-> TRUE, h |-> FALSE],
   ann |-> [g |-> "none", h |-> "none"],
   acked |-> [g |-> FALSE, h |-> FALSE],
   ackDue |-> [g |-> FALSE, h |-> FALSE],
@@ -158,7 +158,7 @@ State 4: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
   dead |-> [g |-> FALSE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<"Paired">>],
+  ch |-> [g |-> <<>>, h |-> <<>>],
   vEnd |-> [g |-> FALSE, h |-> FALSE],
   vEndSent |-> [g |-> FALSE, h |-> TRUE],
   held |-> [g |-> TRUE, h |-> FALSE],
@@ -182,7 +182,7 @@ State 4: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 5: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, col 50 of module flows_altPendingWait>
+State 5: <flows_altPendingWait_owner_flows_step line 3516, col 9 to line 3517, col 50 of module flows_altPendingWait>
 /\ flows_altPendingWait_owner_flows_badPaired = FALSE
 /\ flows_altPendingWait_owner_flows_gen = 0
 /\ flows_altPendingWait_owner_flows_crossMsg = FALSE
@@ -228,7 +228,7 @@ State 5: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 6: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, col 50 of module flows_altPendingWait>
+State 6: <flows_altPendingWait_owner_flows_step line 3516, col 9 to line 3517, col 50 of module flows_altPendingWait>
 /\ flows_altPendingWait_owner_flows_badPaired = FALSE
 /\ flows_altPendingWait_owner_flows_gen = 0
 /\ flows_altPendingWait_owner_flows_crossMsg = FALSE
@@ -274,7 +274,7 @@ State 6: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 7: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, col 50 of module flows_altPendingWait>
+State 7: <flows_altPendingWait_owner_flows_step line 3516, col 9 to line 3517, col 50 of module flows_altPendingWait>
 /\ flows_altPendingWait_owner_flows_badPaired = FALSE
 /\ flows_altPendingWait_owner_flows_gen = 0
 /\ flows_altPendingWait_owner_flows_crossMsg = FALSE
@@ -320,7 +320,7 @@ State 7: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 8: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, col 50 of module flows_altPendingWait>
+State 8: <flows_altPendingWait_owner_flows_step line 3516, col 9 to line 3517, col 50 of module flows_altPendingWait>
 /\ flows_altPendingWait_owner_flows_badPaired = FALSE
 /\ flows_altPendingWait_owner_flows_gen = 0
 /\ flows_altPendingWait_owner_flows_crossMsg = FALSE
@@ -366,7 +366,7 @@ State 8: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, c
 /\ flows_altPendingWait_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 
-State 9: <flows_altPendingWait_owner_flows_step line 3502, col 9 to line 3503, col 50 of module flows_altPendingWait>
+State 9: <flows_altPendingWait_owner_flows_step line 3516, col 9 to line 3517, col 50 of module flows_altPendingWait>
 /\ flows_altPendingWait_owner_flows_badPaired = FALSE
 /\ flows_altPendingWait_owner_flows_gen = 0
 /\ flows_altPendingWait_owner_flows_crossMsg = FALSE

@@ -60,14 +60,20 @@
  */
 module cid_lease {
   const OFF: Set[str]
-  const CFG: str   // "ok" | "three" | "live"
+  const CFG: str   // "ok" | "three" | "live" | "conf_ok" | "conf_live"
 
-  val OFFS: Set[int] = Set(0, 1, 2)
-  val N: int = 3
+  // The design instances use three offsets for tractability. No pool the production constructor builds
+  // has three: a /29 has five usable offsets (after the network address, the gateway and the broadcast
+  // address) and a /30 has one. The conformance instances (S-2) use the five offsets of the /29 test
+  // pool, otherwise as `ok` / `live`.
+  val CONF: bool = CFG == "conf_ok" or CFG == "conf_live"
+  val LIVE: bool = CFG == "live" or CFG == "conf_live"
+  val OFFS: Set[int] = if (CONF) Set(0, 1, 2, 3, 4) else Set(0, 1, 2)
+  val N: int = if (CONF) 5 else 3
   val ALLOCS: Set[int] = if (CFG == "three") Set(1, 2, 3) else Set(1, 2)
   val SURVIVORS0: Set[int] = Set(0)                  // offsets a VMM from an earlier run holds at start
-  val BOOTS: int = if (CFG == "live") 1 else -1      // serve crash + restart (-1: unbounded)
-  val PRE_READY_EXITS: int = if (CFG == "live") 2 else 1
+  val BOOTS: int = if (LIVE) 1 else -1      // serve crash + restart (-1: unbounded)
+  val PRE_READY_EXITS: int = if (LIVE) 2 else 1
   val CLAIM_ERRORS: int = if (CFG == "three") 0 else 1
   val BUG_CHECK_THEN_CLAIM: bool = OFF.contains("checkThenClaim")
   val BUG_RELEASE_BEFORE_VMM: bool = OFF.contains("releaseBeforeVmm")
@@ -103,6 +109,9 @@ module cid_lease {
   val g0: Ghost = { clash: false, skipFree: false, skipped: false, skipOrphan: false,
                     refusedHeld: false, refusedClaimable: false, claimErr: false,
                     refusedUnasked: false }
+  // (S-2) the comparison points of a conformance driver: no `assign` walk is in progress (the walk is
+  // one `pool.assign` call under the pool lock; `walker` and `todo` are model-internal to it)
+  val walkIdle: bool = walker == 0
   def isFree(o: int): bool = lease.get(o) == 0
   val freeOffs: Set[int] = OFFS.filter(o => isFree(o))
   val claimableFree: bool = OFFS.exists(o => isFree(o) and kern.get(o) == 0)
@@ -362,5 +371,9 @@ module cid_lease {
 module lease_ok { import cid_lease(OFF = Set(), CFG = "ok").* from "./cid_lease" }
 // Three workloads on three offsets (the pool fills; GuestCidsHeldElsewhere vs PoolExhausted).
 module lease_three { import cid_lease(OFF = Set(), CFG = "three").* from "./cid_lease" }
+// Conformance (S-2): `lease_ok` on the five offsets of the /29 test pool. Compared where `walkIdle`.
+module lease_conf_ok { import cid_lease(OFF = Set(), CFG = "conf_ok").* from "./cid_lease" }
+// Conformance (S-2): `lease_live` on the five offsets of the /29 test pool.
+module lease_conf_live { import cid_lease(OFF = Set(), CFG = "conf_live").* from "./cid_lease" }
 // Liveness: one serve restart, two pre-READY exits, one claim error.
 module lease_live { import cid_lease(OFF = Set(), CFG = "live").* from "./cid_lease" }

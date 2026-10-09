@@ -46,7 +46,7 @@ State 2: <boot_bugUnpinned_prefix_boot_Restart line 272, col 5 to line 283, col 
 /\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
-State 3: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col 75 of module boot_bugUnpinned>
+State 3: <boot_bugUnpinned_prefix_boot_BootStep line 442, col 3 to line 562, col 75 of module boot_bugUnpinned>
 /\ boot_bugUnpinned_prefix_boot_swapOk = FALSE
 /\ boot_bugUnpinned_prefix_boot_failLeft = 1
 /\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
@@ -70,7 +70,7 @@ State 3: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col
 /\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
-State 4: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col 75 of module boot_bugUnpinned>
+State 4: <boot_bugUnpinned_prefix_boot_BootStep line 442, col 3 to line 562, col 75 of module boot_bugUnpinned>
 /\ boot_bugUnpinned_prefix_boot_swapOk = FALSE
 /\ boot_bugUnpinned_prefix_boot_failLeft = 1
 /\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
@@ -94,7 +94,7 @@ State 4: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col
 /\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
-State 5: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col 75 of module boot_bugUnpinned>
+State 5: <boot_bugUnpinned_prefix_boot_BootStep line 442, col 3 to line 562, col 75 of module boot_bugUnpinned>
 /\ boot_bugUnpinned_prefix_boot_swapOk = TRUE
 /\ boot_bugUnpinned_prefix_boot_failLeft = 1
 /\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
@@ -118,7 +118,7 @@ State 5: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col
 /\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
-State 6: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col 75 of module boot_bugUnpinned>
+State 6: <boot_bugUnpinned_prefix_boot_BootStep line 442, col 3 to line 562, col 75 of module boot_bugUnpinned>
 /\ boot_bugUnpinned_prefix_boot_swapOk = TRUE
 /\ boot_bugUnpinned_prefix_boot_failLeft = 1
 /\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
@@ -142,7 +142,7 @@ State 6: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col
 /\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
-State 7: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col 75 of module boot_bugUnpinned>
+State 7: <boot_bugUnpinned_prefix_boot_BootStep line 442, col 3 to line 562, col 75 of module boot_bugUnpinned>
 /\ boot_bugUnpinned_prefix_boot_swapOk = TRUE
 /\ boot_bugUnpinned_prefix_boot_failLeft = 1
 /\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,
@@ -166,7 +166,7 @@ State 7: <boot_bugUnpinned_prefix_boot_BootStep line 379, col 3 to line 498, col
 /\ boot_bugUnpinned_prefix_boot_bin = "v1"
 /\ boot_bugUnpinned_prefix_boot_crashLeft = -1
 
-State 8: <boot_bugUnpinned_prefix_boot_Crash line 309, col 3 to line 343, col 7 of module boot_bugUnpinned>
+State 8: <boot_bugUnpinned_prefix_boot_Crash line 307, col 3 to line 341, col 7 of module boot_bugUnpinned>
 /\ boot_bugUnpinned_prefix_boot_swapOk = FALSE
 /\ boot_bugUnpinned_prefix_boot_failLeft = 1
 /\ boot_bugUnpinned_prefix_boot_g = [ refused |-> FALSE,

@@ -1,4 +1,4 @@
-# owner-flows-env-guest-misses-host-close: counterexample, 17 state(s) (from the TLC trace)
+# owner-flows-env-guest-misses-host-close: counterexample, 14 state(s) (from the TLC trace)
 
 State 1
   gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
@@ -32,56 +32,45 @@ State 2 [step]
   alloc = "Provisioned"
 
 State 3 [step]
-  vmGen = 1
-  vmUp = TRUE
-
-State 4 [step]
   alloc = "Retiring"
 
-State 5 [step]
-  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-
-State 6 [step]
-  flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE] >>
-
-State 7 [step]
-  vmUp = FALSE
-
-State 8 [step]
+State 4 [step]
   alloc = "Absent"
 
-State 9 [step]
+State 5 [step]
   gen = 2
   alloc = "Provisioned"
 
-State 10 [step]
+State 6 [step]
   vmGen = 2
   vmUp = TRUE
 
+State 7 [step]
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+
+State 8 [step]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
+
+State 9 [step]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 2]>>
+
+State 10 [step]
+  claim = 2
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
+
 State 11 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
-
-State 12 [step]
-  sess = <<[st |-> "reading", gen |-> 2], [st |-> "none", gen |-> 0]>>
-
-State 13 [step]
-  claim = 1
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "none", gen |-> 0]>>
-
-State 14 [step]
   alloc = "Active"
 
-State 15 [step]
+State 12 [step]
   hf = <<[st |-> "req", gen |-> 2]>>
 
-State 16 [step]
+State 13 [step]
   hf = <<[st |-> "closed", gen |-> 2]>>
-  toGuestAbort = {1}
-
-State 17 [step]
   claim = 0
-  sess = <<[st |-> "closed", gen |-> 2], [st |-> "none", gen |-> 0]>>
-  toGuestAbort = {}
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 2]>>
   alloc = "Retiring"
 
--> stutters forever in State 17
+State 14 [step]
+  sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+
+-> stutters forever in State 14

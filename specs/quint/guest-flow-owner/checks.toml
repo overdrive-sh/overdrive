@@ -1591,11 +1591,26 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
+# UP-7 hazard (a failed post-repair audit is not a failed attempt). S-6 (U-QP-1): IpRules damage no
+# longer recurs at runtime (the table is absent only from `init` / a failed boot step-8 write, and a
+# repair makes it complete), so the round-9 counterexample against `IpRulesEpisodeEnds` — an IpRules
+# episode kept alive by recurring IpRules damage — LOST ITS COUNTEREXAMPLE: the check below records
+# that, as `holds` (reported to the architect; not restored with a partial table). The hazard keeps its
+# teeth on the component whose damage still recurs, FlowListeners (second check, prediction: violated).
+[[check]]
+name = "quiescence-hazard-redo-not-counted-ip-rules-lost"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_live_bugRedoNoCount"
+temporal = "IpRulesEpisodeEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
 [[check]]
 name = "quiescence-hazard-redo-not-counted"
 spec = "hazard/quiescence_hazards.qnt"
 main = "quiesce_live_bugRedoNoCount"
-temporal = "IpRulesEpisodeEnds"
+temporal = "FlowListenersEpisodeEnds"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1619,11 +1634,12 @@ expect = "violation"
 ci = true
 
 
-# Steering concern 4 — the shared nft table left partial by Overdrive (shared_table.qnt): K-D3,
-# D8a-LOOKUP (steering independent of the table), D8a-HOLD (the IpRules recovery). Instances: table_ok
-# (crash at any step, between step-8 batches included; the mTLS worker failing part-way at boot and at
-# runtime, unbounded; listener-task exits; one repair failure), table_live (no crash; a repair may
-# fail forever).
+# Steering concern 4 — the shared nft table left absent by Overdrive (shared_table.qnt): K-D3,
+# U-QP-1 (the table is written and replaced only in single transactions: two states, `absent` and
+# `complete`), D8a-LOOKUP (steering independent of the table), D8a-HOLD (the IpRules recovery).
+# Instances: table_ok (crash at any step; the mTLS worker's transaction failing at boot step 8 and at
+# runtime, unbounded, a failed replacement leaving the table as it was; listener-task exits; one
+# repair failure), table_live (no crash; a repair may fail forever).
 [[check]]
 name = "shared-table-safety-tlc"
 spec = "shared_table.qnt"
@@ -1685,28 +1701,19 @@ expect = "violation"
 ci = true
 
 [[check]]
-name = "shared-table-witness-partial-while-up"
+name = "shared-table-witness-absent-while-up"
 spec = "shared_table.qnt"
 main = "table_ok"
-invariant = "WitnessNoPartialWhileUp"
+invariant = "WitnessNoAbsentWhileUp"
 backend = "tlc"
 expect = "violation"
 ci = true
 
 [[check]]
-name = "shared-table-witness-partial-while-down"
+name = "shared-table-witness-absent-while-down"
 spec = "shared_table.qnt"
 main = "table_ok"
-invariant = "WitnessNoPartialWhileDown"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "shared-table-witness-crash-between-batches"
-spec = "shared_table.qnt"
-main = "table_ok"
-invariant = "WitnessNoCrashBetweenBatches"
+invariant = "WitnessNoAbsentWhileDown"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1760,3 +1767,210 @@ max_steps = 14
 expect = "holds"
 ci = false
 timeout_secs = 1800
+
+
+# S-2 (conformance instances): `lease_conf_ok` / `lease_conf_live` are `lease_ok` / `lease_live` on the
+# five offsets of the /29 test pool (production pools have 5 or 1 offsets; the design instances use 3).
+# A driver compares only where `walkIdle` (walker == 0). Prediction: Safety holds, EventuallyPlaced
+# holds, the witness is violated. `cid-lease-conf-safety-tlc` takes ~122 s of its own time (> 2 min):
+# ci = false; the other three are under 50 s.
+
+[[check]]
+name = "cid-lease-conf-safety-tlc"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+[[check]]
+name = "cid-lease-conf-live-safety-tlc"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-conf-eventually-placed"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+temporal = "EventuallyPlaced"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-conf-witness-running"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+invariant = "WitnessNoRunning"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+
+# S-3: for an adopted link swap goes straight to `route`; `pin` follows a first attach only (no `pin`
+# step exists that `Fail` could refuse for an adopted link). Prediction: holds on the failing instance.
+
+[[check]]
+name = "prefix-boot-pin-only-after-first-attach"
+spec = "prefix_boot.qnt"
+main = "boot_faulty"
+invariant = "PinOnlyAfterFirstAttach"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+
+# S-4: per-side conformance instances of the half-close module. `HcPeerDefectEnd(s)` (a defect of `s`'s
+# own code) is enabled only for the side not under test: `flows_half_host` (host owner under test, the
+# guest's defect enabled), `flows_half_guest` (guest owner under test, the host's defect enabled). A
+# closed flow's fields at a side are history. Prediction: invariant 13 and the three progress properties
+# hold, the three witnesses are violated, on both instances.
+
+[[check]]
+name = "owner-flows-half-host-no-eof-on-peer-loss"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "NoEofOnPeerLoss"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-fin-only-after-ack"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "FinOnlyAfterAck"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-close-completes"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+temporal = "HalfCloseCompletes"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-announce-ends"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+temporal = "AnnounceEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-early-eof-carried"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+temporal = "EarlyEofCarried"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-witness-clean-eof"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "WitnessNoCleanEof"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-witness-survivor-abort-first"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "WitnessNoSurvivorAbortFirst"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-witness-early-eof"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "WitnessNoEarlyEof"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-no-eof-on-peer-loss"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "NoEofOnPeerLoss"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-fin-only-after-ack"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "FinOnlyAfterAck"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-close-completes"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+temporal = "HalfCloseCompletes"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-announce-ends"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+temporal = "AnnounceEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-early-eof-carried"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+temporal = "EarlyEofCarried"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-witness-clean-eof"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "WitnessNoCleanEof"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-witness-survivor-abort-first"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "WitnessNoSurvivorAbortFirst"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-witness-early-eof"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "WitnessNoEarlyEof"
+backend = "tlc"
+expect = "violation"
+ci = true

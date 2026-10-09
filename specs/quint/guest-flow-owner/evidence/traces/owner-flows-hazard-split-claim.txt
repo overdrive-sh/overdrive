@@ -36,19 +36,19 @@ State 3
   vmUp = true
 
 State 4
-  sess = Map(1 -> { gen: 1, st: "pending" }, 2 -> { gen: 0, st: "none" })
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
 
 State 5
-  sess = Map(1 -> { gen: 1, st: "reading" }, 2 -> { gen: 0, st: "none" })
+  sess = Map(1 -> { gen: 1, st: "pending" }, 2 -> { gen: 1, st: "pending" })
 
 State 6
   sess = Map(1 -> { gen: 1, st: "reading" }, 2 -> { gen: 1, st: "pending" })
 
 State 7
-  sess = Map(1 -> { gen: 1, st: "reading" }, 2 -> { gen: 1, st: "reading" })
+  sess = Map(1 -> { gen: 1, st: "checked" }, 2 -> { gen: 1, st: "pending" })
 
 State 8
-  sess = Map(1 -> { gen: 1, st: "reading" }, 2 -> { gen: 1, st: "checked" })
+  sess = Map(1 -> { gen: 1, st: "checked" }, 2 -> { gen: 1, st: "reading" })
 
 State 9
   sess = Map(1 -> { gen: 1, st: "checked" }, 2 -> { gen: 1, st: "checked" })

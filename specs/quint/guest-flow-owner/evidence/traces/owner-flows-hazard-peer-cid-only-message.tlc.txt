@@ -44,7 +44,7 @@ State 1: <Initial predicate>
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 2: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, col 50 of module flows_bugPeerCidOnly>
+State 2: <flows_bugPeerCidOnly_owner_flows_step line 3469, col 4 to line 3470, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Provisioned"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = FALSE
@@ -90,7 +90,7 @@ State 2: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, c
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 3: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, col 50 of module flows_bugPeerCidOnly>
+State 3: <flows_bugPeerCidOnly_owner_flows_step line 3469, col 4 to line 3470, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Provisioned"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE
@@ -136,9 +136,55 @@ State 3: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, c
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 4: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, col 50 of module flows_bugPeerCidOnly>
+State 4: <flows_bugPeerCidOnly_owner_flows_step line 3469, col 4 to line 3470, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_alloc = "Provisioned"
+/\ flows_bugPeerCidOnly_owner_flows_alloc = "Retiring"
+/\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE
+/\ flows_bugPeerCidOnly_owner_flows_quiesced = FALSE
+/\ flows_bugPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugPeerCidOnly_owner_flows_bHeldByOther = FALSE
+/\ flows_bugPeerCidOnly_owner_flows_bclaim = 0
+/\ flows_bugPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugPeerCidOnly_owner_flows_toGuestAbort = {}
+/\ flows_bugPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugPeerCidOnly_owner_flows_crossMsg = FALSE
+/\ flows_bugPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugPeerCidOnly_owner_flows_resurrected = FALSE
+/\ flows_bugPeerCidOnly_owner_flows_vmGen = 1
+/\ flows_bugPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugPeerCidOnly_owner_flows_abortDiscarded = {}
+/\ flows_bugPeerCidOnly_owner_flows_gen = 1
+/\ flows_bugPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugPeerCidOnly_owner_flows_toHostPaired = {}
+/\ flows_bugPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugPeerCidOnly_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> FALSE ]
+/\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
+
+State 5: <flows_bugPeerCidOnly_owner_flows_step line 3471, col 9 to line 3472, col 50 of module flows_bugPeerCidOnly>
+/\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
+/\ flows_bugPeerCidOnly_owner_flows_alloc = "Retiring"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE
 /\ flows_bugPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_claim = 0
@@ -182,53 +228,7 @@ State 4: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, c
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 5: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, col 50 of module flows_bugPeerCidOnly>
-/\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_alloc = "Provisioned"
-/\ flows_bugPeerCidOnly_owner_flows_vmUp = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_quiesced = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_claim = 0
-/\ flows_bugPeerCidOnly_owner_flows_bHeldByOther = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_bclaim = 0
-/\ flows_bugPeerCidOnly_owner_flows_toHostRefused = {}
-/\ flows_bugPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugPeerCidOnly_owner_flows_toGuestAbort = {}
-/\ flows_bugPeerCidOnly_owner_flows_heldByOther = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_crossMsg = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugPeerCidOnly_owner_flows_resurrected = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_vmGen = 1
-/\ flows_bugPeerCidOnly_owner_flows_badPaired = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_abortDiscarded = {}
-/\ flows_bugPeerCidOnly_owner_flows_gen = 1
-/\ flows_bugPeerCidOnly_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
-/\ flows_bugPeerCidOnly_owner_flows_toHostPaired = {}
-/\ flows_bugPeerCidOnly_owner_flows_phantom = FALSE
-/\ flows_bugPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
-/\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
-
-State 6: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, col 50 of module flows_bugPeerCidOnly>
+State 6: <flows_bugPeerCidOnly_owner_flows_step line 3469, col 4 to line 3470, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Retiring"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = FALSE
@@ -274,7 +274,7 @@ State 6: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, c
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 7: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, col 50 of module flows_bugPeerCidOnly>
+State 7: <flows_bugPeerCidOnly_owner_flows_step line 3469, col 4 to line 3470, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Absent"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = FALSE
@@ -320,7 +320,7 @@ State 7: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, c
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 8: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, col 50 of module flows_bugPeerCidOnly>
+State 8: <flows_bugPeerCidOnly_owner_flows_step line 3469, col 4 to line 3470, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Provisioned"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = FALSE
@@ -366,7 +366,7 @@ State 8: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, c
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 9: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, col 50 of module flows_bugPeerCidOnly>
+State 9: <flows_bugPeerCidOnly_owner_flows_step line 3469, col 4 to line 3470, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Provisioned"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE
@@ -412,7 +412,7 @@ State 9: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, c
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 10: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, col 50 of module flows_bugPeerCidOnly>
+State 10: <flows_bugPeerCidOnly_owner_flows_step line 3471, col 9 to line 3472, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Provisioned"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE
@@ -458,7 +458,7 @@ State 10: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, 
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 11: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, col 50 of module flows_bugPeerCidOnly>
+State 11: <flows_bugPeerCidOnly_owner_flows_step line 3471, col 9 to line 3472, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Provisioned"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE
@@ -504,7 +504,7 @@ State 11: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, 
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 12: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, col 50 of module flows_bugPeerCidOnly>
+State 12: <flows_bugPeerCidOnly_owner_flows_step line 3469, col 4 to line 3470, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Active"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE
@@ -550,7 +550,7 @@ State 12: <flows_bugPeerCidOnly_owner_flows_step line 3455, col 4 to line 3456, 
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 13: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, col 50 of module flows_bugPeerCidOnly>
+State 13: <flows_bugPeerCidOnly_owner_flows_step line 3471, col 9 to line 3472, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Active"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE
@@ -596,7 +596,7 @@ State 13: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, 
 /\ flows_bugPeerCidOnly_owner_flows_hf = <<[st |-> "req", gen |-> 2]>>
 /\ flows_bugPeerCidOnly_owner_flows_drvLive = FALSE
 
-State 14: <flows_bugPeerCidOnly_owner_flows_step line 3457, col 9 to line 3458, col 50 of module flows_bugPeerCidOnly>
+State 14: <flows_bugPeerCidOnly_owner_flows_step line 3471, col 9 to line 3472, col 50 of module flows_bugPeerCidOnly>
 /\ flows_bugPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugPeerCidOnly_owner_flows_alloc = "Active"
 /\ flows_bugPeerCidOnly_owner_flows_vmUp = TRUE

@@ -14,30 +14,31 @@ State 1
   holders = {}
 
 State 2 [Damage]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 
 State 3 [RecQuiesce]
-  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+  rec = [IpRules |-> "idle", FlowListeners |-> "held"]
   latch = TRUE
   lis = FALSE
-  holders = {"IpRules"}
+  holders = {"FlowListeners"}
 
-State 4 [RepFail]
-  repLeft = 0
-  att = [IpRules |-> 1, FlowListeners |-> 0]
-
-State 5 [RecRepair]
+State 4 [RecRepair]
   dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
-  rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
+  rec = [IpRules |-> "idle", FlowListeners |-> "repaired"]
 
-State 6 [Damage]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+State 5 [Damage]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 
-State 7 [RecRedo]
-  att = [IpRules |-> 2, FlowListeners |-> 0]
-  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+State 6 [RecRedo]
+  att = [IpRules |-> 0, FlowListeners |-> 1]
+  rec = [IpRules |-> "idle", FlowListeners |-> "held"]
+
+State 7 [RepFail]
+  repLeft = 0
+  att = [IpRules |-> 0, FlowListeners |-> 2]
 
 State 8 [FailStop]
+  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
   att = [IpRules |-> 0, FlowListeners |-> 0]
   up = FALSE
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]

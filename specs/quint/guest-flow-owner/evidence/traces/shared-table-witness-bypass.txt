@@ -3,24 +3,23 @@
 State 1
   route = "absent"
   att = [IpRules |-> 0, FlowListeners |-> 0]
-  g = [ partialUp |-> FALSE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+  g = [absentUp |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE]
   holders = {}
+  table = "absent"
   up = TRUE
-  reject = FALSE
   repLeft = 1
   link = "none"
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
   entries = {}
   phase = "start"
-  divert = FALSE
   flDmg = FALSE
   lis = {}
 
 State 2 [BootStep]
   phase = "rules"
 
-State 3 [RulesPartial]
-  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE ]
+State 3 [RulesFail]
+  g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> FALSE]
   phase = "steer"
 
 State 4 [BootStep]
@@ -29,6 +28,6 @@ State 4 [BootStep]
   phase = "open"
 
 State 5 [BringUp]
-  g = [ partialUp |-> TRUE, crashPartial |-> FALSE, bypassed |-> TRUE, reopenEarly |-> FALSE ]
+  g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> FALSE]
   entries = {1}
   lis = {1}

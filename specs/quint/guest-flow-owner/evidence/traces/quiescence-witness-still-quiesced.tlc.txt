@@ -1,22 +1,4 @@
 State 1: <Initial predicate>
-/\ quiesce_ok_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
-/\ quiesce_ok_quiescence_repLeft = 1
-/\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ quiesce_ok_quiescence_up = TRUE
-/\ quiesce_ok_quiescence_prefix = "booted"
-/\ quiesce_ok_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
-/\ quiesce_ok_quiescence_stop = "none"
-/\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  prefixWritten |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> FALSE ]
-/\ quiesce_ok_quiescence_latch = FALSE
-/\ quiesce_ok_quiescence_lis = TRUE
-/\ quiesce_ok_quiescence_holders = {}
-
-State 2: <quiesce_ok_quiescence_Damage line 450, col 3 to line 462, col 58 of module quiesce_ok>
 /\ quiesce_ok_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
@@ -34,31 +16,13 @@ State 2: <quiesce_ok_quiescence_Damage line 450, col 3 to line 462, col 58 of mo
 /\ quiesce_ok_quiescence_lis = TRUE
 /\ quiesce_ok_quiescence_holders = {}
 
-State 3: <quiesce_ok_quiescence_Damage line 450, col 3 to line 462, col 58 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
+State 2: <quiesce_ok_quiescence_RecQuiesce line 216, col 3 to line 241, col 7 of module quiesce_ok>
+/\ quiesce_ok_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
 /\ quiesce_ok_quiescence_prefix = "booted"
-/\ quiesce_ok_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
-/\ quiesce_ok_quiescence_stop = "none"
-/\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  prefixWritten |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> FALSE ]
-/\ quiesce_ok_quiescence_latch = FALSE
-/\ quiesce_ok_quiescence_lis = TRUE
-/\ quiesce_ok_quiescence_holders = {}
-
-State 4: <quiesce_ok_quiescence_RecQuiesce line 212, col 3 to line 237, col 7 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
-/\ quiesce_ok_quiescence_repLeft = 1
-/\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ quiesce_ok_quiescence_up = TRUE
-/\ quiesce_ok_quiescence_prefix = "booted"
-/\ quiesce_ok_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "held"]
+/\ quiesce_ok_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
 /\ quiesce_ok_quiescence_stop = "none"
 /\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -68,27 +32,45 @@ State 4: <quiesce_ok_quiescence_RecQuiesce line 212, col 3 to line 237, col 7 of
   failStopped |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = TRUE
 /\ quiesce_ok_quiescence_lis = FALSE
-/\ quiesce_ok_quiescence_holders = {"FlowListeners"}
+/\ quiesce_ok_quiescence_holders = {"IpRules"}
 
-State 5: <quiesce_ok_quiescence_RecQuiesce line 212, col 3 to line 237, col 7 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
+State 3: <quiesce_ok_quiescence_RecRepair line 247, col 3 to line 279, col 7 of module quiesce_ok>
+/\ quiesce_ok_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
 /\ quiesce_ok_quiescence_prefix = "booted"
-/\ quiesce_ok_quiescence_rec = [IpRules |-> "held", FlowListeners |-> "held"]
+/\ quiesce_ok_quiescence_rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
 /\ quiesce_ok_quiescence_stop = "none"
 /\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   prefixWritten |-> FALSE,
-  overlapped |-> TRUE,
+  overlapped |-> FALSE,
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = TRUE
 /\ quiesce_ok_quiescence_lis = FALSE
-/\ quiesce_ok_quiescence_holders = {"IpRules", "FlowListeners"}
+/\ quiesce_ok_quiescence_holders = {"IpRules"}
 
-State 6: <quiesce_ok_quiescence_RecRepair line 243, col 3 to line 275, col 7 of module quiesce_ok>
+State 4: <quiesce_ok_quiescence_Damage line 454, col 3 to line 466, col 58 of module quiesce_ok>
+/\ quiesce_ok_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
+/\ quiesce_ok_quiescence_repLeft = 1
+/\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
+/\ quiesce_ok_quiescence_up = TRUE
+/\ quiesce_ok_quiescence_prefix = "booted"
+/\ quiesce_ok_quiescence_rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
+/\ quiesce_ok_quiescence_stop = "none"
+/\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  prefixWritten |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE ]
+/\ quiesce_ok_quiescence_latch = TRUE
+/\ quiesce_ok_quiescence_lis = FALSE
+/\ quiesce_ok_quiescence_holders = {"IpRules"}
+
+State 5: <quiesce_ok_quiescence_RecQuiesce line 216, col 3 to line 241, col 7 of module quiesce_ok>
 /\ quiesce_ok_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
@@ -106,7 +88,7 @@ State 6: <quiesce_ok_quiescence_RecRepair line 243, col 3 to line 275, col 7 of 
 /\ quiesce_ok_quiescence_lis = FALSE
 /\ quiesce_ok_quiescence_holders = {"IpRules", "FlowListeners"}
 
-State 7: <quiesce_ok_quiescence_RecRestore line 307, col 3 to line 364, col 36 of module quiesce_ok>
+State 6: <quiesce_ok_quiescence_RecRestore line 311, col 3 to line 368, col 36 of module quiesce_ok>
 /\ quiesce_ok_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]

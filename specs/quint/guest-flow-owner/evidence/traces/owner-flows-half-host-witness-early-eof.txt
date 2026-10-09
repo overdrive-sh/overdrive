@@ -1,0 +1,31 @@
+# owner-flows-half-host-witness-early-eof: counterexample, 2 state(s) (from the TLC trace)
+
+State 1
+  claim = 0
+  resurrected = FALSE
+  toHostRefused = {}
+  abortDiscarded = {}
+  heldByOther = FALSE
+  drvLive = FALSE
+  badPaired = FALSE
+  gen = 0
+  vmUp = FALSE
+  toHostPaired = {}
+  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+  vmGen = 0
+  readyCross = FALSE
+  toGuestAbort = {}
+  quiesced = FALSE
+  gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+  hc = [ opener |-> "g", paired |-> [g |-> FALSE, h |-> FALSE], outEof |-> [g |-> FALSE, h |-> FALSE], farHc |-> [g |-> FALSE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]
+  hf = <<[st |-> "none", gen |-> 0]>>
+  bHeldByOther = FALSE
+  crossMsg = FALSE
+  phantom = FALSE
+  alloc = "Absent"
+  bclaim = 0
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+
+State 2 [step]
+  hc = [ opener |-> "g", paired |-> [g |-> FALSE, h |-> FALSE], outEof |-> [g |-> TRUE, h |-> FALSE], farHc |-> [g |-> TRUE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]

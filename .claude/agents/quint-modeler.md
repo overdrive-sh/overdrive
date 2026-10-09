@@ -34,18 +34,29 @@ before running it).
    mutation, restart) as actions.
 5. Run everything through the xtask command, inside Lima, in the foreground:
    - `cargo xtask lima run -- cargo xtask quint typecheck`
-   - `cargo xtask lima run -- cargo xtask quint check --subsystem <subsystem>`
-     (use `--name <check>` to iterate on one check).
+   - `cargo xtask lima run -- cargo xtask quint check --subsystem <subsystem> --name <check>`
+   **While you edit, run only the checks you affected**: each check of the
+   module you changed, plus its hazards, one `--name` at a time (seconds to a
+   few minutes each). Never run the whole subsystem to see the effect of an
+   edit — the full run is the final record in step 7.
    The command owns timeouts, process cleanup, server ports and parallelism.
-   Do not write your own runner scripts, `sleep`/poll loops, watchdogs, or
-   `kill`/`pkill` sequences. If the command misbehaves (hangs, leaks
-   processes, misclassifies an outcome), stop and return that as a tooling
-   defect with the log path — do not work around it.
+   Do not write your own runner scripts, watchdogs, or `kill`/`pkill`
+   sequences. If the command misbehaves (hangs, leaks processes,
+   misclassifies an outcome), stop and return that as a tooling defect with
+   the log path — do not work around it.
 6. Mark `ci = true` only for checks that finish in under two minutes.
-7. When the specs are final for this design revision, record evidence with
-   one full run: `cargo xtask lima run -- cargo xtask quint check --subsystem
-   <subsystem> --record`, then confirm it with `cargo xtask quint
-   verify-evidence --subsystem <subsystem>`. The command owns `evidence/`
+7. When every affected check passes and the specs are final for this design
+   revision, record evidence with one full run: `cargo xtask lima run --
+   cargo xtask quint check --subsystem <subsystem> --record`, then confirm it
+   with `cargo xtask quint verify-evidence --subsystem <subsystem>`. The
+   record run is yours to finish: if it reports a mismatch, fix it (step 5
+   checks again), then re-record. A full run can outlast one 30-minute tool
+   call; then start it detached with an exit-code file
+   (`nohup sh -c '<command> > target/quint-record.log 2>&1; echo $? > target/quint-record.exit' &`)
+   and wait with a loop that returns the moment the file appears —
+   `timeout 1700 sh -c 'until [ -f target/quint-record.exit ]; do sleep 15; done'`,
+   repeated until it exists. Never a fixed long `sleep`: it idles after the
+   run has finished. Read the log once the exit file exists. The command owns `evidence/`
    entirely and replaces it; git history keeps earlier runs. Never write to
    `evidence/` yourself, and never keep scripts, spec copies, or per-round
    directories anywhere under `specs/quint/`.

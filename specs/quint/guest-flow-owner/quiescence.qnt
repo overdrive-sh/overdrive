@@ -23,13 +23,17 @@
  *     (UP-12).
  *
  * Abstraction:
- *   - Components IpRules (damage = the shared nft table left partial by the mTLS worker; concern 4
- *     models the table itself) and FlowListeners (a listener-task exit). Damage recurs at any time
- *     (unbounded): an Overdrive component can fail again. The audit's finding and the recovery's
- *     quiesce are one step.
+ *   - Components IpRules (damage = the shared nft table left ABSENT: the table is written only in
+ *     single transactions (U-QP-1), so the mTLS worker leaves it absent only where boot step 8's
+ *     transaction failed on a node with no table; concern 4 models the table itself) and
+ *     FlowListeners (a listener-task exit, recurring at any time, unbounded). No Overdrive write
+ *     leaves the table absent while serving, so IpRules damage is drawn at `init` and at `Restart`
+ *     only. The audit's finding and the recovery's quiesce are one step. `holders` is the SET of
+ *     current holders (D8a-HOLD, U-QP-3): every component under repair is a member, and recovery
+ *     progress is per component (`rec`, `att`).
  *   - ONE wanted intake listener (`lis`) stands for the owner's intake listeners (concern 2).
- *   - Crash / restart: process-scoped state is lost; the partial table persists and boot step 8
- *     converges it again (possibly partially).
+ *   - Crash / restart: process-scoped state is lost; an absent table persists and boot step 8
+ *     writes it again (its transaction fails and leaves the table absent, or succeeds).
  *
  * OFF names design rules switched off (hazard/quiescence_hazards.qnt):
  *   anyRestore         D8a-HOLD: one latch — any recovery's restore reopens; every hold ends
@@ -64,7 +68,7 @@ module quiescence {
   var holders: Set[str]
   var latch: bool            // admission quiesced
   var rec: str -> str        // per component recovery: idle | held | repaired
-  var dmg: str -> bool       // per component damage
+  var dmg: str -> bool       // per component damage (IpRules: the table is absent)
   var att: str -> int        // failed attempts of the current episode (process-scoped)
   var repLeft: int
   var lis: bool              // the wanted intake listener is open (and steered)
@@ -79,21 +83,27 @@ module quiescence {
   action keepState = all { holders' = holders, latch' = latch, rec' = rec, att' = att, lis' = lis }
   action keepEnv = all { up' = up, stop' = stop, dmg' = dmg, repLeft' = repLeft, prefix' = prefix }
 
-  action init = all {
+  action init = {
+    // boot step 8's transaction failed on a node with no table (absent), or succeeded
+    nondet ipAbsent0 = Set(false, true).oneOf()
+    all {
     up' = true, stop' = "none", holders' = Set(), latch' = false, rec' = recIdle,
-    dmg' = COMPONENTS.mapBy(c => false), att' = att0, repLeft' = REPAIR_FAILS, lis' = true,
+    dmg' = COMPONENTS.mapBy(c => false).set("IpRules", ipAbsent0), att' = att0, repLeft' = REPAIR_FAILS, lis' = true,
     prefix' = "booted", g' = g0,
+    }
   }
 
   // ------------------------------------------------------------------ environment
-  // Overdrive's own failure damages c (the mTLS worker leaves the table partial; a listener task exits)
+  // Overdrive's own failure damages a component; `step` applies it to FlowListeners only (a listener
+  // task exits). There is no `Damage("IpRules")` action: no Overdrive write leaves the shared table absent while serving (U-QP-1)
   action Damage(c: str): bool = all { up, not(dmg.get(c)),
     dmg' = dmg.set(c, true), up' = up, stop' = stop, repLeft' = repLeft, prefix' = prefix, keepState, g' = g }
   action Crash = all { ALLOW_CRASH, up,
     up' = false, stop' = "crash", holders' = Set(), latch' = false, rec' = recIdle, att' = att0,
     lis' = false, dmg' = dmg.set("FlowListeners", false), repLeft' = repLeft, prefix' = prefix, g' = g }
-  // boot: step 8 converges the table again (it may be left partial again); the route and the pinned
-  // steering are converged at step 9 (concern 1) — as booted here
+  // boot: step 8 writes the table in one transaction — it fails and the table stays absent, or it
+  // succeeds (`partial` reads "the write fails"); the route and the pinned steering are converged at
+  // step 9 (concern 1) — as booted here
   action Restart = {
     nondet partial = Set(false, dmg.get("IpRules")).oneOf()
     all { not(up),
@@ -173,7 +183,7 @@ module quiescence {
   }
   action step = {
     nondet c = COMPONENTS.oneOf()
-    any { recStep(c), RepFail(c), Damage(c), Crash, Restart, BringUp }
+    any { recStep(c), RepFail(c), Damage("FlowListeners"), Crash, Restart, BringUp }
   }
 
   // ------------------------------------------------------------------ invariants
@@ -227,7 +237,8 @@ module quiescence {
 }
 
 // ------------------------------------------------------------------ design instances
-// crash + restart (boot may leave the table partial again), one repair failure, recurring damage
+// crash + restart (boot's step-8 write may fail and leave the table absent again), one repair failure,
+// recurring FlowListeners damage
 module quiesce_ok { import quiescence(OFF = Set(), CFG = "ok").* from "./quiescence" }
-// no crash; a repair may fail forever; recurring damage
+// no crash; a repair may fail forever; recurring FlowListeners damage
 module quiesce_live { import quiescence(OFF = Set(), CFG = "live").* from "./quiescence" }

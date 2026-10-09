@@ -1,0 +1,28 @@
+# shared-table-witness-absent-while-up: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  route = "absent"
+  att = [IpRules |-> 0, FlowListeners |-> 0]
+  g = [absentUp |-> FALSE, bypassed |-> FALSE, reopenEarly |-> FALSE]
+  holders = {}
+  table = "absent"
+  up = TRUE
+  repLeft = 1
+  link = "none"
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  entries = {}
+  phase = "start"
+  flDmg = FALSE
+  lis = {}
+
+State 2 [BootStep]
+  phase = "rules"
+
+State 3 [RulesFail]
+  g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> FALSE]
+  phase = "steer"
+
+State 4 [BootStep]
+  route = "local"
+  link = "pinned"
+  phase = "open"

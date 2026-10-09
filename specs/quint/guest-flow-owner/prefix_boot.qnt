@@ -14,8 +14,10 @@
  *   - boot step 9 runs load → swap → route. `load` loads this binary's program (the kernel verifier
  *     may reject it) and changes no attached kernel object. `swap` is the only step that changes the
  *     link's program: an adopted pinned link gets it atomically (BPF_LINK_UPDATE, K-L9) — never a
- *     detach; with no pin, the program is attached (link process-scoped) and then pinned (two
- *     sub-steps: `swap`, `pin`). `route` keeps or adds the tagged `local` route.
+ *     detach — and boot goes straight on to `route` (production never pins an adopted link, so no
+ *     `pin` step exists that a failure could refuse: S-3); with no pin, the program is attached
+ *     (link process-scoped) and then pinned (two sub-steps: `swap`, `pin`), so `pin` follows a first
+ *     attach only. `route` keeps or adds the tagged `local` route.
  *   - Any failure of load / swap / pin / the route write → startup refuses
  *     `GuestPrefixSteeringConverge`; the route is not written and the link keeps its earlier
  *     program (K-L9; nothing is attached after a failed load).
@@ -95,14 +97,17 @@ module prefix_boot {
   def dec(x: int): int = if (x < 0) x else x - 1
   def avail(x: int): bool = x != 0
 
+  // the phase after `ph`; a `swap` goes on to the step after `pin` (`route`, or `open` under
+  // routeFirst) — `phaseAfterSwap` sends only a swap that attached a NEW link (a first attach) to `pin`
   def nextPhase(ph: str): str =
     if (bug("routeFirst")) {
       if (ph == "start") "route" else if (ph == "route") "load" else if (ph == "load") "swap"
-      else if (ph == "swap") "pin" else "open"
+      else "open"
     } else {
-      if (ph == "start") "load" else if (ph == "load") "swap" else if (ph == "swap") "pin"
+      if (ph == "start") "load" else if (ph == "load") "swap" else if (ph == "swap") "route"
       else if (ph == "pin") "route" else "open"
     }
+  def phaseAfterSwap(attachedNew: bool): str = if (attachedNew) "pin" else nextPhase("swap")
 
   action keepCounters = all { failLeft' = failLeft, crashLeft' = crashLeft }
   action keepRoute = all { route' = route, estab' = estab }
@@ -141,15 +146,15 @@ module prefix_boot {
       link' = if (link == "none") "attached" else link,
       prog' = bin,
       adopted' = (adopted or link == "pinned"),
-      phase' = nextPhase(phase), keepBoot, loaded' = loaded, swapOk' = true, keepRoute,
+      phase' = phaseAfterSwap(link == "none"), keepBoot, loaded' = loaded, swapOk' = true, keepRoute,
       g' = { ...g, updated: g.updated or (link == "pinned" and prog != bin) },
     } else if (phase == "swap") all {
       // no loaded program (reachable only when ignoreFailure ignored a load failure): the link keeps
-      // its program
+      // its program (no new link: nothing to pin)
       keepSteer, adopted' = adopted, phase' = nextPhase(phase), keepBoot, loaded' = loaded,
       swapOk' = swapOk, keepRoute, g' = g,
     } else if (phase == "pin") all {
-      // the second sub-step of a first attach; a no-op for an adopted link
+      // the second sub-step of a first attach (reached only after one: an adopted link is not pinned)
       link' = if (link == "attached" and not(bug("unpinned"))) "pinned" else link,
       prog' = prog, adopted' = adopted, phase' = nextPhase(phase), keepBoot, loaded' = loaded,
       swapOk' = swapOk, keepRoute, g' = g,
@@ -219,6 +224,10 @@ module prefix_boot {
   // (D8a-LOAD-SWAP, D8a-ROUTE) a boot opens only converged: its own program runs in the pinned link
   // and the route is `local` — so a crash at any step leaves a state the next boot converges
   val OpenConverged: bool = open implies (link == "pinned" and prog == bin and route == "local")
+
+  // (S-3, D8a-LOAD-SWAP) `pin` is a step of a first attach only: production pins a link it attached and
+  // never an adopted one, so `pin` is never the phase unless this boot attached a new, unpinned link
+  val PinOnlyAfterFirstAttach: bool = phase == "pin" implies link == "attached"
 
   val Safety: bool = and {
     LocalOnlyOverLink, RouteOnlyAfterSwap, NoWildcardReached, NothingDeliveredWhileDown,

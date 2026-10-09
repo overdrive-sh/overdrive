@@ -781,50 +781,6 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-system-conformance) & binary(shared_guest_network_fail_stop_recovery)'
 test-group = 'host-kernel-shared'
 
-# netns-density-295 (GH #295) vsock-attachment replacement — the P6 recovery /
-# walking-skeleton / crash-matrix + the `quiescence.qnt` / `shared_table.qnt`
-# conformance Tier-3 surface → `host-kernel-shared`, by BINARY (rename-proof).
-# Each `tests/conformance/tests/vsock_*.rs` is its own standalone nextest binary
-# that boots the production composition through `serve` + `deploy` and touches
-# node-global kernel state the vsock model shares across EVERY Tier-3 test: the
-# `/dev/vhost-vsock` CID holder table, the process-global `AF_VSOCK` listeners
-# (1234/1240/1241/1242/1243), the root-namespace `sk_lookup` steering link +
-# pinned map, the TCX egress-unframe links on `lo` and every interface, the
-# `overdrive-mtls` / guest-prefix nft tables, and the shared `local` route
-# (DISTILL shared-test-infrastructure §5; P6 §"Real-kernel fixture policy").
-# Per `.claude/rules/testing.md` § "Node-global kernel state requires a catch-all
-# nextest group", every such binary joins the single-writer domain. There is no
-# `package(overdrive-system-conformance)` catch-all (only the per-binary entry
-# above), so each of the four conformance binaries is named here.
-#
-# Declared NOW (DISTILL scaffolds) so the group is in place the moment the
-# DELIVER roadmap reconciliation lands the compiling bodies — the same
-# "membership declared at DISTILL before the body exists" discipline as the
-# `guest_stack_mtls_egress` / `vm_walking_skeleton` blocks above; the filter
-# matches nothing until the gated conformance binaries are created. (The gated
-# bodies are spec-only this pass: shared-infra §0 — a Rust acceptance body only
-# compiles once the production API it calls exists, and inventing surface to
-# compile a stub is forbidden; the host-kernel-shared entry co-arrives with the
-# body in DELIVER, which is this gap being closed early in the shared file so no
-# piece-author races another on `.config/nextest.toml`.)
-#
-# `vsock_crash_matrix` is the P6 replacement for the retired
-# `shared_guest_network_fail_stop_recovery` binary (shared-infra §7); that old
-# entry above is left in place until the DELIVER roadmap reconciliation removes
-# the old-model binary it names (deleting it now would strand an entry for a
-# binary still in tree).
-[[profile.default.overrides]]
-filter = '''
-    package(overdrive-system-conformance)
-    & (
-        binary(vsock_walking_skeleton)
-        | binary(vsock_crash_matrix)
-        | binary(vsock_quiescence_conformance)
-        | binary(vsock_shared_table_conformance)
-    )
-'''
-test-group = 'host-kernel-shared'
-
 # netns-density-295 (GH #295) — `overdrive-init`'s integration binary →
 # `host-kernel-shared`, WHOLE BINARY. `vsock_guest_ready_config.rs` (P6-S11)
 # carries a Tier-3 guest-config cell that boots a real guest through the

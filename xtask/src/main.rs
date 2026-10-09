@@ -40,6 +40,20 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
+    /// Hollow Quint-conformance-driver gate — reject always-false `cfg`
+    /// gates, empty action handlers, and `State::from_driver` projections
+    /// that read `Sim*` state or only the driver's own bookkeeping in every
+    /// quint-connect driver under `crates/*/src/**/*.rs` and
+    /// `tests/conformance/tests/*.rs`. See
+    /// `xtask/src/conformance_lint.rs` and `.claude/rules/testing.md`
+    /// § "Quint conformance".
+    ConformanceLint {
+        /// Path to the workspace `Cargo.toml`; the scan roots are
+        /// `crates/*/src` and `tests/conformance/tests` beside it.
+        #[arg(long, default_value = "Cargo.toml")]
+        manifest_path: std::path::PathBuf,
+    },
+
     /// ADR-0019 gate — assert no `serde_yaml` / `serde_yml` appears in
     /// the `overdrive-cli` resolved dependency graph. Scoped to
     /// non-dev dependencies; test-only YAML is out of scope.
@@ -416,6 +430,7 @@ fn run() -> Result<()> {
     match Args::parse().cmd {
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::CloexecLint { manifest_path } => xtask::cloexec_lint::run(&manifest_path),
+        Task::ConformanceLint { manifest_path } => xtask::conformance_lint::run(&manifest_path),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfBuild => bpf_build(),
         Task::BpfClippy => bpf_clippy(),

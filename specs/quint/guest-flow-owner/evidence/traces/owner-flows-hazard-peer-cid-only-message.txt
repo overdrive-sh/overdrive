@@ -36,13 +36,13 @@ State 3 [step]
   vmGen = 1
 
 State 4 [step]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  alloc = "Retiring"
 
 State 5 [step]
-  vmUp = FALSE
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 6 [step]
-  alloc = "Retiring"
+  vmUp = FALSE
 
 State 7 [step]
   alloc = "Absent"

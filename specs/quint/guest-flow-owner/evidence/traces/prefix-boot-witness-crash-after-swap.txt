@@ -64,7 +64,7 @@ State 11 [BootStep]
   loaded = TRUE
 
 State 12 [BootStep]
-  phase = "pin"
+  phase = "route"
   swapOk = TRUE
   prog = "v1"
   g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> TRUE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]

@@ -75,7 +75,7 @@ State 3: <intake_two_intake_SessOpen line 670, col 3 to line 678, col 50 of modu
 
 State 4: <intake_two_intake_ListenState line 636, col 3 to line 649, col 50 of module intake_two>
 /\ intake_two_intake_oEnt = 0
-/\ intake_two_intake_lastLS = {1}
+/\ intake_two_intake_lastLS = {2}
 /\ intake_two_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
@@ -100,7 +100,7 @@ State 4: <intake_two_intake_ListenState line 636, col 3 to line 649, col 50 of m
 
 State 5: <intake_two_intake_ActivateBegin line 306, col 3 to line 321, col 50 of module intake_two>
 /\ intake_two_intake_oEnt = 0
-/\ intake_two_intake_lastLS = {1}
+/\ intake_two_intake_lastLS = {2}
 /\ intake_two_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> FALSE,
@@ -125,7 +125,7 @@ State 5: <intake_two_intake_ActivateBegin line 306, col 3 to line 321, col 50 of
 
 State 6: <intake_two_intake_BindFail line 603, col 3 to line 610, col 60 of module intake_two>
 /\ intake_two_intake_oEnt = 0
-/\ intake_two_intake_lastLS = {1}
+/\ intake_two_intake_lastLS = {2}
 /\ intake_two_intake_g = [ actPartial |-> FALSE,
   actResidue |-> FALSE,
   actErr |-> TRUE,

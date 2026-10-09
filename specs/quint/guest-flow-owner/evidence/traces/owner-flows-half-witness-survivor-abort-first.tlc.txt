@@ -16,7 +16,7 @@ State 1: <Initial predicate>
 /\ flows_half_owner_flows_vmGen = 0
 /\ flows_half_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_half_owner_flows_hc = [ opener |-> "h",
+/\ flows_half_owner_flows_hc = [ opener |-> "g",
   paired |-> [g |-> FALSE, h |-> FALSE],
   outEof |-> [g |-> FALSE, h |-> FALSE],
   farHc |-> [g |-> FALSE, h |-> FALSE],
@@ -44,7 +44,7 @@ State 1: <Initial predicate>
 /\ flows_half_owner_flows_vmUp = FALSE
 /\ flows_half_owner_flows_readyCross = FALSE
 
-State 2: <flows_half_owner_flows_step line 2780, col 9 to line 2780, col 70 of module flows_half>
+State 2: <flows_half_owner_flows_step line 2792, col 9 to line 2792, col 70 of module flows_half>
 /\ flows_half_owner_flows_toGuestAbort = {}
 /\ flows_half_owner_flows_quiesced = FALSE
 /\ flows_half_owner_flows_claim = 0
@@ -62,7 +62,7 @@ State 2: <flows_half_owner_flows_step line 2780, col 9 to line 2780, col 70 of m
 /\ flows_half_owner_flows_vmGen = 0
 /\ flows_half_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_half_owner_flows_hc = [ opener |-> "h",
+/\ flows_half_owner_flows_hc = [ opener |-> "g",
   paired |-> [g |-> FALSE, h |-> FALSE],
   outEof |-> [g |-> FALSE, h |-> FALSE],
   farHc |-> [g |-> FALSE, h |-> FALSE],
@@ -90,7 +90,7 @@ State 2: <flows_half_owner_flows_step line 2780, col 9 to line 2780, col 70 of m
 /\ flows_half_owner_flows_vmUp = FALSE
 /\ flows_half_owner_flows_readyCross = FALSE
 
-State 3: <flows_half_owner_flows_step line 2780, col 9 to line 2780, col 70 of module flows_half>
+State 3: <flows_half_owner_flows_step line 2792, col 9 to line 2792, col 70 of module flows_half>
 /\ flows_half_owner_flows_toGuestAbort = {}
 /\ flows_half_owner_flows_quiesced = FALSE
 /\ flows_half_owner_flows_claim = 0
@@ -108,7 +108,7 @@ State 3: <flows_half_owner_flows_step line 2780, col 9 to line 2780, col 70 of m
 /\ flows_half_owner_flows_vmGen = 0
 /\ flows_half_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_half_owner_flows_hc = [ opener |-> "h",
+/\ flows_half_owner_flows_hc = [ opener |-> "g",
   paired |-> [g |-> FALSE, h |-> FALSE],
   outEof |-> [g |-> FALSE, h |-> FALSE],
   farHc |-> [g |-> FALSE, h |-> FALSE],
