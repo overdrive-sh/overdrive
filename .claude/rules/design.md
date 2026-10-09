@@ -350,6 +350,40 @@ never runner scripts, copies of earlier specs, or per-round directories.
   composition. Both are required (§ "Required boundary scenarios").
 - **Lifecycle Gate Ownership** and the other DESIGN artifacts above.
 
+## Run contract-shaping validation before the design is accepted
+
+**A validation item whose falsification would change a contract that DISTILL
+pins — a wire or persisted format, a port or `Vmm`/driver signature, the
+shape of a handle, a state meaning — is run as a spike during DESIGN, before
+independent review and before the user is asked to accept the design.** It is
+never carried as an Open row into DISTILL. A design that rests on an unproven
+assumption about the shape of its own contract is a hypothesis, not a design,
+and every DISTILL test written against it is provisional.
+
+- **Classify every validation item when you write it.** If its falsification
+  changes a contract shape, or would return a decision to DESIGN, it is
+  *contract-shaping* and is run before approval. If a falsification changes
+  only a bound, a tuning value, or the internals of one DELIVER step, it may
+  stay Open and block only that step.
+- **"Blocks DISTILL of X" is not a valid status.** Any row that would say it
+  is a contract-shaping item that has not run: run it. DISTILL starts with
+  no open contract-shaping items. Not "only for the scenarios that depend on
+  them" — a falsification can reshape shared fixtures and the harness too.
+- **Spike results feed the design before review.** A falsified item is a
+  design defect: remediate it (with user approval per § "Surface material
+  design decisions"), update the Quint model if it encodes the fact, then
+  review. A held item is recorded as a proven fact with its findings file and
+  kernel version.
+- **Run them early and in parallel.** Dispatch the probes as soon as the
+  assumption is named, alongside modeling and review rounds, so they never
+  sit on the critical path at the end. Twelve review rounds are not a
+  substitute for one real-kernel run.
+
+**Symptoms during review:** a validation table with `Open` rows whose
+"blocks" column names DISTILL or a contract; an approval request that lists
+open validation items as "preconditions" of the next wave; a "what blocks
+DISTILL" paragraph that is non-empty.
+
 ## Orchestrator and reviewer enforcement
 
 Architect recommendations are hypotheses until checked against the lifecycle
@@ -373,7 +407,9 @@ The DESIGN reviewer blocks approval when any of the following is true:
 - the design changes a concurrent, ordered, or crash-sensitive protocol and
   the `Formal protocol model` section is absent, has unrun checks, lacks a
   hazard variant per rule, carries an unresolved counterexample, or leaves an
-  assumption with no discharging validation item.
+  assumption with no discharging validation item;
+- a contract-shaping validation item (§ "Run contract-shaping validation
+  before the design is accepted") is still Open.
 
 This is enforced first as a DESIGN artifact and blocking review contract, then
 as executable state-boundary scenarios in DISTILL/DELIVER. Do not claim that
