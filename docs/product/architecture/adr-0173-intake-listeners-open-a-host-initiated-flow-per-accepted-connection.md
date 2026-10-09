@@ -26,8 +26,10 @@ first, and 10,000/10,000 with the client writing immediately.
 
 ## Decision
 
-1. **Intake listeners.** A host TCP listener on `workload_addr:port` may exist
-   only for a declared TCP listen port (the PORT-295-C projection), only while
+1. **Intake listeners.** A host TCP listener serving `workload_addr:port` —
+   bound to `workload_addr` on a port of the intake host block and reached through
+   its steering entry for `(workload_addr, port)` (ADR-0178, ADR-0171) — may
+   exist only for a declared TCP listen port (the PORT-295-C projection), only while
    the allocation is Active and node forwarding is not quiesced, and only
    under the condition ADR-0163 sets. No listener exists before activation;
    teardown and quiescence close them all.
@@ -38,9 +40,10 @@ first, and 10,000/10,000 with the client writing immediately.
    (ADR-0151).
 3. **Host-initiated flow.** For each accepted connection the owner opens a
    vsock STREAM to the guest inbound port with a `TcpAccept` request carrying
-   the kernel-reported peer address of the intake connection and the declared
-   port. The guest connects to the application from that address (ADR-0150,
-   ADR-0174).
+   the kernel-reported peer address of the intake connection, the declared
+   port the listener serves (from the owner's record, never the listener's
+   bound port) and the launch token of the CID's lease (ADR-0177). The guest
+   connects to the application from that address (ADR-0150, ADR-0174).
 
 ## Alternatives considered
 

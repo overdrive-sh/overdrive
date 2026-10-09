@@ -7,8 +7,10 @@ answered; further review waived by user 2026-10-08; handed to DISTILL.** GH #295
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN — PROPOSED 2026-10-05*. Depends on ADR-0146 (kernel vhost-vsock
 backend of the vendored Cloud Hypervisor) and ADR-0156 (the CID is derived
-from the admission lease). Kernel facts the decision rests on are validation
-item V-25.
+from the admission lease). The kernel facts the decision rests on were
+validated by V-25 (feature delta P-39, `spike/findings-v25.md`, kernel
+7.0.0-29); the handoff points they pin (CLAIM-PINS) are approved under the
+user's 2026-10-09 remediation directive.
 
 ## Context
 
@@ -51,8 +53,13 @@ startup probe already opens `/dev/vhost-vsock` and sets a CID from inside the
 - **`EADDRINUSE` is the only skip.** An offset whose claim fails
   `EADDRINUSE` is held by another device instance at that moment (a VMM the
   pool does not lease); `assign` moves to the next free offset. Nothing about it is remembered: the next `assign`
-  asks the kernel again. Any other claim failure stops `assign` with a typed
-  error naming the CID and the cause; it is never treated as "held".
+  asks the kernel again. Any other claim failure — `EINVAL` included, the
+  kernel's answer for the reserved CIDs the leased range already excludes —
+  stops `assign` with a typed error naming the CID and the cause; it is never
+  treated as "held".
+- **One claim per instance.** Each claim opens a new `/dev/vhost-vsock`
+  instance and sets its CID once. Setting a CID again on a held instance
+  moves the claim and frees the earlier CID, so nothing offers a re-claim.
 - **Typed refusal with the true cause.** If every free offset is held by
   other device instances, `assign` refuses with its own non-terminal error, not
   the pool-exhaustion refusal. The exhaustion refusal still means no free
@@ -62,11 +69,16 @@ startup probe already opens `/dev/vhost-vsock` and sets a CID from inside the
   it at launch and passes the claimed file to the fork as an inherited
   descriptor (`--vsock cid=N,backend=vhost-kernel,fd=K`), the same pre-exec
   descriptor handoff the TAP queue path used (ADR-0128, superseded by
-  ADR-0146 for its TAP content). The fork does
+  ADR-0146 for its TAP content): the same open file, made inheritable only in
+  the child and only at `K`; never a reopen, which would create a new,
+  unclaimed instance. The fork does
   not open `/dev/vhost-vsock` or set the CID in this mode; it becomes the
-  device owner (`VHOST_SET_OWNER`) and starts the rings. `overdrive serve`
-  closes its own copy as soon as the VMM process holds the file, so the claim
-  then lives exactly as long as the VMM.
+  device owner (`VHOST_SET_OWNER`) and starts the rings, and it consumes the
+  descriptor once: a later device creation (a guest reboot) ends the VMM
+  instead of reusing the number. `overdrive serve` closes its own copy as
+  soon as the VMM process is spawned, so the claim then lives exactly as
+  long as the VMM; the CID is claimable again within 10 ms of the VMM's
+  reaped exit.
 - **Release.** A claim never handed to a VMM (launch not reached, VMM spawn
   failed) is released when the lease releases it or the handle is dropped. A
   handed-off claim is released by the VMM's exit, as today. The CID offset
@@ -118,15 +130,19 @@ feature delta (§ *Core vocabulary*, § *VMM backend contract*, § *Composition*
   them, counted for observability.
 - The fork gains an `fd=` mode for its vhost-kernel vsock device (a new fork
   revision, ADR-0161); in that mode CH needs no Landlock access to
-  `/dev/vhost-vsock` and does not issue `VHOST_VSOCK_SET_GUEST_CID`. A guest
-  reboot in that mode cannot re-create the device (the open file already has
-  an owner); guest reboot is not supported today, and V-25 records how the
-  VMM ends in that case.
+  `/dev/vhost-vsock` and does not issue `VHOST_VSOCK_SET_GUEST_CID`. The fork
+  needs its own vhost wrapper over the inherited file (its vhost library has
+  no constructor from a descriptor) and a once-only consumption guard. A
+  guest reboot in that mode cannot re-create the device; guest reboot is not
+  supported today, and the VMM ends (V-25 observed exit status 1 on a
+  prototype).
 - `/dev/vhost-vsock` access becomes a property of the `serve` identity, which
   the claim probe checks, rather than of the VMM launch identity.
 - The kernel facts — a claim on an instance with no owner, the handoff of a
   claimed file to another process that then becomes its owner, exclusivity
-  while any reference is open, release at the last close — are validation item
-  V-25, which blocks DISTILL of the CID-claim scenarios.
+  while any reference (`dup`, fork, exec inheritance, `SCM_RIGHTS`) is open,
+  release at the last close — were validated by V-25 (feature delta P-39) on
+  7.0.0-29, the handoff on a prototype `fd=` mode. The production launch
+  identity with `fd=` is validation item V-1(c) (DELIVER).
 - The claim discipline is checked by the formal model of the guest-flow owner
   (ADR-0168, `specs/quint/guest-flow-owner/`, module `cid_lease`).

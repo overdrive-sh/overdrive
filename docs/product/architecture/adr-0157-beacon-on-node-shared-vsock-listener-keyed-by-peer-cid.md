@@ -8,7 +8,9 @@ Attachment Replacement DESIGN — PROPOSED 2026-10-05*. Depends on ADR-0146.
 
 If accepted, this ADR **amends ADR-0082 §D4's transport**: the beacon reaches
 the host over a node-shared `AF_VSOCK` listener instead of a per-VM Unix
-socket. The beacon's messages and meanings are unchanged.
+socket. The beacon's message set and meanings are unchanged; which launch a
+session belongs to is ADR-0177 (the launch token READY carries; approved
+under the user's 2026-10-09 remediation directive).
 
 ## Context
 
@@ -41,21 +43,34 @@ with `EADDRNOTAVAIL` (guest-capture spike, increment a); binding
 - **One listener.** The VM driver binds exactly one host `AF_VSOCK` stream
   listener on `VMADDR_CID_ANY`, port 1234, when it is composed.
 - **Attribution.** Each accepted session is attributed to the VM whose live
-  launch holds the kernel-reported peer CID.
+  launch holds the kernel-reported peer CID **and** whose launch token the
+  session's READY carries (ADR-0177).
 - **Rejection.** A session from a CID no live launch holds is closed with no
-  effect, as is a second session from a CID that already has a live session.
-  Accepting a session is one atomic claim on the CID — the check and the
-  claim are the same operation, so two concurrent sessions from one CID
-  cannot both be accepted; the claim is released when the session ends.
-- **Protocol.** The beacon message set and its semantics are unchanged.
+  effect, as is a session whose READY carries another launch's token, and a
+  second session from a CID that already has a live session. Accepting a
+  session is one atomic claim on the CID, taken in one per-CID step after
+  its READY is read, which requires both that READY's token equals the token of
+  the CID's live launch (started, not yet stopped) and that the claim is
+  free (ATTR-LIVE-CLAIM, ADR-0177). The live-launch check at accept only
+  closes connections early; the driver's stop ends the launch's liveness in
+  the step that closes its session and releases its claim. So two
+  concurrent sessions from one CID cannot both be accepted, a session a
+  dead launch left queued can never hold the claim, and a connection
+  accepted before a stop and read after it takes nothing; the claim is
+  released when the session ends.
+- **Protocol.** The beacon message set and its semantics are unchanged;
+  READY's line carries the launch token (ADR-0177).
 
 ## Alternatives considered
 
 - **Per-VM ports.** The port would become the identity; a guest could still
   dial another VM's port. Rejected.
-- **An authentication token on the beacon.** Adds secret material to the
-  guest and changes ADR-0082's wire format. Held as the fallback if
-  packet-level CID spoofing is shown possible (V-10). Rejected as primary.
+- **An authentication secret on the beacon in place of the peer CID.** Adds
+  secret material to the guest to defend against a CID-spoofing guest
+  driver, which V-10 tests at packet level; a falsified V-10 is a security
+  escalation to the user. Rejected as the trust anchor. (ADR-0177's launch
+  token is not a secret and does not replace the CID: it tells one CID's
+  launches apart.)
 - **Bind on CID 2.** Fails before the vhost transport module is loaded.
   Rejected.
 
@@ -63,6 +78,9 @@ with `EADDRNOTAVAIL` (guest-capture spike, increment a); binding
 
 - The beacon's trust anchor moves from filesystem-path isolation to kernel
   vhost source-CID validation: shown at the socket API, cited from source
-  below it (V-10, packet level open).
+  below it (V-10, packet level open). Across launches of one CID the peer
+  CID is not enough — a connection a dead VM left queued is accepted with
+  the CID's next holder as peer and delivers its buffered READY (V-22,
+  feature delta P-37) — so the launch token decides (ADR-0177).
 - Per-VM Unix beacon sockets and run-directory vsock paths are deleted.
 - A listener bind failure refuses driver composition at startup.

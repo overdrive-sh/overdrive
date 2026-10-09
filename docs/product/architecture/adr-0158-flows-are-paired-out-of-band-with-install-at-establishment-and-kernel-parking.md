@@ -49,10 +49,12 @@ only then inserted its vsock socket into the verdict's SockHash
 ## Decision
 
 - **Requests stay in-band and first.** The opener of each flow vsock
-  connection writes one fixed 16-byte request before anything else. No payload
-  ever precedes it. The acceptor reads exactly 16 bytes in userspace.
+  connection writes one fixed 32-byte request (carrying its launch token,
+  ADR-0177) before anything else. No payload ever precedes it. The acceptor
+  reads exactly 32 bytes in userspace.
 - **Every other control message is out of band** (`Paired`, `Refused`,
-  `Abort`, `ListenState`). No control byte is ever written on a flow vsock
+  `Abort`, `ListenState`, and the half-close pair `HalfClose` /
+  `HalfCloseAck`, ADR-0180). No control byte is ever written on a flow vsock
   connection after its request.
 - **Install before the peer can send:**
   - the opener installs its vsock socket immediately after `connect()`
@@ -64,8 +66,9 @@ only then inserted its vsock socket into the verdict's SockHash
     leg-F, or to the guest application) are armed before `connect()` and
     installed at `ACTIVE_ESTABLISHED`;
   - UDP intakes are installed from boot and park into framing cells.
-- **The acceptor reads, then installs.** The acceptor reads the 16-byte
-  request from the vsock socket it accepted in userspace, and only then
+- **The acceptor reads, then installs.** The acceptor reads the 32-byte
+  request from the vsock socket it accepted in userspace, checks its launch
+  token against the CID's live launch token (ADR-0177), and only then
   installs that socket, before connecting its peer-facing socket. This is safe
   because no byte can follow the request on that connection before `Paired`:
   the opener's application bytes are parked until `Paired`. Installing before

@@ -5,7 +5,9 @@
 **Accepted — decision D7 approved by user 2026-10-05, with its correction — `sock_ops`
 identifies intake children by listener tag, not port (independent DESIGN
 review finding M-1) — confirmed by user 2026-10-06; independent review r12
-answered; further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+answered; further review waived by user 2026-10-08; handed to DISTILL.** The
+tag's map wording (INTAKE-TAG-MAP) approved under the user's 2026-10-09
+remediation directive after V-20. GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*. The owner's cgroup
 placement under the service-VIP rewrite is ADR-0164. Object lifetime is
 ADR-0159; stop and restore semantics are ADR-0160.
@@ -55,10 +57,13 @@ half-close of 10,000.
   - an active socket is acted on only if the owner armed that socket (by its
     socket cookie) before `connect()`;
   - a passive child is acted on only if its listener is one of the owner's
-    intake listeners. The owner tags each intake listener with a socket-local
-    storage entry created with the clone flag, so every child accepted on it
-    carries the tag from the moment it is created; the program checks the
-    child's tag at `PASSIVE_ESTABLISHED`.
+    intake listeners. The owner tags each intake listener with an entry in a
+    dedicated clone-flagged socket-storage map (the clone flag is a property
+    of the map, set at its creation, so every entry in it is copied to the
+    children of the socket it is on); every child accepted on an intake
+    listener carries a copy of the tag from the moment it is created, and
+    the program checks the child's tag at `PASSIVE_ESTABLISHED`. No other
+    socket — leg-C's listener included — ever has an entry in that map.
 
   Every other socket of the process — leg-C's transparent children, whose
   local address and port equal an intake's, the API server, leg-F and leg-S —
@@ -109,5 +114,9 @@ half-close of 10,000.
 - The host kernel carries Overdrive programs on the egress of `lo` and every
   root-namespace interface, on the owner's cgroup, and on `skb_send_sock`.
   Each is a link the owner holds (ADR-0159).
-- Clone-flagged socket storage inheritance at accept is a kernel facility the
-  spikes did not exercise; it is validation item V-20.
+- The inheritance was validated (V-20, feature delta P-46): intake children
+  carry the tag, leg-C children never do, and the tag is a copy taken at the
+  child's creation; the owner-only-cgroup process split is not needed.
+- The map needs BTF-described key and value types that the current aya
+  release does not create for it; the feature delta's forwarder contract
+  pins how DELIVER creates it.

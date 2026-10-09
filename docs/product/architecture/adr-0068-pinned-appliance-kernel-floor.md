@@ -158,18 +158,31 @@ image carries no network configuration that matches interfaces generically and
 so would configure a later one — for example a systemd-networkd `[Match]
 Name=*` file, or a DHCP client started on every new link.
 
+**The appliance image MUST NOT configure a root-namespace interface stacked
+on another** — an interface enslaved to a bridge, bond, team or VRF, or a
+`vlan`, `macvlan`, `macvtap`, `ipvlan` or `ipvtap` interface over a lower
+device (decision IFACE-NO-STACK of the #295 feature delta, approved under the
+user's 2026-10-09 remediation directive; ADR-0181). A datagram leaving
+through an upper and its lower passes the unframe program twice, which
+corrupts or loses it (ADR-0165). `overdrive serve` checks this at boot,
+before any boot effect, and refuses startup naming the interface; the image
+requirement keeps that refusal from firing.
+
 Interfaces that `overdrive serve` creates and configures during its own boot
 (ADR-0061's load-balancer veth pair) are Overdrive's, not the image's; the #295
 feature delta orders them before the unframe attach (D5a-SERVE-IFACE).
 
-This is a requirement on the image build, not a runtime check: the image's
-network configuration is reviewed against this section when the image is built
+The first requirement is a requirement on the image build, not a runtime
+check: the image's network configuration is reviewed against this section when the image is built
 and whenever it changes, in the same "image change is a tested change"
 discipline as §1. No new work item is minted by recording it.
 
 **Corollary — the dev and metal hosts are not the appliance image.** They run
 a catch-all systemd-networkd configuration that configures later interfaces;
-they are evidence neither for nor against this requirement.
+they are evidence neither for nor against this requirement. A dev or metal
+host that carries a stacked root-namespace interface (for example a bridge
+with enslaved ports) is refused by `overdrive serve`'s boot check like the
+appliance would be.
 
 ## Consequences
 

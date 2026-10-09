@@ -9,7 +9,11 @@ configures no interface registered after boot, D5a-LATE, 2026-10-08; that
 image requirement recorded in ADR-0068 § 5, IMG-IFACE-BOOT, and `serve`'s own
 boot-created interfaces ordered before the attach, D5a-SERVE-IFACE,
 2026-10-08); independent review r12 answered; further review waived by user
-2026-10-08; handed to DISTILL.** GH #295. Split out of ADR-0149 (frame format, D5) so that each ADR
+2026-10-08; handed to DISTILL. USO-NO-SEGMENT and FRAG-MAP-LIFECYCLE
+approved under the user's 2026-10-09 remediation directive after V-16 and
+V-18.** GH #295. The rule for stacked interfaces is ADR-0181
+(IFACE-NO-STACK); the attach errno classification is in the feature delta's
+forwarder contract. Split out of ADR-0149 (frame format, D5) so that each ADR
 records one decision. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*, which holds the
 forwarder contract.
@@ -66,6 +70,23 @@ removal points:
 - **Tuples come from the kernel.** A tuple is registered from the connected
   host socket's kernel-reported local address and peer (after any `connect4`
   rewrite), never from the requested destination.
+- **Owner sockets never produce a UDP GSO skb (USO-NO-SEGMENT).** The
+  guest-flow owner's host UDP sockets never set `UDP_SEGMENT`, as a socket
+  option or per send. The program cannot remove a frame from a UDP GSO skb,
+  and only such a socket hands one to it; segmentation offload on the
+  interface runs after the program and is unaffected.
+- **Fragment records are first-fragment-authoritative and never block an
+  insert (FRAG-MAP-LIFECYCLE).** The program records a stripped fragmented
+  datagram under its IPv4 reassembly key so it can move the later fragments
+  back. A first fragment is authoritative for its key — stripped, it inserts
+  or overwrites the record; not stripped, it removes any record — and the
+  last fragment removes it. The record map is a least-recently-used hash, so
+  records whose last fragment never passed the program (a fragment dropped
+  after it) are evicted instead of filling the map. So a fragment is never
+  changed by another datagram's state; an eviction can only lose the one
+  datagram whose record it took, never corrupt one. Unlike the drain
+  counters (ADR-0151), which must be exact because an evicted counter stalls
+  a half-close, these records tolerate eviction.
 - **Attachment set.** An interface carries guest datagrams only once it has
   addresses and routes. Root-namespace interfaces are configured by two
   producers, both before the attach: the appliance image at boot, before
@@ -73,8 +94,9 @@ removal points:
   attach step (ADR-0061's load-balancer veth pair). So:
   - **at boot, the program is attached to every interface present** — `lo`,
     the image's NICs and every interface `serve`'s earlier boot steps
-    created. Any failed attachment refuses startup with the interface named,
-    before forwarding opens;
+    created, none of them stacked on another (ADR-0181). Any failed
+    attachment refuses startup with the interface named and its cause
+    classified, before forwarding opens;
   - **after boot, nothing is attached.** An interface the kernel registers
     later (a NIC whose driver probes late, a hot-added NIC, or one any
     component creates) is never given addresses or routes, so it carries no
@@ -112,6 +134,18 @@ removal points:
   window, but adds an attach operation, a failure classification, a retry
   and a lifecycle gate for a configuration the appliance never performs.
   Rejected in favour of never configuring such an interface.
+- **Plain hash for the fragment records, inserted on a stripped first
+  fragment and removed by the last fragment** (as the V-11 spike shipped).
+  A record whose last fragment never passed stays forever; the next
+  datagram with the same key is shifted and lost, and a full map makes
+  later stripped datagrams lose their tails (V-18). Rejected.
+- **A plain hash with insert timestamps compared with the reassembly
+  lifetime.** Ages stale records but still refuses inserts while full, and
+  a BPF program cannot sweep it. Rejected.
+- **Handle UDP GSO skbs in the program** (`BPF_F_ADJ_ROOM_FIXED_GSO`). The
+  program unframed, but nothing was delivered (V-16). Rejected.
+- **Pass, rather than drop, a frame-kept UDP GSO skb.** The datagram still
+  reaches its peer with the wrong bytes. Rejected.
 
 ## Consequences
 
@@ -127,7 +161,9 @@ removal points:
   leaving through such an interface reach their peers framed. That host is
   not the appliance.
 - The host carries one TC egress program per root-namespace interface plus a
-  fragment-tracking map; it is a no-op for unregistered tuples.
-- Untested, and therefore validation items in the feature delta: NICs with UDP
-  segmentation offload, several egress interfaces with policy routing, and a
-  frame-shaped payload above the MTU.
+  least-recently-used fragment-tracking map; it is a no-op for unregistered
+  tuples.
+- The edges this decision rests on were measured (V-16, V-17, V-18; feature
+  delta P-43 to P-45): an interface with UDP segmentation offload, several
+  independent egress interfaces with policy routing, and frame-shaped
+  payloads above the MTU. Stacked interfaces are ADR-0181.

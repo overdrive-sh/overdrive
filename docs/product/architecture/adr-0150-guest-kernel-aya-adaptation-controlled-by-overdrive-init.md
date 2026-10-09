@@ -9,7 +9,10 @@ reserved port) with its residual D15 differences D15-R2, approved by user
 2026-10-06; the exact bind-refusal scope (D25-BIND) and the end of an
 unpaired or aborted datagram association (U-2), approved by user 2026-10-06;
 independent review r12 answered; further review waived by user 2026-10-08;
-handed to DISTILL.** GH #295. Recorded in the #295
+handed to DISTILL.** Cells recreated (never merely emptied), the
+end-of-association order and registration-identity dispatch (CELL-RECREATE)
+approved under the user's 2026-10-09 remediation directive after V-5(c)
+(feature delta P-41). GH #295. Recorded in the #295
 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
 2026-10-05*, § *[REF] Guest adaptation contract* and § *[REF] Core
 vocabulary* (intake constants and the deploy refusal's typed error).
@@ -117,8 +120,27 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
   `sock_release` hook reports the released socket; if its report cannot be
   queued, the level-triggered audit in `overdrive-init` finds slots whose
   socket no longer exists and releases them. Release ends the association,
-  discards every frame parked in the slot's cells (the cells are emptied or
-  recreated), and only then returns the slot to the pool. A released slot is
+  discards every frame parked in the slot's cells by recreating both cells
+  (an emptied cell is not enough: frames in its sender-side queue or psock
+  backlog refill it and start new associations, V-5(c)), and only then
+  returns the slot to the pool.
+- **End-of-association order (CELL-RECREATE).** Whenever an association
+  ends — slot release or U-2 below — `overdrive-init` performs, in this
+  order: cut the reassembly cell's output to the slot's intake; close the
+  association's vsock legs; recreate the framing and reassembly cells;
+  disconnect the slot socket; remove the guest-`lo` unframe tuple last. With
+  the cell's output cut first, no late reply reaches the application with
+  its frame (V-5(c)). Recreating closes the old cells before creating new
+  ones; if a new cell cannot be created, the slot is quarantined — no
+  association, detached from its owner, not returned to the pool — until
+  the audit's retry succeeds.
+- **Readiness dispatch by registration (CELL-RECREATE).** `overdrive-init`
+  dispatches every readiness event by the identity of its registration —
+  slot index and the cell generation it was registered for — never by raw
+  descriptor number. A recreated cell may reuse a descriptor number, and an
+  event of the old generation must not start an association on the new one
+  (V-5(c) saw spurious associations with raw-descriptor dispatch and none
+  with registration identity). A released slot is
   never re-associated with the departed application's destination; a late
   `Paired` for its flow is answered with `Abort` (user ruling 2026-10-06).
   (The off-host spike showed the hazard: released slots returned to the pool
@@ -128,8 +150,9 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
 - **An ended association does not re-associate by itself (U-2, user ruling
   2026-10-06).** When an association whose slot is still owned ends without
   pairing or is aborted — `Refused`, `Abort`, or the pairing deadline — the
-  guest discards every frame parked in the slot's cells and keeps the slot
-  for its (application socket, destination). The discarded frames never start
+  guest discards every frame parked in the slot's cells (by recreating them,
+  in the end-of-association order above) and keeps the slot for its
+  (application socket, destination). The discarded frames never start
   a new association; only a datagram the application sends after the end
   does. A destination that refuses every attempt is therefore tried at most
   once per pairing round trip, driven by the application's own sends, never
@@ -146,17 +169,21 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
   once instead of after the connect timeout.
 - **FIN and half-close.** Every TCP verdict drops zero-length skbs. FIN is
   propagated by the owner with `shutdown(SHUT_WR)` only after the drain signal
-  shows the forwarding backlog has drained (ADR-0160).
+  shows the forwarding backlog has drained (ADR-0160), and across the VM
+  boundary only through the acknowledged `HalfClose` handshake (ADR-0180).
 - **Owner-crash visibility.** Owner-held TCP sockets on the application side
-  carry `SO_LINGER{1,0}` from creation, so an owner exit resets the
+  carry `SO_LINGER{1,0}` from creation, so `overdrive-init`'s exit resets the
   application's connection rather than ending it cleanly. A clean close clears
-  linger first (ADR-0160). Untested (V-13).
+  linger first (ADR-0160). When the host owner dies instead, `overdrive-init`
+  sees the flow vsock end with no acknowledged `HalfClose` and aborts the
+  flow, resetting the application's connection (ADR-0180). Measured by V-13
+  (feature delta P-42).
 - **Loss of the owner fails closed.** Every guest program attachment is a BPF
   link held by `overdrive-init`; its exit detaches the hooks, so new
   connections fail with `ENETUNREACH` instead of reaching anything.
 - **Control.** `overdrive-init` opens the per-VM control session (ADR-0166),
-  writes 16-byte flow requests on flow vsock connections, and installs and
-  removes guest pairs.
+  writes 32-byte flow requests carrying its launch token on flow vsock
+  connections (ADR-0177), and installs and removes guest pairs.
 - **Programs.** The guest programs are Aya Rust in `overdrive-bpf`, built by
   the one eBPF pipeline (ADR-0038) and embedded in the guest image.
 

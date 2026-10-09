@@ -10,7 +10,11 @@ item V-24 (second model check, `spike/quint-owner-findings-r2.md`, finding
 r2-3); independent review r12 answered; further review waived by user
 2026-10-08; handed to DISTILL.** GH #295. Split out of ADR-0158 (out-of-band
 pairing order, D18) so that each ADR records one decision. Recorded in the
-#295 feature delta, § *[REF] Control session (D18a)*.
+#295 feature delta, § *[REF] Control session (D18a)*. Which launch a session
+belongs to is ADR-0177 (approved under the user's 2026-10-09 remediation
+directive), and the claim's live-token step is ATTR-LIVE-CLAIM (same
+directive). The half-close messages are ADR-0180 (HALFCLOSE-SIGNAL, same
+directive). K-A4 was validated by V-24 (feature delta P-38).
 
 ## Context
 
@@ -25,20 +29,30 @@ lifecycle.
 - The guest opens one dedicated control session per VM, a vsock STREAM to a
   host port owned by the guest-flow owner, and keeps it for the VM's life,
   reconnecting after loss.
-- The host attributes a session by the kernel-reported peer CID, exactly as
-  the beacon is attributed, and accepts it only for a CID it holds as
-  Provisioned or Active.
+- The host attributes a session by the kernel-reported peer CID and the
+  launch token of the session's opening record (ADR-0177), exactly as the
+  beacon is attributed: the token must equal the CID's live launch token,
+  which exists only while the CID is Provisioned or Active.
 - **At most one live session per CID.** Accepting a session is an atomic claim
-  on the CID (the claim and its check are one operation); a second session
-  for a CID with a live claim is closed. Releasing the claim happens when the
-  session ends.
-- Messages on the session are fixed-size, written and read in userspace only.
+  on the CID, taken in one per-CID step after the opening record is read,
+  which requires both that its token equals the live launch token and that
+  the claim is free (ATTR-LIVE-CLAIM, ADR-0177); a second session for a CID with
+  a live claim is closed. Teardown ends the live token in the step that
+  closes the session and releases its claim, so a connection read after
+  teardown takes no claim. Releasing the claim happens when the session
+  ends.
+- Records on the session are fixed-size, written and read in userspace only:
+  one opening record, then control messages. The messages are `Paired`,
+  `Refused`, `Abort`, `ListenState`, and the half-close pair `HalfClose` /
+  `HalfCloseAck` that carries a flow's half-close across the VM boundary
+  (ADR-0180).
 - Loss of the session aborts every flow of that VM, because no further
   `Paired` can be delivered, and closes the VM's intake listeners (ADR-0163).
 - A host-side flow request from a CID with no live session is not paired: the
   host closes that flow connection without a control message.
 - **A control message for a flow the receiver does not hold is discarded
-  (U-5).** A `Paired`, `Refused` or `Abort` naming a flow id the receiver
+  (U-5).** A `Paired`, `Refused`, `Abort`, `HalfClose` or `HalfCloseAck`
+  naming a flow id the receiver
   never opened or has already closed is dropped and counted, with no reply.
   The one exception is the guest's datagram slot rule — a late `Paired` for a
   released slot is answered with `Abort` (ADR-0150). No reply is needed
@@ -71,20 +85,20 @@ lifecycle.
   feature delta).
 - A guest that cannot hold its control session has no working flows; READY is
   unaffected.
-- Attribution by peer CID across allocations assumes the host kernel resets
-  every connection of a VM whose vhost device is released — including
-  connections still waiting in a host accept queue — before the CID can be
-  leased to the next VM. Otherwise a queued session from a dead VM would be
-  accepted as the next allocation's session. The formal model shows the
-  attribution is safe only under this assumption
-  (`spike/quint-owner-findings.md`, finding 3); validation item V-22 tests it.
-- Discarding unknown-flow messages without reply is safe only under K-A4:
+- Attribution by peer CID alone across allocations is unsafe: a session a
+  dead VM left in the host's accept queue is accepted with the CID's next
+  holder as peer and delivers its buffered bytes (V-22, feature delta P-37;
+  the formal model's finding 3, `spike/quint-owner-findings.md`). The launch
+  token (ADR-0177) makes the attribution exact.
+- Discarding unknown-flow messages without reply is safe under K-A4:
   closing the host's socket of an aborted or session-lost host-opened flow
-  reliably reaches the guest and tears down the guest-side connection,
-  including one still in the guest's accept queue. Without it the guest half
-  of such a flow, connected to the application, is never closed
-  (`spike/quint-owner-findings-r2.md`, finding r2-3). Validation item V-24
-  tests it and blocks DISTILL of the scenarios that depend on it.
+  reaches the guest and ends the guest-side connection, including one still
+  in the guest's accept queue — after its request is read, the guest vsock
+  reads EOF, reports `POLLRDHUP` and fails its first write
+  (`spike/quint-owner-findings-r2.md`, finding r2-3; validated by V-24,
+  feature delta P-38). The guest owner checks for that end after the
+  request read. No byte of such a flow reaches the application because the
+  host writes nothing after the request before `Paired` (ADR-0158, H-1).
 - Even under K-A4, a guest application can accept a connection for a client
   the host already aborted and then see it reset at once.
 - The session protocol, including these rules, is modelled in the formal

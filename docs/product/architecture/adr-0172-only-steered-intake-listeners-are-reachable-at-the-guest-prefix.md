@@ -44,6 +44,17 @@ Under the bridge topology the guest kernel answered; the host never did.
   host-local client sees a refusal at once; the prerouting rule drops, as
   today for remote traffic. So an unmarked host-local client reaches an
   intake only through leg-C.
+- **The rules decide connections, not replies.** Each of the two rules is
+  immediately preceded by `ct state established,related accept`, placed
+  after the leg-S exemption and the leg-C divert in a chain hooked at or
+  after conntrack's priority, so the rules decide connection-opening packets
+  only while the exemption and the divert still see every packet of their
+  connections. A host-local client's source can
+  lie in the prefix (the gateway, or the destination itself under a route
+  with no preferred source), so an intake's replies are addressed into the
+  prefix, unmarked; without the accept they are refused and the connection
+  times out (V-26, feature delta P-40; PREFIX-REPLY, approved under the
+  user's 2026-10-09 remediation directive).
 - **The gateway is excluded** from the guest-prefix match of the lookup
   decision and of the rules; it is the DNS address (ADR-0154).
 - **No per-allocation membership.** These replace the per-allocation
@@ -75,5 +86,8 @@ Under the bridge topology the guest kernel answered; the host never did.
   not open the prefix to host services: the lookup decision (ADR-0171) does
   not depend on the table. A partial table affects only the existing mTLS
   interception rules, under ADR-0124's recovery (ADR-0169).
-- Validated by V-19 and V-26 (feature delta); checked by the formal model of
-  the guest-flow owner (ADR-0168, modules `intake` and `shared_table`).
+- An admitted connection's later packets are not re-decided by the rules; a
+  connection is admitted or refused at its opening packet.
+- The lookup decision is validated by V-26 (feature delta P-40); the
+  production composition by V-19; checked by the formal model of the
+  guest-flow owner (ADR-0168, modules `intake` and `shared_table`).

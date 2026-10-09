@@ -68,5 +68,7 @@ successful update is not load-bearing (finding r6-1).
   down.
 - A logic defect in the steering program is a failed build, not a boot
   refusal (feature delta A-33).
-- A falsified K-L9 (V-26 (viii)) returns this decision to DESIGN.
+- K-L9 holds (V-26 (viii), feature delta P-40: 5.45 M swaps under connect
+  load with no lookup undecided; every failing update left the earlier
+  program).
 - The order is checked by the formal model (ADR-0168, module `prefix_boot`).

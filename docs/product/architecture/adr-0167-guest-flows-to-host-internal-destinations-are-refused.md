@@ -4,7 +4,10 @@
 
 **Accepted — decision D26 (raised by independent DESIGN review finding B-1) approved by
 user 2026-10-06; independent review r12 answered; further review waived by
-user 2026-10-08; handed to DISTILL.**
+user 2026-10-08; handed to DISTILL.** Its rule construction (D26-PINS:
+masked mark bit, position before any accept, plain `reject`, one-transaction
+replacement, the UDP projection, and the non-unicast match) approved under
+the user's 2026-10-09 remediation directive after V-21.
 GH #295. Recorded in the #295 feature delta, § *[REF] Per-flow policy and the
 host-internal deny set*.
 
@@ -47,7 +50,9 @@ backends are chosen by the platform's own service map and may be host-local.
   2. `169.254.0.0/16` (link-local, including instance metadata);
   3. any address the host kernel would deliver locally — its FIB route type
      for the destination is `local` — which covers the host's interface
-     addresses, the guest gateway and the whole guest prefix;
+     addresses, the guest gateway and the whole guest prefix — and any
+     address whose route type is `broadcast`, `multicast` or `anycast` (each
+     also delivers to the host);
 
   with exactly two exceptions:
   - the guest gateway on port 53 (UDP and TCP), which reaches the node DNS
@@ -63,12 +68,34 @@ backends are chosen by the platform's own service map and may be host-local.
 - **Atomic kernel enforcement.** Every host socket the owner connects directly
   for a guest flow whose requested destination is not a service VIP carries a
   dedicated socket mark. A constant host firewall rule in the output path
-  rejects any packet carrying that mark whose destination is locally
-  delivered or in `127.0.0.0/8` or `169.254.0.0/16`, except the gateway on
-  port 53. The owner's check gives the typed refusal; the kernel rule closes
-  the window between the check and the connect (an address added to the host
-  in between). A connect the kernel rule rejects is projected as
-  `DestinationUnreachable`.
+  rejects any packet carrying that mark whose destination is not routed as
+  ordinary unicast (`fib daddr type != unicast`: local, broadcast, multicast
+  and every other non-unicast route type) or is in `127.0.0.0/8` or
+  `169.254.0.0/16`, except the gateway on port 53. The owner's check gives
+  the typed refusal; the kernel rule closes the window between the check and
+  the connect (an address added to the host in between). How the rule is
+  built (D26-PINS):
+  - **Mark.** The owner mark is one dedicated bit, disjoint from every other
+    Overdrive mark; the rule matches that bit under its mask, so a packet
+    carrying the bit with other bits set is still matched.
+  - **Position.** The `gateway:53` accept and the reject are the first rules
+    of the output chain that also holds the guest-prefix rules' conntrack
+    accepts (ADR-0172), ahead of every `accept` in it; a conntrack accept
+    ahead of them let a marked UDP socket reusing an earlier flow's source
+    port reach a local service.
+  - **Verdict.** Plain `reject`: TCP connects fail `ECONNREFUSED`, UDP sends
+    `EPERM`. `reject with tcp reset` let UDP through; `drop` left TCP
+    hanging until its timeout.
+  - **Replacement.** The shared table is replaced only in one nft
+    transaction; a delete and an add in separate transactions leaked marked
+    connects through the gap.
+  - **Projection.** A TCP connect the rule rejects is `Refused
+    (DestinationUnreachable)`. A UDP `connect()` sends nothing, so the rule
+    rejects the first datagram's transmit; for a forwarded datagram that
+    transmit is the forwarder's redirect onto the owner's socket, and any
+    error the owner then sees on that socket ends the association with close
+    cause `DestinationUnreachable` (the guest's next datagram starts a new
+    association, which the owner's check then refuses `HostInternal`).
 - **VIP flows.** A flow whose requested destination is a service VIP is left
   unmarked, so ADR-0053's rewrite to a platform-chosen backend is honoured.
   For datagram associations the owner reads the connected socket's kernel peer
@@ -87,6 +114,14 @@ backends are chosen by the platform's own service map and may be host-local.
   only mechanism.
 - **A fixed range list without the local-delivery check.** Misses the host's
   own public and private addresses and any address an operator adds. Rejected.
+- **Match `fib daddr type local` and rely on the owner never setting
+  `SO_BROADCAST`.** With `SO_BROADCAST` set, marked UDP to a subnet-directed
+  broadcast, to the guest prefix's broadcast address and to a multicast
+  group reached a wildcard host service; keeping the option unset is a
+  convention on every owner socket, where the non-unicast match makes those
+  destinations unreachable whatever the socket's options. Rejected.
+- **Match the exact mark value.** A mark carrying the owner bit plus another
+  bit escaped it. Rejected in favour of the masked bit.
 
 ## Consequences
 
@@ -97,5 +132,8 @@ backends are chosen by the platform's own service map and may be host-local.
   DNS.
 - One more refusal code on the wire, one socket mark, and one constant
   firewall rule.
-- Whether the firewall's local-delivery match works in the host output path
-  is a validation item (V-21), not an observed fact.
+- The match works in the host output path and was not bypassed (V-21,
+  feature delta P-47). The owner's connect to leg-F stays unmarked.
+- The UDP projection rests on the kernel reporting a redirect's transmit
+  error on the target socket; V-21 measured the reject with userspace
+  sends, and the redirect path is a DISTILL Tier-3 scenario.

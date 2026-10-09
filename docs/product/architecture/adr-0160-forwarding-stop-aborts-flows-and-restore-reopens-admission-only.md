@@ -6,7 +6,9 @@
 `SO_LINGER{1,0}` extended to the host's remote-side sockets and leg-F's
 remote socket (independent DESIGN review finding H-5) — confirmed by user
 2026-10-06; independent review r12 answered; further review waived by user
-2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+2026-10-08; handed to DISTILL.** Leg-F's linger clearing pinned, and the
+cross-boundary half-close made explicit (ADR-0180, HALFCLOSE-SIGNAL), under
+the user's 2026-10-09 remediation directive after V-13. GH #295. Recorded in the #295 feature delta, § *[REF] vsock
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*. It replaces ADR-0124's
 containment primitive (TAP quiescence); ADR-0124's cadence and fail-stop are
 unchanged.
@@ -51,14 +53,20 @@ The guest-capture spike established the half-close mechanics:
 - **Half-close.** On peer EOF the owner calls `shutdown(SHUT_WR)` on the
   partner only after the drain signal shows every hop toward that partner has
   drained. If the drain signal does not converge within the pinned drain
-  deadline, the flow is aborted, never truncated.
+  deadline, the flow is aborted, never truncated. Across the VM boundary a
+  half-close also needs the peer owner's announcement: a flow vsock's
+  end-of-stream is a half-close only after an acknowledged `HalfClose`, and
+  otherwise aborts the flow (ADR-0180).
 - **Owner-crash visibility, both ends.** Every TCP socket an owner holds whose
-  far end is outside that owner carries `SO_LINGER{1,0}` from creation, so an
-  owner exit resets it rather than ending it with a clean FIN:
+  far end is outside that owner carries `SO_LINGER{1,0}` from creation, so the
+  owner's exit resets it rather than ending it with a clean FIN (the far ends
+  of the *surviving* owner's sockets are reset by ADR-0180's rule):
   - guest: intake children and sockets connected to the application;
   - host: intake children, and the socket the owner connects toward a
     non-mesh destination;
-  - leg-F: for a forwarded mesh flow, its socket toward the remote peer.
+  - leg-F: for a forwarded mesh flow, its socket toward the remote peer,
+    whose linger leg-F clears only on a clean close of both directions — an
+    error or reset on its loopback leg closes it with linger set.
 
   Before a clean close the owner clears linger. Sockets whose far end is
   inside the same process (the owner's socket to leg-F) need no linger: both
@@ -84,9 +92,12 @@ The guest-capture spike established the half-close mechanics:
   datagram sent while the association is down may be lost, as UDP permits.
 - The drain signal needs the host and guest `fexit(skb_send_sock)` program and
   exact counters (ADR-0151).
-- An owner exit now resets in-flight connections on both sides — the guest
-  application and the remote peer — instead of ending them cleanly. That is
-  the intended surface; it is untested (V-13).
+- An owner exit resets in-flight connections on both sides — the guest
+  application and the remote peer — instead of ending them cleanly. V-13
+  (feature delta P-42) showed linger resetting every far end the dying owner
+  holds, and the surviving owner's far ends ending in EOF when a vsock
+  end-of-stream was taken as a half-close; ADR-0180 removes that path. The mesh remote peer through
+  leg-F was not measured with production leg-F.
 - Remote clients of an inbound flow are connected to leg-C, not to the owner;
   on an `overdrive serve` exit they observe the TLS session ending without
   `close_notify`, which TLS reports as truncation. Leg-C's own linger policy is

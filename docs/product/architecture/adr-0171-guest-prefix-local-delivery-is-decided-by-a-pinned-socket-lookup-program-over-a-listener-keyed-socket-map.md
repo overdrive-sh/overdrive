@@ -51,7 +51,9 @@ reach it.
   the prefix, and the gateway, pass to the normal lookup untouched.
 - **The listener is the steering decision.** The program reads one socket map
   keyed by `(workload_addr, port)` whose value is the intake listener for that
-  port. For a TCP connection arriving on the loopback interface (host-local
+  port; the listener is bound to `workload_addr` on a port of the intake
+  host block (ADR-0178), and the program assigns it whatever port it is
+  bound to. For a TCP connection arriving on the loopback interface (host-local
   clients: leg-S, probes) whose key has an entry, it assigns that listener.
   Every other lookup for the prefix is dropped: a key with no entry, any UDP,
   and any connection arriving on another interface (remote traffic reaches
@@ -135,11 +137,12 @@ reach it.
   of a serving port directly — as under the bridge topology, never a host
   service or a port the guest does not serve — until ADR-0124's recovery of
   those rules.
-- New kernel facts are assumed and validated (feature delta V-26): the
-  lookup runs for loopback connections to a `local`-route address before the
-  wildcard lookup; a drop yields a reset; a TPROXY-assigned packet bypasses
-  it; a closing listener leaves the map, and frees its slot, in the same
-  step; a pinned link keeps running with no process. The program's own
+- The kernel facts were validated by V-26 (feature delta P-40; kernels
+  7.0.0-34 and 7.0.0-29): the lookup runs for loopback connections to a
+  `local`-route address before the wildcard lookup; a drop yields a reset; a
+  TPROXY-assigned packet bypasses it; a closing listener leaves the map, and
+  frees its slot, in the same step; a pinned link keeps running with no
+  process; the program assigns a listener whatever it is bound to. The program's own
   correctness is established by the Tier-3 steering tests in CI on the
   pinned kernel (feature delta A-33). The steering rules are checked by the
   formal model (ADR-0168, `specs/quint/guest-flow-owner/`, modules
