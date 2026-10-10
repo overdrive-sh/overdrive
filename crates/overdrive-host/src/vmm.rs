@@ -42,12 +42,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use command_fds::{CommandFdExt, FdMapping};
+use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
-    Result, TapQueueStage, TapQueueViolation, VmControl, VmExitWatch, VmProcess, VmTermination,
-    Vmm, VmmDiagnostics, VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
+    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
+    VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
 };
-use overdrive_core::vm::config::{DiskAttachment, VmConfig, VmNetworkAttachment};
+use overdrive_core::vm::config::{DiskAttachment, VmConfig};
 use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::{ChildStderr, Command};
@@ -76,9 +77,6 @@ const REFLINK_PROBE_BYTES: usize = 8 * 1024 * 1024;
 /// § "Production code is not shaped by simulation").
 const STDERR_DRAIN_MAX_YIELDS: u32 = 16;
 const REQUIRED_LAUNCH_TOOLS: [&str; 2] = ["prlimit", "setpriv"];
-/// The Cloud Hypervisor child's descriptor for the per-launch TAP queue
-/// (`--net fd=[3]`, D-295-R1/R2/R3; ADR-0127, ADR-0128, ADR-0129).
-pub(crate) const VMM_TAP_QUEUE_FD: std::os::fd::RawFd = 3;
 
 #[async_trait]
 trait VmmProbeSubstrate: Send + Sync {
@@ -269,11 +267,17 @@ impl CloudHypervisorVmm {
     /// `--landlock-rules` is rendered HERE — the sole site the 01-10 dst-lint
     /// clause sanctions; each rule VALUE comes from the pure
     /// [`LandlockRule::to_rule_arg`].
-    /// Extracted from `create` purely to keep it within the line budget.
-    fn build_confined_command(&self, config: &VmConfig, wrapper: &[String]) -> Command {
-        let (program, prefix_args) = network_launch_prefix(config.network.as_ref(), wrapper);
-        let mut cmd = Command::new(program);
-        cmd.args(prefix_args);
+    /// `vsock_arg` is the one `--vsock` device argument of the claimed CID
+    /// (§ *VMM backend contract*). Extracted from `create` purely to keep it
+    /// within the line budget.
+    fn build_confined_command(
+        &self,
+        config: &VmConfig,
+        wrapper: &[String],
+        vsock_arg: &str,
+    ) -> Command {
+        let mut cmd = Command::new(&wrapper[0]);
+        cmd.args(&wrapper[1..]);
         cmd.arg(&self.binary)
             .arg("--cpus")
             .arg(format!("boot={}", config.vcpus))
@@ -294,15 +298,12 @@ impl CloudHypervisorVmm {
             .arg("--console")
             .arg("off")
             .arg("--vsock")
-            .arg(format!("cid=3,socket={}", config.run_dir.vsock_socket().display()))
+            .arg(vsock_arg)
             .arg("--api-socket")
             .arg(config.run_dir.api_socket())
             .arg("--seccomp")
             .arg(config.confinement.seccomp_arg())
             .arg("--landlock");
-        if let Some(network) = config.network.as_ref() {
-            cmd.arg("--net").arg(cloud_hypervisor_network_arg(network));
-        }
         for rule in config.landlock_rules() {
             cmd.arg("--landlock-rules").arg(rule.to_rule_arg());
         }
@@ -365,24 +366,18 @@ fn register_launch_child_hook(
     }
 }
 
-fn network_launch_prefix(
-    _network: Option<&VmNetworkAttachment>,
-    wrapper: &[String],
-) -> (String, Vec<String>) {
-    (wrapper[0].clone(), wrapper[1..].to_vec())
-}
-
-fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {
-    format!(
-        "fd=[{}],mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x},offload_tso=off,offload_ufo=off,offload_csum=off",
-        VMM_TAP_QUEUE_FD,
-        attachment.mac[0],
-        attachment.mac[1],
-        attachment.mac[2],
-        attachment.mac[3],
-        attachment.mac[4],
-        attachment.mac[5],
-    )
+/// The claimed vsock device's launch handoff (D16-CLAIM, § *VMM backend
+/// contract*, ADR-0170): the one `--vsock cid=<claim.cid()>,backend=vhost-kernel,fd=<K>`
+/// argument and the descriptor mapping that installs the claimed
+/// `/dev/vhost-vsock` file (`vsock.into_device().vhost_fd()`) at `K` in the
+/// child before `exec`. A device without a `vhost_fd` (a simulated claim) is
+/// a typed `VmmError::Create` refusal.
+///
+/// RED scaffold (DISTILL): DG-2 row 6 — the claim handoff to the VMM lands in
+/// the attachment cut.
+// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 6, attachment cut).
+fn claimed_vsock_handoff(_vsock: ClaimedGuestCid) -> Result<(String, FdMapping)> {
+    panic!("Not yet implemented -- RED scaffold")
 }
 
 fn classify_launch_spawn_error(
@@ -400,35 +395,6 @@ fn classify_launch_spawn_error(
             "spawning VMM launch executable {} failed: {source}",
             launched_executable.to_string_lossy()
         ))
-    }
-}
-
-fn map_tap_queue_error(tap: &str, error: overdrive_netlink::TapQueueError) -> VmmError {
-    use overdrive_netlink::TapQueueError;
-
-    match error {
-        TapQueueError::Open { source, .. } => {
-            VmmError::TapQueue { tap: tap.to_owned(), stage: TapQueueStage::Open, source }
-        }
-        TapQueueError::Attach { source, .. } => {
-            VmmError::TapQueue { tap: tap.to_owned(), stage: TapQueueStage::Attach, source }
-        }
-        TapQueueError::FlagsReadBack { source, .. } => {
-            VmmError::TapQueue { tap: tap.to_owned(), stage: TapQueueStage::FlagsReadBack, source }
-        }
-        TapQueueError::Flags { observed, .. } => VmmError::TapQueuePostcondition {
-            tap: tap.to_owned(),
-            violation: TapQueueViolation::Flags { observed },
-        },
-        TapQueueError::AdminStateReadBack { source, .. } => VmmError::TapQueue {
-            tap: tap.to_owned(),
-            stage: TapQueueStage::AdminStateReadBack,
-            source,
-        },
-        TapQueueError::NotDown { .. } => VmmError::TapQueuePostcondition {
-            tap: tap.to_owned(),
-            violation: TapQueueViolation::NotDown,
-        },
     }
 }
 
@@ -476,7 +442,7 @@ impl Vmm for CloudHypervisorVmm {
     // ordering. `#[allow]` (not `#[expect]`) because the `#[async_trait]`
     // expansion makes `#[expect]` self-fulfilment unreliable here.
     #[allow(clippy::too_many_lines)]
-    async fn create(&self, config: &VmConfig) -> Result<VmProcess> {
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> Result<VmProcess> {
         let launch_filter =
             launch_seccomp::VmmLaunchSeccompFilter::for_target().map_err(|error| {
                 VmmError::ConfinementUnavailable {
@@ -570,29 +536,17 @@ impl Vmm for CloudHypervisorVmm {
         }
 
         // §(c): spawn Cloud Hypervisor through the existing confinement
-        // wrapper. The persistent TAP is already attached to the shared host
-        // bridge; no namespace-exec launcher is required.
+        // wrapper, handing it the claimed vsock device (D16-CLAIM).
         let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
-        let tap_queue = config
-            .network
-            .as_ref()
-            .map(|attachment| {
-                overdrive_netlink::attach_tap_queue(&attachment.tap)
-                    .map_err(|error| map_tap_queue_error(&attachment.tap, error))
-            })
-            .transpose()?;
-        let mut cmd = self.build_confined_command(config, &wrapper);
-        if let Some(queue) = tap_queue {
-            let mapping =
-                FdMapping { parent_fd: queue.into_owned_fd(), child_fd: VMM_TAP_QUEUE_FD };
-            if let Err(error) = cmd.fd_mappings(vec![mapping]) {
-                return Err(VmmError::create(format!(
-                    "mapping TAP queue to child descriptor {VMM_TAP_QUEUE_FD} failed: {error}"
-                )));
-            }
+        let (vsock_arg, vsock_mapping) = claimed_vsock_handoff(vsock)?;
+        let vsock_child_fd = vsock_mapping.child_fd;
+        let mut cmd = self.build_confined_command(config, &wrapper, &vsock_arg);
+        if let Err(error) = cmd.fd_mappings(vec![vsock_mapping]) {
+            return Err(VmmError::create(format!(
+                "mapping the claimed vsock device to child descriptor {vsock_child_fd} failed: {error}"
+            )));
         }
-        let first_closed = if config.network.is_some() { VMM_TAP_QUEUE_FD + 1 } else { 3 };
-        register_launch_child_hook(&mut cmd, first_closed, launch_filter);
+        register_launch_child_hook(&mut cmd, vsock_child_fd + 1, launch_filter);
         let launched_executable: OsString = cmd.as_std().get_program().to_owned();
 
         // `let-else` is deliberately NOT used here (unlike the `child.id()`
@@ -1150,7 +1104,7 @@ mod tests {
         CloudHypervisorVmm { probe_substrate: Arc::new(substrate), ..CloudHypervisorVmm::new() }
     }
 
-    fn sample_config(network: Option<VmNetworkAttachment>) -> VmConfig {
+    fn sample_config() -> VmConfig {
         let alloc = AllocationId::new("mesh-argv").unwrap();
         let mut header = vec![0; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
@@ -1177,7 +1131,6 @@ mod tests {
                 VmmIdentity { uid: 991, gid: Gid::new(994), supplementary: vec![] },
                 1024,
             ),
-            network,
             cgroup_scope: CgroupPath::for_alloc(&alloc),
         }
     }
@@ -1358,26 +1311,15 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    fn mesh_and_non_mesh_launches_preserve_shape_and_attribute_the_actual_launcher() {
-        let attachment = VmNetworkAttachment {
-            tap: "ovd-tap-002a".to_owned(),
-            mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
-        };
+    fn launches_preserve_shape_and_attribute_the_actual_launcher() {
         let wrapper = vec![
             "prlimit".to_owned(),
             "--fsize=1073741824".to_owned(),
             "setpriv".to_owned(),
             "--reuid=991".to_owned(),
         ];
-        let queue_net_arg =
-            "fd=[3],mac=02:00:00:00:00:2a,offload_tso=off,offload_ufo=off,offload_csum=off";
+        let vsock_arg = "cid=16777216,backend=vhost-kernel,fd=3";
 
-        assert_eq!(VMM_TAP_QUEUE_FD, 3, "the queue is handed to Cloud Hypervisor at descriptor 3");
-        assert_eq!(
-            cloud_hypervisor_network_arg(&attachment),
-            queue_net_arg,
-            "the network argument must name only descriptor 3 and the guest MAC",
-        );
         assert_eq!(
             REQUIRED_LAUNCH_TOOLS.as_slice(),
             ["prlimit", "setpriv"].as_slice(),
@@ -1385,36 +1327,7 @@ mod tests {
         );
 
         let vmm = CloudHypervisorVmm::new().with_binary(PathBuf::from("/usr/bin/cloud-hypervisor"));
-        let command = vmm.build_confined_command(&sample_config(Some(attachment)), &wrapper);
-        let command = command.as_std();
-        let program = command.get_program().to_string_lossy();
-        let args: Vec<_> =
-            command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
-
-        assert_eq!(program, "prlimit");
-        assert_eq!(
-            &args[..4],
-            ["--fsize=1073741824", "setpriv", "--reuid=991", "/usr/bin/cloud-hypervisor"],
-            "the direct launch must preserve the confinement argv",
-        );
-        let net_flag = args.iter().position(|arg| arg == "--net").unwrap();
-        assert_eq!(
-            args[net_flag + 1],
-            queue_net_arg,
-            "Cloud Hypervisor must import its queue from descriptor 3 with the slot-derived MAC",
-        );
-        assert!(
-            !args.iter().any(|arg| arg.contains("tap=")),
-            "Cloud Hypervisor must never open the TAP by name: {args:?}",
-        );
-        assert!(
-            args.windows(2).any(|pair| {
-                pair == ["--landlock-rules", "path=/sys/class/net/ovd-tap-002a,access=r"]
-            }),
-            "mesh VMM confinement must grant read-only access to the exact TAP sysfs directory",
-        );
-
-        let command = vmm.build_confined_command(&sample_config(None), &wrapper);
+        let command = vmm.build_confined_command(&sample_config(), &wrapper, vsock_arg);
         let command = command.as_std();
         let program = command.get_program().to_string_lossy();
         let args: Vec<_> =
@@ -1423,25 +1336,29 @@ mod tests {
         assert_eq!(
             &args[..4],
             ["--fsize=1073741824", "setpriv", "--reuid=991", "/usr/bin/cloud-hypervisor"],
-            "non-mesh launch prefix must remain byte-for-byte unchanged"
+            "the launch prefix must remain byte-for-byte unchanged"
         );
-        assert!(!args.iter().any(|arg| arg == "--net"));
+        let vsock_flags: Vec<_> =
+            args.iter().enumerate().filter(|(_, arg)| *arg == "--vsock").collect();
+        assert_eq!(vsock_flags.len(), 1, "exactly one vsock device: {args:?}");
+        assert_eq!(args[vsock_flags[0].0 + 1], vsock_arg, "the vsock argument is passed verbatim");
+        assert!(!args.iter().any(|arg| arg == "--net"), "no network device: {args:?}");
         assert!(
             !args.iter().any(|arg| arg.contains("/sys/class/net/")),
-            "a non-networked VM must not gain a sysfs network grant",
+            "the VMM confinement grants no sysfs network access",
         );
 
-        let non_mesh = classify_launch_spawn_error(
+        let launcher_absent = classify_launch_spawn_error(
             OsStr::new("prlimit"),
             &wrapper,
             &io::Error::from(io::ErrorKind::NotFound),
         );
         assert!(
             matches!(
-                non_mesh,
+                launcher_absent,
                 VmmError::ConfinementUnavailable { control: ConfinementControl::UidDrop, .. }
             ),
-            "missing non-mesh wrapper must preserve the established confinement classification"
+            "a missing wrapper must preserve the established confinement classification"
         );
     }
 }
@@ -1471,24 +1388,43 @@ mod tests {
 )]
 mod launch_seccomp_kernel {
 
+    #[cfg(not(target_arch = "x86_64"))]
     use std::num::NonZeroU8;
+    #[cfg(target_arch = "x86_64")]
     use std::os::fd::{AsRawFd, OwnedFd};
+    #[cfg(not(target_arch = "x86_64"))]
     use std::os::unix::fs::MetadataExt;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
+    #[cfg(not(target_arch = "x86_64"))]
+    use std::path::PathBuf;
+    #[cfg(target_arch = "x86_64")]
     use std::sync::atomic::{AtomicU32, Ordering};
 
+    #[cfg(not(target_arch = "x86_64"))]
     use overdrive_core::cgroup::CgroupPath;
+    #[cfg(not(target_arch = "x86_64"))]
     use overdrive_core::id::AllocationId;
+    #[cfg(not(target_arch = "x86_64"))]
     use overdrive_core::vm::config::{
         Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
         VmConfinement, VmRunDir, VmmIdentity,
     };
+    #[cfg(target_arch = "x86_64")]
     use overdrive_netlink::{Client, block_on_host_netlink, create_persistent_tap};
 
-    use super::{CloudHypervisorVmm, VmConfig, VmNetworkAttachment, io};
+    use super::io;
+    #[cfg(not(target_arch = "x86_64"))]
+    use super::{CloudHypervisorVmm, VmConfig};
 
+    /// The descriptor the cases hand the scratch TAP queue to in the
+    /// launched child (the hook's `first_closed` is one past it).
+    #[cfg(target_arch = "x86_64")]
+    const CHILD_QUEUE_FD: std::os::fd::RawFd = 3;
+
+    #[cfg(target_arch = "x86_64")]
     static SCRATCH_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
+    #[cfg(target_arch = "x86_64")]
     /// A persistent TAP created by root with owner uid 0, as the shared
     /// guest-network owner creates it (D-295-R4): down, unbridged, named
     /// outside the managed `ovd-tp-` prefix, and deleted on drop.
@@ -1496,6 +1432,7 @@ mod launch_seccomp_kernel {
         name: String,
     }
 
+    #[cfg(target_arch = "x86_64")]
     impl ScratchTap {
         fn create() -> Self {
             let sequence = SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -1506,6 +1443,7 @@ mod launch_seccomp_kernel {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
     impl Drop for ScratchTap {
         fn drop(&mut self) {
             let name = self.name.clone();
@@ -1517,6 +1455,7 @@ mod launch_seccomp_kernel {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
     /// An `ifreq` naming `name`, every other byte zero.
     fn named_ifreq(name: &str) -> libc::ifreq {
         assert!(name.len() < libc::IFNAMSIZ, "interface name {name} must fit IFNAMSIZ");
@@ -1528,12 +1467,14 @@ mod launch_seccomp_kernel {
         request
     }
 
+    #[cfg(target_arch = "x86_64")]
     /// The flags of a vnet-header single-queue TAP queue (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the `attach_tap_queue` contract: effect)).
     fn tap_queue_flags() -> libc::c_short {
         libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI | libc::IFF_VNET_HDR)
             .expect("TAP queue flags fit ifr_flags")
     }
 
+    #[cfg(target_arch = "x86_64")]
     /// Attach one vnet-header queue to the scratch TAP with a raw `TUNSETIFF`.
     /// Fixture setup only: the production `attach_tap_queue` is DELIVER 05-03
     /// and carries its own contract (S-ND295-38), so the 05-02 cases attach
@@ -1553,41 +1494,7 @@ mod launch_seccomp_kernel {
         OwnedFd::from(tun)
     }
 
-    /// `(carrier_up_count, carrier_down_count)`: a TAP's carrier rises when a
-    /// queue attaches and falls when its last queue closes, so the pair counts
-    /// attaches and releases even while the TAP is administratively down.
-    fn carrier_counts(tap: &str) -> (u64, u64) {
-        let read = |counter: &str| -> u64 {
-            let path = format!("/sys/class/net/{tap}/{counter}");
-            let raw = std::fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("read {path}: {error}"));
-            raw.trim().parse().unwrap_or_else(|error| panic!("parse {path} ({raw:?}): {error}"))
-        };
-        (read("carrier_up_count"), read("carrier_down_count"))
-    }
-
-    /// Every descriptor of this process whose `fdinfo` names `tap`'s queue.
-    fn descriptors_holding_queue_of(tap: &str) -> Vec<i32> {
-        let listed: Vec<i32> = std::fs::read_dir("/proc/self/fd")
-            .expect("list /proc/self/fd")
-            .map(|entry| {
-                let name = entry.expect("read a /proc/self/fd entry").file_name();
-                name.to_string_lossy().parse().expect("descriptor entries are numbers")
-            })
-            .collect();
-        listed
-            .into_iter()
-            .filter(|fd| match std::fs::read_to_string(format!("/proc/self/fdinfo/{fd}")) {
-                Ok(info) => info.lines().any(|line| {
-                    line.strip_prefix("iff:").is_some_and(|holder| holder.trim() == tap)
-                }),
-                // The directory handle used for the listing is closed by now.
-                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
-                Err(error) => panic!("read /proc/self/fdinfo/{fd}: {error}"),
-            })
-            .collect()
-    }
-
+    #[cfg(not(target_arch = "x86_64"))]
     /// The owner uid of `path`, or `None` while it does not exist.
     fn owner_uid(path: &Path) -> Option<u32> {
         match std::fs::metadata(path) {
@@ -1597,6 +1504,7 @@ mod launch_seccomp_kernel {
         }
     }
 
+    #[cfg(not(target_arch = "x86_64"))]
     /// A complete VM launch configuration over real files under `root`: a
     /// rootfs master, clone staging and index directories, a kernel image, a
     /// run directory, and an executable stand-in hypervisor binary that the
@@ -1607,8 +1515,9 @@ mod launch_seccomp_kernel {
         hypervisor: PathBuf,
     }
 
+    #[cfg(not(target_arch = "x86_64"))]
     impl LaunchFixture {
-        fn new(root: tempfile::TempDir, network: VmNetworkAttachment) -> Self {
+        fn new(root: tempfile::TempDir) -> Self {
             use std::os::unix::fs::PermissionsExt;
 
             let base = root.path();
@@ -1644,7 +1553,6 @@ mod launch_seccomp_kernel {
                     VmmIdentity { uid: 991, gid: Gid::new(994), supplementary: vec![] },
                     1024,
                 ),
-                network: Some(network),
                 cgroup_scope: CgroupPath::for_alloc(&alloc),
             };
             Self { _root: root, config, hypervisor }
@@ -1822,7 +1730,7 @@ mod launch_seccomp_kernel {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
             let queue_fd = queue.as_raw_fd();
-            let queue_child_fd = super::VMM_TAP_QUEUE_FD;
+            let queue_child_fd = CHILD_QUEUE_FD;
             let no_core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
             // SAFETY: the closure runs in the forked child before exec and
             // issues only `setrlimit`, `fcntl`, and `dup2` raw syscalls on
@@ -2053,7 +1961,7 @@ mod launch_seccomp_kernel {
 
     #[cfg(target_arch = "x86_64")]
     fn child_requests(tap: &str) {
-        let queue = super::VMM_TAP_QUEUE_FD;
+        let queue = CHILD_QUEUE_FD;
         let first = issue_denied_requests(queue);
         let spawned: Vec<_> =
             (0..3).map(|_| std::thread::spawn(move || issue_denied_requests(queue))).collect();
@@ -2130,7 +2038,7 @@ mod launch_seccomp_kernel {
         let rc = unsafe {
             libc::syscall(
                 X32_IOCTL,
-                libc::c_long::from(super::VMM_TAP_QUEUE_FD),
+                libc::c_long::from(CHILD_QUEUE_FD),
                 owner_request,
                 libc::c_long::from(u32::MAX),
             )
@@ -2169,7 +2077,7 @@ mod launch_seccomp_kernel {
     #[cfg(target_arch = "x86_64")]
     fn child_i386_ioctl() {
         let owner_request = u32::try_from(libc::TUNSETOWNER).expect("request fits 32 bits");
-        let queue = u32::try_from(super::VMM_TAP_QUEUE_FD).expect("descriptor fits 32 bits");
+        let queue = u32::try_from(CHILD_QUEUE_FD).expect("descriptor fits 32 bits");
         let returned = int80(I386_IOCTL, queue, owner_request, u32::MAX);
         report(format_args!("i386 returned={returned:#x}"));
     }
@@ -2490,7 +2398,7 @@ mod launch_seccomp_kernel {
         let inheritable = InheritableDescriptors::open();
 
         for (first_closed, expected_fds, expected_fd3) in
-            [(super::VMM_TAP_QUEUE_FD + 1, "0,1,2,3", tap.name.as_str()), (3, "0,1,2", "-")]
+            [(CHILD_QUEUE_FD + 1, "0,1,2,3", tap.name.as_str()), (3, "0,1,2", "-")]
         {
             let child = run_child("descriptors", &tap, &queue, Launch::Hooked { first_closed });
             child.assert_completed();
@@ -2682,7 +2590,7 @@ mod launch_seccomp_kernel {
             "requests",
             &tap,
             &queue,
-            Launch::Hooked { first_closed: super::VMM_TAP_QUEUE_FD + 1 },
+            Launch::Hooked { first_closed: CHILD_QUEUE_FD + 1 },
         );
         filtered.assert_completed();
         let denied: std::collections::BTreeMap<(String, String), String> = filtered
@@ -2730,7 +2638,7 @@ mod launch_seccomp_kernel {
             "tasks",
             &tap,
             &queue,
-            Launch::Hooked { first_closed: super::VMM_TAP_QUEUE_FD + 1 },
+            Launch::Hooked { first_closed: CHILD_QUEUE_FD + 1 },
         );
         child.assert_completed();
         let descriptors = child.records("descriptors");
@@ -2780,7 +2688,7 @@ mod launch_seccomp_kernel {
     fn foreign_syscall_abis_end_the_filtered_process() {
         let tap = ScratchTap::create();
         let queue = attach_scratch_queue(&tap.name);
-        let hooked = Launch::Hooked { first_closed: super::VMM_TAP_QUEUE_FD + 1 };
+        let hooked = Launch::Hooked { first_closed: CHILD_QUEUE_FD + 1 };
 
         // Contrast: unfiltered, the x32 ioctl returns (ENOSYS or EINVAL), so
         // a SIGSYS below is the launch filter's.
@@ -2819,209 +2727,6 @@ mod launch_seccomp_kernel {
         }
     }
 
-    /// Restores `PATH` on drop.
-    #[cfg(target_arch = "x86_64")]
-    struct PathGuard {
-        prior: Option<std::ffi::OsString>,
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    impl PathGuard {
-        fn replace(value: &Path) -> Self {
-            let prior = std::env::var_os("PATH");
-            // SAFETY: `#[serial(env)]` gives this test exclusive use of the
-            // process environment, and no other thread of it is running yet.
-            unsafe { std::env::set_var("PATH", value) };
-            Self { prior }
-        }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    impl Drop for PathGuard {
-        fn drop(&mut self) {
-            // SAFETY: as in `replace`; the runtime is dropped before this guard.
-            unsafe {
-                match &self.prior {
-                    Some(prior) => std::env::set_var("PATH", prior),
-                    None => std::env::remove_var("PATH"),
-                }
-            }
-        }
-    }
-
-    /// The staging root must clone by `FICLONE`, as `create` requires.
-    #[cfg(target_arch = "x86_64")]
-    fn assert_reflink_capable(dir: &Path) {
-        let source = dir.join(".nd295-reflink-probe");
-        let clone = dir.join(".nd295-reflink-probe.clone");
-        std::fs::write(&source, [0xcd_u8; 4096]).expect("write the reflink probe");
-        let src = std::fs::File::open(&source).expect("open the reflink probe");
-        let dst = std::fs::File::create_new(&clone).expect("create the reflink clone");
-        rustix::fs::ioctl_ficlone(&dst, &src).unwrap_or_else(|error| {
-            panic!(
-                "precondition: {} must be reflink-capable (the native metal /srv/vm is \
-                 XFS-reflink): {error}",
-                dir.display()
-            )
-        });
-        drop((src, dst));
-        std::fs::remove_file(&clone).expect("remove the reflink clone");
-        std::fs::remove_file(&source).expect("remove the reflink probe");
-    }
-
-    /// What the process held while `create` was parked on its cleanup await.
-    #[cfg(target_arch = "x86_64")]
-    #[derive(Debug)]
-    struct CleanupAwait {
-        queue_descriptors: Vec<i32>,
-        clone_present: bool,
-        carrier: (u64, u64),
-    }
-
-    /// Drive `create` by hand on a runtime with one blocking thread. At every
-    /// await it records any descriptor of this process holding the queue.
-    /// Once `create` has handed the clone to the confined uid (its last
-    /// blocking step before the spawn), a gate occupies the blocking thread,
-    /// so the next poll runs the attach and the spawn and parks on the
-    /// clone-removal await; the process is observed there, then released.
-    #[cfg(target_arch = "x86_64")]
-    async fn drive_create_through_its_cleanup_await(
-        vmm: &CloudHypervisorVmm,
-        config: &VmConfig,
-        tap: &str,
-    ) -> (super::Result<super::VmProcess>, Option<CleanupAwait>, Vec<Vec<i32>>) {
-        use super::Vmm;
-
-        let clone_dest = config.rootfs.clone_dest().to_path_buf();
-        let confined_uid = config.confinement.identity().uid;
-        let mut create = std::pin::pin!(vmm.create(config));
-        let mut held_at_awaits = Vec::new();
-        let mut parked = None;
-        let mut gate: Option<tokio::task::JoinHandle<()>> = None;
-        loop {
-            let polled =
-                std::future::poll_fn(|cx| std::task::Poll::Ready(create.as_mut().poll(cx))).await;
-            if let std::task::Poll::Ready(result) = polled {
-                if let Some(gate) = gate {
-                    gate.await.expect("the blocking-thread gate completes");
-                }
-                return (result, parked, held_at_awaits);
-            }
-            let holders = descriptors_holding_queue_of(tap);
-            if !holders.is_empty() {
-                held_at_awaits.push(holders);
-            }
-            if gate.is_none() && owner_uid(&clone_dest) == Some(confined_uid) {
-                let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
-                let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
-                gate = Some(tokio::task::spawn_blocking(move || {
-                    started_tx.send(()).expect("announce the gate");
-                    release_rx.recv().expect("the case releases the gate");
-                }));
-                started_rx
-                    .recv_timeout(std::time::Duration::from_secs(60))
-                    .expect("the gate holds the only blocking thread once the path handover ends");
-                let resumed =
-                    std::future::poll_fn(|cx| std::task::Poll::Ready(create.as_mut().poll(cx)))
-                        .await;
-                assert!(
-                    resumed.is_pending(),
-                    "create must park on its clone-removal await behind the occupied blocking thread",
-                );
-                parked = Some(CleanupAwait {
-                    queue_descriptors: descriptors_holding_queue_of(tap),
-                    clone_present: clone_dest.exists(),
-                    carrier: carrier_counts(tap),
-                });
-                release_tx.send(()).expect("release the gate");
-            }
-            tokio::task::yield_now().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-40 — The VMM adapter launches from the queue and reports queue
-    /// failures in their own terms (a failed spawn releases the queue before
-    /// any cleanup await).
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// Lane: native x86_64 metal, not the Lima kernel lane. The case is
-    /// x86_64-only (the launch hook takes the x86_64 launch program), and its
-    /// `create` clones the rootfs by `FICLONE`, so `assert_reflink_capable`
-    /// requires a reflink-capable staging root (the metal `/srv/vm`).
-    #[cfg(target_arch = "x86_64")]
-    #[test]
-    #[serial_test::serial(env)]
-    fn a_failed_spawn_releases_the_queue_before_any_cleanup_await() {
-        let staging_root = overdrive_testing::vm_fixture::default_staging_root();
-        std::fs::create_dir_all(&staging_root).expect("create the VM staging root");
-        let root = tempfile::Builder::new()
-            .prefix("nd295-launch-")
-            .tempdir_in(&staging_root)
-            .expect("per-case directory on the VM staging root");
-        assert_reflink_capable(root.path());
-        let empty_path = root.path().join("empty-path");
-        std::fs::create_dir(&empty_path).expect("create an empty PATH directory");
-        let tap = ScratchTap::create();
-        let fixture = LaunchFixture::new(
-            root,
-            VmNetworkAttachment {
-                tap: tap.name.clone(),
-                mac: [0x02, 0x00, 0x00, 0x00, 0x29, 0x5a],
-            },
-        );
-        let clone_dest = fixture.config.rootfs.clone_dest().to_path_buf();
-        let vmm = fixture.vmm();
-        // The launch wrapper `prlimit` resolves through PATH; an empty PATH
-        // makes the spawn itself fail after the queue is attached.
-        let path_guard = PathGuard::replace(&empty_path);
-        let before = carrier_counts(&tap.name);
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .max_blocking_threads(1)
-            .build()
-            .expect("single-blocking-thread runtime");
-        let (result, parked, held_at_awaits) = runtime
-            .block_on(drive_create_through_its_cleanup_await(&vmm, &fixture.config, &tap.name));
-        drop(runtime);
-        drop(path_guard);
-
-        assert!(
-            held_at_awaits.is_empty(),
-            "the parent must hold no queue descriptor at any await of create: {held_at_awaits:?}",
-        );
-        let parked = parked.unwrap_or_else(|| {
-            panic!("create never handed its clone to the confined uid: {result:?}")
-        });
-        assert!(parked.clone_present, "the observation must precede the clone removal: {parked:?}");
-        assert!(
-            parked.queue_descriptors.is_empty(),
-            "no descriptor of the parent may hold the queue at the cleanup await: {parked:?}",
-        );
-        let attached = parked.carrier.0 - before.0;
-        let released = parked.carrier.1 - before.1;
-        assert!(attached >= 1, "create must attach the queue before its spawn: {parked:?}");
-        assert_eq!(
-            released, attached,
-            "every attached queue must be closed before the cleanup await: {parked:?}",
-        );
-        match &result {
-            Err(super::VmmError::ConfinementUnavailable {
-                control: super::ConfinementControl::UidDrop,
-                detail,
-            }) => assert!(
-                detail.contains("prlimit"),
-                "the spawn failure must name the launch wrapper: {detail}",
-            ),
-            other => panic!("create must fail at the wrapper spawn: {other:?}"),
-        }
-        assert!(!clone_dest.exists(), "the failed create removes its rootfs clone");
-        let fresh = overdrive_netlink::attach_tap_queue(&tap.name)
-            .expect("after the failed spawn no queue is held, so a fresh attach succeeds");
-        assert_eq!(fresh.name(), tap.name);
-    }
-
     // ------------------------------------------------------------------
     // Every other target: no program, so no microVM (user ruling 10)
     // ------------------------------------------------------------------
@@ -3034,6 +2739,9 @@ mod launch_seccomp_kernel {
     #[cfg(not(target_arch = "x86_64"))]
     #[tokio::test]
     async fn launch_on_a_target_without_a_program_is_refused_before_any_effect() {
+        use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid, GuestCidClaim};
+        use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
+
         use super::{
             ConfinementControl, RealVmmProbeSubstrate, Vmm, VmmError, VmmProbeError,
             VmmProbeSubstrate,
@@ -3049,22 +2757,16 @@ mod launch_seccomp_kernel {
             }
         }
 
-        let tap = ScratchTap::create();
-        let fixture = LaunchFixture::new(
-            tempfile::tempdir().expect("per-case directory"),
-            VmNetworkAttachment {
-                tap: tap.name.clone(),
-                mac: [0x02, 0x00, 0x00, 0x00, 0x29, 0x5b],
-            },
-        );
+        let fixture = LaunchFixture::new(tempfile::tempdir().expect("per-case directory"));
         let clone_dest = fixture.config.rootfs.clone_dest().to_path_buf();
         let staging =
             clone_dest.parent().expect("the clone lives in the staging dir").to_path_buf();
         let run_dir = fixture.config.run_dir.path().to_path_buf();
         let run_dir_owner = owner_uid(&run_dir);
-        let carrier_before = carrier_counts(&tap.name);
+        let cid = GuestCid::new(GUEST_CID_BASE).expect("an in-range guest CID");
+        let claim = SimGuestCidClaim::new().claim(cid).expect("claim the launch's guest CID");
 
-        let result = fixture.vmm().create(&fixture.config).await;
+        let result = fixture.vmm().create(&fixture.config, claim).await;
 
         match &result {
             Err(VmmError::ConfinementUnavailable {
@@ -3086,8 +2788,5 @@ mod launch_seccomp_kernel {
         );
         assert!(!fixture.config.run_dir.kernel_copy().exists(), "no kernel copy may be made");
         assert_eq!(owner_uid(&run_dir), run_dir_owner, "the run directory must not be handed over");
-        assert_eq!(carrier_counts(&tap.name), carrier_before, "no queue may have been attached");
-        assert!(descriptors_holding_queue_of(&tap.name).is_empty(), "no queue may be held");
-        drop(attach_scratch_queue(&tap.name));
     }
 }

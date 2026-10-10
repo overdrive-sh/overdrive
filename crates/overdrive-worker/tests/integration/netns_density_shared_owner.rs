@@ -27,11 +27,13 @@ use std::sync::{Condvar, Mutex as StdMutex};
 use std::time::Duration;
 
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
+use overdrive_core::guest_transport::{
+    GUEST_CID_BASE, GUEST_NODE_GATEWAY, GuestCid, GuestCidClaim as _, GuestTransportAssignment,
+    LaunchToken,
+};
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::driver::{
-    AllocationSpec, DriverPayload, GuestNetworkAssignment, Resources, VmPayload,
-};
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
 use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement, MtlsLimits,
     PumpLiveness,
@@ -40,6 +42,7 @@ use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, Resolved
 use overdrive_netlink::nft::SharedIpInterceptIdentity;
 use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_worker::mtls_intercept::{InterceptError, InterceptLeg, InterceptPostcondition};
 use overdrive_worker::mtls_intercept_port::{
@@ -472,7 +475,8 @@ enum SharedElement {
 }
 
 fn allocation_elements(spec: &AllocationSpec) -> BTreeSet<SharedElement> {
-    let address = spec.network.as_ref().expect("shared allocation has a network").address;
+    let address =
+        spec.transport.as_ref().expect("shared allocation has a transport").workload_addr();
     let mut elements = BTreeSet::from([
         SharedElement::ManagedGuest(address),
         SharedElement::OutboundSource(address),
@@ -1207,7 +1211,11 @@ impl MtlsIntercept for ActivationBarrierIntercept {
 }
 
 fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
-    let octet = address.octets()[3];
+    let [_, _, high, low] = address.octets();
+    let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
+        .expect("an in-range guest CID");
+    let claim = SimGuestCidClaim::new().claim(cid).expect("claim the allocation's guest CID");
+    let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
     AllocationSpec {
         alloc: AllocationId::new(name).expect("allocation id"),
         identity: SpiffeId::new(&format!(
@@ -1222,14 +1230,7 @@ fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 1, memory_bytes: 1 },
         probe_descriptors: Vec::new(),
-        network: Some(GuestNetworkAssignment {
-            address,
-            tap: format!("ovd-tp-{octet:04}"),
-            mac: [0x02, 0x00, 100, 95, 0, octet],
-            gateway: Ipv4Addr::new(100, 95, 0, 1),
-            prefix: 16,
-            dns: Ipv4Addr::new(100, 95, 0, 1),
-        }),
+        transport: Some(GuestTransportAssignment::new(address, GUEST_NODE_GATEWAY, launch, claim)),
         service_ports: [8080_u16, 8443]
             .into_iter()
             .map(|port| std::num::NonZeroU16::new(port).expect("non-zero port"))

@@ -445,9 +445,9 @@ fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &Allocat
                 clippy::expect_used,
                 reason = "ADR-0090 makes a provisioned workload address an established VM-registration precondition; no Vm + None probe behavior is defined"
             )]
-            spec.network
+            spec.transport
                 .as_ref()
-                .map(|network| network.address)
+                .map(overdrive_core::guest_transport::GuestTransportAssignment::workload_addr)
                 .expect("VM probe registration requires a provisioned workload address")
                 .to_string()
         }

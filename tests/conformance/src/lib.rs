@@ -64,6 +64,9 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry::LookupSpan;
 
+/// `prefix_landing` real-kernel conformance harness (QPROJ-8).
+pub mod prefix_landing;
+
 /// ADR-0124's accepted shared-network recovery cadence, stated as that
 /// contract and measured on the injected clock.
 ///

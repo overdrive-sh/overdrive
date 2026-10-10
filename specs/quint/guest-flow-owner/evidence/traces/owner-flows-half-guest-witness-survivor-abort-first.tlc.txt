@@ -21,7 +21,7 @@ State 1: <Initial predicate>
 /\ flows_half_guest_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_half_guest_owner_flows_drvLive = FALSE
 /\ flows_half_guest_owner_flows_crossMsg = FALSE
-/\ flows_half_guest_owner_flows_hc = [ opener |-> "g",
+/\ flows_half_guest_owner_flows_hc = [ opener |-> "h",
   paired |-> [g |-> FALSE, h |-> FALSE],
   outEof |-> [g |-> FALSE, h |-> FALSE],
   farHc |-> [g |-> FALSE, h |-> FALSE],
@@ -44,7 +44,7 @@ State 1: <Initial predicate>
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 2: <flows_half_guest_owner_flows_step line 3234, col 9 to line 3235, col 46 of module flows_half_guest>
+State 2: <flows_half_guest_owner_flows_step line 3263, col 9 to line 3264, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -67,7 +67,7 @@ State 2: <flows_half_guest_owner_flows_step line 3234, col 9 to line 3235, col 4
 /\ flows_half_guest_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_half_guest_owner_flows_drvLive = FALSE
 /\ flows_half_guest_owner_flows_crossMsg = FALSE
-/\ flows_half_guest_owner_flows_hc = [ opener |-> "g",
+/\ flows_half_guest_owner_flows_hc = [ opener |-> "h",
   paired |-> [g |-> FALSE, h |-> FALSE],
   outEof |-> [g |-> FALSE, h |-> FALSE],
   farHc |-> [g |-> FALSE, h |-> FALSE],
@@ -90,7 +90,7 @@ State 2: <flows_half_guest_owner_flows_step line 3234, col 9 to line 3235, col 4
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 3: <flows_half_guest_owner_flows_step line 3234, col 9 to line 3235, col 46 of module flows_half_guest>
+State 3: <flows_half_guest_owner_flows_step line 3263, col 9 to line 3264, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -113,7 +113,7 @@ State 3: <flows_half_guest_owner_flows_step line 3234, col 9 to line 3235, col 4
 /\ flows_half_guest_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_half_guest_owner_flows_drvLive = FALSE
 /\ flows_half_guest_owner_flows_crossMsg = FALSE
-/\ flows_half_guest_owner_flows_hc = [ opener |-> "g",
+/\ flows_half_guest_owner_flows_hc = [ opener |-> "h",
   paired |-> [g |-> FALSE, h |-> FALSE],
   outEof |-> [g |-> FALSE, h |-> FALSE],
   farHc |-> [g |-> FALSE, h |-> FALSE],

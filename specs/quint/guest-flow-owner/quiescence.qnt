@@ -86,6 +86,9 @@ module quiescence {
   action init = {
     // boot step 8's transaction failed on a node with no table (absent), or succeeded
     nondet ipAbsent0 = Set(false, true).oneOf()
+    InitWith(ipAbsent0)
+  }
+  action InitWith(ipAbsent0: bool): bool = {
     all {
     up' = true, stop' = "none", holders' = Set(), latch' = false, rec' = recIdle,
     dmg' = COMPONENTS.mapBy(c => false).set("IpRules", ipAbsent0), att' = att0, repLeft' = REPAIR_FAILS, lis' = true,
@@ -106,7 +109,10 @@ module quiescence {
   // step 9 (concern 1) — as booted here
   action Restart = {
     nondet partial = Set(false, dmg.get("IpRules")).oneOf()
-    all { not(up),
+    RestartWith(partial)
+  }
+  action RestartWith(partial: bool): bool = {
+    all { not(up), partial implies dmg.get("IpRules"),
       up' = true, stop' = "none", dmg' = dmg.set("IpRules", partial), holders' = holders,
       latch' = latch, rec' = rec, att' = att, lis' = lis, repLeft' = repLeft, prefix' = "booted", g' = g }
   }
@@ -207,6 +213,67 @@ module quiescence {
     LatchIffHolders, HeldIsHolder, NoReopenBeforeRepair, NoRepairWithoutHold, QuiescedClosesListeners,
     RepairNeverWritesPrefix, FailStopLeavesPrefixAsBooted,
   }
+
+  // ------------------------------------------------------------------ named runs (critical scenarios)
+  // Deterministic scenarios (`InitWith` / `RestartWith` fix boot step 8's outcome), each ending in an
+  // `expect` of its outcome with `Safety` checked along the way. Runs on `quiesce_ok` unless noted.
+  // D8a-HOLD, IpRules: the audit finds the table absent, the recovery quiesces under its own holder
+  // (closing every intake listener), repairs the table only, restores, and the owner brings the
+  // listener back
+  run IpRulesRecoveryQuiescesRepairsRestores = InitWith(true)
+    .expect(Safety and lis and dmg.get("IpRules") and not(latch))
+    .then(RecQuiesce("IpRules")).expect(Safety and latch and not(lis) and holders == Set("IpRules"))
+    .then(RecRepair("IpRules")).expect(Safety and not(dmg.get("IpRules")) and rec.get("IpRules") == "repaired" and latch)
+    .then(RecRestore("IpRules")).expect(Safety and not(latch) and holders == Set() and rec.get("IpRules") == "idle" and prefix == "booted")
+    .then(BringUp).expect(Safety and lis)
+  // FlowListeners: a listener-task exit, then the same episode
+  run FlowListenersRecoveryAfterListenerTaskExit = InitWith(false)
+    .then(Damage("FlowListeners")).expect(Safety and dmg.get("FlowListeners") and lis)
+    .then(RecQuiesce("FlowListeners")).expect(Safety and not(lis) and holders == Set("FlowListeners"))
+    .then(RecRepair("FlowListeners")).then(RecRestore("FlowListeners"))
+    .expect(Safety and not(latch) and holders == Set() and not(dmg.get("FlowListeners")))
+    .then(BringUp).expect(Safety and lis)
+  // D8a-HOLD: two recoveries hold at once; the first restore removes only its own holder and
+  // forwarding stays quiesced until the other has repaired and restored
+  run TwoHoldersRestoreOneKeepsForwardingQuiesced = InitWith(true)
+    .then(Damage("FlowListeners"))
+    .then(RecQuiesce("IpRules")).then(RecQuiesce("FlowListeners"))
+    .expect(Safety and holders == Set("IpRules", "FlowListeners") and g.overlapped and latch)
+    .then(RecRepair("IpRules")).then(RecRestore("IpRules"))
+    .expect(Safety and holders == Set("FlowListeners") and latch and not(lis) and g.stillQuiesced and not(g.reopenEarly))
+    .then(RecRepair("FlowListeners")).then(RecRestore("FlowListeners"))
+    .expect(Safety and holders == Set() and not(latch))
+    .then(BringUp).expect(Safety and lis)
+  // UP-7: a repair that returns Err is a failed attempt; the recovery repairs again under its hold
+  run RepairFailureCountsAttemptThenRepairs = InitWith(true)
+    .then(RecQuiesce("IpRules")).then(RepFail("IpRules"))
+    .expect(Safety and att.get("IpRules") == 1 and holders == Set("IpRules") and latch and dmg.get("IpRules"))
+    .then(RecRepair("IpRules")).then(RecRestore("IpRules"))
+    .expect(Safety and not(latch) and att.get("IpRules") == 0 and holders == Set())
+  // UP-7: the post-repair audit finds the component damaged again: a failed attempt, repaired again under the hold
+  run PostRepairAuditFailureCountsAttempt = InitWith(false)
+    .then(Damage("FlowListeners")).then(RecQuiesce("FlowListeners")).then(RecRepair("FlowListeners"))
+    .then(Damage("FlowListeners")).expect(Safety and rec.get("FlowListeners") == "repaired" and dmg.get("FlowListeners"))
+    .then(RecRedo("FlowListeners")).expect(Safety and rec.get("FlowListeners") == "held" and att.get("FlowListeners") == 1)
+    .then(RecRepair("FlowListeners")).then(RecRestore("FlowListeners"))
+    .expect(Safety and not(latch) and holders == Set())
+  // ADR-0124 / UP-12 (quiesce_live: a repair may fail forever): the budget is spent, serve fail-stops; the
+  // route and the pinned steering stay as boot converged them; the restart converges again
+  run SpentBudgetFailStopsAndRestartConverges = InitWith(true)
+    .then(RecQuiesce("IpRules")).then(RepFail("IpRules")).then(RepFail("IpRules"))
+    .expect(Safety and att.get("IpRules") == MAXATT and latch)
+    .then(FailStop("IpRules"))
+    .expect(Safety and not(up) and stop == "failstop" and holders == Set() and not(latch) and prefix == "booted" and g.failStopped)
+    .then(RestartWith(false)).expect(Safety and up and not(dmg.get("IpRules")) and prefix == "booted")
+    .then(BringUp).expect(Safety and lis)
+  // crash during a recovery: the process-scoped hold vanishes; an absent table persists; boot step 8
+  // writes it again (or its transaction fails again and a new episode repairs it)
+  run CrashDuringRecoveryThenRestartRecovers = InitWith(true)
+    .then(RecQuiesce("IpRules")).then(Crash)
+    .expect(Safety and not(up) and stop == "crash" and holders == Set() and not(latch) and dmg.get("IpRules"))
+    .then(RestartWith(true)).expect(Safety and up and dmg.get("IpRules") and prefix == "booted")
+    .then(RecQuiesce("IpRules")).then(RecRepair("IpRules")).then(RecRestore("IpRules")).then(BringUp)
+    .expect(Safety and lis and not(latch) and not(dmg.get("IpRules")))
 
   // ------------------------------------------------------------------ witnesses (expected violated)
   val WitnessNoOverlap: bool = not(g.overlapped)

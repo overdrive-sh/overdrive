@@ -1,0 +1,22 @@
+# prefix-landing-hazard-route-first: counterexample, 2 state(s) (from the TLC trace)
+
+State 1
+  wl = {}
+  lis = {}
+  entries = {}
+  seen = << >>
+  reject = FALSE
+  steer = "none"
+  route = "absent"
+  divert = FALSE
+  legC = FALSE
+  everBooted = FALSE
+  marked = FALSE
+
+State 2 [Boot]
+  reject = TRUE
+  route = "local"
+  divert = TRUE
+  legC = TRUE
+  everBooted = TRUE
+  marked = TRUE

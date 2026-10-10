@@ -53,16 +53,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
-use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::driver::{
-    AllocationSpec, DriverPayload, GuestNetworkAssignment, Resources, VmPayload,
+use overdrive_core::guest_transport::{
+    GUEST_CID_BASE, GuestCid, GuestCidClaim as _, GuestTransportAssignment, LaunchToken,
 };
+use overdrive_core::traits::IdentityRead;
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_core::{AllocationId, SpiffeId};
 use overdrive_netlink::nft::{self, SharedIpInterceptIdentity};
 use overdrive_netlink::{Client, block_on_host_netlink};
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
 use overdrive_worker::mtls_intercept::InterceptError;
@@ -785,7 +787,11 @@ const fn first_destination() -> SocketAddrV4 {
 }
 
 fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
-    let octets = address.octets();
+    let [_, _, high, low] = address.octets();
+    let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
+        .expect("an in-range guest CID");
+    let claim = SimGuestCidClaim::new().claim(cid).expect("claim the allocation's guest CID");
+    let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
     AllocationSpec {
         alloc: AllocationId::new(alloc).expect("a valid allocation id"),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
@@ -798,14 +804,12 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: Some(GuestNetworkAssignment {
+        transport: Some(GuestTransportAssignment::new(
             address,
-            tap: format!("nd61tap-{}", octets[3]),
-            mac: [0x02, 0x00, octets[0], octets[1], octets[2], octets[3]],
-            gateway: Ipv4Addr::new(100, 95, 61, 1),
-            prefix: 24,
-            dns: Ipv4Addr::new(100, 95, 61, 1),
-        }),
+            Ipv4Addr::new(100, 95, 61, 1),
+            launch,
+            claim,
+        )),
         service_ports: vec![NonZeroU16::new(MEMBER_SERVICE_PORT).expect("a non-zero port")],
     }
 }

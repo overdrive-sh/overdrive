@@ -66,9 +66,9 @@ pub(crate) mod serve_ports {
     pub fn pool() -> Arc<GuestAddressPool> {
         Arc::new(GuestAddressPool::new(
             "100.95.0.0/16".parse().expect("static guest prefix"),
-            "ovd-gbr0".to_owned(),
             Ipv4Addr::new(100, 95, 0, 1),
-            Ipv4Addr::new(100, 95, 0, 1),
+            Arc::new(crate::adapters::guest_cid_claim::SimGuestCidClaim::new()),
+            Arc::new(crate::adapters::entropy::SimEntropy::new(0x295)),
         ))
     }
 }

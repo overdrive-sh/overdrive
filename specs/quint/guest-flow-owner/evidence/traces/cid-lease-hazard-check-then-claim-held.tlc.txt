@@ -56,7 +56,7 @@ State 2: <lease_bugCheckThenClaim_cid_lease_OrphanExit line 658, col 3 to line 6
   claimErr |-> FALSE,
   refusedUnasked |-> FALSE ]
 
-State 3: <lease_bugCheckThenClaim_cid_lease_AssignBegin line 894, col 3 to line 974, col 53 of module lease_bugCheckThenClaim>
+State 3: <lease_bugCheckThenClaim_cid_lease_AssignBegin line 893, col 3 to line 973, col 53 of module lease_bugCheckThenClaim>
 /\ lease_bugCheckThenClaim_cid_lease_pend = {}
 /\ lease_bugCheckThenClaim_cid_lease_cursor = 0
 /\ lease_bugCheckThenClaim_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -85,7 +85,7 @@ State 3: <lease_bugCheckThenClaim_cid_lease_AssignBegin line 894, col 3 to line 
   claimErr |-> FALSE,
   refusedUnasked |-> FALSE ]
 
-State 4: <lease_bugCheckThenClaim_cid_lease_AssignTry line 997, col 3 to line 1118, col 53 of module lease_bugCheckThenClaim>
+State 4: <lease_bugCheckThenClaim_cid_lease_AssignTry line 1003, col 3 to line 1124, col 53 of module lease_bugCheckThenClaim>
 /\ lease_bugCheckThenClaim_cid_lease_pend = {}
 /\ lease_bugCheckThenClaim_cid_lease_cursor = 1
 /\ lease_bugCheckThenClaim_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)

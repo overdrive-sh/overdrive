@@ -33,5 +33,7 @@ pub use backend_key::{BackendKey, Proto};
 pub use drop_class::{DropClass, aggregate_per_cpu};
 pub use fingerprint::{BackendSetFingerprint, fingerprint};
 pub use maglev_table_size::MaglevTableSize;
-pub use mtls_mark::MTLS_LEG_S_DIAL_MARK;
+pub use mtls_mark::{
+    MTLS_LEG_S_DIAL_MARK, MTLS_SHARED_NFT_TABLE, MTLS_TPROXY_MARK, OWNER_EGRESS_MARK,
+};
 pub use service_frontend::ServiceFrontend;

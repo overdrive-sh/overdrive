@@ -30,7 +30,7 @@ State 4 [AssignTry]
 State 5 [LaunchBegin]
   al = << [ st |-> "launching", off |-> 0, loc |-> "taken", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
 
-State 6 [Boot]
+State 6 [BootWith]
   pend = {0}
   cursor = 0
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)

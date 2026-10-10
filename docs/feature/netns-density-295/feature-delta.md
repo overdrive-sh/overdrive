@@ -16745,7 +16745,7 @@ nothing blocks DISTILL (§ *What blocks DISTILL*).
 | ID | Ruling | Recorded in |
 |---|---|---|
 | **D12** | Inbound UDP service delivery to VMs is not part of this feature; deferred to **#310** | § *Scope* |
-| **D13 = (a)** | The vendored Cloud Hypervisor fork (`overdrive-sh/cloud-hypervisor`, branch `overdrive/vhost-kernel-vsock`, `9b68dbb57` + `41a619d19` on v53.0, `--vsock cid=N,backend=vhost-kernel`) is the production VMM path. Its build, pin and provisioning replace the upstream release download | ADR-0146, ADR-0161; `spike/wave-decisions.md` PROMOTE entry |
+| **D13 = (a)** | The vendored Cloud Hypervisor fork (`overdrive-sh/cloud-hypervisor`, branch `overdrive/vhost-kernel-vsock`, `9b68dbb57` + `41a619d19` on v53.0, `--vsock cid=N,backend=vhost-kernel`) is the only VMM Overdrive runs with. Its build, pin and checksum-verified provisioning replace today's Cloud Hypervisor download (DG-1: no runtime check identifies the installed build) | ADR-0146, ADR-0161; `spike/wave-decisions.md` PROMOTE entry |
 | **D14** | Non-mesh guest egress is forwarded in the kernel. Leg-F's userspace cleartext relay (`spawn_cleartext_passthrough`, `copy_bidirectional`) is replaced. Mesh keeps leg-F's kernel splice. No userspace payload relay anywhere | ADR-0162, ADR-0153 |
 | **D15** | Guests keep today's network behaviour wherever the kernel allows it: workload address present in the guest and returned by `getsockname`; original peer addresses visible; inbound shows the real client address; general UDP; early data never silently lost. Deferred: IPv6 **#308**, UDP above 59,000 bytes **#309**, inbound UDP service **#310**, ICMP **#311**. Pre-activation behaviour and READY meaning are re-derived under this ruling (§ *D15 re-derivation*) | ADR-0150, ADR-0173, ADR-0174, ADR-0154 |
 | **D18** | The in-band preamble ordering is replaced by the spike-proven ordering: `Paired` out of band on a per-VM control session; the opener installs its vsock right after `connect()`; intake sockets installed at establishment and parked in kernel loopback TCP cells until `Paired`, then re-armed with `SO_RCVLOWAT`; acceptor-side sockets installed at establishment | ADR-0158 |
@@ -17350,8 +17350,8 @@ New steps are needed for (DELIVER owns IDs and order after approval):
 3. VMM adapter: fork launch arguments, the claimed-device descriptor handoff
    (D16-CLAIM: `dup2` onto `K` and `FD_CLOEXEC` cleared in the child only,
    never a `/proc` reopen; the adapter's copy closed as soon as the spawn
-   returns — CLAIM-PINS), the transport token's `launch=` field, and probe
-   stages (D2);
+   returns — CLAIM-PINS), and the transport token's `launch=` field (no new
+   probe stage, DG-1);
 4. host forwarder in `overdrive-dataplane` + host programs in `overdrive-bpf`,
    including the hybrid verdict strip with the escape rule, the
    fragment-aware tuple-gated egress unframe, its attachment to `lo` and
@@ -17569,7 +17569,7 @@ impl PartialEq for GuestTransportAssignment { /* workload_addr, gateway, cid, la
 impl Eq for GuestTransportAssignment {}
 
 /// D16-CLAIM: claims guest CIDs on the host kernel. Driven port; host
-/// adapter `overdrive-host::VhostVsockCidClaim`, sim adapter
+/// adapter `overdrive-host::VhostVsockCidClaim` (`new()`, DG-6), sim adapter
 /// `overdrive-sim::SimGuestCidClaim`. Required constructor argument of the
 /// pool (no default).
 pub trait GuestCidClaim: Send + Sync {
@@ -17663,19 +17663,14 @@ branches on that text: every such start failure retires and releases the
 lease (ADR-0133), and placement may retry with a fresh lease and claim. A CID
 clash cannot cause it (D16-CLAIM).
 
-`VmmProbeError` (core) gains:
-
-```rust
-/// The installed cloud-hypervisor does not offer the vhost-kernel vsock
-/// backend with the `fd=` handoff (e.g. the upstream release) — a typed
-/// refusal, never a fallback.
-#[error("cloud-hypervisor {binary} ({version}) has no vhost-kernel vsock backend with fd handoff")]
-VsockBackendUnsupported { binary: std::path::PathBuf, version: String },
-```
+`VmmProbeError` (core) is unchanged. Overdrive runs only with the vendored
+Cloud Hypervisor fork (ADR-0161); no probe stage and no error variant
+identifies which Cloud Hypervisor build is installed (DG-1).
 
 `/dev/vhost-vsock` reachability is no longer a VMM probe: the VMM never opens
 the device. It is the claim probe's (`GuestCidClaim::probe`, under the
-`serve` identity).
+`serve` identity) — a host fact with its own typed error
+(`GuestCidClaimError::DeviceUnavailable` / `ProbeMismatch`).
 
 **Newtypes (M-5;** `.claude/rules/rust.md` § *Newtypes*). Each has a
 validating constructor returning `Result`, `FromStr`, `Display`, and
@@ -17688,6 +17683,8 @@ roundtrip. No raw primitive carries these concepts in any interface below.
 pub struct InterfaceIndex(/* private */ std::num::NonZeroU32);
 /// A TCP listen port an allocation declares or a guest reports; never 0.
 pub struct ListenPort(/* private */ std::num::NonZeroU16);
+// Constructors `new` and their error types `ListenPortError` /
+// `InterfaceIndexError`: DG-11.
 ```
 
 No `Uid` / `FileMode` newtype is added: their only consumer, a VMM-identity
@@ -17705,6 +17702,8 @@ pub const GUEST_UDP_SLOT_BASE: u16 = 61_001;     // slot n binds GUEST_UDP_SLOT_
 pub const GUEST_UDP_SLOTS: u16 = 1_024;          // slots 61_001..=62_024
 pub const GUEST_TCP_PARK_CELLS: u32 = 4_096;     // = GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION
 pub const GUEST_DATAGRAM_SLOT_IDLE: std::time::Duration; // 120 s
+/// The guest flow owner's audit tick (DG-5-A): 1 s.
+pub const GUEST_OWNER_AUDIT_PERIOD: std::time::Duration;
 /// The reserved guest port range, inclusive: GUEST_TCP_INTAKE_PORT ..=
 /// GUEST_UDP_SLOT_BASE + GUEST_UDP_SLOTS - 1.
 pub fn guest_reserved_ports() -> std::ops::RangeInclusive<u16>;
@@ -17789,7 +17788,7 @@ the listeners are bound from — the operator API's `config.bind` when its
 address is unspecified, and any other such configured listener).
 
 ```rust
-// added to overdrive_core (beside GuestNetworkError)
+// overdrive_control_plane::guest_network, beside GuestNetworkError (DG-13)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntakePortBlockConflict {
     /// The block intersects `ip_local_port_range` = `low..=high`.
@@ -17963,10 +17962,9 @@ Contracts:
   prototype (`spike-scratch/netns-density-295-v25/fd-mode.patch`) is
   evidence, not the implementation.
 - **Never issued:** snapshot, restore, migration or pause of a VM (P-18).
-- **`Vmm::probe` adds one stage** after today's stages: the binary's `--help`
-  advertises `backend=vhost-kernel` and `fd=` in its `--vsock` syntax, else
-  `VsockBackendUnsupported` → driver probe failure →
-  `health.startup.refused`. `/dev/vhost-vsock` access is the claim probe's
+- **`Vmm::probe` adds no stage (DG-1).** Its stages are today's. The installed
+  binary is the checksum-pinned fork (ADR-0161); nothing inspects it for the
+  vsock backend. `/dev/vhost-vsock` access is the claim probe's
   (§ *Composition*, boot step 4).
 - **Seccomp and Landlock.** The ADR-0143 launch filter and the fork's own
   filters must admit `VHOST_SET_OWNER`, `VHOST_SET_MEM_TABLE`, the vring ioctls
@@ -17989,13 +17987,12 @@ Contracts:
 - `infra/provision/common-system.sh` and `infra/lima/overdrive-dev.yaml`
   download `https://github.com/${REPO}/releases/download/${TAG}/<asset>`,
   verify SHA-256 before install, and refuse on mismatch; then refuse unless
-  `--help` lists `--landlock` and `backend=vhost-kernel`.
+  `--help` lists `--landlock` (today's check). The checksum is the identity
+  check; nothing probes for the vsock backend (DG-1).
 - Asset names keep today's `cloud-hypervisor-static` /
   `cloud-hypervisor-static-aarch64`.
 - The fork release workflow builds from `CLOUD_HYPERVISOR_FORK_REV` with
   `--locked`.
-- `infra/metal/native-preflight.sh` additionally checks the vhost-kernel
-  capability.
 - A consistency test (xtask-side, no `overdrive-*` dependency) asserts that the
   submodule pointer equals `CLOUD_HYPERVISOR_FORK_REV`.
 
@@ -18087,10 +18084,11 @@ impl ControlOpen {
 
 **Beacon READY** (ADR-0082 §D4 line wire, `overdrive_core::vm::beacon`):
 `READY pid=<pid> port=<port> launch=<LaunchToken Display>` — `BeaconMessage::
-Ready { pid, port, launch: LaunchToken }`. A READY line without the field,
-with an extra field, or with a token that fails `LaunchToken::from_str` is a
-`BeaconParseError` (the existing field-count and field variants). No beacon
-message is added; EXEC, EXIT and SHUTDOWN are unchanged.
+Ready { pid, port, launch: LaunchToken }`. A READY line without the field
+or with an extra field is `BeaconParseError::FieldCount`; a third field not
+shaped `launch=<v>` is `MissingKey`; a token that fails
+`LaunchToken::from_str` is the new `BeaconParseError::InvalidLaunchToken`
+(DG-7). No beacon message is added; EXEC, EXIT and SHUTDOWN are unchanged.
 
 **Attribution (ATTR-TOKEN, ATTR-LIVE-CLAIM, ADR-0177).** A guest-opened
 host connection (beacon 1234, flows 1240 / 1241, control 1243) belongs to an
@@ -18194,7 +18192,9 @@ pub enum FlowWireError {
 ```
 
 `decode` accepts only canonical encodings, so round-trip equality holds over
-every valid value and every accepted byte string; proptest mandatory. An
+every valid value and every accepted byte string; proptest mandatory. A
+`ListenState` whose port is 0 or lies in `guest_reserved_ports()` is
+`InvalidField { field: ListenPort }` (DG-12). An
 all-zero launch token is `InvalidField { field: LaunchToken }`; a non-zero
 reserved byte of the control open is `InvalidField { field:
 ControlOpenReserved }`; the control open's magic and version use `BadMagic`
@@ -18219,12 +18219,16 @@ pub const DATAGRAM_FRAME_HEADER_LEN: usize = 8;
 pub const MAX_GUEST_DATAGRAM_PAYLOAD: u32 = 59_000;
 ```
 
-**Deadlines** (one SSOT):
+The Rust codec of the frame is `DatagramFrame` / `DatagramFrameError` (DG-8).
+
+**Deadlines** (one SSOT, `overdrive_core::guest_transport::wire`, public;
+consumed by both owners):
 
 ```rust
 pub const FLOW_REQUEST_DEADLINE: std::time::Duration;  // 2 s — acceptor reading a request; host matching kinds 2 and 3
 pub const FLOW_PAIRING_DEADLINE: std::time::Duration;  // 5 s — opener waiting for Paired/Refused: datagram associations and TcpAccept
 pub const FLOW_DRAIN_DEADLINE: std::time::Duration;    // 10 s — K2 drain before half-close; expiry aborts
+pub const FLOW_DRAIN_RECHECK_PERIOD: std::time::Duration; // 10 ms — interval between `drained` re-checks of a waiting direction (DG-5-D)
 pub const CONTROL_RECONNECT_BACKOFF: std::time::Duration; // 250 ms — guest re-opening a lost control session
 ```
 
@@ -18482,7 +18486,8 @@ hold (V_g still in its accept queue when the host aborts, or when the session
 is lost) — the host's close of V_h reaches the guest: a V_g accepted after the
 close delivers its request, then reads EOF, reports `POLLRDHUP` and fails its
 first write `EPIPE`; the guest sees it ended at step 3 (or, if the close
-lands after step 3, once V_g is routed to C) and tears down V_g and C (K-A4,
+lands after step 3, as terminal readiness on the installed V_g, which the
+guest watches from install, DG-5-E) and tears down V_g and C (K-A4,
 proven: P-38, V-24). In the second case the guest application may accept a
 connection for a client the host already aborted and sees it reset at once;
 no byte of the aborted flow reaches it, because the host writes nothing on
@@ -18899,9 +18904,9 @@ Contracts:
   `inventory().links_attached` serves the startup probe only.
 - **Simulation seam.** `GuestFlowForwarder` is a concrete adapter-host type
   with no public port trait. The owner reaches it, the vsock/socket syscalls
-  and the control-session I/O through one private effect seam the crafter
-  shapes (precedent: D-295-DISTILL-12A `GuestNetworkAllocationIo`). The flow
-  state machine runs under seeded `overdrive-sim` through that seam; kernel
+  and the control-session I/O through the crate-private seam `GuestFlowIo`
+  (DG-3; production `HostGuestFlowIo`, simulation `SimGuestFlowIo`). The
+  flow state machine runs under seeded simulation through that seam; kernel
   effects are Tier-3.
 
 #### [REF] Driven port — guest-prefix steering `overdrive-dataplane::guest_steering` (D8a-LOOKUP, ADR-0171)
@@ -19082,8 +19087,8 @@ Contracts:
   has no runtime audit, re-steer, read-back or repair, and it is not a
   shared component of the supervisor; a crash at any point is covered by
   the next boot.
-- **Simulation seam.** Reached through the owner's private effect seam like
-  the forwarder; the sim models the decision function, the entry set with
+- **Simulation seam.** Reached through the owner's seam `GuestFlowIo`
+  (`converge_steering`, `steer`; DG-3) like the forwarder; the sim models the decision function, the entry set with
   removal at close, the map's capacity, scripted `load` / `attach` / pin
   failures (a failed `attach` leaves the earlier program attached; a failed
   first-attach pin leaves no link) and scripted `steer` failures of each
@@ -19266,10 +19271,12 @@ progress reports the current holders.
   (D8a-LOOKUP). Hence every steering entry always names an open, listening
   intake listener of a serving port, and every connection a listener accepts
   may be paired.
-- The owner's concrete constructor takes `Arc<dyn MtlsResolve>`, the mTLS
-  worker handle and the configured service VIP ranges explicitly (no
-  defaulting; `.claude/rules/development.md` § "Port-trait dependencies"). The
-  VIP ranges are the same value handed to the VIP allocator and to
+- The owner's concrete constructor is `HostSharedGuestNetworkOwner::new(
+  GuestFlowOwnerPorts)` (DG-3): the clock, `Arc<dyn MtlsResolve>`, the mTLS
+  worker handle, the configured service VIP range, the wildcard TCP port set,
+  the node prefix and the gateway, each explicit (no defaulting;
+  `.claude/rules/development.md` § "Port-trait dependencies"). The VIP range
+  is the same value handed to the VIP allocator and to
   `ServiceBackendsResolve::new` (one SSOT at composition).
 - **Owner placement (D24).** The owner runs inside the `overdrive serve`
   process, enrolled at `overdrive.slice/control-plane.slice`. `probe_startup`
@@ -19305,13 +19312,18 @@ linger. Leg-F clears its remote socket's linger only on a clean close of
 both directions; an error or reset on its loopback leg (the owner's abort of
 D) closes the remote socket with linger set (ADR-0160).
 
-**Structural enforcement that the control plane never reads payload.** After
-installation every pair socket is held as a private `PairedSocket` exposing
-only: `as_fd`; readiness registration for `EPOLLRDHUP | EPOLLHUP | EPOLLERR`
-(never `EPOLLIN`/`EPOLLOUT`); `shutdown_write`; `clear_linger`; and `abort`
-(close with `SO_LINGER{1,0}`). No `Read`, `Write`, `AsyncRead`, `AsyncWrite`,
-`recv` or `send`. A `trybuild` fixture pins that it implements neither `Read`
-nor `AsyncRead`. Cell readiness is observed with `EPOLLIN` interest only on
+**Structural enforcement that the control plane never reads payload.** The
+owner holds sockets only as the typed, move-only handles of its seam
+`GuestFlowIo` (DG-3). After installation every pair socket is a
+`PairSocket`, for which the seam offers only terminal readiness
+(`EPOLLRDHUP | EPOLLHUP | EPOLLERR`, never `EPOLLIN` / `EPOLLOUT`),
+`shutdown_write`, `clear_linger`, `abort` (close with `SO_LINGER{1,0}`) and
+`close`; no method reads or writes it, and the production adapter holds the
+descriptor. The enforcement is the seam's signatures: a read or write of a
+`PairSocket` does not compile. (The types are crate-private, so a
+`trybuild` fixture cannot name them; the DELIVER reviewer checks the
+signatures.) The guest seam `GuestOwnerIo` (DG-5) applies the same rule to
+`GuestPairSocket`. Cell readiness is observed with `EPOLLIN` interest only on
 the guest framing cell trigger, never followed by a read; control sockets and
 vsock flow connections are read only for their fixed-length messages.
 
@@ -19332,27 +19344,60 @@ the guest; the destination or intake side on the host) and its flow vsock.
   `EPOLLRDHUP`; a closed application socket answers later bytes with a
   reset, which arrives as that error.)
 
-- **Half-close, outer leg first.** `EPOLLRDHUP` on the outer leg → wait until
-  `drained(key, dir)` toward the flow vsock (not drained within
-  `FLOW_DRAIN_DEADLINE` → abort, cause `DrainTimeout`) → send `HalfClose`
-  for the flow on the control session → on `HalfCloseAck`, `shutdown_write`
-  on the flow vsock. Until the acknowledgement the vsock stays open for
-  writing; the wait ends by `HalfCloseAck`, `Abort`, control-session loss,
-  a flow error, teardown or quiescence — no timer.
+- **Half-close, outer leg first.** `EPOLLRDHUP` on the outer leg → drain
+  wait toward the flow vsock (below) → send `HalfClose` for the flow on the
+  control session → on `HalfCloseAck`, `shutdown_write` on the flow vsock.
+  Until the acknowledgement the vsock stays open for writing; the wait ends
+  by `HalfCloseAck`, `Abort`, control-session loss, a flow error, teardown or
+  quiescence — no timer.
 - **Half-close, flow vsock.** On `HalfClose` for a flow this side holds →
   send `HalfCloseAck` at once and record the peer's direction as announced.
-  `EPOLLRDHUP` on the flow vsock for an announced direction → wait until
-  `drained(key, dir)` toward the outer leg (deadline as above) →
-  `shutdown_write` on the outer leg. **`EPOLLRDHUP` on the flow vsock for a
-  direction not announced is never a half-close:** it is the peer owner's
+  `EPOLLRDHUP` on the flow vsock for an announced direction → drain wait
+  toward the outer leg (below) → `shutdown_write` on the outer leg.
+- **Drain wait (DG-5-D, approved by the user 2026-10-10; both owners).** The
+  bytes of a paired flow are moved by the kernel forwarder (SockHash
+  redirect), never by the owner, so the owner observes drain completion only
+  by reading the forwarder's exact counters through `drained(key, dir)` (K2;
+  ADR-0151, ADR-0160); neither seam has a drain-complete event. The wait for
+  direction `dir` starts in the dispatch that observes its `EPOLLRDHUP` (for
+  an outer-leg EOF recorded before `Paired`, in the dispatch that routes the
+  pair at `Paired`). At the start the owner arms the direction's drain
+  deadline, start + `FLOW_DRAIN_DEADLINE`, then calls `drained(key, dir)`
+  once. `Ok(true)` → the next step of the path, in the same dispatch.
+  `Ok(false)` → a re-check is armed at the current instant +
+  `FLOW_DRAIN_RECHECK_PERIOD`; each re-check calls `drained(key, dir)` once
+  and either proceeds (`Ok(true)`, both of the direction's timers disarmed)
+  or arms the next re-check the same way. A re-check is armed only when its
+  instant is strictly before the drain deadline, so the two never coincide;
+  at the drain deadline the owner aborts the flow without a further check,
+  sends `Abort`, cause `DrainTimeout`. `drained` returning `Err` aborts the
+  flow, sends `Abort`, cause `OwnerAbort` (an owner effect on the flow
+  failed). Any input that ends the flow (an `Abort`, an error, control-session
+  loss, teardown, quiescence, an unannounced vsock end) disarms both timers.
+  The acknowledged handshake is unchanged: `HalfClose` is sent only after
+  `drained` toward the vsock returned `Ok(true)`, and `shutdown_write` on the
+  outer leg only after `drained` toward the outer leg did. The two directions
+  of one flow wait independently. Guest: both timers are owner deadlines on
+  `GuestClock` (DG-5-A), so they appear in `next_deadline()` and one
+  re-check is one `dispatch_next`. Host: the flow's task reads `ports.clock`
+  (DG-3): it waits on `Clock::sleep` until the earlier of the next re-check
+  and the drain deadline, raced against the flow's other inputs; seam calls
+  `GuestFlowIo::drained` (host) and `GuestOwnerIo::drained` (guest) only.
+  This is not the "half-close after a fixed delay" ADR-0160 rejects: the
+  owner proceeds on the exact counter fact, and the period bounds only how
+  late after the drain the FIN is sent.
+- **Unannounced vsock end.** `EPOLLRDHUP` on the flow vsock for a direction
+  not announced is never a half-close: it is the peer owner's
   loss (its exit, or a defect that ended the vsock without the handshake) →
-  abort at once (cause `UnannouncedVsockEnd`), so every far end this side
+  abort at once and send `Abort` (cause `UnannouncedVsockEnd`), so every far end this side
   holds is reset before any FIN, whenever the control-session loss arrives
   (P-42: the vsock end led the session loss in 415 of 415 deaths).
 - **Error or reset.** `EPOLLERR`, or `EPOLLHUP` with an error → abort and send
   `Abort`.
 - **Clean close.** Both directions half-closed through the handshake and
-  drained → `remove_pair`, `clear_linger` on outer sockets, close.
+  drained → `remove_pair`, `clear_linger` on outer sockets, close — in the
+  same dispatch as the `shutdown_write` that completes the second
+  direction (DG-5-C, approved by the user 2026-10-10; no separate step).
 - **Abort.** `remove_pair`, then `abort` every socket of the flow.
 - **Datagram association** ends when either side closes its legs (the guest
   closes them when the application socket is released) or on abort; it has
@@ -19431,11 +19476,12 @@ is in `127.0.0.0/8` / `169.254.0.0/16`. The owner's check gives the typed
 refusal; the rules close the check-then-connect window. Pinned by V-21
 (P-47):
 
-- **F-6 — mark.** `OWNER_EGRESS_MARK` is one dedicated bit (SSOT constant
-  beside `MTLS_LEG_S_DIAL_MARK`); the rules match it under its mask (`meta
-  mark & OWNER_EGRESS_MARK == OWNER_EGRESS_MARK`), and a unit test pins the
-  Overdrive mark constants (TPROXY, leg-S, owner) as pairwise-disjoint bits.
-  The owner's connect to leg-F stays unmarked.
+- **F-6 — mark.** `OWNER_EGRESS_MARK = 0x4` is one dedicated bit (SSOT
+  constant in `overdrive_core::dataplane::mtls_mark` beside
+  `MTLS_LEG_S_DIAL_MARK = 0x2` and `MTLS_TPROXY_MARK = 0x1`, DG-9); the rules
+  match it under its mask (`meta mark & 0x4 == 0x4`), and a unit test in
+  `overdrive-core` pins the three as single, pairwise-disjoint bits. The
+  owner's connect to leg-F stays unmarked.
 - **F-1 — position.** The two D26 rules come before any `accept` in their
   chain — `ct state established,related accept` included — so they are the
   first rules of the output chain that also holds PREFIX-REPLY's accepts
@@ -19539,10 +19585,11 @@ impl MtlsInterceptWorker {
     pub fn leg_f_addr(&self) -> Option<std::net::SocketAddrV4>;
 }
 
-/// Held by the owner for the whole life of the flow. Dropping it closes
-/// leg-F's side of that connection whether or not leg-F has claimed it. The
-/// registration survives until leg-F claims it at accept; time does not remove
-/// it.
+/// Held by the owner for the whole life of the flow. Dropping it releases the
+/// registration whether or not leg-F has claimed it; a claimed flow's leg-F
+/// sockets then close clean only if the loopback leg ended cleanly in both
+/// directions, else with reset (DG-10). The registration survives until
+/// leg-F claims it at accept; time does not remove it.
 #[must_use]
 pub struct ForwardedOutbound { /* private */ }
 
@@ -19597,8 +19644,10 @@ the VIP branch with per-arm mutation coverage.
 #### [REF] Beacon intake — `overdrive-worker::VmDriver` (D17)
 
 - At composition the driver binds exactly one host `AF_VSOCK` `SOCK_STREAM`
-  listener on (`VMADDR_CID_ANY`, `BEACON_VSOCK_PORT`). A bind failure is a
-  driver probe refusal (`health.startup.refused`).
+  listener on (`VMADDR_CID_ANY`, `BEACON_VSOCK_PORT`) —
+  `BeaconIntake::bind(VsockBeaconIo)`, passed to `VmDriver::new`, over the
+  core port `BeaconIo` (DG-4). A bind failure is a driver probe refusal (`health.startup.refused`,
+  reason `vm_driver.beacon_bind`).
 - An accepted connection is attributed by kernel-reported peer CID together
   with the launch token its READY carries (ATTR-TOKEN, ADR-0177). No live
   launch holds that CID → closed without effect. Otherwise the connection is
@@ -19692,6 +19741,8 @@ the VIP branch with per-arm mutation coverage.
       ReservedPorts { source: std::io::Error },
       /// D25: binding an intake on a reserved port failed.
       IntakeBind { addr: std::net::SocketAddrV4, source: std::io::Error },
+      /// DG-5: inserting the bound UDP slot sockets into the slot SockHash failed.
+      SlotInstall { source: std::io::Error },
   }
   enum GuestProgram { Connect4, Sendmsg4, Getpeername4, Recvmsg4, SockRelease, SockOps, Verdict, StreamParser, UnframeLo, DrainCounter, ListenStart, ListenStop }
   ```
@@ -19740,8 +19791,8 @@ the VIP branch with per-arm mutation coverage.
    stacked on another (IFACE-NO-STACK). It runs before any boot effect:
    nothing has been written yet.
    Refusal: `health.startup.refused`, reason `guest_network.probe`.
-2. `compose_vm_driver`: `Vmm::probe` (incl. the fork's `backend=vhost-kernel`
-   with `fd=`), then the beacon listener bind.
+2. `compose_vm_driver`: `Vmm::probe` (today's stages; DG-1), then the beacon
+   listener bind (`BeaconIntake::bind`, passed to `VmDriver::new`, DG-4).
 3. CA, identity, dataplane probe (as today). With the default interface
    names, the dataplane block provisions ADR-0061's load-balancer veth pair
    `ovd-veth-cli` / `ovd-veth-bk` in the root namespace: gateways from
@@ -19751,9 +19802,9 @@ the VIP branch with per-arm mutation coverage.
 4. `guest_cid_claim.probe()` (`VhostVsockCidClaim`, D16-CLAIM: claim,
    second claim refused `InUse`, reclaim after release; under the `serve`
    identity); refusal: `health.startup.refused`, reason
-   `guest_cid_claim.probe`. Then `GuestAddressPool::new(100.95.0.0/16,
-   gateway, guest_cid_claim, entropy)` — `entropy` the composition's
-   `OsEntropy`, which draws the launch tokens (ATTR-TOKEN).
+   `guest_cid_claim.probe`. Then `GuestAddressPool::new(GUEST_NODE_PREFIX,
+   GUEST_NODE_GATEWAY, guest_cid_claim, entropy)` (DG-14) — `entropy` the
+   composition's `OsEntropy`, which draws the launch tokens (ATTR-TOKEN).
 5. Enforcement and resolve probes; `MtlsInterceptWorker::new`; `AppState`.
 6. `vm_reclamation_boot::converge`.
 7. `sweep_stale()`.
@@ -19887,7 +19938,7 @@ the prefix drops (D8a-LOAD-SWAP).
 | Beacon listener (CID_ANY:1234) and sessions | VM driver | VM driver | driver shutdown; session end | `overdrive-worker` (adapter-host) |
 | Flow listeners (1240, 1241), control listener (1243), control sessions | owner `converge_shared` | owner | owner shutdown; teardown | `overdrive-control-plane` (adapter-host) |
 | Intake listeners (bound `workload_addr:<intake host port>`, serving declared `workload_addr:port` through their steering entry, INTAKE-BIND) | owner (G-V8) | owner | owner | `overdrive-control-plane` |
-| Host pair sockets, parking cells | owner | owner (`PairedSocket`; cells in the forwarder pool) | owner, after `remove_pair` | `overdrive-control-plane` / `overdrive-dataplane` |
+| Host pair sockets, parking cells | owner | owner (as `PairSocket` handles of `GuestFlowIo`, DG-3; the seam adapter holds the descriptors; cells in the forwarder pool) | owner, after `remove_pair` | `overdrive-control-plane` / `overdrive-dataplane` |
 | Host programs, maps, links (egress unframe TCX on `lo` and every root-namespace interface present at boot, `sock_ops` on owner cgroup, `fexit`) | `GuestFlowForwarder::load`; non-`lo` unframe links by `converge_unframe_interfaces` at boot only (D5a-IFACE; none after boot, D5a-LATE) | owner (unpinned links; not audited, D19-LINKS) | drop / process exit; a TCX link also with its interface, when the kernel removes it | `overdrive-dataplane`; programs in `overdrive-bpf` |
 | Local route on `lo` (Overdrive-tagged `local`) | owner boot `converge_shared` only (written only after this boot's steering program is loaded and attached, D8a-ROUTE, D8a-LOAD-SWAP) | kernel (node infrastructure; persists across `serve` restarts) | never removed, at shutdown (graceful or not, U-4) or otherwise; never written at runtime; converged at every boot (H-4) | via `overdrive-netlink` |
 | Guest-prefix steering: `sk_lookup` program, its root-netns link and its socket map; the link pinned under `GUEST_PREFIX_STEERING_PIN_DIR`, the map not pinned (D8a-LOOKUP) | owner boot `converge_shared` through `GuestPrefixSteering::load` → `GuestSteeringCandidate::attach` (program and a new map loaded; then swapped into the pinned link with `BPF_LINK_UPDATE`, or a first link attached and pinned) | kernel through the link pin (node infrastructure; persists across `serve` restarts; the link keeps the program, the program keeps its map); the owner holds a `GuestPrefixSteering` handle | never: no method detaches, unpins or clears it; never removed at shutdown (U-4); a later boot swaps in its own program, and the earlier program and map are freed when the link drops them | `overdrive-dataplane` (adapter-host); program in `overdrive-bpf` |
@@ -20030,12 +20081,12 @@ Deleted: `Bridge`, `TcxLink`, `EndpointMap`, `CounterMap`, `BpffsPin`,
 | Intake steer fails with any other variant (an Overdrive defect) | in activation as above; after activation `guest_intake.bind_failed { retried: false }` | shim / owner | Activation-failure projection / the listener is closed and not retried; the port is refused until wanted anew; never reaches a host service |
 | Host-internal destination | `FlowRefusal::HostInternal` | owner | Flow-local refusal; counted |
 | Spec declares a listener port in the reserved guest range (D25) | `ParseError::ListenerPortReserved` (TOML ingress) / `AggregateError::Validation { field: "listeners[].port" }` (API ingress) | `overdrive deploy` / the submit handler | Deploy refused before any intent write; nothing is placed |
-| Upstream CH (no `backend=vhost-kernel` with `fd=`) | `VmmProbeError::VsockBackendUnsupported` | driver composition | `health.startup.refused` |
 | `/dev/vhost-vsock` unusable, or the kernel's claim not exclusive / not released at close | `GuestCidClaimError` from `GuestCidClaim::probe` | `run_server` | `health.startup.refused`, reason `guest_cid_claim.probe` |
 | Every free CID held by another device instance (a VMM the pool does not lease) | `GuestNetworkError::GuestCidsHeldElsewhere` | shim | Like `PoolExhausted`: non-terminal, no allocation row, before any effect; placement retries |
 | A claim fails for a cause other than `InUse` | `GuestNetworkError::GuestCidClaim { cid, source }` | shim | Same projection as `GuestCidsHeldElsewhere`; no offset is skipped on it |
 | Second quiesce by a holder that already holds | `GuestNetworkError::QuiescenceHolderBusy` | supervisor | A supervisor defect: no state change; the recovery attempt counts as failed (ADR-0124 bound, then fail-stop) |
 | VM start without a claim (no transport, or claim already taken) | `DriverError::VsockClaimUnavailable { alloc }` | VM driver → shim | Non-terminal start failure; a composition defect, never a placement path |
+| Beacon listener bind fails at composition (DG-4) | `BeaconIntakeError::Bind` | `compose_vm_driver` | `health.startup.refused`, reason `vm_driver.beacon_bind` |
 | vsock device setup fails at launch | existing pre-READY VMM-exit start failure | VM driver → shim | Non-terminal start failure; retire then release the lease. Never a CID clash (D16-CLAIM) |
 | Guest setup fails before READY | `GuestTransportSetupError` (guest console) → existing "guest exited before READY" | VM driver → shim | Existing start failure |
 | Activation: quiesced / control session pending | `ForwardingActivation::{QuiescenceLatched, ControlSessionPending}` | shim | Retry under the EXEC claim (ADR-0131 budget) |
@@ -20059,7 +20110,7 @@ intercept-live or Service `Stable`.
   steering refusal (`GuestPrefixSteeringConverge`, route unwritten,
   D8a-LOAD-SWAP); records calls in order, the boot steering steps
   included.
-- `SimVmm` scripts the new `VmmProbeError` variant and pre-READY exits;
+- `SimVmm` scripts pre-READY exits (no new `VmmProbeError` variant, DG-1);
   `create` takes the `ClaimedGuestCid` by value and holds it until the
   simulated VMM exits.
 - `SimGuestCidClaim` (new, `overdrive-sim`): an atomic claim set over CIDs
@@ -20073,8 +20124,8 @@ intercept-live or Service `Stable`.
   two states one nft transaction leaves, absent or complete, with a scripted
   failed table write that leaves the state as it was (R5-30). It models no
   intake admission and no steering.
-- The sim guest-prefix steering (behind the owner's private effect seam, like
-  the forwarder; D8a-LOOKUP) models the decision function (a host-local TCP
+- The sim guest-prefix steering (in `SimGuestFlowIo`, the owner seam's sim,
+  DG-3; D8a-LOOKUP) models the decision function (a host-local TCP
   lookup reaches the steered listener; every other lookup to the prefix is
   dropped), the entry set with removal at listener close and its capacity,
   scripted `load` / `attach` / pin failures — a failed `load` attaches
@@ -20083,8 +20134,8 @@ intercept-live or Service `Stable`.
   (R5-22, R5-24, R5-30, R5-34, R5-37).
 - The sim pool reservation is the production pool's (the pool is not a
   port); `SimGuestCidClaim` supplies its claims and the seeded entropy
-  (`SimEntropy`) its launch tokens (ATTR-TOKEN). The owner's private seam
-  delivers accepted guest-opened connections with a peer CID and a first
+  (`SimEntropy`) its launch tokens (ATTR-TOKEN). The owner seam's sim
+  (`SimGuestFlowIo`, DG-3) delivers accepted guest-opened connections with a peer CID and a first
   record, so a seeded run can deliver a connection a previous launch of the
   same CID left queued — its buffered record carrying that launch's token —
   after the CID's next launch is provisioned, as the kernel does (P-37); a
@@ -20095,7 +20146,7 @@ intercept-live or Service `Stable`.
   scripted VIP-branch outcomes (D24a).
 - `SimGuestAttachmentView` retained.
 - No public sim forwarder. The owner's flow state machine runs under seeded
-  `overdrive-sim` through its private seam, printing the seed and retaining
+  simulation through `GuestFlowIo` (DG-3), printing the seed and retaining
   the triggering sequence. No test hand-installs a production effect.
 - **Conformance arbiters.** The read surfaces the Quint conformance drivers
   project from — `SimGuestCidClaim::held_cids`, `SimVmm::is_live`, the new
@@ -20219,8 +20270,9 @@ contract of a decision they already record.
   `overdrive-control-plane` types (`SimMtlsInterceptLifecycle`, the guest
   network, guest DNS, view-store and journal adapters) are not used by any
   in-crate driver. No workspace crate depends on `overdrive-init`, so no
-  second copy arises there; the binary may take `overdrive-sim` as a
-  dev-dependency for the core-trait sims (`SimClock`, `SimEntropy`).
+  second copy arises there; the binary's guest owner uses its own synchronous
+  `GuestClock` and `SimGuestClock` (DG-5), so it takes no `overdrive-sim`
+  dev-dependency.
 - **Rejected.** (1) Drivers in `tests/conformance` over `#[doc(hidden)] pub`
   seams with public sims: contradicts "No public sim forwarder", widens the
   owner's cross-crate surface into a socket and BPF fault framework
@@ -20442,8 +20494,7 @@ pub struct BeaconObservation {
     pub unread: BTreeSet<BeaconConnKey>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BeaconConnKey { pub peer_cid: GuestCid, pub peer_port: VsockPort }
+// `BeaconConnKey` is `overdrive_core::vm::beacon::BeaconConnKey` (DG-4).
 ```
 
 Contract of `beacon_observation`:
@@ -20477,8 +20528,8 @@ module in the binary crate's `src/`:
 
 ```rust
 // overdrive-init (binary) — read-only, compiled in the binary
-impl /* the guest flow owner type */ {
-    pub fn guest_observation(&self) -> GuestSideObservation;
+impl GuestFlowOwner {   // DG-5
+    pub(crate) fn guest_observation(&self) -> GuestSideObservation;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20513,11 +20564,8 @@ pub struct SlotObservation {
 }
 ```
 
-`FlowEndObservation` mirrors QPROJ-3's (same four fields). `SocketCookie` is
-the slot-ownership table's existing key type, or a crate-private newtype
-over the kernel socket cookie if none exists (`rust.md` § *Newtypes*);
-`CellGeneration` likewise (the readiness-registration generation of
-CELL-RECREATE). Both are `overdrive-init`-private.
+`FlowEndObservation` mirrors QPROJ-3's (same four fields). `SocketCookie` and
+`CellGeneration` are the `overdrive-init`-private newtypes pinned in DG-5.
 
 Contract of `guest_observation`:
 
@@ -20600,7 +20648,7 @@ supervisor*).
 | `SimMtlsIntercept` (`overdrive-sim`, `pub`, **new**) | `shared_table_state(&self) -> SimSharedTable` with `pub enum SimSharedTable { Absent, Complete }` | the shared table is absent, or present with every constant guest-prefix rule (divert, output reject, prerouting drop) — the only two states a single nft transaction leaves (D26-PINS F-2, boot step 8); the sim applies a table write atomically and a scripted failed write leaves the state as it was | R5-43, R5-48 (`nft list table` read-back of the production table: no table ↔ `Absent`; every constant rule present ↔ `Complete`) |
 | Owner seam sim — sockets (source-local, `overdrive-control-plane`) | `socket_observation(&self) -> SimOwnerSocketObservation` (below) | accept queues with buffered first records; connections the owner closed; accepted connections whose peer VM is gone (K-A2′); peer connects in flight; control messages the owner wrote and the peer has not consumed; session end; flow-vsock ends in flight and sent; each outer far end's first terminal event | R5-41 (P-37 shape: queued records after VMM death and CID reuse); R5-9; R5-10 and R5-45 (far-end first event, vsock end before session loss, the `HalfClose` / `HalfCloseAck` exchange); R5-28 |
 | Owner seam sim — steering and route (source-local, `overdrive-control-plane`) | `steering_observation(&self) -> SimSteeringObservation`; `steering_effects(&self) -> Vec<SimSteeringEffect>` (below) | the node-global pinned link, the program version it runs, the entries, the tagged route — kept across owner instances, an unpinned link gone with its instance; every load / attach / pin / route / steer effect the owner issued, in order, with its outcome | R5-24, R5-34 (V-26 (viii): update keeps the earlier program on error), R5-25 (persistence while down), R5-11, R5-2 (an entry exists iff a connect to `(workload_addr, p)` reaches the listener; `bpftool map dump`) |
-| VM-driver beacon seam sim (source-local, `overdrive-worker`) | `beacon_socket_observation(&self) -> SimBeaconSocketObservation { queued: BTreeMap<BeaconConnKey, Option<LaunchToken>>, closed_by_driver: BTreeSet<BeaconConnKey> }` | beacon accept queue with buffered READY (K-A2′); connections the driver closed | R5-41 (beacon part) |
+| `SimBeaconIo` (`overdrive-sim`, `pub`, **new**; the core `BeaconIo` port, DG-4) | `beacon_socket_observation(&self) -> SimBeaconSocketObservation { queued: BTreeMap<BeaconConnKey, Option<LaunchToken>>, closed_by_driver: BTreeSet<BeaconConnKey> }` (`pub`) | beacon accept queue with buffered READY (K-A2′); connections the driver closed | R5-41 (beacon part) |
 | Guest-owner seam sim (source-local, `overdrive-init`) | `guest_socket_observation(&self) -> SimGuestSocketObservation` (below) | V_g in the guest accept queue and torn down there (K-A4); messages the guest wrote and the host has not consumed; session end; readiness events not yet dispatched, with their registration generation; frames parked in each slot's framing cell, tagged by origin; queued `sock_release` reports; legs the guest closed and the host has not observed; flow-vsock ends; each guest far end's first terminal event | R5-31, R5-28 (K-A4, P-38); R5-14, R5-27 (cells, generations, release reports); R5-10, R5-45 |
 
 ```rust
@@ -20629,7 +20677,7 @@ pub(crate) enum SimSteeringEffect {
     Attach { adopted: bool, ok: bool },
     Pin { ok: bool },
     Route { ok: bool },
-    Steer { intake: SocketAddrV4, outcome: SimSteerOutcome },          // Ok | KernelMemory | Defect | Capacity
+    Steer { intake: SocketAddrV4, outcome: SimSteerOutcome },          // Ok | KernelMemory | Defect (no capacity failure, D8a-CAP)
 }
 pub(crate) struct SimGuestSocketObservation {
     pub(crate) queued_inbound: BTreeSet<FlowId>,                      // V_g in the guest accept queue
@@ -20661,11 +20709,11 @@ in-crate driver names, checked against it):
 |---|---|---|---|
 | `SimGuestCidClaim` | `overdrive-sim` | `overdrive_core::guest_transport::GuestCidClaim`, `overdrive_core::claim_set` | core trait and core types only; used by the `overdrive-control-plane` and `overdrive-worker` drivers |
 | `SimVmm` | `overdrive-sim` | `overdrive_core::traits::vmm::Vmm`, `VmConfig`, `ConfinementControl` | core only; used by the pool, host-owner-lifecycle and worker drivers |
-| `SimClock`, `SimEntropy`, `SimCgroupFs`, `SimCgroupAccounting` | `overdrive-sim` | core ports (`Clock`, `Entropy`, `CgroupFs`, `CgroupAccounting`) | core only; used by all three crates' drivers (the worker driver builds `VmDriver` over them) |
+| `SimClock`, `SimEntropy`, `SimCgroupFs`, `SimCgroupAccounting` | `overdrive-sim` | core ports (`Clock`, `Entropy`, `CgroupFs`, `CgroupAccounting`) | core only; used by the `overdrive-control-plane` and `overdrive-worker` drivers (the worker driver builds `VmDriver` over them); `overdrive-init` uses `SimGuestClock` (DG-5) |
 | `SimMtlsIntercept` | `overdrive-sim` | `overdrive_worker::mtls_intercept_port::MtlsIntercept` and `overdrive_worker::mtls_intercept` types | used only by `overdrive-control-plane` drivers (`quiescence`, `shared_table`), where `overdrive-worker` is a normal dependency of both the owner crate and `overdrive-sim`, so Cargo links one copy and the trait unifies. Not used by the `overdrive-worker` drivers |
-| Owner seam sim — sockets, steering and route | `overdrive-control-plane`, `#[cfg(test)]`, beside the private seam | the seam trait, `GuestConnKey`, `FlowId`, `ControlMessage`, `LaunchToken` | names the owner crate's own types, so it lives in the owner crate (a copy in `overdrive-sim` would name a second copy of the owner crate) |
-| VM-driver beacon seam sim | `overdrive-worker`, `#[cfg(test)]`, beside the seam | the beacon seam trait, `BeaconConnKey` | names the worker crate's own types |
-| Guest-owner seam sim | `overdrive-init`, `#[cfg(test)]`, beside the seam | the guest-owner seam trait, `SocketCookie`, `CellGeneration` | names the binary's own types; the binary has no library target |
+| Owner seam sim `SimGuestFlowIo` — sockets, steering and route (DG-3) | `overdrive-control-plane`, `#[cfg(test)]`, beside the seam | `GuestFlowIo`, `GuestConnKey`, `FlowId`, `ControlMessage`, `LaunchToken` | names the owner crate's own types, so it lives in the owner crate (a copy in `overdrive-sim` would name a second copy of the owner crate) |
+| `SimBeaconIo` (DG-4) | `overdrive-sim`, `pub` | `overdrive_core::vm::beacon::{BeaconIo, BeaconSocket, BeaconConnKey}` | core trait and core types only (rule 1); used by the `overdrive-worker` in-crate driver, out-of-crate `VmDriver` tests and `run_server` boots with `VmOverride` |
+| Guest-owner seam sim `SimGuestOwnerIo` with `SimGuestClock` (DG-5) | `overdrive-init`, `#[cfg(test)]`, beside the seam | `GuestOwnerIo`, `GuestClock`, `SocketCookie`, `CellGeneration` | names the binary's own types; the binary has no library target |
 
 `SimMtlsInterceptLifecycle` and `overdrive-sim`'s adapters that name
 `overdrive-control-plane` types (guest network, guest DNS, view store,
@@ -20693,7 +20741,10 @@ paths**, and compares, for every client class and port:
   (`bpftool link` on the pin path), `entries` (`bpftool map dump` of the
   link's map), `lis` (`ss -ltn` on the workload address), `divert` /
   `reject` (`nft list table`), `legC` (`ss` on leg-C's address),
-  `marked` (`serve` serving).
+  and, from the caller (QPROJ-1 source (d), DG-14), `marked` — true iff the
+  driver booted `serve` and has neither killed nor stopped it. `entries` is
+  decoded with the pinned key layout (`guest_steering_key`, DG-14) and
+  `route` filtered by `GUEST_PREFIX_ROUTE_PROTOCOL`.
 - **Reachable configurations:** never booted (route absent, no link, no
   rules); serving with the guest listening; serving with the guest not
   listening; `serve` down after SIGKILL and after graceful shutdown. The
@@ -20765,7 +20816,7 @@ compared only where `walker = 0`)
 | `HostOpenAccept(h)` | seam: an intake client connects to a serving declared port (its `ListenState` injected beforehand as stimulus; it changes no compared variable) |
 | `HostRecvPaired(h)`, `HostRecvRefused(h)` | seam releases the guest's injected `Paired` / `Refused` to the owner |
 | `HostAbortAccept(h)` | seam: an error on the intake child or V_h |
-| `GuestAcceptV`, `GuestPairOrRefuse`, `GuestRecvAbort`, `GuestSeesHostClose`, `GuestLossAbort`, `GuestQueueReset` | stimulus (the guest side; consumes the owner's outbox where the trace says so) |
+| `GuestAcceptV`, `GuestPairOrRefuse`, `GuestRecvAbort`, `GuestSeesHostClose`, `GuestSessionLossObserved`, `GuestQueueReset` | stimulus (the guest side; consumes the owner's outbox where the trace says so) |
 | `HostCheckFlow`, `HostRegisterFlow`, `HostClaimSession` | hazard-only |
 
 **`owner_flows` `flows_ok`, guest side** (`overdrive-init`): `gf(h)` ←
@@ -20777,8 +20828,14 @@ compared only where `walker = 0`)
 → seam completes the application connect (scripted refused / accepted);
 `GuestRecvAbort(h)` → seam releases the host's `Abort`;
 `GuestSeesHostClose(h)` / `GuestQueueReset(h)` → seam delivers the host's
-close of V_h (K-A4) after / before the guest's accept; `GuestLossAbort(h)` →
-seam ends the session; host actions → stimulus.
+close of V_h (K-A4) after / before the guest's accept — after it, a
+`Hangup { ReadHangup }` on the installed V_g while `gf(h)` is `acc`
+(DG-5-E), or on its `GuestPairSocket` once `routed`;
+`GuestSessionLossObserved(c)` (replacing `GuestLossAbort(h)`, DG-5-F) →
+seam ends the session; the owner aborts every flow of it in that one
+dispatch; host actions → stimulus. Every guest timer action → `SimGuestClock`
+advanced to exactly that timer's production deadline (DG-5-A), then
+dispatch until quiescent (DG-5-Q).
 
 **`owner_flows` `flows_beacon`** (`overdrive-worker`): `drvLive` ← O QPROJ-4
 `live`; `bclaim` ← O `claims`; `bcn(b).st` ← `pending` ⇔ S `queued`,
@@ -20804,14 +20861,26 @@ driver dropped the owner); the other side's fields, `opener`, `farHc` →
 stimulus; `held`, `ackDue` → hazard-only; `earlyShut`, `faulted` → ghost.
 Once `open(s)` is false the owner holds nothing of the flow and `s`'s other
 fields are not compared (history). Actions at `s`: `HcFarHalfClose(s)` /
-`HcFarReset(s)` → seam: the far end half-closes / resets; `HcPair` (`s` the
-acceptor) → seam releases the pairing; `HcAnnounce(s)` → seam reports the
-drain complete (`drained`) and releases the write; `HcRecv(s)` → seam
-releases the next inbound message; `VsockEndArrives(s)`,
-`VsockEndReachesSurvivor(s)` → seam delivers the peer's vsock end;
-`HcCleanClose(s)` → seam releases the close; `HcLossObserved(s)` → seam
+`HcFarReset(s)` → seam: the far end half-closes / resets (a half-close
+starts the drain wait toward the vsock with `drained` scripted `false` at
+its first check, DG-5-D); `HcPair` (`s` the acceptor) → seam releases the
+pairing; `HcAnnounce(s)` → seam scripts `drained` toward the vsock `true`
+and `SimGuestClock` / `SimClock` is advanced to that direction's next
+re-check deadline (DG-5-D), the owner writing `HalfClose`; `HcOuterDrained(s)`
+→ the same toward the outer leg, the owner shutting the outer leg down;
+`HcRecv(s)` → seam releases the next inbound message; `VsockEndArrives(s)`,
+`VsockEndReachesSurvivor(s)` → seam delivers the peer's vsock end (for an
+announced direction it starts the drain wait toward the outer leg, `drained`
+scripted `false` at its first check; the clean close of DG-5-C happens in
+the action that completes the second direction — `HcRecv` of the
+acknowledgement or `HcOuterDrained` — there is no separate close action);
+`HcLossObserved(s)` → seam
 delivers the session's end; `HcFlowError(s)` → `owner.teardown` /
-`quiesce_forwarding`, or `SimClock` past `FLOW_DRAIN_DEADLINE`;
+`quiesce_forwarding`, a scripted flow error (before pairing on the guest
+side: `Hangup { Error }` on the installed V_g, DG-5-E), or, while a
+direction's drain wait is open, the clock advanced through its re-checks
+(each `drained` scripted `false`) to its drain deadline (the wait's start +
+`FLOW_DRAIN_DEADLINE`, DG-5-D);
 `HcOwnerDies(s)` → drop the owner (the seam applies linger: far end reset,
 vsock end, session end); `HcSessionDrop` → seam resets the session. Every
 action at the other side is stimulus.
@@ -20833,9 +20902,13 @@ releases that readiness event; `GuestRecvPaired`, `GuestRecvEnd` → seam
 releases the host's message; `GuestPairingTimeout(s)` → `SimClock` past
 `FLOW_PAIRING_DEADLINE` for the slot's association; `SockClose(k)` /
 `SockCloseReportLost(k)` → seam: the socket is released with / without a
-report; `GuestReleaseSock(k)` → seam releases the report; `GuestAudit` /
-`IdleRelease(s)` → `SimClock` to the audit tick / past
-`GUEST_DATAGRAM_SLOT_IDLE`; host actions → stimulus.
+report; `GuestReleaseSock(k)` → seam releases the report; `GuestAudit` →
+`SimGuestClock` to the next audit tick (DG-5-A; it also performs the idle
+release of every slot idle for `GUEST_DATAGRAM_SLOT_IDLE`, so there is no
+separate `IdleRelease`); host actions → stimulus. `MAXFID` is a
+model-checking bound with no production counterpart (DG-5-B): it only
+disables minting, and the conformance instance sizes it so no trace within
+the driver's step bound reaches it.
 
 **`udp_slots`, host side** (`overdrive-control-plane`): `host(i).st` ←
 `req` / `paired` ⇔ O QPROJ-3 `datagrams`, `closed` ⇔ S `closed_by_owner` for
@@ -20864,8 +20937,10 @@ the session; `ListenState(p, v)` → seam delivers `ListenState`;
 `ActivateBegin` → `owner.activate(&plan)` issued (pending); `ActivateOk` →
 it returns `Activated`; `BindListen(p)` / `BindFail(p)` → seam releases /
 fails bind and listen for `p`; `Steer(p)` / `SteerMemFail(p)` /
-`SteerDefect(p)` / `SteerCapFail(p)` → seam's steering returns `Ok` /
-`KernelMemory` / `MapUpdate` / its capacity refusal; `Teardown`, `Release`,
+`SteerDefect(p)` → seam's steering returns `Ok` / `KernelMemory` /
+`MapUpdate`; `SteerCapFail(p)` → hazard-only (never enabled in the design
+instances: admission reserves the capacity, D8a-CAP; `steer` has no
+capacity failure; DG-15); `Teardown`, `Release`,
 `Quiesce`, `Restore` → as in `owner_flows`; `OtherAdmit` → a second
 allocation through `pool.assign` + `provision` + session + `ListenState` on
 both its ports + `activate`, its bring-ups held by the seam; `OtherSteer` →
@@ -20996,6 +21071,1256 @@ the port's bring-up; recovery actions as in `quiescence`.
   compared (QPROJ-7 `shared_table_state`), and re-records `evidence/`
   (`cargo xtask quint check --record`) after S-1 to S-6.
 
+#### [REF] DISTILL design-gap closure (DG-1 to DG-16) — approved under user delegation, 2026-10-09
+
+**Status: approved under user delegation, 2026-10-09.** The user delegated
+the decisions of this round ("choose the correct solutions; not the easiest
+ones"; surface only a decision that breaks functionality an operator or
+workload relies on today). None of DG-1 to DG-16 does. They close every
+DESIGN gap in `distill/upstream-issues.md`; the decision record is
+§ *DISTILL design-gap decisions*. Each item below is an interface contract;
+what it does not name (private helpers, module-private types, the sims'
+stepping and scripting methods) stays the crafter's or DISTILL's.
+
+##### DG-1 — No binary identification of the VMM (user mandate)
+
+Overdrive runs only with the vendored Cloud Hypervisor fork
+(`vendors/cloud-hypervisor`, branch `overdrive/vhost-kernel-vsock`, ADR-0161).
+No probe stage, provisioning check or typed error identifies which Cloud
+Hypervisor build is installed: `VmmProbeError` gains no variant, `Vmm::probe`
+keeps today's stages, provisioning keeps today's `--landlock` check, and
+`infra/metal/native-preflight.sh` adds nothing. The provisioning checksum
+(ADR-0161 decision 3) is the identity check. `/dev/vhost-vsock` access is a
+host fact, not a property of the binary, and stays the claim probe's
+(`GuestCidClaim::probe`, `GuestCidClaimError::{DeviceUnavailable,
+ProbeMismatch}`). P6-S7 is withdrawn; UI-HOST-2 has no subject.
+
+##### DG-2 — Single-cut migration of the replaced signatures (UI-C1; DG-2-R2, approved by the user 2026-10-10)
+
+The pinned signatures replace live ones with no deprecation shim, alias,
+feature flag or parallel old path (single-cut greenfield). **Every row is
+scaffolded in DISTILL, in place, now** — no test, body or conformance driver
+waits for a later authoring time:
+
+- **The pinned signature replaces the live one** in the DISTILL increment.
+  No old and new API exist side by side, and no shim forwards one to the
+  other.
+- **Every production caller is adapted to the pinned shape** in the same
+  increment. Where a caller can supply the new arguments and keep today's
+  behaviour, it does. Only genuinely new behaviour gets a RED-scaffold body
+  (`panic!("Not yet implemented -- RED scaffold")`, marked
+  `// SCAFFOLD: true`), never a method, type, variant or parameter the
+  contract does not name.
+- **Every body and driver over the replaced surface is authored now**,
+  compiled, and marked `#[ignore = "pending DELIVER <step>"]` where its
+  owner is a RED scaffold, the step being the one in the last column. None
+  is committed uncompiled (no unregistered file, no always-false `cfg`).
+- **Existing tests turned red by a scaffold body are expected RED.** Each is
+  listed in `distill/red-classification.md` with the DELIVER step that turns
+  it green; none is weakened or rewritten to stay green.
+- **Tests that defend only deleted surface are deleted with it**, in the
+  same increment: rows 5 and 17, and the TAP allocation and scratch seams of
+  row 9 (deletion discipline).
+
+The last column names the DELIVER step that replaces the scaffold bodies
+with the implementation and activates the bodies over them. A crafter does
+not edit those bodies; a body that does not compile against the pinned
+contract goes back to DISTILL. Step numbers are the § *Roadmap impact* new
+steps and existing step ids; **the attachment-cut step** is defined below
+the table. Line numbers are as of the revision before the DISTILL
+increment.
+
+| # | Live surface (today) | Replacement (pinned) | Production callers adapted | Scaffolded in DISTILL; implemented in |
+|---|---|---|---|---|
+| 1 | `GuestAddressPool::new(node_prefix, bridge, gateway, dns)` (`overdrive-control-plane/src/guest_network.rs:581`) | `new(node_prefix, gateway, Arc<dyn GuestCidClaim>, Arc<dyn Entropy>)` | `lib.rs` `run_server_with_obs_and_drivers` (`:7665`); `overdrive-sim/src/invariants/mod.rs:67` | the attachment-cut step (15) |
+| 2 | `GuestAddressPool::assign(alloc)` (`:597`) | `assign(alloc, &[ListenPort])` | `action_shim/mod.rs:1470` | the attachment-cut step (15) |
+| 3 | `GuestNetworkPlan::{bridge(), assignment() -> &GuestNetworkAssignment}` (`:75`) | no `bridge()`; `assignment() -> &GuestTransportAssignment`; `listen_ports()` | `action_shim/mod.rs:1472`; `overdrive-sim/src/adapters/guest_network.rs:181`; the owner's sites in `guest_network.rs` go with the TAP allocation I/O (row 9) | the attachment-cut step (15) |
+| 4 | `AllocationSpec.network` (`overdrive-core/src/traits/driver.rs:329`) | `AllocationSpec.transport: Option<GuestTransportAssignment>` | `action_shim/mod.rs:1472, 1519, 2519, 3027`; `overdrive-reconcilers/src/workload_lifecycle.rs:1318, 1597, 2004`; `overdrive-worker/src/vm_driver.rs:130, 1518`; `probe_runner/mod.rs:448`; `mtls_intercept_worker.rs:2577, 2602`; `overdrive-sim/src/invariants/{terminal_contention.rs:319, provision_failure_cleanup.rs:396}` | the attachment-cut step (15, 3) |
+| 5 | `GuestNetworkAssignment`, `VmNetworkAttachment`, `VmConfig.network` (`overdrive-core/src/vm/config.rs:887, 927`) | deleted | `vm_driver.rs:36, 125, 164, 1299`; `overdrive-host/src/vmm.rs:274, 303, 375, 577, 594` (`--net`, TAP queue attach; the hardcoded `cid=3` at `:297`); `vm/config.rs:964-966` (Landlock rules) | deleted in DISTILL with its tests; the vsock launch in the attachment-cut step (3) |
+| 6 | `Vmm::create(&self, &VmConfig)` (`overdrive-core/src/traits/vmm.rs:148`) | `create(&self, &VmConfig, ClaimedGuestCid)` | caller `vm_driver.rs:1326`; impls `CloudHypervisorVmm` (`overdrive-host/src/vmm.rs:479`), `SimVmm` (`overdrive-sim/src/adapters/vmm.rs:353`) and every test `impl Vmm` | the attachment-cut step (3) |
+| 7 | `GuestNetworkProvisioner::activate -> TapActivation` (`:157`) | `-> ForwardingActivation` | `action_shim/mod.rs:1742` (`activate_guest_network`, match `:1745`); host owner `:3859`; sim adapter `:276` | the attachment-cut step (06-04 rework) |
+| 8 | `SharedGuestNetworkOwner::{quiesce_managed_taps, restore_quiesced_taps}` (`:213`, `:216`) | `quiesce_forwarding(QuiescenceHolder)`, `restore_forwarding(QuiescenceHold)` | `lib.rs:1587, 1654` (`run_mtls_owner`, replaced by the supervisor rework); sim `:350, 365` | the attachment-cut step (09-01 rework) |
+| 9 | `HostSharedGuestNetworkOwner::new()` (`pub(super)`, `:2525`), `with_scratch_io`, `with_allocation_io` and their private seams | `pub fn new(GuestFlowOwnerPorts)` and `#[cfg(test)] with_flow_io` (DG-3); the TAP allocation and scratch seams are deleted with their tests | `lib.rs:6890` (`run_server`) | the attachment-cut step (7) |
+| 10 | `SharedGuestNetworkComponent` variant set (`overdrive-core/src/guest_network.rs:66`) | § *Typed error taxonomy* set | `mtls_intercept_worker.rs:304`; the owner's audit; `lib.rs:1552-1557`; sim | the attachment-cut step (7, 08-03 rework) |
+| 11 | `GuestNetworkOperation` (`:241`); `GuestNetworkError::Tcx` (`:500`) | § *Typed error taxonomy*; `Flow { operation, source }` | `guest_network.rs`; `action_shim/mod.rs:1479, 1728, 1765`; `overdrive-sim/src/{adapters/guest_network.rs, invariants/netns_density_boot_order.rs}` | the attachment-cut step (7) |
+| 12 | `GuestNetworkExecSupervisor::recovery_progress() -> Option<SharedGuestNetworkRecovery>` (`overdrive-core/src/guest_network.rs:301`) | `-> Vec<SharedGuestNetworkRecovery>` (U-QP-3), and with it the holder-set EXEC-gate contract: `begin_recovery` adds a holder while Recovering, `complete_attempt(&self, remaining: BTreeSet<SharedGuestNetworkComponent>) -> bool` (§ *Owner and provisioner*) | `lib.rs:1657`; tests `overdrive-core/tests/acceptance/netns_density_exec_gate.rs`, `overdrive-control-plane/tests/integration/shared_network_supervisor_recovery.rs` (migrated) | the attachment-cut step (09-01 rework) |
+| 13 | `BeaconMessage::Ready { pid, port }` (`overdrive-core/src/vm/beacon.rs:177`) | `Ready { pid, port, launch: LaunchToken }`; `BeaconParseError::InvalidLaunchToken` (DG-7) | `beacon.rs:212, 310`; `vm_driver.rs:2029`; `overdrive-init/src/main.rs:142, 955` | the attachment-cut step (6, 5) |
+| 14 | `ServiceBackendsResolve::new(store, frontend)` (`mtls_resolve_adapter.rs:650`) | `new(store, frontend, vip_ranges)` | `lib.rs:7750` (passes the configured VIP range, which the resolve adapter does not consult until step 11, so today's behaviour holds); test `overdrive-sim/tests/integration/service_backend_projection.rs:1091` | step 11 |
+| 15 | per-VM Unix beacon listener (`vm_driver.rs:1197`, accepted at `:2020`); `VmDriver::new`'s parameter list | node beacon intake over the `BeaconIo` port; `VmDriver::new(.., beacon: BeaconIntake)` (DG-4) | `vm_driver.rs:1197, 1510, 2020`; `compose_vm_driver`; every test constructing `VmDriver` (out-of-crate ones pass `BeaconIntake::bind(SimBeaconIo)`) | the attachment-cut step (6) |
+| 16 | `overdrive.net=` parsing and TAP guest configuration (`overdrive-init/src/main.rs:398, 458, 462, 520, 781`) | DG-5 | `complete_pre_ready_init` | the attachment-cut step (5) |
+| 17 | `overdrive-control-plane/bin/netns_density_benchmark.rs` and `guest_network::e18_test_support` | deleted (V-9 replaces E18, 08-04 **Replace**) | — | deleted in DISTILL with its tests |
+| 18 | `ServerConfig.vmm_override: Option<Arc<dyn Vmm>>` (`overdrive-control-plane/src/lib.rs`) | `vm_override: Option<VmOverride { vmm, beacon }>` (DG-4) | `lib.rs` composition; `overdrive-cli/src/commands/serve.rs`; the `overdrive-cli` and `overdrive-control-plane` integration tests that set it | the attachment-cut step (6) |
+
+**The attachment-cut step.** This is the DELIVER step that implements rows
+1–13 and 15–18; it is an implementation step, not an authoring time. A step
+is mis-sized if its implementation leaves a live production path that runs
+on a scaffold body, a mechanism with no consumer, or host and guest speaking
+different versions of one wire (the transport token, READY, the flow and
+control records). Every row but 14 moves the VM network attachment from TAP
+to vsock: the launch handoff (rows 1–6, 13, 15, 16) removes the TAP device
+the owner's TAP provisioning, activation, quiescence and audit (rows 7–12)
+exist to serve, and the owner rows need the transport the handoff creates.
+No order of implementing them leaves every test green without a dead
+mechanism, so they are implemented in **one DELIVER step**: new steps 3, 6,
+7, 8, 9, 12, 13, 14 and 15, the kernel-command-line token and READY half of
+new step 5, and the reworks of 06-04, 07-02, 08-03 and 09-01 (which
+§ *Roadmap impact* already places in one cut for 7–9 and 12–14). That step
+activates every body DISTILL marked with it, records the semantic RED,
+makes them GREEN and commits once. Steps that add surface without replacing
+any are implemented before it, each as its own step: new step 1 (fork), 2
+(core types and codecs), 4 (host forwarder and programs), 5's guest programs
+and the `overdrive-init` setup and flow owner modules (DG-5, not yet called
+by `main`), the steering adapter of 9 / 13, and 10. Row 14 is implemented in
+its own step 11. End-to-end coverage of the replacement is V-6 (10-01),
+after the attachment-cut step; the old model's end-to-end VM networking
+tests are deleted in DISTILL with the surface they defend (rows 5, 9, 17).
+
+##### DG-3 — Host owner effect seam `GuestFlowIo` (UI-C2, UI-COV-1)
+
+The host guest-flow owner reaches every kernel, socket, forwarder,
+steering and route effect through one crate-private seam. Owner sockets are
+seam handles; the owner never holds a descriptor. Precedent:
+D-295-DISTILL-12A (`GuestNetworkAllocationIo` + `#[cfg(test)]
+with_allocation_io`), which this seam replaces.
+
+```rust
+// overdrive_control_plane::guest_network::flow_io — crate-private
+// (`pub(crate)`), compiled in every build.
+
+// Socket handles. Issued by the seam, move-only (no `Clone`, no `Copy`),
+// `#[must_use]`, meaningless to any other seam instance. Each type admits
+// exactly the operations its socket's stage allows, so the typestate of the
+// forwarder survives the seam and a pair socket has no read or write method:
+// the "control plane never reads payload" rule is enforced by these
+// signatures (passing a `PairSocket` to `read_record` / `write_record` does
+// not compile). The types are crate-private, so no `trybuild` fixture can
+// name them; the DELIVER reviewer checks the signatures against this block.
+pub(crate) struct RecordSocket(/* private */);   // accepted on 1240 / 1241 / 1243, or V_h: fixed records only
+pub(crate) struct PeerSocket(/* private */);     // from `open_peer`: bound per its spec; UDP: connected by `connect_udp`
+pub(crate) struct ArmedPeer(/* private */);      // `arm_peer` done; TCP connect allowed
+pub(crate) struct InstalledVsock(/* private */); // request read, token matched, installed
+pub(crate) struct IntakeListener(/* private */);
+pub(crate) struct IntakeChild(/* private */);    // accepted, `SO_LINGER{1,0}` set
+pub(crate) struct ParkedChild(/* private */);    // `adopt_intake` done
+pub(crate) struct PendingInbound(/* private */); // V_h installed, request not yet written / `Paired` not received
+pub(crate) struct PairSocket(/* private */);     // routed: terminal readiness, shutdown, linger, abort, close only
+/// Every handle, for `abort` / `close`.
+pub(crate) enum OwnedSocket {
+    Record(RecordSocket), Peer(PeerSocket), Armed(ArmedPeer), Installed(InstalledVsock),
+    Listener(IntakeListener), Child(IntakeChild), Parked(ParkedChild),
+    Pending(PendingInbound), Pair(PairSocket),
+}   // + `From<_>` for each
+/// Names one installed pair for `drained` / `remove_pair`; no socket capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct PairKey(/* private */ u64);
+pub(crate) struct TcpPair { pub(crate) key: PairKey, pub(crate) vsock: PairSocket, pub(crate) outer: PairSocket }
+pub(crate) struct DatagramPair {
+    pub(crate) key: PairKey, pub(crate) stream: PairSocket,
+    pub(crate) seqpacket: PairSocket, pub(crate) udp: PairSocket,
+}
+/// Direction of a TCP pair for `drained` (the forwarder's `FlowDirection`).
+pub(crate) use overdrive_dataplane::guest_flow::FlowDirection;
+
+/// The owner's host vsock listeners, bound on `VMADDR_CID_ANY`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum FlowListener {
+    Stream,    // GUEST_FLOW_STREAM_PORT (1240), SOCK_STREAM
+    Seqpacket, // GUEST_FLOW_DATAGRAM_PORT (1241), SOCK_SEQPACKET
+    Control,   // GUEST_FLOW_CONTROL_PORT (1243), SOCK_STREAM
+}
+
+
+/// One snapshot of the host facts `probe_startup` checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GuestHostFacts {
+    pub(crate) interfaces: BTreeMap<InterfaceIndex, InterfaceFacts>,
+    /// `net.ipv4.ip_local_port_range`.
+    pub(crate) ephemeral_ports: std::ops::RangeInclusive<u16>,
+    /// Soft `RLIMIT_NOFILE` of the `serve` process.
+    pub(crate) nofile_limit: u64,
+    /// The `serve` process's cgroup v2 path.
+    pub(crate) owner_cgroup: std::path::PathBuf,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InterfaceFacts {
+    pub(crate) addresses: BTreeSet<Ipv4Net>,
+    /// `Some` when the interface has a master or a stacking link kind (IFACE-NO-STACK).
+    pub(crate) stacking: Option<InterfaceStacking>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PeerProtocol { Tcp, Udp }
+/// How the seam creates a host peer socket (H-5, D26-PINS, USO-NO-SEGMENT).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PeerSocketSpec {
+    pub(crate) protocol: PeerProtocol,
+    /// Carries `OWNER_EGRESS_MARK` (DG-9).
+    pub(crate) owner_egress_mark: bool,
+    /// Created with `SO_LINGER{1,0}`.
+    pub(crate) abortive_linger: bool,
+    /// Bound before `open_peer` returns: `Some(127.0.0.1:0)` for a connect
+    /// to leg-F (its local address is registered before the connect, D9);
+    /// `None` binds at connect.
+    pub(crate) bind: Option<SocketAddrV4>,
+}
+
+/// Terminal readiness of a pair socket (never `EPOLLIN` / `EPOLLOUT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlowHangup { ReadHangup, Hangup, Error(std::io::ErrorKind) }
+
+/// The host's route type for a destination (D26 local-delivery check).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostRouteType { Unicast, Local, Broadcast, Multicast, Anycast, Other }
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FlowIoError {
+    /// The socket's syscall failed; `source.kind()` is the classification the
+    /// owner branches on (refused, unreachable, timed out, reset, broken pipe).
+    #[error("flow socket operation failed: {source}")]
+    Io { #[source] source: std::io::Error },
+}
+
+#[async_trait::async_trait]
+pub(crate) trait GuestFlowIo: Send + Sync {
+    // --- startup and boot (probe_startup, sweep_stale, converge_shared) ---
+    /// Reads every fact `probe_startup` checks, in one snapshot. Changes
+    /// nothing. Err: a fact is unreadable (`GuestNetworkError::Io` /
+    /// `Netlink`, operation `StartupProbe`); never a default value.
+    async fn host_facts(&self) -> Result<GuestHostFacts, GuestNetworkError>;
+    /// The forwarder's Earned-Trust probe on scratch objects
+    /// (`GuestFlowForwarder::probe`'s stages). Leaves nothing loaded or
+    /// attached on any return.
+    async fn probe_forwarder(&self) -> Result<(), GuestFlowError>;
+    /// Boot: loads the forwarder in the owner's cgroup
+    /// (`GuestFlowForwarder::load`, unframe on `lo`), keeps it for the seam's
+    /// life, then attaches the egress unframe program to every interface in
+    /// `interfaces` (`converge_unframe_interfaces`, D5a-IFACE-BOOT). Ok: the
+    /// forwarder is held, and every interface is in exactly one of
+    /// `attached` / `failed`. Err: nothing held. A second call after Ok
+    /// loads nothing and returns the earlier convergence.
+    async fn load_forwarder(&self, interfaces: &BTreeSet<InterfaceIndex>)
+        -> Result<UnframeConvergence, GuestFlowError>;
+    /// Binds and listens `listener`. Ok: `accept(listener)` yields its
+    /// connections. On a listener already bound (a repair after its accept
+    /// task ended) the earlier socket is closed first. Err: not bound.
+    async fn bind_listener(&self, listener: FlowListener) -> Result<(), FlowIoError>;
+    /// D8a-LOAD-SWAP steps 1–2: `GuestPrefixSteering::load`, then
+    /// `GuestSteeringCandidate::attach` (swap into the pinned link, or first
+    /// attach then pin). Ok: the seam holds the `GuestPrefixSteering`.
+    /// `Err(Load | Query)`: nothing attached. `Err(Update)`: the link runs
+    /// the earlier program. `Err(Attach)`: nothing attached. `Err(Pin)`: the
+    /// new link detaches on return. Never detaches a pinned link; the route
+    /// is untouched on every return.
+    async fn converge_steering(&self, prefix: Ipv4Net, gateway: Ipv4Addr) -> Result<(), GuestSteeringError>;
+    /// D8a-ROUTE step 3: converge `local <prefix> dev lo src <gateway> proto
+    /// GUEST_PREFIX_ROUTE_PROTOCOL` (keep / replace tagged / add). Err:
+    /// `GuestNetworkError::Netlink { LocalRouteConverge }`, the route as it was.
+    async fn converge_prefix_route(&self, prefix: Ipv4Net, gateway: Ipv4Addr) -> Result<(), GuestNetworkError>;
+    /// `sweep_stale`: true iff a process-scoped owner object of a previous run
+    /// is present. Never reports the route or the pinned steering.
+    async fn stale_objects_present(&self) -> Result<bool, GuestNetworkError>;
+
+    // --- connections and records ---
+    /// Next connection accepted on `listener`, with its kernel-reported key.
+    /// Cancellation-safe: a dropped call loses no connection. Err: the
+    /// listener failed (its accept task ends; component `FlowListeners` /
+    /// `ControlListener` damaged until `bind_listener` repairs it).
+    async fn accept(&self, listener: FlowListener) -> Result<(RecordSocket, GuestConnKey), FlowIoError>;
+    /// Reads 1..=`max` bytes of a fixed record or control message.
+    /// `Ok(empty)`: end of stream before any byte. A queued connection whose
+    /// peer died delivers its buffered bytes, then EOF or an error (P-37).
+    /// Cancellation-safe: bytes are never lost to a dropped call.
+    async fn read_record(&self, socket: &RecordSocket, max: usize) -> Result<Vec<u8>, FlowIoError>;
+    /// Writes all of `bytes` (an 8-byte control message on the control
+    /// session), or fails with nothing the peer can parse as a message.
+    async fn write_record(&self, socket: &RecordSocket, bytes: &[u8]) -> Result<(), FlowIoError>;
+    /// Opens V_h to (`cid`, `GUEST_INBOUND_PORT`). Non-blocking; completes
+    /// when connected or failed.
+    async fn connect_guest(&self, cid: GuestCid) -> Result<RecordSocket, FlowIoError>;
+    /// Creates a host peer socket per `spec`, bound to `spec.bind` when
+    /// `Some` before return (so `local_addr` is final). A UDP socket gets
+    /// `SO_NO_CHECK` and never `UDP_SEGMENT`.
+    async fn open_peer(&self, spec: PeerSocketSpec) -> Result<PeerSocket, FlowIoError>;
+    /// `getsockname` / `getpeername` as the kernel reports them.
+    fn local_addr(&self, peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError>;
+    fn peer_addr(&self, peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError>;
+    /// UDP `connect()` (sends nothing; a `connect4` VIP rewrite is visible in
+    /// `peer_addr` afterwards).
+    async fn connect_udp(&self, peer: &PeerSocket, destination: SocketAddrV4) -> Result<(), FlowIoError>;
+    /// Non-blocking TCP connect of an armed peer; completes on readiness
+    /// (established, refused, unreachable, or the kernel's SYN retries
+    /// exhausted). Non-mesh destinations: the owner sets no timeout of its
+    /// own (D15-R3). Leg-F: the owner bounds it by
+    /// `FLOW_PAIRING_DEADLINE − FLOW_REQUEST_DEADLINE` by dropping the
+    /// future; after a dropped call the peer's connect state is unspecified
+    /// and the owner's only next step is `abort`.
+    async fn connect_peer(&self, peer: &ArmedPeer, destination: SocketAddrV4) -> Result<(), FlowIoError>;
+    /// The host's FIB route type for `destination` (D26 check 4). Pure read.
+    async fn route_type(&self, destination: Ipv4Addr) -> Result<HostRouteType, FlowIoError>;
+
+    // --- intake listeners (G-V8) ---
+    /// Binds `address` (`workload_addr:guest_intake_host_port(i)`) and listens.
+    async fn bind_intake(&self, address: SocketAddrV4) -> Result<IntakeListener, FlowIoError>;
+    /// Next child of an intake listener (`SO_LINGER{1,0}` set) and its
+    /// client's address. Cancellation-safe.
+    async fn accept_intake(&self, listener: &IntakeListener) -> Result<(IntakeChild, SocketAddrV4), FlowIoError>;
+    /// `GuestPrefixSteering::steer(intake, listener)`, with its contract.
+    async fn steer(&self, intake: SocketAddrV4, listener: &IntakeListener) -> Result<(), GuestSteeringError>;
+
+    // --- forwarding (the forwarder's contract and per-flow order, by type) ---
+    /// `install_accepted_vsock`; the request was read and its token matched.
+    async fn install_vsock(&self, vsock: RecordSocket) -> Result<InstalledVsock, GuestFlowError>;
+    /// `arm_peer`; before the TCP connect.
+    async fn arm_peer(&self, vsock: &InstalledVsock, peer: PeerSocket) -> Result<ArmedPeer, GuestFlowError>;
+    /// `complete_outbound` after `connect_peer` returned Ok.
+    async fn route_outbound(&self, vsock: InstalledVsock, peer: ArmedPeer) -> Result<TcpPair, GuestFlowError>;
+    /// `install_datagram`: `udp` connected by `connect_udp`; both requests read.
+    async fn install_datagram(&self, stream: RecordSocket, seqpacket: RecordSocket, udp: PeerSocket) -> Result<DatagramPair, GuestFlowError>;
+    /// `register_intake_listener` (before `steer`) / `unregister_intake_listener`.
+    async fn register_intake(&self, listener: &IntakeListener) -> Result<(), GuestFlowError>;
+    async fn unregister_intake(&self, listener: &IntakeListener) -> Result<(), GuestFlowError>;
+    /// `adopt_intake`, right after `accept_intake`.
+    async fn adopt_intake(&self, child: IntakeChild) -> Result<ParkedChild, GuestFlowError>;
+    /// `begin_inbound` with V_h from `connect_guest`.
+    async fn begin_inbound(&self, child: ParkedChild, vsock: RecordSocket) -> Result<PendingInbound, GuestFlowError>;
+    /// Writes the 32-byte `TcpAccept` request on the pending V_h, once.
+    async fn write_request(&self, pending: &PendingInbound, request: &[u8; FLOW_REQUEST_LEN]) -> Result<(), FlowIoError>;
+    /// Terminal readiness of the pending flow's intake child (outer-leg EOF
+    /// before `Paired` is recorded, not an abort; § *Flow end*).
+    async fn pending_hangup(&self, pending: &PendingInbound) -> FlowHangup;
+    /// `complete_inbound` on `Paired`.
+    async fn route_inbound(&self, pending: PendingInbound) -> Result<TcpPair, GuestFlowError>;
+    /// K2 `drained` of a TCP pair.
+    async fn drained(&self, pair: PairKey, direction: FlowDirection) -> Result<bool, GuestFlowError>;
+    /// `remove_pair`, convergent (an absent pair counts as removed).
+    async fn remove_pair(&self, pair: PairKey) -> Result<(), GuestFlowError>;
+    async fn inventory(&self) -> Result<GuestFlowInventory, GuestFlowError>;
+    async fn counters(&self) -> Result<GuestFlowCounters, GuestFlowError>;
+
+    // --- ends of sockets ---
+    /// Next terminal readiness of a pair socket. Cancellation-safe.
+    async fn hangup(&self, socket: &PairSocket) -> FlowHangup;
+    async fn shutdown_write(&self, socket: &PairSocket) -> Result<(), FlowIoError>;
+    async fn clear_linger(&self, socket: &PairSocket) -> Result<(), FlowIoError>;
+    /// Closes with `SO_LINGER{1,0}` (reset). Consumes the handle.
+    async fn abort(&self, socket: OwnedSocket);
+    /// Closes. Closing an `IntakeListener` removes its steering entry in the
+    /// same kernel step (K-L3). Consumes the handle.
+    async fn close(&self, socket: OwnedSocket);
+}
+```
+
+Contract (every method):
+
+- **Preconditions are types.** A handle exists only between the call that
+  issued it and the call that consumed it, so a stale or closed handle
+  cannot be passed; the per-flow order of the forwarder
+  (install → arm → connect → route; adopt → begin → write request → route)
+  is the only order the types admit. A handle of another seam instance is
+  unreachable from the owner (`unreachable!` in both adapters). The owner
+  ends every handle with `abort` / `close` or a consuming call; a handle
+  dropped otherwise is an owner defect, and `SimGuestFlowIo` reports it at
+  its own drop.
+- **Consuming calls are all-or-nothing.** A call that consumes handles and
+  returns `Err` has aborted (`SO_LINGER{1,0}`) every consumed socket and
+  removed every entry it wrote before returning (the forwarder's "No
+  partial pair").
+- **Postconditions and ordering.** A method's effect has happened when its
+  future completes, never before; effects of one owner task happen in its
+  call order. A dropped future of an effect method (anything but `accept`,
+  `accept_intake`, `read_record`, `hangup`, `pending_hangup`) leaves the
+  effect either fully applied or not applied (except `connect_peer`, above);
+  the owner's next call observes which.
+- **Edge cases.** `read_record` with `max = 0` returns `FlowIoError::Io` of
+  kind `InvalidInput`. `abort` of a pair socket before `remove_pair` is
+  allowed (D20 orders it after). `drained` of a removed pair is `Ok(true)`.
+- **Blocking.** The production adapter never blocks a runtime thread: every
+  procfs, sysfs and cgroup read in `host_facts` / `stale_objects_present`
+  goes through `tokio::fs` or `spawn_blocking` (dst-lint async-fs rule), and
+  the netlink client is opened at the first effect, so `new` touches no
+  kernel state.
+- **Boot ordering is structural.** `converge_prefix_route` follows a
+  `converge_steering` Ok, and `steer` / the forwarding methods follow a
+  `load_forwarder` / `converge_steering` Ok, because the owner calls them
+  only from `converge_shared` in that order and binds intake listeners only
+  after the composition opened admission (`open_after_boot`). A call out of
+  that order is unreachable from the owner; the adapters treat it as
+  `unreachable!` (`rust.md` § *Logically unreachable*), not as a runtime
+  error.
+- **Invariants.** Only `RecordSocket` and `PendingInbound` carry bytes
+  through the owner, and only the fixed records; the forwarding methods
+  carry the forwarder's contracts unchanged (§ *Driven port — host
+  forwarder*), and `steer` / `converge_steering` the steering's.
+
+**Mesh TcpConnect through the seam** (D9, the order of § *Per-kind total
+orders*): `install_vsock` → `open_peer { bind: Some(127.0.0.1:0), .. }` →
+`local_addr` → `MtlsInterceptWorker::register_forwarded_outbound(alloc,
+local, destination, backend)` → `arm_peer` → `connect_peer(leg_f_addr)` →
+`route_outbound` → `Paired`. The registration exists before leg-F can
+accept.
+
+**Production adapter.** `HostGuestFlowIo` (crate-private, same module):
+holds the handle table (seam ids → `OwnedFd` with
+`tokio::io::unix::AsyncFd` readiness), the `GuestFlowForwarder` after
+`load_forwarder`, the `GuestPrefixSteering` after `converge_steering`, and
+the netlink client; built only by `HostSharedGuestNetworkOwner::new`. The
+seam's `InstalledVsock` / `ArmedPeer` / `PendingInbound` share names with the
+forwarder's typestates, which the adapter wraps; inside the adapter the
+forwarder's are named module-qualified (`guest_flow::InstalledVsock`, …;
+`rust.md` § *Import style*, disambiguation).
+
+**Simulation adapter.** `SimGuestFlowIo` (`#[cfg(test)]`, module
+`guest_network::flow_io::sim`, crate-private; QPROJ-1 rule 3). It holds
+every effect the owner issues until the driver releases or fails it,
+reports when every owner task waiting on it is parked, and implements the
+read surfaces of QPROJ-7 (`socket_observation`, `steering_observation`,
+`steering_effects`). Node-global steering state (link, program version,
+entries, route) lives in a `SimGuestNode` shared by every `SimGuestFlowIo`
+built over it, so it survives an owner's drop; an unpinned link and every
+handle die with their seam. `converge_steering` is held as separate
+effects in the sim — `Load`, then `Attach` (adopted link: the update) and,
+for a first attach only, `Pin` — so a driver can fail or crash between them
+(`prefix_boot`). Scripted outcomes cover UI-COV-1: `Load` (verifier
+rejection), `Update`, `Attach`, `Pin`, `steer` → `KernelMemory` /
+`MapUpdate` / `IntakeAlreadySteered`, and `load_forwarder` → a `failed`
+entry of `KernelMemory` or `Attach` (`ERANGE`, `EEXIST`, `ENODEV`). Its
+stepping and scripting methods are DISTILL's.
+
+**Owner construction.**
+
+```rust
+// overdrive_control_plane::guest_network — public
+pub struct HostSharedGuestNetworkOwner { /* private */ }
+
+/// Every input the owner needs; no field has a default (`development.md`
+/// § "Port-trait dependencies").
+pub struct GuestFlowOwnerPorts {
+    pub clock: Arc<dyn Clock>,
+    pub resolve: Arc<dyn MtlsResolve>,
+    pub mtls: Arc<MtlsInterceptWorker>,
+    /// The configured service VIP range — the same value the VIP allocator
+    /// and `ServiceBackendsResolve::new` receive (D24a, D8-PREFIX-VIP).
+    pub vip_range: VipRange,
+    /// TCP ports `serve` binds on the unspecified address (INTAKE-BIND).
+    pub wildcard_tcp_ports: BTreeSet<u16>,
+    /// `GUEST_NODE_PREFIX` / `GUEST_NODE_GATEWAY` in production (DG-14).
+    pub node_prefix: Ipv4Net,
+    pub gateway: Ipv4Addr,
+}
+
+impl HostSharedGuestNetworkOwner {
+    /// Production: composes `HostGuestFlowIo`. Infallible; touches no kernel
+    /// state (the effects start at `probe_startup`).
+    pub fn new(ports: GuestFlowOwnerPorts) -> Self;
+    /// In-crate tests and conformance drivers: the same owner over `io`.
+    #[cfg(test)]
+    pub(crate) fn with_flow_io(ports: GuestFlowOwnerPorts, io: Arc<dyn GuestFlowIo>) -> Self;
+}
+```
+
+Every deadline, the drain re-check (DG-5-D: `Clock::sleep` until the
+earlier of the next `FLOW_DRAIN_RECHECK_PERIOD` re-check and the
+direction's `FLOW_DRAIN_DEADLINE`, then one `GuestFlowIo::drained` call) and
+the audit cadence read `ports.clock`; the seam gains no method. The runtime
+supervisor (RUN-295-B) is built through the existing crate-private
+`run_shared_network_supervisor(SharedNetworkSupervisorPorts, ..)`; an
+in-crate driver composes it over the same owner and a `SimClock` (crate
+structure, not a gap).
+
+##### DG-4 — VM-driver beacon port `BeaconIo` (UI-C2)
+
+The beacon listener is a driven **port**, not a crate-private seam: every
+VM-driver test and every `run_server` boot that injects a simulated VMM must
+also inject the beacon, from any crate (H-B of the DG review). The port
+names only core types, so its sim lives in `overdrive-sim` and unifies in
+every crate, the `overdrive-worker` in-crate driver included (QPROJ-1 rule 1).
+
+```rust
+// overdrive_core::vm::beacon — public (beside the beacon wire codec)
+/// Kernel-reported identity of an accepted beacon connection (moved here
+/// from `overdrive-worker`; QPROJ-4 uses it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BeaconConnKey { pub peer_cid: GuestCid, pub peer_port: VsockPort }
+
+/// A beacon connection held by a `BeaconIo` adapter. Move-only,
+/// `#[must_use]`, ended only by `close`. `from_raw` is for adapters only:
+/// a handle means something only to the adapter that issued it.
+pub struct BeaconSocket(/* private */ u64);
+impl BeaconSocket { pub const fn from_raw(id: u64) -> Self; pub const fn raw(&self) -> u64; }
+
+#[async_trait::async_trait]
+pub trait BeaconIo: Send + Sync + 'static {
+    /// Binds and listens (`VMADDR_CID_ANY`, `BEACON_VSOCK_PORT`), once per
+    /// driver. A second call is Ok and changes nothing. Err: nothing bound.
+    async fn bind(&self) -> Result<(), std::io::Error>;
+    /// Next accepted connection and its kernel-reported key. Precondition:
+    /// `bind` returned Ok. Cancellation-safe.
+    async fn accept(&self) -> Result<(BeaconSocket, BeaconConnKey), std::io::Error>;
+    /// Next `\n`-terminated line without the terminator, at most 4,096 bytes
+    /// (longer → `InvalidData`). `Ok(None)`: end of stream. A queued
+    /// connection whose VM died delivers its buffered line (P-37).
+    /// Cancellation-safe: a dropped call loses no buffered byte.
+    async fn read_line(&self, socket: &BeaconSocket) -> Result<Option<String>, std::io::Error>;
+    /// Writes `line` and `\n` (EXEC, SHUTDOWN) whole, or fails.
+    async fn write_line(&self, socket: &BeaconSocket, line: &str) -> Result<(), std::io::Error>;
+    /// Closes. Consumes the handle.
+    async fn close(&self, socket: BeaconSocket);
+}
+```
+
+Contract (`BeaconIo`): a stale handle cannot be passed (move-only; consumed
+by `close`); a handle another adapter issued is unreachable
+(`unreachable!`). `accept`, `read_line` and `write_line` effects have
+happened when their futures complete; `read_line` / `accept` are
+cancellation-safe. `read_line` returns `Err(InvalidData)` for a line over
+4,096 bytes and leaves the connection for the driver to `close`. `bind`
+precedes `accept` structurally (`BeaconIntake::bind` calls it first).
+
+Production adapter `VsockBeaconIo` (`overdrive-host`, public; real
+`AF_VSOCK`, async over `AsyncFd`), constructed by (DG-4-CTOR, approved by
+the user 2026-10-10):
+
+```rust
+// overdrive_host — public
+pub struct VsockBeaconIo { /* private: listener and handle table, empty until `bind` */ }
+impl VsockBeaconIo {
+    /// Infallible; opens no socket and touches no kernel state. The listener
+    /// is created by `BeaconIo::bind`, whose failure `BeaconIntake::bind`
+    /// reports as `BeaconIntakeError::Bind`.
+    #[must_use]
+    pub const fn new() -> Self;
+}
+```
+
+No `Default` and no port or address override, mirroring DG-6's
+`VhostVsockCidClaim::new`: the port is `BEACON_VSOCK_PORT` and the address
+`VMADDR_CID_ANY`; tests use `SimBeaconIo`. Simulation adapter `SimBeaconIo`
+(`overdrive-sim`, public, adapter-sim test API) with the QPROJ-7 read
+surface `beacon_socket_observation()` and accept-queue K-A2′ behaviour
+coupled to the `SimVmm` it is built with; its stepping methods are
+DISTILL's. No test binds a real beacon port, so no test needs the
+`host-kernel-shared` group for it.
+
+A driver without a bound beacon listener is unrepresentable: the bound
+intake is a constructor argument.
+
+```rust
+// overdrive_worker — public
+/// D17: the node's bound beacon listener and its accept task. Exists only
+/// bound; dropping it stops the accept task and closes the listener.
+pub struct BeaconIntake { /* private: Arc<dyn BeaconIo>, accept task */ }
+impl BeaconIntake {
+    /// Binds through `io` and starts the accept task. Production passes
+    /// `VsockBeaconIo`; tests and `run_server` boots with a simulated VMM
+    /// pass `SimBeaconIo`. Called once by `compose_vm_driver`, after
+    /// `Vmm::probe`. Err → `health.startup.refused`, reason
+    /// `vm_driver.beacon_bind`; nothing bound.
+    pub async fn bind(io: Arc<dyn BeaconIo>) -> Result<Self, BeaconIntakeError>;
+}
+impl VmDriver {
+    /// Today's parameters plus the bound intake (DG-2 row 15).
+    pub fn new(vmm: Arc<dyn Vmm>, clock: Arc<dyn Clock>, fs: Arc<dyn CgroupFs>,
+               cgroup_accounting: Arc<dyn CgroupAccounting>, probe_runner: Arc<ProbeRunner>,
+               guest_network_exec: Arc<GuestNetworkExecGate>, layout: VmHostLayout,
+               beacon: BeaconIntake) -> Self;
+}
+#[derive(Debug, thiserror::Error)]
+pub enum BeaconIntakeError {
+    #[error("binding the beacon vsock listener on port {port} failed: {source}")]
+    Bind { port: VsockPort, #[source] source: std::io::Error },
+}
+```
+
+**`run_server` injection.** A simulated VMM without a simulated beacon is
+the wrong state (a `SimVmm` guest cannot reach a real vsock listener), so
+the two travel together: `ServerConfig.vmm_override: Option<Arc<dyn Vmm>>`
+becomes `vm_override: Option<VmOverride>` with
+`#[derive(Clone)] pub struct VmOverride { pub vmm: Arc<dyn Vmm>, pub beacon: Arc<dyn BeaconIo> }`
+(`overdrive-control-plane`, public). It derives `Clone` because
+`ServerConfig`, which holds it, derives `Clone`; both fields are `Arc`s, so
+a clone shares the same VMM and beacon. `None` composes `CloudHypervisorVmm`
+and `VsockBeaconIo::new()`; `Some` composes both overrides. Every caller of
+`vmm_override` is adapted in DISTILL (DG-2 row 18).
+
+##### DG-5 — `overdrive-init` guest flow owner and setup (UI-C3)
+
+All items live in the `overdrive-init` binary crate (no library target);
+tests are `#[cfg(test)]` / `#[cfg(all(test, feature = "integration-tests"))]`
+modules under its `src/`. No test calls `main`, `run` or any path that
+reaches `reboot(RB_POWER_OFF)`; the kernel command line is passed to the
+parser as a string (no environment hook). `overdrive-init` adds `aya`
+(the guest programs and `GuestTransportOps`' errors) as a dependency and
+`quint-connect` as a dev-dependency (step 5).
+
+**Transport token and setup** (module `transport`):
+
+```rust
+pub(crate) struct GuestTransportToken { pub(crate) workload_addr: Ipv4Addr, pub(crate) gateway: Ipv4Addr, pub(crate) launch: LaunchToken }
+
+/// Parses the one `overdrive.transport=` token of `cmdline` (§ *Guest
+/// adaptation contract*). Fields are positional: `vsock2`, `addr=`, `dns=`,
+/// `launch=`. The first position whose key or value is invalid names the
+/// field (`Version`, `Addr`, `Dns`, `Launch`); a missing trailing field names
+/// the first missing one; a fifth field is `Extra`. Other kernel parameters
+/// are ignored.
+pub(crate) fn parse_transport_token(cmdline: &str) -> Result<GuestTransportToken, GuestTransportSetupError>;
+
+/// The setup steps of G-V7, one method per step; each `Err` maps to exactly
+/// one `GuestTransportSetupError` variant (named per method). Stateful: the
+/// production ops keep every socket they bind and every program they load,
+/// and hand them to the owner's seam (`KernelGuestOwnerIo::new(ops)`).
+pub(crate) trait GuestTransportOps {
+    fn create_dummy_device(&mut self) -> std::io::Result<()>;                       // DummyDevice
+    fn add_workload_address(&mut self, addr: Ipv4Addr) -> std::io::Result<()>;      // AddressAdd
+    fn add_fwmark_rule(&mut self) -> std::io::Result<()>;                           // FwmarkRule
+    fn enable_fwmark_reflect(&mut self) -> std::io::Result<()>;                     // FwmarkReflect
+    fn reserve_ports(&mut self, ports: std::ops::RangeInclusive<u16>) -> std::io::Result<()>; // ReservedPorts
+    fn bind_tcp_intake(&mut self, addr: SocketAddrV4) -> std::io::Result<()>;       // IntakeBind { addr }
+    fn bind_udp_slot(&mut self, addr: SocketAddrV4) -> std::io::Result<()>;         // IntakeBind { addr }
+    fn check_sock_common_layout(&mut self) -> Result<(), SockCommonField>;          // KernelLayoutMismatch
+    fn load_program(&mut self, program: GuestProgram) -> Result<(), aya::EbpfError>;            // ProgramLoad
+    fn attach_program(&mut self, program: GuestProgram) -> Result<(), aya::programs::ProgramError>; // ProgramAttach
+    /// Inserts every bound UDP slot socket into the slot SockHash (the
+    /// intake model's "SockHash-installed from boot").
+    fn install_udp_slots(&mut self) -> std::io::Result<()>;                          // SlotInstall
+    fn seed_listener_map(&mut self) -> std::io::Result<()>;                         // ListenerSeed
+    fn bind_inbound_vsock(&mut self) -> std::io::Result<()>;                        // InboundListenerBind
+}
+
+/// Runs the steps in this order and stops at the first failure: dummy
+/// device, workload address, fwmark rule, `fwmark_reflect`, reserved ports,
+/// TCP intake, every UDP slot (n ascending), layout check, each
+/// `GuestProgram` load then attach (enum order), slot install, listener
+/// seed, inbound listener. Today's `lo` bring-up and resolver write keep
+/// their place and error handling.
+pub(crate) fn configure_guest_transport(token: &GuestTransportToken, ops: &mut dyn GuestTransportOps) -> Result<(), GuestTransportSetupError>;
+```
+
+`SlotInstall` is in the § *Guest adaptation contract* error set.
+
+Production `KernelGuestTransportOps`. `GuestTransportSetupError` (the
+§ *Guest adaptation contract* set) derives `thiserror::Error`;
+`TransportTokenField`, `SockCommonField` and `GuestProgram` have
+`as_str` (lower snake case). On any setup error `overdrive-init` writes
+exactly one console line `overdrive-init: guest transport setup failed:
+<Display>` and takes the existing pre-READY exit path. `Display` texts:
+
+| Variant | `Display` |
+|---|---|
+| `TokenMissing` | `kernel command line has no overdrive.transport= token` |
+| `TokenDuplicate` | `kernel command line has more than one overdrive.transport= token` |
+| `TokenMalformed { field }` | `overdrive.transport= field {field} is malformed` |
+| `DummyDevice` | `creating the transport dummy device failed: {source}` |
+| `AddressAdd` | `adding the workload address failed: {source}` |
+| `FwmarkRule` | `adding the fwmark lookup rule failed: {source}` |
+| `FwmarkReflect` | `setting net.ipv4.fwmark_reflect failed: {source}` |
+| `KernelLayoutMismatch { field }` | `guest kernel sock_common field {field} does not match the guest programs` |
+| `ProgramLoad { program }` | `loading guest program {program} failed: {source}` |
+| `ProgramAttach { program }` | `attaching guest program {program} failed: {source}` |
+| `ListenerSeed` | `seeding the listener map from sock_diag failed: {source}` |
+| `InboundListenerBind` | `binding the inbound vsock listener failed: {source}` |
+| `ReservedPorts` | `reserving the guest transport ports failed: {source}` |
+| `IntakeBind { addr }` | `binding the guest intake on {addr} failed: {source}` |
+| `SlotInstall` | `installing the UDP slot sockets failed: {source}` |
+
+**Guest flow owner** (module `guest_flow`):
+
+```rust
+/// Kernel socket cookie of a guest socket; never 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct SocketCookie(/* private */ std::num::NonZeroU64);
+/// Readiness-registration generation of one UDP slot's cells (CELL-RECREATE).
+/// 0 at boot; +1 at each recreate; `u64`, never wraps in practice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct CellGeneration(/* private */ u64);
+// Both: validating `new` returning `Result`, `get`, decimal `FromStr` /
+// `Display` (rust.md § Newtype completeness); proptest roundtrip.
+
+// Guest socket handles: issued by the seam, move-only, `#[must_use]`, each
+// admitting only its stage's operations (mirroring DG-3; no read or write
+// method takes a pair socket). `SocketId` only correlates an event with a
+// handle the owner holds; it carries no capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct SocketId(/* private */ u64);
+pub(crate) struct HostConn(/* private */);      // vsock to the host on a `HostChannel`: the control session, a TcpConnect V_g, T_g, Q_g
+pub(crate) struct InboundConn(/* private */);   // V_g accepted on `GUEST_INBOUND_PORT`
+pub(crate) struct CapturedConn(/* private */);  // I: the TCP intake's child for an application's captured `connect()`
+pub(crate) struct InstalledConn(/* private */); // a flow V_g installed (TcpConnect: route V_g → I; TcpAccept: no route yet)
+pub(crate) struct AppConn(/* private */);       // C: armed toward an installed V_g, connecting
+pub(crate) struct SlotLegs(/* private */);      // T_g and Q_g of one slot's association, installed
+pub(crate) struct GuestPairSocket(/* private */); // routed: terminal readiness, shutdown, linger, abort, close only
+/// Names one routed TCP pair for `drained` / `remove_pair`; no capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct GuestPairKey(/* private */ u64);
+pub(crate) struct GuestPair { pub(crate) key: GuestPairKey, pub(crate) vsock: GuestPairSocket, pub(crate) outer: GuestPairSocket }
+pub(crate) enum GuestOwnedSocket {
+    Host(HostConn), Inbound(InboundConn), Captured(CapturedConn), Installed(InstalledConn),
+    App(AppConn), Legs(SlotLegs), Pair(GuestPairSocket),
+}   // + `From<_>` for each; `id(&self) -> SocketId` on every handle
+/// Terminal readiness (never `POLLIN` / `POLLOUT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GuestHangup { ReadHangup, Hangup, Error(std::io::ErrorKind) }
+/// Outcome of the end-of-association order for one slot (CELL-RECREATE).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlotEnd {
+    /// Both cells recreated; the slot's new generation.
+    Recreated(CellGeneration),
+    /// Creating a new cell failed: the slot is quarantined (no association,
+    /// detached from its owner, not in the pool; steps 4–5 ran).
+    Quarantined,
+}
+
+/// The host vsock channels the guest opens (CID 2), with their socket types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostChannel {
+    FlowStream,    // GUEST_FLOW_STREAM_PORT (1240), SOCK_STREAM
+    FlowSeqpacket, // GUEST_FLOW_DATAGRAM_PORT (1241), SOCK_SEQPACKET
+    Control,       // GUEST_FLOW_CONTROL_PORT (1243), SOCK_STREAM
+}
+/// The only reads guest userspace makes ("No payload in guest userspace").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GuestRecord {
+    ControlMessage, // CONTROL_MESSAGE_LEN (8)
+    FlowRequest,    // FLOW_REQUEST_LEN (32), on V_g
+}
+/// Direction of a guest TCP pair for `drained`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GuestFlowDirection { TowardOuter, TowardHost }
+/// The guest's listeners whose failure the owner cannot repair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GuestListener { Inbound /* GUEST_INBOUND_PORT */, TcpIntake /* GUEST_TCP_INTAKE_PORT */ }
+
+/// Every input event of the guest owner. Each is delivered exactly once.
+#[derive(Debug)]
+pub(crate) enum GuestIoEvent {
+    /// A connect from `start_connect_host` / `start_connect_app` completed.
+    Connected { socket: SocketId, result: Result<(), std::io::ErrorKind> },
+    /// A `start_read_*` completed: exactly the record's bytes, `Ok(empty)` at
+    /// EOF before any byte, `Err(UnexpectedEof)` at EOF mid-record.
+    Read { socket: SocketId, result: Result<Vec<u8>, std::io::ErrorKind> },
+    /// V_g accepted on `GUEST_INBOUND_PORT`.
+    InboundAccepted { conn: InboundConn },
+    /// The TCP intake accepted an application's captured `connect()`; the
+    /// kernel already installed it with route I → a parking cell (or, with no
+    /// free cell, did not: `parked = false`, and the owner resets it).
+    OutboundCaptured { child: CapturedConn, original_destination: SocketAddrV4, cookie: SocketCookie, parked: bool },
+    /// Terminal readiness on a watched socket: the control session's
+    /// `HostConn`, a `CapturedConn` before `Paired`, every `InstalledConn`
+    /// (a flow V_g between install and route, DG-5-E) and every
+    /// `GuestPairSocket` are watched from issue (level-triggered: reported
+    /// once per socket per kind until the socket ends). A routing call
+    /// consumes an `InstalledConn`; the `GuestPairSocket` it yields for the
+    /// same V_g keeps the watch, so a pending terminal readiness is reported
+    /// once, under whichever handle the owner holds when it is delivered.
+    Hangup { socket: SocketId, hangup: GuestHangup },
+    /// A slot's framing cell became readable, as registered at `generation`.
+    SlotReady { slot: SocketAddrV4, generation: CellGeneration },
+    /// A `sock_release` report (ring buffer).
+    SocketReleased { cookie: SocketCookie },
+    /// The listener map changed (`fexit` wake record).
+    ListenerMapWake,
+    /// A listener's accept failed with an error other than a per-connection
+    /// one (`ECONNABORTED`, and `EMFILE` / `ENFILE`, which the seam retries).
+    ListenerFailed { listener: GuestListener, kind: std::io::ErrorKind },
+}
+
+/// Synchronous: `overdrive-init` has no async runtime (std + nix).
+pub(crate) trait GuestOwnerIo: Send {
+    /// Blocks until the next event (`Some`) or until `deadline` passes on the
+    /// owner's clock (`None`; never `None` before it, never with an event
+    /// pending). `deadline = None`: waits for an event. Err: the readiness
+    /// wait itself failed (fatal to the owner).
+    fn next_event(&mut self, deadline: Option<std::time::Instant>) -> std::io::Result<Option<GuestIoEvent>>;
+    // --- host channels and records ---
+    /// Non-blocking vsock connect to the host (CID 2) on `channel`, with the
+    /// channel's socket type; completion is a `Connected` event.
+    fn start_connect_host(&mut self, channel: HostChannel) -> std::io::Result<HostConn>;
+    /// Starts reading exactly one `record` on a connected `HostConn` (the
+    /// control session: `ControlMessage`); completion is a `Read` event.
+    fn start_read_host(&mut self, conn: &HostConn, record: GuestRecord) -> std::io::Result<()>;
+    /// Starts reading the 32-byte `TcpAccept` request on V_g.
+    fn start_read_inbound(&mut self, conn: &InboundConn) -> std::io::Result<()>;
+    /// Writes one whole `ControlOpen` or control message on the session.
+    fn write_host(&mut self, conn: &HostConn, bytes: &[u8]) -> std::io::Result<()>;
+    /// TCPACCEPT-END: after the request read, `true` iff V_g already reports
+    /// `POLLRDHUP` or EOF (the host closed V_h). Non-blocking; reads no byte.
+    fn inbound_ended(&mut self, conn: &InboundConn) -> std::io::Result<bool>;
+
+    // --- TcpConnect (guest opens; § Per-kind total orders steps 2, 7) ---
+    /// Re-arms I (`SO_RCVLOWAT`) after its `OutboundCaptured` event.
+    fn rearm_captured(&mut self, child: &CapturedConn) -> std::io::Result<()>;
+    /// Installs the connected V_g with route V_g → I.
+    fn install_outbound(&mut self, vsock: HostConn, child: &CapturedConn) -> std::io::Result<InstalledConn>;
+    /// Writes the 32-byte flow request on an installed V_g, once.
+    fn write_request(&mut self, vsock: &InstalledConn, request: &[u8; FLOW_REQUEST_LEN]) -> std::io::Result<()>;
+    /// On `Paired`: routes I's parking cell → V_g and re-arms the cell.
+    fn route_outbound(&mut self, vsock: InstalledConn, child: CapturedConn) -> std::io::Result<GuestPair>;
+
+    // --- TcpAccept (host opens; steps 3–5) ---
+    /// Installs V_g after a matching request and `inbound_ended == false`
+    /// (no route yet).
+    fn install_inbound(&mut self, vsock: InboundConn) -> std::io::Result<InstalledConn>;
+    /// Creates C with `SO_LINGER{1,0}`, `IP_TRANSPARENT` bound to `client`
+    /// and the platform `SO_MARK`; arms C with route C → V_g; starts the
+    /// non-blocking connect to `destination` (`workload_addr:listen_port`).
+    /// Completion is a `Connected` event; refused → `ApplicationNotListening`.
+    fn start_connect_app(&mut self, vsock: &InstalledConn, client: SocketAddrV4, destination: SocketAddrV4) -> std::io::Result<AppConn>;
+    /// Routes V_g → C (C installed at establishment by guest `sock_ops`).
+    fn route_inbound(&mut self, vsock: InstalledConn, app: AppConn) -> std::io::Result<GuestPair>;
+
+    // --- pairs ---
+    fn drained(&mut self, pair: GuestPairKey, direction: GuestFlowDirection) -> std::io::Result<bool>;
+    /// Convergent: an absent pair counts as removed.
+    fn remove_pair(&mut self, pair: GuestPairKey) -> std::io::Result<()>;
+    fn shutdown_write(&mut self, socket: &GuestPairSocket) -> std::io::Result<()>;
+    fn clear_linger(&mut self, socket: &GuestPairSocket) -> std::io::Result<()>;
+    /// Close with `SO_LINGER{1,0}`. Consumes the handle.
+    fn abort(&mut self, socket: GuestOwnedSocket);
+    /// Close. Consumes the handle.
+    fn close(&mut self, socket: GuestOwnedSocket);
+
+    // --- datagram associations and slots ---
+    /// The kernel's (cookie, destination) owner of `slot`.
+    fn slot_owner(&mut self, slot: SocketAddrV4) -> std::io::Result<Option<(SocketCookie, SocketAddrV4)>>;
+    /// Step 2: installs connected T_g (route T_g → reassembly cell → U) and Q_g.
+    fn install_slot_legs(&mut self, slot: SocketAddrV4, stream: HostConn, seqpacket: HostConn) -> std::io::Result<SlotLegs>;
+    /// Step 2: writes `DatagramStream` on T_g and `DatagramSeqpacket` on Q_g, once.
+    fn write_slot_requests(&mut self, legs: &SlotLegs, stream: &[u8; FLOW_REQUEST_LEN], seqpacket: &[u8; FLOW_REQUEST_LEN]) -> std::io::Result<()>;
+    /// Step 5, on `Paired`: routes the framing cell → Q_g; re-arms.
+    fn route_slot(&mut self, legs: &SlotLegs) -> std::io::Result<()>;
+    /// The whole end-of-association order (CELL-RECREATE) as one call,
+    /// consuming the legs if any. Never fails: a cell-creation failure is
+    /// `SlotEnd::Quarantined`, and the other steps still run.
+    fn end_association(&mut self, slot: SocketAddrV4, legs: Option<SlotLegs>) -> SlotEnd;
+    /// Returns a slot whose association ended (`Recreated`) to the pool.
+    fn release_slot(&mut self, slot: SocketAddrV4);
+    /// Audit: retries a quarantined slot's cell creation; `Ok` returns it to
+    /// the pool.
+    fn retry_quarantined(&mut self, slot: SocketAddrV4) -> std::io::Result<CellGeneration>;
+    /// Exact per-slot counters in both directions (idle release).
+    fn slot_counters(&mut self, slot: SocketAddrV4) -> std::io::Result<(u64, u64)>;
+
+    // --- audits ---
+    /// The subset of `cookies` that still name a live socket (release audit).
+    fn live_cookies(&mut self, cookies: &BTreeSet<SocketCookie>) -> std::io::Result<BTreeSet<SocketCookie>>;
+    /// The listener map: application ports listening on `0.0.0.0` / `workload_addr`.
+    fn listener_map(&mut self) -> std::io::Result<BTreeSet<ListenPort>>;
+}
+```
+
+Contract (`GuestOwnerIo`, every method):
+
+- **Preconditions are types.** Handles are move-only and exist from the
+  call or event that issued them to the call that consumed them; the
+  per-kind orders of § *Per-kind total orders* are the only orders the
+  types admit (TcpConnect: captured → rearm → connect host →
+  `install_outbound` → `write_request` → `route_outbound`; TcpAccept:
+  inbound → read → `inbound_ended` → `install_inbound` → `start_connect_app`
+  → `route_inbound`; datagram: two host connects → `install_slot_legs` →
+  `write_slot_requests` → `route_slot` → `end_association`). An operation
+  on a `HostConn` / `AppConn` before its `Connected` event fails with the
+  kernel's `NotConnected`, which the owner never issues. A handle from
+  another seam instance is unreachable (`unreachable!`).
+- **Consuming calls are all-or-nothing.** A call that consumes handles and
+  returns `Err` has aborted every consumed socket and removed every entry
+  it wrote.
+- **Writes** (`write_host`, `write_request`, `write_slot_requests`) write the
+  whole record or fail; a failed write may have sent a prefix the peer
+  reads as a truncated record — which every peer treats as a read failure
+  of that connection — so the owner ends that connection (or, on the
+  session, takes the session-loss path).
+- **Events.** Each `GuestIoEvent` is delivered once; `Connected` / `Read`
+  name a handle the owner still holds or one it has since consumed (the
+  owner discards the latter). A `Hangup` is level-triggered and reported
+  once per socket per kind.
+- **An installed, unrouted V_g is observed (DG-5-E, approved by the user
+  2026-10-10).** A `Hangup` on an `InstalledConn` ends the flow in the
+  dispatch that receives it, by § *Flow end*: an error or reset aborts it
+  and sends `Abort`; `ReadHangup` is the host's close of V_h (no `HalfClose`
+  can be announced before `Paired`), so the flow ends with no message —
+  TcpAccept: no C is created, or an armed C is aborted; TcpConnect: I is
+  reset. A flow so ended is Closed, so a later `Connected` for its C, or a
+  `Paired` for it, finds it Closed (U-1, U-5).
+- **No payload.** Only `HostConn` (session and request records) and
+  `InboundConn` (the request) are ever read, and only whole fixed records.
+
+```rust
+// BeaconIo handle (DG-4), move-only like the above:
+pub(crate) struct BeaconSocket(/* private */);
+// `accept` → `(BeaconSocket, BeaconConnKey)`; `read_line(&BeaconSocket)`,
+// `write_line(&BeaconSocket, ..)`, `close(BeaconSocket)`.
+```
+
+```rust
+pub(crate) struct GuestFlowOwner { /* private */ }
+impl GuestFlowOwner {
+    /// Takes the setup's results through `io`; opens nothing yet.
+    pub(crate) fn new(token: GuestTransportToken, io: Box<dyn GuestOwnerIo>, clock: Arc<dyn GuestClock>) -> Self;
+    /// Driving port: handles exactly one input — the next event, or the
+    /// earliest due deadline (request, pairing, drain, drain re-check,
+    /// reconnect backoff, audit tick) computed from `clock.now()` — then
+    /// returns. It passes
+    /// `next_deadline()` to `GuestOwnerIo::next_event`; an event pending at
+    /// the call is handled before a due deadline, and of two due deadlines
+    /// the earlier is handled (ties: the one armed first). The first
+    /// dispatch with no session starts the control-session connect.
+    /// Per-flow failures end that flow and return `Ok`. Blocking.
+    pub(crate) fn dispatch_next(&mut self) -> Result<(), GuestOwnerFatal>;
+    /// `dispatch_next` until it returns `Err`; runs on its own thread.
+    pub(crate) fn run(self) -> GuestOwnerFatal;
+    /// QPROJ-5.
+    pub(crate) fn guest_observation(&self) -> GuestSideObservation;
+    /// The earliest deadline the owner has armed, or `None` when none is
+    /// armed (DG-5-Q). Pure read; compiled in every build: it is the value
+    /// `dispatch_next` passes to `next_event`, so production and test read
+    /// one function. Its only reader besides `dispatch_next` is test
+    /// support (the drivers' quiescence check).
+    pub(crate) fn next_deadline(&self) -> Option<std::time::Instant>;
+}
+/// The only failures the owner cannot recover from without a restart.
+/// `overdrive-init` writes `overdrive-init: guest flow owner failed:
+/// <Display>` to the console and takes the existing guest-exit path; the
+/// host sees the VMM exit.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum GuestOwnerFatal {
+    /// `next_event`'s readiness wait itself failed.
+    #[error("waiting for guest transport events failed: {source}")]
+    EventWait { #[source] source: std::io::Error },
+    /// A listener bound once at setup failed (`ListenerFailed`).
+    #[error("guest listener {listener:?} failed: {kind:?}")]
+    ListenerFailed { listener: GuestListener, kind: std::io::ErrorKind },
+}
+```
+
+**Failure classes of the guest owner** (H-4 of the DG review):
+
+- **Control-session loss is never fatal.** Any of: `Connected` with an error
+  on the control channel (`ECONNREFUSED`, `ECONNRESET`, `ENODEV`,
+  `ETIMEDOUT`, or any other kind — the host owner is down or restarting);
+  `Read` at EOF or with an error on the session; `write_host` failing on
+  the session (`EPIPE`, `ECONNRESET`, `ENOTCONN`, …); a `Hangup` on the
+  session socket. The owner then, in the dispatch that observes the loss,
+  aborts every flow and ends every association of the session
+  (CELL-RECREATE order) and closes the session socket (DG-5-F, approved by
+  the user 2026-10-10: no flow of a lost session outlives that dispatch, so
+  no reconnect precedes its abort); it re-opens the session
+  `CONTROL_RECONNECT_BACKOFF` after the loss, repeating at that backoff
+  while it fails. A synchronous `start_connect_host` error is the
+  same (retry at the backoff).
+- **Per-flow failures** (any error on a flow leg, V_g, an application leg or
+  a flow vsock) end that flow (§ *Flow end*) and are not fatal.
+- **Slot failures.** A cell-creation failure in `end_association` is
+  `SlotEnd::Quarantined` (§ *Per-kind total orders*, end-of-association
+  order: counted `guest_udp_slot_quarantined`), retried at each audit tick by
+  `retry_quarantined`; not fatal. `listener_map`, `slot_counters` and
+  `live_cookies` failures are retried at the next audit tick.
+- **Fatal** is only `GuestOwnerFatal`.
+
+**Timers and the audit tick (DG-5-A, approved by the user 2026-10-10).**
+Every deadline is `clock.now()` at the dispatch that arms it plus its pinned
+constant (`FLOW_REQUEST_DEADLINE`, `FLOW_PAIRING_DEADLINE`,
+`FLOW_DRAIN_DEADLINE`, `FLOW_DRAIN_RECHECK_PERIOD`,
+`CONTROL_RECONNECT_BACKOFF`), and is disarmed by the input that makes it
+moot. A waiting drain direction holds two timers, its drain deadline and its
+next re-check (DG-5-D, § *Flow end*); a re-check is armed only strictly
+before the drain deadline, so the two never tie. The audit tick is periodic at
+`GUEST_OWNER_AUDIT_PERIOD` (1 s): the first is armed by the owner's first
+dispatch, each next one at the previous tick's deadline plus the period
+(fixed rate; an event never resets it; a tick handled late arms the next
+from its own deadline, so ticks do not accumulate). One audit tick, in this
+order: the release audit (`live_cookies` over every slot owner's cookie;
+a slot whose cookie is gone is released, as on its `SocketReleased`); the
+idle release (`slot_counters` of every associated slot; a slot whose
+counters have not changed for `GUEST_DATAGRAM_SLOT_IDLE`, measured from the
+tick that last saw them change, ends its association and is released); the
+retry of every quarantined slot (`retry_quarantined`); and, after a
+`listener_map` failure, its retry. So idle release has no timer of its own:
+it happens at the first audit tick at or after the slot's idle deadline.
+`dispatch_next` handles one input per call (the earliest due deadline when
+no event is pending), so advancing the clock past several deadlines yields
+one dispatch per deadline, in deadline order.
+
+Boundary scenario (DISTILL, owner seeded sim + walking-skeleton Tier-3
+cell): the host owner restarts (`serve` killed and started) → the guest
+stays up, its flows end with reset (HALFCLOSE-SIGNAL), and the session is
+re-established within one backoff after the host listens again; no
+`GuestOwnerFatal`.
+
+Production seam `KernelGuestOwnerIo::new(ops: KernelGuestTransportOps)`
+(built from the sockets and programs `configure_guest_transport` set up).
+Simulation seam `SimGuestOwnerIo` (`#[cfg(test)]`, module `guest_flow::sim`)
+with the QPROJ-7 read surface `guest_socket_observation()`. It is a handle
+over shared state — the owner owns its `Box`, the driver keeps a clone of
+the handle to inject, release and read. It completes the guest's own
+connects (control session, flow legs) when the driver releases them; its
+`next_event` returns `None` only once the driver has advanced the
+`SimGuestClock` past the deadline. Its stepping methods are DISTILL's,
+including a read of whether an event is released and not yet delivered.
+
+**Quiescence of a single-threaded driver (DG-5-Q, approved by the user
+2026-10-10).** The driver calls `dispatch_next` only when it would not
+block: while the sim holds a released, undelivered event, or while
+`owner.next_deadline()` is `Some(d)` with `d <= clock.now()`. When neither
+holds the owner is quiescent and the driver stops dispatching. No signal
+unwinds through the owner: no panic is raised or caught to detect
+quiescence, `next_event`'s `Err` keeps its production meaning (fatal,
+`GuestOwnerFatal::EventWait`), and the sim never returns an `Err` the
+production seam would not. A `next_event` call with nothing released and
+no deadline passed is then unreachable from a correct driver; the sim
+treats it as a driver defect (`unreachable!`), never as a signal.
+`overdrive-init` constructs
+the owner after `configure_guest_transport` and starts `run` on a thread
+before READY (READY is not gated on the session, G-V3); `SocketCookie` and
+`CellGeneration` are the QPROJ-5 types.
+
+The owner's time port is crate-private and synchronous, because the core
+`Clock` port is async and the guest has no runtime:
+
+```rust
+pub(crate) trait GuestClock: Send + Sync {
+    /// Monotonic now. Never goes backwards.
+    fn now(&self) -> std::time::Instant;
+}
+```
+
+Production `MonotonicGuestClock` (`Instant::now()`); test `SimGuestClock`
+(`#[cfg(test)]`, advanced only by the driver; `SimGuestOwnerIo` reads the
+same instance). In the guest-side rows of the action maps, "`SimClock`"
+means `SimGuestClock`. `overdrive-init` takes no `overdrive-sim`
+dev-dependency.
+
+##### DG-6 — `VhostVsockCidClaim` constructor (UI-HOST-1)
+
+```rust
+// overdrive_host — public
+pub const VHOST_VSOCK_DEVICE: &str = "/dev/vhost-vsock";
+/// `GuestCidClaim` on the host kernel. Each `claim` opens a new instance of
+/// `VHOST_VSOCK_DEVICE` (`O_RDWR | O_CLOEXEC`) and issues
+/// `VHOST_VSOCK_SET_GUEST_CID` once; an open failure is `DeviceUnavailable`.
+pub struct VhostVsockCidClaim { /* private: nothing */ }
+impl VhostVsockCidClaim {
+    /// Infallible; opens nothing (device access is proven by `probe`).
+    #[must_use]
+    pub const fn new() -> Self;
+}
+```
+
+`new`, `BeaconSocket::from_raw` / `raw` (DG-4) and `VsockBeaconIo::new` are
+`const fn` (DG-CONST, approved by the user 2026-10-10). No `Default` and no device-path override: tests on the real kernel use the
+real device (P1-S12 cells, QPROJ-7 pairing R5-19).
+
+##### DG-7 — READY with an invalid launch token (UI-BEACON-1)
+
+`BeaconParseError` gains one variant; READY's arity becomes 3:
+
+```rust
+#[error("{kind} field launch is not a valid launch token: {source} in line {raw:?}")]
+InvalidLaunchToken { kind: &'static str, raw: String, #[source] source: LaunchTokenError },
+```
+
+A READY line with two or four fields → `FieldCount { expected: 3 }`; a
+third field not shaped `launch=<v>` → `MissingKey { field: "launch" }`; `v`
+failing `LaunchToken::from_str` → `InvalidLaunchToken`. The golden READY
+line and each refusal are default-lane tests (P2-S1, P2-S14).
+
+##### DG-8 — Rust datagram-frame codec (UI-FRAME-1)
+
+```rust
+// overdrive_core::guest_transport::wire
+/// One framed datagram (§ Wire contracts, Datagram frame).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DatagramFrame<'a> { /* private: payload */ }
+impl<'a> DatagramFrame<'a> {
+    /// `Err(Oversize)` when `payload.len() > MAX_GUEST_DATAGRAM_PAYLOAD`.
+    pub fn new(payload: &'a [u8]) -> Result<Self, DatagramFrameError>;
+    pub fn payload(&self) -> &'a [u8];
+    /// Header + payload, pre-sized (`DATAGRAM_FRAME_HEADER_LEN + payload.len()`).
+    pub fn encode(&self) -> Vec<u8>;
+    /// Accepts exactly one canonical frame: magic, length ≤ max, and
+    /// `bytes.len() == DATAGRAM_FRAME_HEADER_LEN + length`.
+    pub fn decode(bytes: &'a [u8]) -> Result<Self, DatagramFrameError>;
+}
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DatagramFrameError {
+    #[error("datagram frame is {len} bytes, shorter than its header")]
+    Truncated { len: usize },
+    #[error("datagram frame magic {observed:02x?} is not OVD1")]
+    BadMagic { observed: [u8; 4] },
+    #[error("datagram frame length {length} exceeds {max}")]
+    Oversize { length: u64, max: u32 },
+    #[error("datagram frame declares {declared} payload bytes but carries {actual}")]
+    LengthMismatch { declared: u32, actual: usize },
+}
+```
+
+The forwarder probe (`EmptyDatagram`, `MaxDatagram`, `EscapedFrame`) and
+the escape rule's test vectors use it; the golden empty and maximum frames
+are asserted equal across this codec, the host programs and the guest
+programs (P3-S1). Roundtrip proptest over every payload ≤ max; every
+non-canonical byte string is refused.
+
+##### DG-9 — Overdrive mark and table SSOT (UI-MARK-1, G-PL-5)
+
+```rust
+// overdrive_core::dataplane::mtls_mark — beside MTLS_LEG_S_DIAL_MARK (0x2)
+/// The leg-C/leg-F TPROXY fwmark (today the worker's private `TPROXY_FWMARK`
+/// and netlink's private `SHARED_IP_FWMARK`, both 0x1).
+pub const MTLS_TPROXY_MARK: u32 = 0x1;
+/// D26-PINS F-6: the owner's egress mark; rules match `meta mark & 0x4 == 0x4`.
+pub const OWNER_EGRESS_MARK: u32 = 0x4;
+/// The shared nft table (family `ip`; today private as `NFT_TABLE` and
+/// `SHARED_IP_TABLE`).
+pub const MTLS_SHARED_NFT_TABLE: &str = "overdrive-mtls";
+```
+
+The worker and `overdrive-netlink` consume these; their private copies are
+deleted (step 14). A default-lane unit test in `overdrive-core` asserts
+that `MTLS_TPROXY_MARK`, `MTLS_LEG_S_DIAL_MARK` and `OWNER_EGRESS_MARK` are
+single bits and pairwise disjoint. The bridge-model marks (`0x295a`,
+`0x295b`) are deleted with the guest TCX programs (06-01 **Replace**).
+
+##### DG-10 — Forwarded-outbound readings (UI-WORKER-1 to 4)
+
+1. `MtlsInterceptInstallError::stage()`: `NotInterceptLive` →
+   `"not_intercept_live"`; `DuplicateForwardedRegistration` →
+   `"duplicate_forwarded_registration"`.
+2. Dropping a **claimed** `ForwardedOutbound` releases the registration;
+   leg-F's sockets for that flow then close as its loopback leg dictates:
+   a loopback leg that ended cleanly in both directions closes the remote
+   socket cleanly (linger cleared, FIN); otherwise — the owner aborted D,
+   or the loopback leg is still open at the drop — leg-F aborts both
+   (`SO_LINGER{1,0}`: the remote peer sees a reset). Dropping an
+   **unclaimed** one removes the registration; a later accept from that
+   peer finds none and is closed.
+3. "Cleared before a clean close" = both directions of the loopback leg
+   ended with FIN while the registration is held → leg-F clears the remote
+   socket's linger, then closes it: the remote sees FIN, no reset.
+4. Precedence of refusals: worker shutdown → `OwnerShutdown`; shared owner
+   not published → `SharedOwner { source: NotStarted }` (or `OwnerShutdown`
+   while it shuts down), as `start_alloc` returns today; then no active
+   capability for `alloc` → `NotInterceptLive`; then an existing
+   registration for `forwarder_local` → `DuplicateForwardedRegistration`.
+
+##### DG-11 — `ListenPort` / `InterfaceIndex` constructors (UI-NET-1)
+
+```rust
+// overdrive_core::net
+impl ListenPort {
+    pub fn new(raw: u16) -> Result<Self, ListenPortError>;   // 0 → Zero
+    pub const fn get(self) -> u16;
+}
+impl InterfaceIndex {
+    pub fn new(raw: u32) -> Result<Self, InterfaceIndexError>; // 0 → Zero
+    pub const fn get(self) -> u32;
+}
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ListenPortError {
+    #[error("listen port 0 is not a port")] Zero,
+    #[error("listen port is not a decimal integer in 1..=65535")] Unparseable,
+}
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InterfaceIndexError {
+    #[error("interface index 0 names no interface")] Zero,
+    #[error("interface index is not a decimal integer in 1..=4294967295")] Unparseable,
+}
+```
+
+Decimal `FromStr` / `Display` and matching `Serialize` / `Deserialize`;
+`FromStr` uses the same errors (not `IdParseError`, which is the label-id
+family's). The DISTILL scaffold's `IdParseError` is replaced at step 2.
+
+##### DG-12 — A reserved port in `ListenState` (UI-WIRE-1)
+
+`ControlMessage::decode` refuses a `ListenState` whose port lies in
+`guest_reserved_ports()` with `FlowWireError::InvalidField { field:
+WireField::ListenPort }` (as for port 0): no valid sender produces it (the
+guest's listener map excludes the reserved range), so a canonical decoder
+does not accept it. The roundtrip property ranges over ports outside the
+reservation; a second property asserts every reserved port is refused.
+
+##### DG-13 — Location of `IntakePortBlockConflict` (UI-CORE-1)
+
+`IntakePortBlockConflict` lives in `overdrive-control-plane::guest_network`,
+beside `GuestNetworkError` (where the error and `probe_startup` live), not in
+`overdrive-core`.
+
+##### DG-14 — `prefix_landing` inputs (UI-PL-1 to 7)
+
+- **G-PL-1, steering map layout.** The map is a kernel object the
+  conformance test reads independently, so its layout is a contract:
+  `value_size = 8` (a dump reports the socket cookie, host byte order) and
+  an 8-byte key — bytes 0..4 the IPv4 address in network order, 4..6 the
+  declared port in network order, 6..8 zero. `overdrive_dataplane::
+  guest_steering::{GUEST_STEERING_KEY_LEN: usize = 8, guest_steering_key(intake:
+  SocketAddrV4) -> [u8; 8]}` is the one encoder (the program and the test
+  reader use it).
+- **G-PL-2, route protocol.** `overdrive_core::guest_transport::
+  GUEST_PREFIX_ROUTE_PROTOCOL: u8 = 247` (unassigned in the kernel's
+  `RTPROT_*` table); `converge_prefix_route` writes it and the reader
+  queries `ip route show proto 247`.
+- **G-PL-7, node prefix.** `overdrive_core::guest_transport::{GUEST_NODE_PREFIX:
+  Ipv4Net = 100.95.0.0/16, GUEST_NODE_GATEWAY: Ipv4Addr = 100.95.0.1}`;
+  composition step 4 and `GuestFlowOwnerPorts` read them; the literals in
+  `lib.rs` and the sims are replaced. With `GUEST_INTAKE_HOST_PORT_BASE`
+  (core) and `GUEST_PREFIX_STEERING_PIN_DIR` (dataplane), the harness spells
+  no constant.
+- **G-PL-5.** `MTLS_SHARED_NFT_TABLE` (DG-9).
+- **G-PL-3, `quint` on metal.** `infra/metal/provision.sh` installs the
+  pinned Quint toolchain the Lima template installs (one version pin in
+  `infra/provision/versions.env`), and the native preflight refuses a
+  `prefix_landing` run without it. Owned by the DELIVER provisioning step
+  (new step 1).
+- **G-PL-4.** The oracle is the spec's `lands`, evaluated by the `quint`
+  CLI (`quint repl`) over the spec in place; no Rust copy of it exists.
+  Confirmed as designed.
+- **`marked`.** Source (d), the caller: true iff the driver booted `serve`
+  and has neither killed nor stopped it (`marked` is "Overdrive's marked
+  clients exist"); not a kernel query. QPROJ-8 is corrected.
+- **G-PL-6** (the native runner selecting `pending DELIVER` tests) is test
+  infrastructure, not DESIGN: the runner excludes tests whose ignore reason
+  starts with `pending DELIVER`.
+
+##### DG-15 — Projection completeness (design.md § "Pin the observable projection")
+
+Every spec variable and `step` action now has a source or a class
+(audit of the 8 modules and 18 instances against this section):
+
+| Module / instance | Item | Class or source |
+|---|---|---|
+| `owner_flows` `flows_ok` host | `hf(h).gen` | ghost: fixed to `gen` at `HostOpenAccept`; a divergence surfaces as the guest's token check |
+| `owner_flows` `flows_ok` guest | `gf(h).gen` | ghost (one guest owner holds one launch) |
+| `owner_flows` `flows_ok` guest | `gf(h).c` | stimulus (the host's V_h; relabelled by the bijection) |
+| `owner_flows` `flows_beacon` | `bcn(b).gen` | stimulus (the token the guest buffered) |
+| `owner_flows` `flows_beacon` | `quiesced`, `claim`, `sess`, `flows`, `hf`, `gf`, `toHostPaired`, `toHostRefused`, `toGuestAbort`, `hc`, and the ghosts `badPaired`, `crossMsg`, `heldByOther`, `resurrected`, `abortDiscarded`, `phantom` | constant in this instance |
+| `owner_flows` `flows_half*` | every non-`hc` variable | constant in these instances (`step` runs only `halfStep`) |
+| `shared_table` | `phase` | C: `start` = `start_shared_owner` not called; `rules` = called, not returned; `steer` = returned, `converge_shared` not returned `Ok`; `open` = `converge_shared` returned `Ok` |
+| `cid_lease` | `SurvivorCreate(o)` | hazard-only (enabled only by `pend`) |
+| `owner_flows` `flows_beacon` | `Activate` | never enabled in this instance |
+| `owner_flows` `flows_half*` | `HcLateAck(s)` | hazard-only (`BUG_ACK_WAITS`) |
+| `owner_flows` `flows_half_host`, `flows_half_guest` | `HcPeerDefectEnd(s)` | stimulus, enabled only for the side not under test (S-4); the base `flows_half` instance (`UNDER = none`) is a design check, not a conformance instance |
+| `owner_flows` `flows_half_guest` | `HcFlowError(s)` | `SimGuestOwnerIo` scripted flow error, or `SimGuestClock` advanced through a waiting direction's re-checks to its drain deadline (DG-5-D; no `teardown` on the guest side) |
+| `intake` | `SteerCapFail(p)` | hazard-only: not enabled in the design instances (admission reserves the capacity, D8a-CAP); `SimSteerOutcome` has no capacity outcome |
+| `owner_flows` | `HostDeadSessionLoss(c)` | appears on a trace as `HostSessionLoss(c)` from `dead`; same mapping |
+| `udp_slots` | `AppPick`, `AppTake`, `Refill(s)` | hazard-only |
+| `intake` | `OtherAdmit` refused branch | `pool.assign` → `IntakeCapacityReached` |
+
+Every `seam:` stimulus of the maps above is an effect hold/release or an
+event injection on `SimGuestFlowIo` (DG-3), `SimBeaconIo` (DG-4) or
+`SimGuestOwnerIo` (DG-5), through a trait method listed there. The spec
+README's projection table (S-1) records the classes above.
+
+##### DG-16 — Remaining dispositions
+
+- **UI-P5-1.** P5-S9's owner-level `NonMesh` decision (route type check,
+  marked connect, `DestinationUnreachable` projection) is a seeded-sim
+  scenario over `SimGuestFlowIo`, authored in DISTILL (DG-2) and
+  implemented in the attachment-cut step; the end-to-end non-mesh egress
+  cell is P6-S13's (walking skeleton).
+- **UI-COV-1.** Closed by DG-3's scripted outcomes.
+- **UI-SCN-1.** Not a DESIGN gap (the piece doc is corrected; tests never
+  spawn the binary).
+- **UI-HOST-2.** No subject after DG-1.
+
 ### Lifecycle Gate Ownership
 
 #### State-ownership matrix
@@ -21003,7 +22328,7 @@ the port's bring-up; recovery actions as in `quiescence`.
 | Signal or state | Owning component | Promise | Inputs that may gate it | States it must not gate |
 |---|---|---|---|---|
 | Node attachment admission | `GuestAddressPool::assign` | Held leases ≤ placeholder cap; declared TCP ports of held leases ≤ `GUEST_INTAKE_STEERING_MAX` (D8a-CAP); each Admitted lease's CID is claimed on the host kernel for it (D16-CLAIM) | Lease occupancy, declared-port reservations, the kernel claim | READY, Running, flows |
-| VM vsock device | VMM (CH fork) | The device runs on the claimed instance and carries the leased CID over kernel vhost | Backend capability, a claimed device | Intercept-live, Active |
+| VM vsock device | VMM (CH fork) | The device runs on the claimed instance and carries the leased CID over kernel vhost | A claimed device | Intercept-live, Active |
 | Forwarding quiescence | Guest-flow owner, on behalf of named holders (D8a-HOLD) | Admission refused and intake listeners down while any holder holds | Supervisor recoveries, each with its own hold | READY, Running, intercept-live, per-CID Active, control sessions |
 | Guest READY | `overdrive-init` + beacon intake | Guest init including guest network configuration completed (meaning unchanged) | Guest setup (G-V7) | Control session, Active, flows |
 | Control session live | Guest-flow owner | Control messages for this CID's current launch can be delivered | Guest connect with a `ControlOpen` carrying the lease's launch token (ATTR-TOKEN); CID Provisioned/Active | READY, Running |
@@ -21177,14 +22502,12 @@ the port's bring-up; recovery actions as in `quiescence`.
   ADR-0143 (launch filter); P-12 (stock CH has no kernel backend), P-14–P-18
   (fork boots, CID lifecycle, duplicate refused, foreign bind refused).
 - **Owner:** the VMM adapter (`CloudHypervisorVmm`) and the fork.
-- **Promise:** startup — the installed VMM offers `backend=vhost-kernel` with
-  `fd=`; launch — the VM's one vsock device runs on the claimed instance and
-  carries the leased CID over kernel vhost.
-- **Affected state:** startup — server boot (driver composition); launch —
-  that allocation's start attempt.
-- **Failure projection:** startup — `VmmProbeError::VsockBackendUnsupported`
-  → `health.startup.refused` (device access is the claim probe's, boot step
-  4); launch — the existing pre-READY VMM-exit start failure (non-terminal;
+- **Promise:** launch — the VM's one vsock device runs on the claimed instance
+  and carries the leased CID over kernel vhost. There is no startup half: the
+  installed VMM is the checksum-pinned fork (ADR-0161, DG-1), and device
+  access is the claim probe's (G-V1, boot step 4).
+- **Affected state:** that allocation's start attempt.
+- **Failure projection:** the existing pre-READY VMM-exit start failure (non-terminal;
   the lease is retired and released; the next placement claims afresh). A CID
   clash cannot reach this gate: the claim precedes the launch (D16-CLAIM).
 - **Explicitly unaffected:** other allocations and their CIDs; node admission
@@ -21198,8 +22521,7 @@ the port's bring-up; recovery actions as in `quiescence`.
   nobody can attribute.
 - **Evidence lane:** native (P-14–P-16 bounded; V-1(c) under the production
   launch identity; the handoff's kernel facts are P-39); seeded sim scripting
-  of the probe refusal, a pre-READY exit, and a launch that takes the claim
-  (R5-19).
+  of a pre-READY exit and a launch that takes the claim (R5-19).
 
 #### Gate G-V5 — runtime recovery reopen (restates G-295-5)
 
@@ -21354,7 +22676,7 @@ the port's bring-up; recovery actions as in `quiescence`.
 | # | Scenario | G-V0 | G-V1 | G-V2 | G-V3 | G-V4 | G-V5 | G-V6 | G-V7 | G-V8 |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 1 | Available: state advances | Lease + CID | Boot completes | EXEC after Active | Active (+ listeners for listening ports) | VM boots with its CID | Reopen | `Paired`; bytes flow, early bytes included | READY | Listener bound when the guest listens |
-| 2 | Unavailable / timeout: typed failure in owner domain | `AdmissionCapReached`; `IntakeCapacityReached` | `health.startup.refused` (incl. `FdBudget`, `OwnerCgroupIsRoot`, `OwnerCgroupPlacement`, `VsockBackendUnsupported`, `GuestPrefixOverlapsNodeAddress`, `IntakePortBlockConflict`, `StackedInterface`, `UnframeAttach`) | Activation failure projection | `QuiescenceLatched` / `ControlSessionPending` → retry; bind failure → activation failure | Pre-READY exit start failure | Fail-stop | `Refused(code)`; `PairingTimeout`; `DrainTimeout` | Guest exits before READY | `guest_intake.bind_failed`, retried |
+| 2 | Unavailable / timeout: typed failure in owner domain | `AdmissionCapReached`; `IntakeCapacityReached` | `health.startup.refused` (incl. `FdBudget`, `OwnerCgroupIsRoot`, `OwnerCgroupPlacement`, `GuestCidClaimError` (claim probe), `GuestPrefixOverlapsNodeAddress`, `IntakePortBlockConflict`, `StackedInterface`, `UnframeAttach`) | Activation failure projection | `QuiescenceLatched` / `ControlSessionPending` → retry; bind failure → activation failure | Pre-READY exit start failure | Fail-stop | `Refused(code)`; `PairingTimeout`; `DrainTimeout` | Guest exits before READY | `guest_intake.bind_failed`, retried |
 | 3 | Unrelated state unchanged | Running allocations | — | READY unchanged | READY unchanged | Other VMs unaffected | Leases unchanged | Allocation stays Running/Stable | Other VMs unaffected | Allocation states unchanged |
 | 4 | Late success cannot resurrect a newer terminal state | Late assign after retire refused | — | No EXEC after teardown | `activate` after `teardown` → `LeaseRetiring` | Late registration after stop torn down | Late restore after fail-stop ignored | `Paired` after Retiring → aborted | Late READY after stop ignored | Late `ListenState` after teardown binds nothing |
 | 5 | Disconnect / reconnect | — | — | Beacon reconnect from a live CID refused; a beacon connection the CID's previous launch left queued, with its READY buffered, is closed unattributed and releases nothing (ATTR-TOKEN) | Control session lost before activate → `ControlSessionPending`; a session the CID's previous launch left queued is closed unattributed and never counts as live (ATTR-TOKEN) | VMM death → flows aborted | Quiesce aborts flows; restore does not resurrect them; a quiesced `TcpAccept` whose V_g is still queued in the guest ends there: after the request read V_g reads EOF, reports `POLLRDHUP`, first write `EPIPE`; C is reset (K-A4, P-38) | Opener disconnect before `Paired`; peer half-close after drain; reset → abort; control-session loss aborts (a `TcpAccept` V_g accepted afterwards reads EOF after its request, `POLLRDHUP`, first write `EPIPE`; C is reset, P-38); a flow request queued by the CID's previous launch is closed unattributed, no control message (ATTR-TOKEN) | Guest reboot: not supported (existing); in `fd=` mode it ends the VMM (P-39) | Session loss closes every intake listener of the CID; reconnect re-sends full state and re-binds listening ports |
@@ -22568,10 +23890,14 @@ CELL-RECREATE step order (framing).
 
 ### Architecture enforcement
 
-- `PairedSocket` has no read/write surface (`trybuild`).
-- Typestate handles (`ParkedIntake`, `InstalledVsock`, `ArmedPeer`,
-  `PendingInbound`) are `#[must_use]` and consumed by value, so an install
-  order other than § *Per-kind total orders* does not compile.
+- `PairSocket` (host, DG-3) and `GuestPairSocket` (guest, DG-5) have no
+  read or write method in their seams; a read or write of either does not
+  compile (crate-private types: the seam signatures are the enforcement,
+  checked by the DELIVER reviewer, not a `trybuild` fixture).
+- Typestate handles — the forwarder's (`ParkedIntake`, `InstalledVsock`,
+  `ArmedPeer`, `PendingInbound`) and the seams' (DG-3, DG-5) — are
+  `#[must_use]` and consumed by value, so an install order other than
+  § *Per-kind total orders* does not compile.
 - Crate classes and `dst-lint` unchanged: forwarder in adapter-host
   `overdrive-dataplane`; programs in `overdrive-bpf`; wire types in core with
   no I/O; guest owner in `overdrive-init`.
@@ -22602,7 +23928,7 @@ CELL-RECREATE step order (framing).
   launch's — including one read after its launch's teardown or stop.
 - A flow vsock's end-of-stream reaches the owner's flow logic only together
   with the flow's announced-direction state (HALFCLOSE-SIGNAL): the
-  `PairedSocket` outer-leg `shutdown_write` is reachable only from the
+  outer leg's `shutdown_write` (`TcpPair.outer` / `GuestPair.outer`) is reachable only from the
   announced-direction path, and a seeded-sim invariant pins that no outer
   shutdown follows an unannounced vsock end.
 - The owner egress mark, the leg-S mark and the TPROXY mark are
@@ -23679,6 +25005,66 @@ re-recorded (S-7).
   fail-stop request names the holder first in the fixed audit order.
   ADR-0169's decision text names no single-component shape and is unchanged.
 
+### DISTILL design-gap decisions — approved under user delegation, 2026-10-09
+
+Closes `distill/upstream-issues.md`. **Approved under user delegation,
+2026-10-09** (the user delegated this round's decisions and asked to be
+consulted only for a decision that breaks behaviour an operator or workload
+relies on today; none does). Contracts: § *DISTILL design-gap closure*.
+
+| Id | Decision | Closes |
+|---|---|---|
+| DG-1 | Overdrive runs only with the vendored fork (user mandate): no probe stage, provisioning check or typed error identifies the installed Cloud Hypervisor build; the checksum is the identity check; `/dev/vhost-vsock` is the claim probe's | user mandate; UI-HOST-2 |
+| DG-2 | Single-cut replacement table (18 rows, callers named). Every row is scaffolded in DISTILL in place (DG-2-R2, user ruling 2026-10-10): the pinned signature replaces the live one, every production caller is adapted (keeping today's behaviour where it can supply the new arguments), only genuinely new behaviour is a RED-scaffold body, every body and driver over it is authored now, compiled and `#[ignore = "pending DELIVER <step>"]`; tests turned red are listed in `red-classification.md`; tests of deleted surface (rows 5, 17, row 9's TAP seams) are deleted with it. Rows 1–13 and 15–18 are implemented in one DELIVER step, the attachment-cut step; row 14 in step 11 | UI-C1, UI-R2-16 |
+| DG-3 | Host owner seam `GuestFlowIo` with typed move-only socket handles (the payload rule enforced by type; per-flow order by type; peer bind for the leg-F registration), `HostGuestFlowIo`, `SimGuestFlowIo`, `GuestFlowOwnerPorts`, `HostSharedGuestNetworkOwner::{new, with_flow_io}` | UI-C2 (host), UI-COV-1 |
+| DG-4 | Beacon port `BeaconIo` in core (`BeaconSocket`, `BeaconConnKey`; `VsockBeaconIo` in `overdrive-host`, `SimBeaconIo` in `overdrive-sim`); `BeaconIntake::bind(io)` passed to `VmDriver::new` (an unbound driver is unrepresentable); `BeaconIntakeError`; `ServerConfig.vm_override: Option<VmOverride { vmm, beacon }>` | UI-C2 (VM driver) |
+| DG-5 | `overdrive-init`: `parse_transport_token`, `GuestTransportOps` (with `install_udp_slots`), `configure_guest_transport`, console rendering, `SlotInstall`; `GuestFlowOwner` with `dispatch_next` / `run`, `GuestOwnerIo` (`HostChannel`, `GuestRecord`, `GuestFlowDirection`), `GuestClock`, `SocketCookie`, `CellGeneration`; control-session loss recovers, `GuestOwnerFatal` only for the event wait and setup-bound listeners | UI-C3 |
+| DG-6 | `VhostVsockCidClaim::new()`, `VHOST_VSOCK_DEVICE` | UI-HOST-1 |
+| DG-7 | `BeaconParseError::InvalidLaunchToken` | UI-BEACON-1 |
+| DG-8 | `DatagramFrame` / `DatagramFrameError` | UI-FRAME-1 |
+| DG-9 | `MTLS_TPROXY_MARK = 0x1`, `OWNER_EGRESS_MARK = 0x4`, `MTLS_SHARED_NFT_TABLE` in core; disjointness test in core | UI-MARK-1, G-PL-5 |
+| DG-10 | Forwarded-outbound stage labels, drop semantics, clean close, refusal precedence | UI-WORKER-1 to 4 |
+| DG-11 | `ListenPort::new` / `InterfaceIndex::new`, `ListenPortError` / `InterfaceIndexError` | UI-NET-1 |
+| DG-12 | A reserved `ListenState` port is refused at decode | UI-WIRE-1 |
+| DG-13 | `IntakePortBlockConflict` in `overdrive-control-plane` | UI-CORE-1 |
+| DG-14 | Steering key layout and encoder, `GUEST_PREFIX_ROUTE_PROTOCOL = 247`, `GUEST_NODE_PREFIX` / `GUEST_NODE_GATEWAY`, `quint` on metal, `marked` from the caller | UI-PL-1 to 7 |
+| DG-15 | Classification of every previously unmapped spec variable and action (incl. `SteerCapFail` hazard-only) | design.md projection completeness |
+| DG-16 | P5-S9 split between the owner seam and P6-S13; UI-SCN-1 not DESIGN | UI-P5-1, UI-SCN-1 |
+
+**Round-2 decisions — approved by the user 2026-10-10** (the user delegated
+them: "choose the correct solution; surface only if it breaks
+functionality"; none does).
+
+| Id | Decision | Closes |
+|---|---|---|
+| DG-2-R2 | DG-2 rewritten: every replaced signature (rows 1–18) is scaffolded in DISTILL in place, with every body and driver over it; the attachment cut is a DELIVER implementation step, not an authoring time | UI-R2-16 (dissolved) |
+| DG-4-CTOR | `VsockBeaconIo::new()`: `#[must_use] pub const fn`, infallible, opens nothing; no `Default`, no override; bind failure stays `BeaconIntake::bind`'s | UI-R2-2 |
+| DG-CONST | `VhostVsockCidClaim::new`, `VsockBeaconIo::new`, `BeaconSocket::{from_raw, raw}` are `const fn` | UI-R2-18 |
+| DG-5-A | Guest timers: deadline = arm instant + pinned constant; audit tick periodic at `GUEST_OWNER_AUDIT_PERIOD` = 1 s, fixed rate; one tick runs release audit, idle release, quarantine retry, `listener_map` retry; idle release has no timer of its own; one input per dispatch, earliest deadline first, an event before a due deadline | UI-R2-5 (a) |
+| DG-5-B | `udp_slots`' `MAXFID` is a model-checking bound with no production counterpart (production allocates `FlowId` seq < 2^31 monotonically, skipping live ids); in the model it only disables minting, and the conformance instance sizes it above any trace's reach | UI-R2-5 (b) |
+| DG-5-C | Clean close happens in the dispatch that completes the second direction's half-close; the model merges `HcCleanClose` into that step | UI-R2-5 (c) |
+| DG-5-E | The guest watches every installed, unrouted V_g (`InstalledConn`) for terminal readiness; an error / reset aborts with `Abort`, `ReadHangup` ends the flow with no message | UI-R2-5 (e) |
+| DG-5-F | Guest session loss aborts every flow and association of the lost session in the dispatch that observes it, before any reconnect; the model replaces per-flow `GuestLossAbort(h)` with one `GuestSessionLossObserved(c)` | UI-R2-5 (f) |
+| DG-5-D | Half-close drain observation, both owners (§ *Flow end*, "Drain wait"): the wait for a direction starts at its `EPOLLRDHUP` (or at `Paired` for a recorded early outer EOF), arms the drain deadline (start + `FLOW_DRAIN_DEADLINE`) and checks `drained(key, dir)` once; `Ok(false)` arms a re-check at now + `FLOW_DRAIN_RECHECK_PERIOD` (`pub const FLOW_DRAIN_RECHECK_PERIOD: Duration = 10 ms`, `overdrive_core::guest_transport::wire`), armed only strictly before the drain deadline; the drain deadline aborts without a further check (`Abort`, `DrainTimeout`); `drained` `Err` aborts (`Abort`, `OwnerAbort`). Guest: both are `GuestClock` owner deadlines in `next_deadline()`; host: `Clock::sleep` on `ports.clock` raced against the flow's other inputs. No seam method is added; `HalfClose` still only after `drained` toward the vsock, the outer `shutdown_write` only after `drained` toward the outer leg (ADR-0180). The user's formulation (the owner observes its own EOF read, last buffered write and `SHUT_WR`) is not adoptable, because no owner copies a payload byte: the forwarder moves them in the kernel (ADR-0160 Context, SockHash forwarding; § *Driven port — host forwarder* `drained`, K2 exact counters; ADR-0151 exact drain accounting; § *Structural enforcement that the control plane never reads payload*). A kernel drain-complete event is excluded by the user. This is therefore a surfaced item: the owner-driven bounded re-check is the remaining correct mechanism, and it breaks no functionality | UI-R2-5 (d) |
+| DG-5-Q | Driver quiescence without unwinding: `GuestFlowOwner::next_deadline()` (production-compiled, the value `dispatch_next` waits on) plus the sim's released-event read; the driver dispatches only when one is ready; the sim's would-block call is `unreachable!`, never a signal. It reads the drain re-check deadlines of DG-5-D like every other owner deadline | UI-R2-22 |
+| DG-2-R2 note: row 12 | The row-12 cut includes the EXEC-gate holder-set contract: `GuestNetworkExecSupervisor::complete_attempt(&self, remaining: BTreeSet<SharedGuestNetworkComponent>) -> bool` and `begin_recovery` adding a holder while Recovering (§ *Owner and provisioner*, U-QP-3) | UI-R2-16 |
+| DG-2-R2 note: row 18 | `VmOverride` derives `Clone` (confirmed): `ServerConfig`, which holds `vm_override: Option<VmOverride>`, derives `Clone`, and both fields are `Arc`s | UI-R2-16 |
+| UI-R2-1 | Closed: the specs declare 109 named `run`s across eight modules (103, plus the six `prefix_landing` runs on `landing_machine` instance `landing_ok`), each mapped in the spec README's scenario table and listed in `checks.toml` | UI-R2-1 |
+| UI-R2-20 | Left open: whether CI selects the source-local quint-connect drivers is the user's decision; nothing is wired | — |
+
+No ADR changes except DG-1's present-tense edits of ADR-0146 and ADR-0161
+(accepted, not implemented). DG-5-D needs none: ADR-0160 decides that a
+half-close waits for the drain signal and that a missed deadline aborts, and
+ADR-0180 that `HalfClose` follows the drain; neither decides how the counter
+is read, and the re-check is not the fixed delay ADR-0160 rejects. DG-15
+changes no modelled behaviour: it updates the spec README's projection table and makes `intake`'s `capFail`
+ghost also record our own steer's capacity refusal (ghost-only; every
+`intake` check met its expectation). DG-5-A to DG-5-F change the
+`owner_flows` and `udp_slots` models (per-timer deadlines and the audit
+tick, `MAXFID` as a minting bound, the merged clean close, the drain wait,
+the installed-unrouted V_g watch, the per-session loss step); the specs,
+their README, `checks.toml` and named runs follow these decisions.
+
 ### Design review record
 
 - **Spike remediation, round 2 (2026-10-09)**,
@@ -23985,3 +25371,276 @@ answers each:
 | M-2 (`vip_range` producer unchecked) | `GuestPrefixOverlapsVipRange` refused in `probe_startup` before any boot effect; `vip_range` named a producer in D8-PREFIX-CFG. **D8-PREFIX-VIP — Approved by user 2026-10-08; independent review r12 answered; further review waived by user 2026-10-08; handed to DISTILL** | ADR-0152; delta `probe_startup`, `converge_shared`, *Composition* step 1, error taxonomy, G-V1, R5-40, *Earned Trust* |
 | L-1 (stale run id, retry text, CI flags, "model unchanged") | Formal model section cites the recorded evidence, lists CI flags as in `checks.toml`, drops the retry caveat; the review record states that `checks.toml` changed | delta § *Formal protocol model*, *Design review record* |
 | L-2 (two checks under two minutes with `ci = false`) | `checks.toml` sets both `ci = true` by own time (modeler's change); the delta lists them so | delta § *Formal protocol model* (*Running it*) |
+
+## Wave: DISTILL / [REF] vsock Reconciliation and Status — 2026-10-10
+
+DISTILL for the vsock attachment replacement (§ *vsock Attachment Replacement
+DESIGN*, ADR-0145..0181, QPROJ-1..8, DG-1..DG-16). Language: Rust
+(`[lang-mode] rust`); policy `docs/architecture/atdd-infrastructure-policy.md`
+inherited (`[policy-mode] inherit`); Mandate 8 maps to the project's native
+port-observable before/after assertions (`[port-mode] n/a-rust`).
+Reconciliation: this feature has one SSOT (this document) and no separate
+DISCUSS / DESIGN / DEVOPS `wave-decisions.md`; 0 contradictions.
+
+**Second increment (2026-10-10), after DG-1..DG-16.** Every `UI-*` item of
+`distill/upstream-issues.md` round 1 is closed by a DG decision. Round 2 of that
+file records what this increment found; four items are open DESIGN decisions
+that gate activation, not authoring: UI-R2-5 (guest-driver model fidelity,
+including part (d), how an owner learns a half-closed direction has drained —
+a contract-shaping decision for the user before new-step 5), UI-R2-1 (no Quint
+`run` declarations, so no `#[quint_test]` pins), UI-R2-16 (DG-2 gives row 14 no
+authoring time) and UI-R2-2 (`VsockBeaconIo` constructor). DG-2 sorts each
+remaining scenario into one of two authoring times, and this increment follows
+it exactly:
+
+- **Authored now** — every body and driver that names only additive surface
+  (the core codecs, constants and ports, the three seams and their sims,
+  `GuestFlowOwnerPorts` / `with_flow_io`, the observation accessors, the
+  `overdrive-init` `transport` and `guest_flow` modules). Each is a complete,
+  compiled body marked `#[ignore = "pending DELIVER vsock new-step N (…)"]`,
+  for a step that lands before the cut (1, 2, 4, 5's modules, the steering
+  adapter of 9 / 13, 10, 11), or `"pending DELIVER vsock attachment cut
+  (new-step N, …)"` for a step inside the cut (3, 6, 7, 8, 9's and 13's owner
+  wiring, 12, 14, 15) even where the body names no replaced signature. The
+  owner-level `probe_startup` refusals that new-steps 4 and 11 specify
+  (IFACE-NO-STACK, D5a-IFACE-BOOT, D24) run over the new owner, so they carry
+  the attachment-cut form too; the adapter halves of steps 4 and 11 land
+  before the cut.
+- **Authored at the attachment cut** — every body or driver that must call a
+  DG-2 row-1..18 replacement (`GuestAddressPool::new` / `assign`, the
+  `GuestNetworkPlan` reshape, `ForwardingActivation`, `quiesce_forwarding` /
+  `restore_forwarding`, `HostSharedGuestNetworkOwner::new(ports)`,
+  `VmDriver::new(.., beacon)`, `BeaconMessage::Ready { launch }`,
+  `Vmm::create(&cfg, claim)`, `vm_override`, …). Such a body cannot compile
+  before the cut, and DG-2 forbids an uncompiled, unregistered or
+  always-false-`cfg` file, so it is not in the tree. Its plan is pinned in
+  § *Attachment-cut DISTILL increment* below; the cut's DISTILL increment
+  writes it in the cut's working tree before the crafter lands the cut.
+
+Gates on this tree (Lima, kernel 7.0): `cargo check --workspace --all-targets
+--features integration-tests` clean; `cargo clippy` with `-D warnings` clean on
+every touched crate (`overdrive-core`, `-dataplane`, `-sim`, `-host` incl.
+`kvm-tests`, `-worker`, `-control-plane`, `-init`, `overdrive-system-conformance`);
+`cargo xtask conformance-lint` 0 violations over the four drivers;
+fail-for-the-right-reason run of every authored ignored test: 0 BROKEN
+(`distill/red-classification.md`). The guest-flow-owner Quint evidence fails
+`cargo xtask quint verify-evidence` because of a runner tool-error flake
+being fixed separately; the specs were not changed by this increment.
+
+## Wave: DISTILL / [REF] vsock Scenario List
+
+Scenario specs (GIVEN/WHEN/THEN, specification only) live in
+`distill/test-scenarios-p1..p6-*.md`; the index is `distill/test-scenarios.md`.
+Tags: `@real-io` real kernel / real adapter; `@pure` layer-1 property;
+`@driving_port`; `@error`; `@property`; `@ac` authored at the attachment cut.
+
+| Scenario | Tags | Authored test module | Status |
+|---|---|---|---|
+| P1-S1 CID derivation, newtypes | `@pure @property @error` | `overdrive-core` `vsock_guest_transport_vocabulary` | RED (new-step 2) |
+| P1-S2..S5, S7, S9 pool `assign` / retire / release / survivors / G-V0 | `@driving_port @error @ac` | — | AC (rows 1, 2) |
+| P1-S6 claim reaches the VMM once | `@pure @error` | `vsock_guest_transport_vocabulary` | RED (attachment cut, new-step 15); failed-`create` half `@ac` (row 6) |
+| P1-S8 intake capacity | `@pure @property` | `vsock_guest_transport_vocabulary` | RED; `IntakeCapacityReached` half `@ac` (row 2) |
+| P1-S10, P1-S11 deploy validation | `@driving_port @property @error` | `vsock_deploy_validation`, `vsock_guest_transport_vocabulary` | RED |
+| P1-S12 kernel claim (Tier-3) | `@real-io @error` | `overdrive-host` `vsock_cid_claim_handoff` | RED (attachment cut, new-step 15); VMM-handoff cell `@ac` (row 6) |
+| P1-S13 `cid_lease` conformance | `@driving_port @ac` | — | AC driver (rows 1-3, 6) |
+| P2-S1 request / control open / token codec | `@pure @property @error` | `vsock_wire_codec` | RED; READY `launch=` cells `@ac` (row 13, DG-7) |
+| P2-S2 control messages, half-close; DG-12 reserved `ListenState` port | `@pure @property @error` | `vsock_wire_codec` | RED (new-step 2) |
+| P2-S3..S9, S11, S13 host owner admission, pairing, attribution, session | `@driving_port @error @ac` | — | AC (rows 1-3, 7-9) |
+| P2-S10 TcpAccept, P2-S12 half-close — guest halves | `@driving_port @error` | `overdrive-init` `guest_flow::tests::{tcp_accept, tcp_connect, half_close, session}` | RED (new-step 5) |
+| P2-S10, P2-S12 host halves | `@driving_port @error @ac` | — | AC (rows 2, 3, 7, 9) |
+| P2-S14 beacon attribution | `@driving_port @error @ac` | — | AC (rows 13, 15); additive half `overdrive-worker` `vsock_beacon_intake` RED (attachment cut, new-step 6; its `fresh_driver` fixture is migrated to `VmDriver::new(.., beacon)` by the cut increment) |
+| P2-S15 `owner_flows` conformance | `@driving_port` | guest side + `flows_half_guest`: `overdrive-init` drivers | guest side authored, RED (new-step 5), model fidelity open (UI-R2-5); host side, `flows_half_host`, `flows_beacon` AC |
+| P3-S1 frame codec (Rust side) | `@pure @property @error` | `overdrive-core` `vsock_datagram_frame` | RED (new-step 2) |
+| P3-S2, S4, S5, S6, S9 (guest half), S10 guest slot pool | `@driving_port @error` | `overdrive-init` `guest_flow::tests::udp_slots` | RED (new-step 5) |
+| P3-S3 reserved intake port refuses a real application bind | `@real-io` | — | needs a real guest kernel: P6-S13 cell (`@ac`) |
+| P3-S7 concurrent associations; P3-S9 host half | `@driving_port @ac` | — | AC (rows 2, 3, 7, 9; new-step 10) |
+| P3-S8 `udp_slots` conformance | `@driving_port` | guest side: `overdrive-init` driver | guest authored, RED (new-step 5), model fidelity open (UI-R2-5); host side AC |
+| P4-S1..S5 steering adapter | `@real-io @error` | `overdrive-dataplane` `vsock_guest_steering` | RED (new-step 9 / 13) |
+| P4-S6..S11 intake listener lifecycle | `@driving_port @error @ac` | — | AC (rows 2, 3, 7, 9) |
+| P4-S12 boot load / swap / route order, crash convergence | `@driving_port @error` | `overdrive-control-plane` `guest_network::prefix_boot_acceptance` | RED (attachment cut, new-step 13) |
+| P4-S13 boot order through `run_server`; `run_server` boot refusal | `@driving_port @error @ac` | — | AC (rows 9, 18) |
+| P4-S14 VIP-range / node-address overlap refusals | `@driving_port @property @error` | `prefix_boot_acceptance` | RED (attachment cut, new-step 13); operator projection in the `run_server` boot-refusal cell (`@ac`) |
+| P4-S15 intake block conflict | `@driving_port @property @error` | `prefix_boot_acceptance` | RED (attachment cut, new-step 9); `run_server` structural cell `@ac` (row 9) |
+| P4-S16 prefix exposure | `@real-io` | covered by P4-S19 | — |
+| P4-S17 `prefix_boot` conformance | `@driving_port` | `overdrive-control-plane` `guest_network::prefix_boot_conformance` | RED (attachment cut, new-step 13) |
+| P4-S18 `intake` conformance | `@driving_port @ac` | — | AC driver (rows 2, 3, 7, 8, 9) |
+| P4-S19 `prefix_landing` (QPROJ-8) | `@real-io @driving_port` | `tests/conformance` `vsock_prefix_landing_conformance` | authored (native metal + `quint`); harness now reads the exported DG-9 / DG-14 constants |
+| P5-S1 unframe on every boot interface; boot `UnframeAttach` refusal | `@real-io @error` | `vsock_egress_unframe`; `prefix_boot_acceptance` | RED (adapter: new-step 4; owner refusal: attachment cut, new-step 4) |
+| P5-S2 stacked interface refused (IFACE-NO-STACK) | `@driving_port @property @error` | `prefix_boot_acceptance` | RED (attachment cut, new-step 4) |
+| P5-S3, S4 USO / fragment map | `@real-io @error` | `vsock_egress_unframe`, `vsock_fragment_map` | RED + 1 GUARD |
+| P5-S5, S6, S9 owner policy, TOCTOU, non-mesh decision | `@driving_port @error @ac` | — | AC (rows 2, 3, 7, 9); P5-S9 end-to-end cell P6-S13 (DG-16) |
+| P5-S7 VIP branch of the resolve adapter | `@driving_port @error` | — | new-step 11 (row 14): authoring time undefined by DG-2 (UI-R2-16) |
+| P5-S8 host-internal output rule (D26-PINS F-1..F-6) | `@real-io @error` | `overdrive-worker` `vsock_host_internal_enforce` | RED (attachment cut, new-step 14) + 3 controls (ignored with their step; pass against today's table); `gateway:53` / guest-broadcast cells need the prefix route → P6-S13 (`@ac`) |
+| P5-S10 mesh egress, forwarded-outbound port (DG-10 readings) | `@real-io @error` | `overdrive-worker` `vsock_mesh_egress_mtls`, `mtls_intercept_worker` stage-label test | RED (attachment cut, new-step 8; the `intercept_live_spec` fixture names `AllocationSpec.network` and is migrated to `transport` by the cut increment) |
+| P6-S1..S6, S10, S12, C1, C2 recovery, VMM death, EXEC | `@driving_port @error @ac` | — | AC (rows 2, 3, 7, 8, 9, 10, 12) |
+| P6-S12b feature disabled (`transport: None`) | `@driving_port @ac` | — | AC (row 4) |
+| P6-S7 | — | — | withdrawn (DG-1) |
+| P6-S8 | — | — | withdrawn with the VMM backend probe (DG-1); the `fd=` handoff is P1-S12's VMM cell (`@ac`) and P6-S13 |
+| P6-S9 fork provisioning gate | `@real-io` | — | DELIVER new-step 1 provisioning |
+| P6-S11 guest transport setup before READY | `@driving_port @error` | `overdrive-init` `transport::tests`, `guest_flow::tests::session` | RED (new-step 5); `main` wiring cell `@ac` (row 16) |
+| P6-S13, S14, S15 walking skeleton, crash matrix, density | `@real-io @driving_port @ac` | — | AC (rows 1-6) |
+
+## Wave: DISTILL / [REF] vsock Conformance Drivers
+
+Every driver is a `quint-connect` module in its owner's crate (`prefix_landing`
+excepted), replays the spec in place under `specs/quint/guest-flow-owner/`,
+and runs `#[quint_run]` per conformance instance. The specs declare no Quint
+`run`, so no `#[quint_test]` pin exists (upstream `UI-R2-1`). No driver has an
+always-false `cfg`, an empty or catch-all arm, or a projection from driver
+bookkeeping (`cargo xtask conformance-lint`: 0). The guest drivers play the
+host peer owner (stimulus, QPROJ-1) and verify that peer model against the
+spec's host variables at every step (decoded in `from_spec`, never a `State`
+source); quint-connect 0.1.2 gives `Driver::step` no access to the trace state.
+Quiescence: the control-plane sim detects idleness through tokio's paused-time
+auto-advance on a current-thread runtime; the `overdrive-init` sim panics with a
+typed `SimWouldBlock` payload exactly when DG-5 pins it (nothing released, no
+deadline passed) and `settle()` stops on that payload only (a non-unwinding
+signal is UI-R2-22).
+
+| Driver | File | Instances | Actions (owner driving port / seam stimulus) | `State` sources | Status |
+|---|---|---|---|---|---|
+| `prefix_boot` | `overdrive-control-plane/src/guest_network/prefix_boot_conformance.rs` | `boot_ok`, `boot_faulty`, `boot_live` | `init` never-booted `SimGuestNode`; `Restart(b)` new `SimGuestFlowIo` over the persisted node with program `b` + `with_flow_io`; `BootStep` call `converge_shared` / release the held `Load`, `Attach`, `Pin`, route effect; `Fail` fail the held effect (`Load`, `Update` on an adopted link, `Attach`, `Pin`, route write); `Crash` abort the pending boot, drop the owner, end the process's seam | `link`, `prog`, `route` ← `steering_observation()`; `phase` ← C (`converge_shared` not called / pending / `Ok`) with `steering_effects()` (arbiter reads, R5-24, R5-34, R5-25); the adapter's never-detach and pin-on-first-attach rules run inside the sim and rest on `vsock_guest_steering` (P4-S4) | RED, attachment cut (new-step 13) |
+| `owner_flows` guest side | `overdrive-init/src/guest_flow/quint_owner_flows.rs` | `flows_ok` | guest actions → `SimGuestOwnerIo` releases (`GuestAcceptV`, `GuestPairOrRefuse`, `GuestRecvAbort`, `GuestSeesHostClose`, `GuestQueueReset`, `GuestLossAbort`), then `dispatch_next`; host and lease actions → seam stimuli of the host side (`host_open_accept`, session connect completion / deferred end, `host_take_*` of the outbox, `host_vsock_end`), `VmStart` / `VmStop` a new owner per launch / `guest_owner_dies`; hazard-only actions → typed error | `gf(h).st` ← O5 `accepted` (`closed` by the identity bijection's "seen in `accepted`"), `reset` ← S `reset_in_queue`; `toHostPaired`, `toHostRefused` ← S `outbox` | RED, new-step 5; model fidelity open (UI-R2-5) |
+| `owner_flows` guest side | `overdrive-init/src/guest_flow/quint_flows_half.rs` | `flows_half_guest` | `HcFarHalfClose` / `HcFarReset` `app_end`; `HcPair` `complete_app_connect` / `host_control(Paired)`; `HcAnnounce` `set_drained`; `HcRecv` `host_control`; `VsockEndArrives` / `VsockEndReachesSurvivor` `host_vsock_end`; `HcLossObserved` `release_session_end`; `HcFlowError` `SimGuestClock` past `FLOW_DRAIN_DEADLINE` or `flow_vsock_error`; `HcOwnerDies` `guest_owner_dies` + drop; `HcCleanClose` settle; host side stimulus; `HcLateAck`, `HcPeerDefectEnd(g)` → typed error | `paired`, `outEof`, `ann`, `acked`, `outShut`, `open` ← O5 `flows` / `awaiting_paired` / `accepted`; `loss`, `ctlDown`, `ch`, `vEnd`, `vEndSent`, `far` ← S; `dead` ← C | RED, new-step 5; model fidelity open (UI-R2-5) |
+| `udp_slots` guest side | `overdrive-init/src/guest_flow/quint_udp_slots.rs` | `slots_ok`, `slots_live` | `AppClaim` / `AppSendOnSlot` `app_send_on`; `GuestReady(s, cur)` release the event, complete both leg connects; `GuestRecvPaired` / `GuestRecvEnd` `host_control`; `GuestPairingTimeout`, `GuestAudit`, `IdleRelease` `SimGuestClock`; `SockClose` / `SockCloseReportLost` `app_close_socket`; `GuestReleaseSock` `release_socket_report`; host actions stimulus; `AppPick`, `AppTake`, `Refill` → typed error | `slots(s).*` ← O5 `slots`; `parked`, `ready` (current iff O5 generation), `releasePending`, `toHostAbort`, `toHostEnd` ← S | RED, new-step 5; model fidelity open (UI-R2-5) |
+| `prefix_landing` | `tests/conformance/tests/vsock_prefix_landing_conformance.rs` | stateless (`lands`) | QPROJ-8 configurations through `run_server` + public API | K queries + C `marked` | authored, native metal |
+| `cid_lease` | (attachment cut) `overdrive-control-plane` | `lease_conf_ok`, `lease_conf_live` | QPROJ action map | O2 `lease_observation`, S `held_cids`, `is_live` | AC (rows 1-3, 6) |
+| `owner_flows` host side, `flows_half_host`, `udp_slots` host side, `intake`, `quiescence`, `shared_table` | (attachment cut) `overdrive-control-plane` | `flows_ok`, `flows_half_host`, `slots_ok` / `slots_live`, `intake_ok` / `two` / `live`, `quiesce_ok` / `live`, `table_ok` / `live` | QPROJ action maps over `SimGuestFlowIo` (+ `SimMtlsIntercept` for quiescence / shared_table) | O2, O3, O6; S `socket_observation`, `steering_observation`, `steering_effects`, `shared_table_state` | AC (rows 1-3, 7-10, 12) |
+| `owner_flows` `flows_beacon` | (attachment cut) `overdrive-worker` | `flows_beacon` | `VmStart` `VmDriver::start`; `VmStop` `SimVmm` exit; `DriverStop` `VmDriver::stop`; beacon connections over `SimBeaconIo` | O4 `beacon_observation`, S `beacon_socket_observation` | AC (rows 13, 15) |
+
+## Wave: DISTILL / [REF] vsock Attachment-cut DISTILL increment
+
+Written by DISTILL as the first activity of the attachment cut, in its working
+tree, against the contracts above; committed compiled with the cut (DG-2).
+Each item names the 91f9436ff draft it starts from (if any), what it drives
+and what it asserts.
+
+| Item | Blocking rows | Drives | Asserts |
+|---|---|---|---|
+| Pool tests P1-S2..S5, S7, S9, P1-S8 stateful half (from `overdrive-core/tests/acceptance/vsock_guest_address_pool.rs` @91f9436ff; moves to `overdrive-control-plane`, owner of `GuestAddressPool`) | 1, 2 | `GuestAddressPool::new(/29, gateway, SimGuestCidClaim, SimEntropy)`, `assign(a, &ports)`, `retire`, `release`, surviving `SimVmm` holders | O2 `lease_observation()` before/after (cursor, leases, `claim_in_slot`, `reserved_ports`), `held_cids`; `GuestCidsHeldElsewhere`, `IntakeCapacityReached` with no state change |
+| `cid_lease` driver | 1, 2, 3, 6 | QPROJ `cid_lease` action map | O2 + S `held_cids` / `is_live` |
+| Owner-flow tests P2-S3..S13 host halves (P2-S12's drain-dependent cells, and P6-S14's clean-close half, pinned to the UI-R2-5 (d) decision) (from `vsock_owner_flow_admission.rs`, `vsock_owner_datagram_assoc.rs` @91f9436ff, made source-local beside the owner) | 2, 3, 7, 9 (+ new-step 10 for datagrams) | `pool.assign` → `provision` → queued 1240 / 1241 / 1243 connections with buffered records on `SimGuestFlowIo` → `activate` | O3 `flow_observation()` (`session`, `unread`, `guest_flows`, `host_flows`, `datagrams`), S `closed_by_owner`, `outbox`; `FlowCloseCause` |
+| Intake tests P4-S6..S11 (from `vsock_intake_listener.rs`) and the `intake` driver | 2, 3, 7, 8, 9 | `assign(a, ports)` → `provision` → session + `ListenState` → `activate`; scripted bind / steer outcomes | O3 `intake`, `parked`, `last_listen_state`; S `steering_observation().entries`, `steering_effects()` |
+| Quiescence and recovery P6-S1..S6, S10, S12, C1, C2 (from `vsock_quiescence_recovery.rs`) and the `quiescence` / `shared_table` drivers | 2, 3, 7, 8, 9, 10, 12 (an allocation with an intake listener needs the pool and plan rows) | runtime supervisor over the owner and `SimMtlsIntercept` | O3 `holders`, `admission`, `intake`, `flow_listeners_running`; O6 `recovery_observation()`; S `shared_table_state()` |
+| `owner_flows` host side, `flows_half_host`, `udp_slots` host side drivers | 2, 3, 7, 8, 9 | QPROJ host-side action maps | O2, O3, S `socket_observation()` |
+| Host policy P5-S5, S6, S9 owner `NonMesh` decision (from `vsock_host_internal_deny.rs`; P5-S7's resolve-adapter VIP branch belongs to new-step 11, row 14, UI-R2-16) | 2, 3, 7, 9 | flows over `SimGuestFlowIo` with scripted `route_type` | `Refused(HostInternal | Policy | DestinationUnreachable)`, O3, S `outbox` |
+| P4-S13, P4-S15 structural, P4-S12 failed step-8 table | 9 | `run_server` composing `new(ports)` | composition order; no wildcard bind after `open_after_boot`; `shared_table_state()` |
+| Beacon attribution P2-S14 (from `overdrive-worker/tests/acceptance/vsock_beacon_attribution.rs`) and `flows_beacon` driver | 13, 15 | `VmDriver::new(.., BeaconIntake::bind(SimBeaconIo::stepped(vmm)))`, READY with `launch=` | O4 `beacon_observation()` (`live`, `claims`, `unread`), S `closed_by_driver`: live READY claims; a stale queued READY (P-37) closes; a read after `stop` takes nothing; a second connection is closed `SessionHeld`; no buffered bytes → EOF close; a non-READY first line closes |
+| DG-7 READY parse cells (P2-S1) | 13 | `BeaconMessage::parse` of the 3-field READY | `FieldCount { expected: 3 }`, `MissingKey { field: "launch" }`, `InvalidLaunchToken` |
+| P1-S12 VMM handoff cell; P1-S6 failed-`create` half | 5, 6 | `Vmm::create(&cfg, claim)` on the real fork; a scripted `SimVmm::create` failure | the CID is held by the VMM until it exits; no Landlock rule names `/dev/vhost-vsock` in `fd=` mode (row 5); a failed `create` drops the claim and the CID is claimable again |
+| Feature disabled P6-S12b | 4 | a `SimDriver` allocation with `AllocationSpec.transport: None` through the action shim | no lease or CID claim is taken; no `activate`; EXEC is released on today's path; `alloc_status` equals the `network: None` baseline (C5a, C5b) |
+| Owner error set closed (C6c) | 11 | every owner failure path of the bodies above | each failure is one `GuestNetworkError` variant of the § *Typed error taxonomy* set, `Flow { operation, source }` for the forwarder; no other variant escapes |
+| `run_server` boot refusal (P4-S13; operator projection of P4-S14, P4-S15, P5-S1, P5-S2) | 9, 18 | `run_server` with `vm_override: Some(VmOverride { vmm, beacon })` and each refusal as a data row (VIP overlap, node address, stacked interface, intake block, `FdBudget`, `OwnerCgroupPlacement`, `OwnerCgroupIsRoot`, failed unframe attach, route write; a scripted `SimGuestCidClaim` probe mismatch; a scripted `SimBeaconIo` bind failure) | `health.startup.refused` with reason `guest_network.probe` / `guest_network.converge` / `guest_cid_claim.probe` / `vm_driver.beacon_bind`; `open_after_boot` never reached; no veth pair or nft table exists; `probe_startup` runs before the veth step |
+| Fixture migrations | 4, 5, 15 | `vsock_mesh_egress_mtls::intercept_live_spec` (`AllocationSpec.network` → `transport`); `vsock_beacon_intake::fresh_driver` (`VmDriver::new(.., BeaconIntake)`) | the existing bodies, unchanged in their assertions |
+| P4-S5 constant-rules half (PREFIX-REPLY) | 9 (new-step 12) | `run_server` boot, then an in-prefix-source reply | the `ct state established,related accept` precedes the prefix reject / drop; the reply is delivered |
+| `overdrive-init` `main` wiring cell (P6-S11) | 16 | `complete_pre_ready_init` | one console line on a setup error; owner thread started before READY |
+| Walking skeleton P6-S13..S15 | 1-6, 13, 15, 16, 18 | `run_server` + public API on native metal | end-to-end paths (V-6); the cell list in `distill/test-scenarios-p6-recovery-vmm-ws.md` § P6-S13 is the single source — among them P3-S3, the P5-S8 `gateway:53` and guest-broadcast cells, P5-S9 non-mesh end to end, the fork-boot cells (guest-reported CID, byte round trip, pre-READY exit on a bad descriptor with the CID still claimable), the guest reboot in `fd=` mode ending the VMM, R5-7 / F-4 forwarder-redirect transmit error, R5-41 kill-and-reuse, R5-28 / R5-31 V-24 shape, R5-13 / V-20 guest `sock_ops`, R5-4, and the P6-S11 in-guest observations |
+
+## Wave: DISTILL / [REF] vsock Walking Skeleton Strategy
+
+The architecture of reference applies (driving and driven-internal ports real;
+clock, entropy, KEK, the CID claim and the owner seams simulated where a real
+kernel is not the subject). The walking skeleton is P6-S13: one VM service
+started in-process through `run_server` and deployed through the public HTTPS
+API, exercising mesh, non-mesh, VIP, DNS, inbound and listen-state paths on
+native metal. It needs the attachment cut (rows 1-6). Until then, the
+authored tests driving the production composition end to end are P4-S19
+(`prefix_landing`) and P5-S8 (`vsock_host_internal_enforce`, the real
+`MtlsInterceptWorker` writing the shared table). Tier B is realised by the
+Quint conformance drivers (QPROJ-1).
+
+## Wave: DISTILL / [REF] vsock Adapter Coverage
+
+| Driven adapter | `@real-io` scenario | Covered by |
+|---|---|---|
+| `GuestPrefixSteering` / `GuestSteeringCandidate` | YES | `vsock_guest_steering` (P4-S1..S5); `prefix_landing` |
+| `GuestFlowForwarder` | YES | `vsock_egress_unframe`, `vsock_fragment_map` (P5-S1, S3, S4) |
+| `MtlsInterceptWorker` forwarded-outbound port | YES | `vsock_mesh_egress_mtls` (P5-S10) |
+| Shared nft table D26 output rules / owner egress mark | YES | `vsock_host_internal_enforce` (P5-S8) |
+| `VhostVsockCidClaim` | YES | `vsock_cid_claim_handoff` (P1-S12); VMM-handoff cell at the cut |
+| `CloudHypervisorVmm` fork `fd=` launch | at the cut | P1-S12 VMM cell, P6-S13 |
+| `HostGuestFlowIo` (owner seam production adapter) | at the cut | P6-S13 through `run_server` |
+| `VsockBeaconIo` | at the cut | P6-S13 (constructor unpinned, `UI-R2-2`) |
+| `KernelGuestTransportOps` / `KernelGuestOwnerIo` | at the cut | P6-S13, P3-S3 (the ops' constructor is internal structure, UI-R2-3 closed) |
+| Prefix `local` route (netlink) | partial | read by `prefix_landing`; the owner's write at the cut |
+| `ServiceBackendsResolve` VIP branch | at the cut | P5-S7 (row 14, new-step 11) |
+
+## Wave: DISTILL / [REF] vsock Scaffolds
+
+Round-1 scaffolds are unchanged except where this increment corrected them to
+the pinned contract. Added in this increment (every scaffold carries
+`// SCAFFOLD: true`; plain data is real — the DG-10 `stage()` labels are the
+exception, they stay in the RED `stage()` arm until new-step 8; nothing
+unpinned was added except the items listed in `upstream-issues.md` round 2):
+
+| Item | File | Contract |
+|---|---|---|
+| `MTLS_TPROXY_MARK`, `OWNER_EGRESS_MARK`, `MTLS_SHARED_NFT_TABLE` (real) | `overdrive-core/src/dataplane/mtls_mark.rs` | DG-9 |
+| `GUEST_NODE_PREFIX`, `GUEST_NODE_GATEWAY`, `GUEST_PREFIX_ROUTE_PROTOCOL` (real) | `overdrive-core/src/guest_transport/mod.rs` | DG-14 |
+| `DatagramFrame`, `DatagramFrameError` | `overdrive-core/src/guest_transport/wire.rs` | DG-8 |
+| `ListenPort::new` / `get`, `InterfaceIndex::new` / `get`, `ListenPortError`, `InterfaceIndexError` (`FromStr` switched off `IdParseError`) | `overdrive-core/src/net.rs` | DG-11 |
+| `BeaconConnKey`, `BeaconSocket`, `BeaconIo`; `BeaconParseError::InvalidLaunchToken` | `overdrive-core/src/vm/beacon.rs` | DG-4, DG-7 |
+| `SharedGuestNetworkComponent` derives `Ord` | `overdrive-core/src/guest_network.rs` | § *Owner and provisioner* |
+| `GUEST_STEERING_KEY_LEN`, `guest_steering_key` | `overdrive-dataplane/src/guest_steering.rs` | DG-14 |
+| `SimBeaconIo` (functional, `beacon_socket_observation`), `SimSharedTable` + `SimMtlsIntercept::shared_table_state`; `SimVmm::spawn_bare_process` (test support) | `overdrive-sim/src/adapters/{beacon_io,mtls_intercept,vmm}.rs` | DG-4, QPROJ-7 |
+| `VHOST_VSOCK_DEVICE`, `VhostVsockCidClaim::new`; `VsockBeaconIo` | `overdrive-host/src/{cid_claim,beacon_io}.rs` | DG-6, DG-4 |
+| `BeaconIntake`, `BeaconIntakeError`; `VmDriver::beacon_observation`, `BeaconObservation` | `overdrive-worker/src/{beacon_intake,vm_driver}.rs` | DG-4, QPROJ-4 |
+| `guest_network::flow_io` (`GuestFlowIo`, every handle and value type, `HostGuestFlowIo`) and `flow_io::sim::SimGuestFlowIo` / `SimGuestNode` (functional, `socket_observation`, `steering_observation`, `steering_effects`) | `overdrive-control-plane/src/guest_network/flow_io{.rs,/sim.rs}` | DG-3, QPROJ-7 |
+| `GuestFlowOwnerPorts`, `with_flow_io`, `flow_observation` + QPROJ-3 types, `lease_observation` + QPROJ-2 types, `QuiescenceHolder`, `FlowCloseCause`, `InterfaceStacking`, `IntakePortBlockConflict` and the probe-startup `GuestNetworkError` variants | `overdrive-control-plane/src/guest_network/flow_owner.rs`, `guest_network.rs` | DG-3, DG-13, QPROJ-2/3, § *Typed error taxonomy* |
+| `recovery_observation`, `RecoveryEpisode`, `RecoveryPhase` | `overdrive-control-plane/src/lib.rs` | QPROJ-6 |
+| `transport` (`GuestTransportToken`, `parse_transport_token`, `GuestTransportOps`, `configure_guest_transport`, `GuestTransportSetupError` with every `Display`, `KernelGuestTransportOps`) and `guest_flow` (`GuestFlowOwner`, `GuestOwnerIo`, every handle and event type, `GuestOwnerFatal`, `GuestClock`, `MonotonicGuestClock`, `KernelGuestOwnerIo`, `SocketCookie`, `CellGeneration`, QPROJ-5 types); `guest_flow::sim::{SimGuestOwnerIo, SimGuestClock}` (functional) | `overdrive-init/src/{transport,guest_flow}/` (not called by `main`) | DG-5, QPROJ-5, QPROJ-7 |
+
+Dependencies added: `itf`, `anyhow` (workspace; dev-dependencies of the three
+driver crates — `switch!` expands to `anyhow::bail!`), `quint-connect`
+dev-dependency of `overdrive-control-plane`, `overdrive-worker`,
+`overdrive-init`; `aya` for `overdrive-init` (DG-5) and as a control-plane
+dev-dependency (the sim builds the dataplane error values);
+`overdrive-dataplane` for `overdrive-system-conformance` (the steering key
+decoder); tokio `test-util` as a control-plane dev-dependency feature (the sim's
+paused-time idle detection).
+
+## Wave: DISTILL / [REF] vsock Test Placement
+
+| Placement | Why |
+|---|---|
+| `crates/overdrive-core/tests/acceptance/vsock_*.rs`, `src/dataplane/mtls_mark.rs` unit tests (default lane) | pure vocabulary, codecs and constants |
+| `crates/overdrive-dataplane/src/guest_steering.rs` unit tests; `tests/integration/vsock_*.rs` (Tier-3) | the pure key encoder in the default lane; adapters on the real kernel |
+| `crates/overdrive-sim/src/adapters/{beacon_io,mtls_intercept}.rs` unit tests | the sims' own semantics |
+| `crates/overdrive-host/tests/integration/vsock_cid_claim_handoff.rs` (`kvm-tests`, real `/dev/vhost-vsock`) | whole binary already in `host-kernel-shared` |
+| `crates/overdrive-worker/tests/acceptance/vsock_beacon_intake.rs`; `tests/integration/{vsock_mesh_egress_mtls,vsock_host_internal_enforce}.rs` (Tier-3) | the worker owns the beacon intake and the shared table; integration binary already in `host-kernel-shared` |
+| `crates/overdrive-control-plane/src/guest_network/{prefix_boot_acceptance,prefix_boot_conformance,flow_io/sim/tests}.rs` (source-local) | the seam and its sim are crate-private (QPROJ-1) |
+| `crates/overdrive-init/src/{transport,guest_flow}/**` tests and drivers (source-local) | binary crate, no library target (DG-5) |
+| `tests/conformance/tests/vsock_prefix_landing_conformance.rs` (native metal) | QPROJ-8 multi-owner landing contract |
+
+## Wave: DISTILL / [REF] vsock Driving Adapter Coverage
+
+| Driving adapter (DESIGN) | Scenario through its protocol | Status |
+|---|---|---|
+| `overdrive serve` composition (`run_server`) | P4-S19 `prefix_landing` | authored (native metal) |
+| `overdrive deploy` → public HTTPS submit | P4-S19 | authored (native metal) |
+| TOML ingress / API ingress | P1-S10, P1-S11 | RED |
+| `SharedGuestNetworkOwner::{probe_startup, converge_shared}` over `with_flow_io` | P4-S12, S14, S15, P5-S1, S2, P4-S17 | RED |
+| `GuestFlowOwner::dispatch_next` (guest owner) | P2-S10 / S12 guest halves, P3, P6-S11 | RED |
+| `BeaconIntake::bind` | P2-S14 additive half | RED |
+| Walking skeleton (serve + deploy, every guest path) | P6-S13 | at the cut |
+
+## Wave: DISTILL / [REF] vsock Prerequisites and Completeness
+
+Pre-requisites: Lima VM (kernel 7.0) for the default lane, the Tier-3 tests and
+the drivers (`quint` 0.32 on PATH); native x86_64 metal with KVM and `quint` for
+P4-S19 (G-PL-3, DELIVER new-step 1) and the `kvm-tests` claim cells; the BPF
+object (`cargo xtask bpf-build`) for the dataplane binary.
+
+AT-completeness (`nw-at-completeness-check`, 15 items, over what is authored
+now): C1a, C1b, C2a (guest owner and boot state machines in the module docs and
+drivers), C2b (stale-token, unknown-flow and out-of-order events per state),
+C3 (N ∈ {0, 1, 2, 1024} slots), C4a, C4b, C6a, C6b (every setup, probe and
+codec error triggered by name), C7a, C7b (crash at every boot step; host
+owner restart), C7c (two allocations on one CID across launches) pass; C5a,
+C5b (`AllocationSpec.transport` `None` vs `Some`) and C6c (the owner's closed
+error set) are owed to the attachment-cut bodies above. Verdict
+**ACCEPTABLE_WITH_DOCUMENTED_GAPS (12/15)**; the three gaps are
+`AT_GAP_IN_DELIVERY_SCOPE` items planned in § *Attachment-cut DISTILL
+increment*. Mandate-12 step-reuse ratio: not applicable (Rust `#[test]`
+bodies, no Gherkin step decorators; the domain vocabulary is the pinned
+newtypes and the seams' typed handles).

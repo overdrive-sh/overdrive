@@ -224,7 +224,7 @@ module intake {
   // a bind / listen / steer failure: during activation the rollback closes every listener of the CID
   // (cannot fail) and returns Err with the CID Provisioned; otherwise the listener is closed and the
   // port refused meanwhile — retried later, or (park: a reported defect) parked until wanted anew
-  action bringUpFails(p: int, steerFail: bool, park: bool): bool = all {
+  action bringUpFails(p: int, steerFail: bool, park: bool, cap: bool): bool = all {
     val act = alloc == "Activating"
     val left = if (act) (if (bug("rollbackPartial")) lis.exclude(Set(p)) else Set()) else lis.exclude(Set(p))
     all {
@@ -233,7 +233,8 @@ module intake {
       alloc' = if (act) "Provisioned" else alloc,
       parked' = if (park and not(act)) parked.union(Set(p)) else parked,
       g' = { ...g, actErr: g.actErr or act, actResidue: g.actResidue or (act and left != Set()),
-             steerFailed: g.steerFailed or steerFail, defected: g.defected or (park and not(act)) },
+             steerFailed: g.steerFailed or steerFail, defected: g.defected or (park and not(act)),
+             capFail: g.capFail or cap },
     },
     gen' = gen, sess' = sess, lastLS' = lastLS, quiesced' = quiesced, up' = up, keepOther,
   }
@@ -243,7 +244,7 @@ module intake {
     lis' = lis.union(Set(p)), entries' = entries, keepAlloc, quiesced' = quiesced, parked' = parked,
     up' = up, keepOther, bindLeft' = bindLeft, g' = g }
   action BindFail(p: int): bool = all { up, serving(p), not(lis.contains(p)), not(parked.contains(p)),
-    bindLeft != 0, bringUpFails(p, false, false), bindLeft' = dec(bindLeft) }
+    bindLeft != 0, bringUpFails(p, false, false, false), bindLeft' = dec(bindLeft) }
   def steerable(p: int): bool = and { up, serving(p), lis.contains(p), not(entries.contains(p)) }
   // GuestPrefixSteering::steer after listen: Ok = the entry is present (a free slot exists)
   action Steer(p: int): bool = all { steerable(p), room,
@@ -251,14 +252,15 @@ module intake {
     up' = up, keepOther, bindLeft' = bindLeft, g' = { ...g, resteered: g.resteered or g.steerFailed } }
   // steer → KernelMemory (transient, A-MEM): the listener is closed and the bring-up retried
   action SteerMemFail(p: int): bool = all { steerable(p),
-    bringUpFails(p, true, false), bindLeft' = bindLeft }
+    bringUpFails(p, true, false, false), bindLeft' = bindLeft }
   // steer → a defect variant: reported, the listener closed, not retried (the port is parked)
   action SteerDefect(p: int): bool = all { DEFECTS, steerable(p),
-    bringUpFails(p, true, true), bindLeft' = bindLeft }
+    bringUpFails(p, true, true, false), bindLeft' = bindLeft }
   // the kernel refuses the insert into a full map (unreachable with admission): a defect variant,
   // not retried — capRetry (revision 10): retried like KernelMemory
+  // (capFail is set here too: the ghost records a capacity failure of our steer as well as the other's)
   action SteerCapFail(p: int): bool = all { steerable(p), not(room),
-    bringUpFails(p, true, not(bug("capRetry"))), bindLeft' = bindLeft }
+    bringUpFails(p, true, not(bug("capRetry")), true), bindLeft' = bindLeft }
   // takedownBeforeClose: remove the entry, then close the listener (one step when the removal works) ...
   action TakeDown(p: int): bool = all { bug("takedownBeforeClose"), up, lis.contains(p), not(serving(p)),
     lis' = lis.exclude(Set(p)), entries' = entries.exclude(Set(p)), keepAlloc, quiesced' = quiesced,
@@ -333,6 +335,106 @@ module intake {
     NoReleaseWithListener, QuiescedClosesListeners, ReservedWithinCapacity, ListenersWithinReserved,
     EntriesWithinListeners, NoCapacitySteerFailure, ParkedOnlyWhileServing,
   }
+
+  // ------------------------------------------------------------------ named runs (critical scenarios)
+  // Deterministic scenarios, each ending in an `expect` of its outcome with `Safety` checked along
+  // the way. Runs on `intake_ok` (one declared port, port 1) unless noted; later runs extend the
+  // happy path `ActivationSteersDeclaredPortAndServes`.
+  def served: bool = alloc == "Active" and lis == Set(1) and entries == Set(1) and landsAt("marked", 1) == "intake"
+  // happy path (U-6, D8a-LOOKUP): admission, session open, the guest reports listening, activation
+  // binds and steers the declared port; marked clients reach the intake through the entry only,
+  // unmarked host-local traffic stays on leg-C, remote traffic never reaches it
+  run ActivationSteersDeclaredPortAndServes = init
+    .then(Provision).expect(Safety and alloc == "Provisioned" and lis == Set() and res == 1)
+    .then(SessOpen).then(ListenState(1, true)).expect(Safety and servingTrue(1) == false and lis == Set())
+    .then(ActivateBegin).expect(Safety and alloc == "Activating" and servingTrue(1))
+    .then(BindListen(1)).expect(Safety and lis == Set(1) and entries == Set() and landsAt("marked", 1) == "refused")
+    .then(Steer(1)).expect(Safety and entries == Set(1) and landsAt("marked", 1) == "intake")
+    .then(ActivateOk)
+    .expect(Safety and served and landsAt("unmarked", 1) == "legC" and landsAt("remote", 1) != "intake" and not(g.actPartial))
+  // the session is lost: every intake listener of the CID closes and its entry goes in the same step
+  // (K-L3); the new session re-reports the port and the owner brings it up again
+  run SessionLossClosesListenerAndEntryThenRecovers = ActivationSteersDeclaredPortAndServes
+    .then(SessLoss).expect(Safety and lis == Set() and entries == Set() and landsAt("marked", 1) == "refused")
+    .then(SessOpen).then(ListenState(1, true)).then(BindListen(1)).then(Steer(1)).expect(Safety and served)
+  // the guest stops listening on the port: the listener and its entry close; listening again reopens it
+  run ListenStateNotListeningClosesListener = ActivationSteersDeclaredPortAndServes
+    .then(ListenState(1, false)).expect(Safety and lis == Set() and entries == Set() and not(servingTrue(1)))
+    .then(ListenState(1, true)).then(BindListen(1)).then(Steer(1)).expect(Safety and served)
+  // teardown (U-3): closes every listener and the session, Retiring keeps the reservation; release
+  // only after teardown returned Ok; the next allocation of the address starts from nothing
+  run TeardownClosesListenersThenReleaseThenReuse = ActivationSteersDeclaredPortAndServes
+    .then(Teardown).expect(Safety and alloc == "Retiring" and lis == Set() and entries == Set() and res == 1 and landsAt("marked", 1) == "refused")
+    .then(Release).expect(Safety and alloc == "Absent" and res == 0 and not(g.relListener))
+    .then(Provision).expect(Safety and alloc == "Provisioned" and gen == 2 and lis == Set() and entries == Set())
+  // M-7 / D8a-HOLD: quiescence closes every intake listener; nothing is bound while quiesced; restore reopens
+  run QuiescenceClosesListenersRestoreReopens = ActivationSteersDeclaredPortAndServes
+    .then(Quiesce).expect(Safety and quiesced and lis == Set() and entries == Set() and not(servingTrue(1)) and landsAt("marked", 1) == "refused")
+    .then(Restore).expect(Safety and not(quiesced) and servingTrue(1) and lis == Set())
+    .then(BindListen(1)).then(Steer(1)).expect(Safety and served)
+  // serve crash: every listener closes and the entries go with them; nothing is delivered while it
+  // is down; the restart rebuilds from scratch
+  run ServeCrashClosesEveryListenerThenRestart = ActivationSteersDeclaredPortAndServes
+    .then(Crash).expect(Safety and not(up) and lis == Set() and entries == Set() and alloc == "Absent" and not(deliveredOn(net, PORTS)))
+    .then(Restart).expect(Safety and up and alloc == "Absent" and lis == Set())
+    .then(Provision).then(SessOpen).then(ListenState(1, true)).then(ActivateBegin).then(BindListen(1)).then(Steer(1)).then(ActivateOk)
+    .expect(Safety and served and gen == 2)
+  // crash in the middle of an activation leaves no listener and no allocation
+  run CrashDuringActivationLeavesNothing = init
+    .then(Provision).then(SessOpen).then(ListenState(1, true)).then(ActivateBegin).then(BindListen(1))
+    .then(Crash).expect(Safety and not(up) and lis == Set() and entries == Set() and alloc == "Absent")
+    .then(Restart).expect(Safety and up and lis == Set())
+  // U-6: a bind failure during activation rolls the CID back to Provisioned with no listener; the
+  // activation is retried
+  run ActivationBindFailureRollsBackThenRetries = init
+    .then(Provision).then(SessOpen).then(ListenState(1, true)).then(ActivateBegin)
+    .then(BindFail(1)).expect(Safety and alloc == "Provisioned" and lis == Set() and entries == Set() and g.actErr and not(g.actResidue))
+    .then(ActivateBegin).then(BindListen(1)).then(Steer(1)).then(ActivateOk).expect(Safety and served)
+  // U-6 with two declared ports (intake_two): a failure on the second port after the first was steered
+  // closes both listeners and entries; the retry activates both
+  run TwoPortActivationRollsBackEveryListener = init
+    .then(Provision).then(SessOpen).then(ListenState(1, true)).then(ListenState(2, true)).then(ActivateBegin)
+    .then(BindListen(1)).then(Steer(1))
+    .expect(Safety and lis == Set(1) and entries == Set(1))
+    .then(BindFail(2)).expect(Safety and alloc == "Provisioned" and lis == Set() and entries == Set() and g.actErr and not(g.actResidue))
+    .then(ActivateBegin).then(BindListen(1)).then(Steer(1)).then(BindListen(2)).then(Steer(2)).then(ActivateOk)
+    .expect(Safety and alloc == "Active" and lis == Set(1, 2) and entries == Set(1, 2) and landsAt("marked", 2) == "intake")
+  // a bind failure on a running allocation: the port is refused meanwhile and the bring-up is retried
+  run RuntimeBindFailureIsRetried = ActivationSteersDeclaredPortAndServes
+    .then(ListenState(1, false)).then(ListenState(1, true))
+    .then(BindFail(1)).expect(Safety and lis == Set() and servingTrue(1) and landsAt("marked", 1) == "refused" and not(parked.contains(1)))
+    .then(BindListen(1)).then(Steer(1)).expect(Safety and served)
+  // A-MEM: steer returns KernelMemory (transient): the listener is closed, the port refused and the
+  // bring-up retried until the steer succeeds
+  run SteerKernelMemoryFailureClosesListenerAndRetries = ActivationSteersDeclaredPortAndServes
+    .then(ListenState(1, false)).then(ListenState(1, true)).then(BindListen(1))
+    .then(SteerMemFail(1)).expect(Safety and lis == Set() and entries == Set() and g.steerFailed and not(parked.contains(1)) and landsAt("marked", 1) == "refused")
+    .then(BindListen(1)).then(Steer(1)).expect(Safety and served and g.resteered)
+  // a steer defect is reported and not retried: the listener is closed and the port parked until it is
+  // wanted anew (the next ListenState change)
+  run SteerDefectParksPortUntilWantedAnew = ActivationSteersDeclaredPortAndServes
+    .then(ListenState(1, false)).then(ListenState(1, true)).then(BindListen(1))
+    .then(SteerDefect(1)).expect(Safety and lis == Set() and parked == Set(1) and g.defected and landsAt("marked", 1) == "refused")
+    .then(ListenState(1, false)).expect(Safety and parked == Set() and not(servingTrue(1)))
+    .then(ListenState(1, true)).then(BindListen(1)).then(Steer(1)).expect(Safety and served)
+  // D8a-CAP: the other allocation's reservation fills the steering capacity; admission refuses
+  // IntakeCapacityReached with no state change (non-terminal); once the reservation is released the
+  // placement retry is admitted
+  run AdmissionRefusedAtCapacityThenAdmittedAfterRelease = init
+    .then(OtherAdmit).expect(Safety and oRes == OD)
+    .then(ProvisionRefused).expect(Safety and alloc == "Absent" and gen == 0 and g.capRefused and res == 0)
+    .then(OtherRelease).then(Provision).expect(Safety and alloc == "Provisioned" and res == 1 and ReservedWithinCapacity)
+  // D8a-CAP: a Retiring lease keeps its reservation until pool.release: the other allocation's
+  // admission is refused meanwhile
+  run RetiringLeaseKeepsReservationUntilRelease = ActivationSteersDeclaredPortAndServes
+    .then(Teardown).then(OtherAdmit).expect(Safety and oRes == 0 and g.retiringRefused)
+    .then(Release).then(OtherAdmit).expect(Safety and oRes == OD and ReservedWithinCapacity)
+  // D8a-CAP / M-7: the other allocation's steered listeners share the map; quiescence closes them as
+  // well; its release frees the reservation
+  run OtherAllocationSharesCapacityAndIsQuiesced = init
+    .then(OtherAdmit).then(OtherSteer).then(OtherSteer).expect(Safety and oEnt == 2 and not(g.capFail))
+    .then(Quiesce).expect(Safety and quiesced and oEnt == 0)
+    .then(Restore).then(OtherRelease).expect(Safety and oRes == 0 and oEnt == 0 and ListenersWithinReserved)
 
   // ------------------------------------------------------------------ witnesses (expected violated)
   val WitnessNoSteered: bool = not(alloc == "Active" and entries != Set())

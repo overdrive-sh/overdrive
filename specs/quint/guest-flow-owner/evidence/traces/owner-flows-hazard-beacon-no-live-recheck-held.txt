@@ -37,10 +37,10 @@ State 3 [step]
   vmGen = 1
 
 State 4 [step]
-  alloc = "Retiring"
+  bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 5 [step]
-  bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  alloc = "Retiring"
 
 State 6 [step]
   vmUp = FALSE

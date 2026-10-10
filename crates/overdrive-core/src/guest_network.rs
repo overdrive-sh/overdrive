@@ -8,6 +8,7 @@
 
 // SCAFFOLD: true — netns-density-295 DISTILL.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -61,31 +62,33 @@ enum GuestNetworkExecGateState {
     FailStop,
 }
 
-/// Closed vocabulary for the first unhealthy shared-network component.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Closed vocabulary for the shared guest-network components the supervisor
+/// audits and repairs (feature-delta § *Typed error taxonomy*). Declaration
+/// order is the fixed audit order. Derives `Ord` (§ *Owner and provisioner*,
+/// D8a-HOLD): the supervisor's per-holder state and `QuiescenceHolder` order
+/// by it. The pinned guest-prefix steering, the prefix route and the
+/// forwarder's links are not components (A-31, D19-LINKS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SharedGuestNetworkComponent {
-    /// Shared bridge identity or membership.
-    Bridge,
+    /// The forwarder's pair and cell bookkeeping: the owner's pair table
+    /// against the forwarder's inventory.
+    Forwarder,
+    /// The host guest-flow vsock listeners (stream and seqpacket).
+    FlowListeners,
+    /// The host per-VM control-session vsock listener.
+    ControlListener,
+    /// The per-allocation intake listeners.
+    IntakeListeners,
     /// Workload-facing plaintext listener.
     LegF,
     /// Peer-facing inbound TLS listener.
     LegC,
-    /// Shared-gateway DNS owner.
-    Dns,
-    /// Per-TAP TCX link identity.
-    TcxLink,
-    /// Endpoint map identity or content.
-    EndpointMap,
-    /// Counter map identity.
-    CounterMap,
-    /// Owned bpffs pin identity.
-    BpffsPin,
-    /// Bridge proof-mark guard.
-    BridgeGuard,
     /// Constant IP rule program.
     IpRules,
     /// Shared IP sets and their schemas.
     IpSets,
+    /// Shared-gateway DNS owner.
+    Dns,
     /// Shared-owner supervisor itself.
     Supervisor,
 }
@@ -117,10 +120,11 @@ pub enum SharedGuestNetworkFailStopCause {
     RequestChannelClosed,
 }
 
-/// Read-only recovery progress while the EXEC gate is recovering.
+/// Read-only recovery progress of one recovery holder while the EXEC gate is
+/// recovering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SharedGuestNetworkRecovery {
-    /// First component still failing in the accepted audit order.
+    /// The component under repair.
     pub component: SharedGuestNetworkComponent,
     /// Completed converge-plus-full-read-back attempts.
     pub attempts: u32,
@@ -273,8 +277,20 @@ impl GuestNetworkExecSupervisor {
     }
 
     /// Record one completed attempt and either remain recovering or reopen.
+    /// `remaining` is the set of components still failing after the
+    /// attempt's full audit; an empty set reopens the gate.
+    ///
+    /// Today's single-holder bookkeeping is kept: the first member of
+    /// `remaining` in `Ord` becomes the recovery snapshot's component. The
+    /// per-holder contract (§ *Owner and provisioner*, U-QP-3) lands with
+    /// the DELIVER 09-01 rework in the attachment cut.
     #[must_use]
-    pub fn complete_attempt(&self, first_remaining: Option<SharedGuestNetworkComponent>) -> bool {
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "the EXEC gate contract pins `remaining` by value; the per-holder bookkeeping consumes it"
+    )]
+    pub fn complete_attempt(&self, remaining: BTreeSet<SharedGuestNetworkComponent>) -> bool {
+        let first_remaining = remaining.first().copied();
         let completed = {
             let mut shared = self.shared.state.lock();
             let GuestNetworkExecGateState::Recovering(snapshot) = &mut shared.state else {
@@ -296,12 +312,19 @@ impl GuestNetworkExecSupervisor {
         completed
     }
 
-    /// Project the latest immutable recovery snapshot.
+    /// Report the current recovery holders: one entry per component under
+    /// repair, ascending by [`SharedGuestNetworkComponent`]'s `Ord`; empty in
+    /// every state except Recovering. A value snapshot taken under the gate
+    /// lock (U-QP-3).
+    ///
+    /// Today's single-holder bookkeeping yields at most one entry; the
+    /// per-holder set (D8a-HOLD) lands with the DELIVER 09-01 rework in the
+    /// attachment cut.
     #[must_use]
-    pub fn recovery_progress(&self) -> Option<SharedGuestNetworkRecovery> {
+    pub fn recovery_progress(&self) -> Vec<SharedGuestNetworkRecovery> {
         let shared = self.shared.state.lock();
         let GuestNetworkExecGateState::Recovering(snapshot) = &shared.state else {
-            return None;
+            return Vec::new();
         };
         let progress = SharedGuestNetworkRecovery {
             component: snapshot.component,
@@ -309,7 +332,7 @@ impl GuestNetworkExecSupervisor {
             elapsed: self.shared.clock.now().saturating_duration_since(snapshot.started_at),
         };
         drop(shared);
-        Some(progress)
+        vec![progress]
     }
 
     /// Enter FailStop once and return the first public request receipt.

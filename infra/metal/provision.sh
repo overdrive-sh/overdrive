@@ -207,6 +207,16 @@ log "shared provisioning (infra/provision)"
 "${REPO}/infra/provision/common-system.sh"
 
 # ---------------------------------------------------------------------------
+log "Quint formal-methods toolchain (infra/provision/install-quint.sh)"
+# ---------------------------------------------------------------------------
+# Same prefix and bin dir as the Lima template (/opt/quint-toolchain,
+# /usr/local/bin), so `cargo xtask quint …` finds `quint` on PATH under
+# `cargo xtask metal run`'s `sudo env PATH=…`. The installer pins and
+# checksum-verifies Node, Quint and the JDK, and skips what is already
+# present, so re-running this script is cheap.
+"${REPO}/infra/provision/install-quint.sh" /opt/quint-toolchain /usr/local/bin
+
+# ---------------------------------------------------------------------------
 log "/dev/kvm access — DELIBERATELY NOT the Lima 0666 rule"
 # ---------------------------------------------------------------------------
 # infra/lima/overdrive-dev.yaml installs a udev rule setting /dev/kvm to 0666

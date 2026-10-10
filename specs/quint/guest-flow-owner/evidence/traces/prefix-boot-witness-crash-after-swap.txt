@@ -16,9 +16,9 @@ State 1
   adopted = FALSE
   link = "none"
 
-State 2 [Restart]
+State 2 [RestartWith]
   stop = "none"
-  bin = "v2"
+  bin = "v1"
   up = TRUE
 
 State 3 [BootStep]
@@ -31,7 +31,7 @@ State 4 [BootStep]
 State 5 [BootStep]
   phase = "pin"
   swapOk = TRUE
-  prog = "v2"
+  prog = "v1"
   link = "attached"
 
 State 6 [BootStep]
@@ -51,9 +51,8 @@ State 8 [Crash]
   g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
   up = FALSE
 
-State 9 [Restart]
+State 9 [RestartWith]
   stop = "none"
-  bin = "v1"
   up = TRUE
 
 State 10 [BootStep]
@@ -66,8 +65,6 @@ State 11 [BootStep]
 State 12 [BootStep]
   phase = "route"
   swapOk = TRUE
-  prog = "v1"
-  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> TRUE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
   adopted = TRUE
 
 State 13 [Crash]
@@ -75,6 +72,6 @@ State 13 [Crash]
   phase = "start"
   swapOk = FALSE
   loaded = FALSE
-  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> TRUE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> TRUE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
+  g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> TRUE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
   up = FALSE
   adopted = FALSE

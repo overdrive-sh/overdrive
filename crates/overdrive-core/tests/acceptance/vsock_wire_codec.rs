@@ -1,30 +1,31 @@
-//! P2 — vsock flow/control/token wire codec (DISTILL, netns-density-295).
+//! P2 — guest-transport wire codec: flow request, control open, control
+//! message (GH #295, vsock attachment replacement).
 //!
-//! Translates `docs/feature/netns-density-295/distill/test-scenarios-p2-owner-flows.md`
-//! P2-S1 (codec roundtrip + reject-all-zero) and P2-S2 (control-message
-//! half-close codec) into Rust `#[test]` / `proptest!` bodies. No `.feature`
-//! files; port-to-port against the public API of the design-pinned wire module
-//! (`overdrive_core::guest_transport::wire`), `overdrive_core::guest_transport::
-//! LaunchToken` and `overdrive_core::net::ListenPort`
-//! (feature-delta §"[REF] Wire contracts — flow request, control message,
-//! datagram frame (D5, D18, D23)" and §"[REF] Core vocabulary").
+//! Spec: `docs/feature/netns-density-295/distill/test-scenarios-p2-owner-flows.md`
+//! P2-S1 (request / control-open / launch-token codec, all-zero token refused)
+//! and P2-S2 (control messages incl. `HalfClose` / `HalfCloseAck`). Contract:
+//! `docs/feature/netns-density-295/feature-delta.md` § "[REF] Wire contracts —
+//! flow request, control message, datagram frame (D5, D18, D23)".
 //!
-//! Layer 1 (pure function): `proptest` full per Mandate 9. The codec mutates no
-//! observable state, so the state-delta/Universe guard does not apply
-//! (pure-function exemption). `@example`-pinned golden bytes pin the exact wire
-//! layout across the Rust codec (the host programs and guest programs pin the
-//! same bytes in their own Tier-2/3 tests — this is the Rust half of that one
-//! golden set).
+//! Driving port: `overdrive_core::guest_transport::wire` (layer 1, pure:
+//! `proptest` full, Mandate 9). `decode` accepts only canonical encodings, so
+//! two properties pin the codec from both sides: every valid value
+//! round-trips, and every byte string `decode` accepts re-encodes to itself.
+//! The golden bytes are the Rust half of the one golden set the host and
+//! guest programs mirror in their own tiers.
 //!
-//! RED scaffold: this body is authored to the design-pinned interface contract
-//! and does not compile until the DELIVER roadmap-reconciliation lands the
-//! `overdrive_core::guest_transport` wire codec + `LaunchToken` + `GuestCid` +
-//! `overdrive_core::net::ListenPort`. CLAUDE.md §"Implement to the design —
-//! never invent API surface": this file references only surface the design
-//! pins. It is registered in `tests/acceptance.rs` by the author when that
-//! scaffold co-arrives (shared doc §6); until then it is intentionally
-//! unregistered (dangling) so it never breaks the workspace build.
+//! Not here: READY's `launch=` field (`BeaconMessage::Ready { launch }` and its
+//! `InvalidLaunchToken` refusal, DG-7, DG-2 row 13; `vm_beacon_roundtrip.rs`)
+//! and the datagram-frame codec (DG-8; `vsock_datagram_frame.rs`).
 
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::doc_markdown,
+    reason = "test bodies unwrap fixtures they construct; the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+
+use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str::FromStr as _;
 
@@ -32,48 +33,106 @@ use overdrive_core::guest_transport::wire::{
     CONTROL_MESSAGE_LEN, CONTROL_OPEN_LEN, ControlMessage, ControlOpen, FLOW_REQUEST_LEN, FlowId,
     FlowKind, FlowOrigin, FlowRefusal, FlowRequest, FlowWireError, WireField,
 };
-use overdrive_core::guest_transport::{LaunchToken, LaunchTokenError};
+use overdrive_core::guest_transport::{LaunchToken, LaunchTokenError, guest_reserved_ports};
 use overdrive_core::net::ListenPort;
 use proptest::prelude::*;
 
-const IGNORE: &str = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort \
-     (roadmap-reconciliation core-vocabulary step)";
+// ---------------------------------------------------------------------------
+// Vocabulary
+// ---------------------------------------------------------------------------
 
-// -----------------------------------------------------------------------------
+/// The pinned refusal-code table (feature-delta § Wire contracts, control
+/// message refusal codes 1..=12).
+const REFUSAL_TABLE: [(FlowRefusal, u8); 12] = [
+    (FlowRefusal::NotActive, 1),
+    (FlowRefusal::Policy, 2),
+    (FlowRefusal::IntakeUnavailable, 3),
+    (FlowRefusal::Capacity, 4),
+    (FlowRefusal::Malformed, 5),
+    (FlowRefusal::Unsupported, 6),
+    (FlowRefusal::Quiesced, 7),
+    (FlowRefusal::MeshUnreachable, 8),
+    (FlowRefusal::ResolveFailed, 9),
+    (FlowRefusal::DestinationUnreachable, 10),
+    (FlowRefusal::ApplicationNotListening, 11),
+    (FlowRefusal::HostInternal, 12),
+];
+
+const TOKEN_BYTES: [u8; 16] = [
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+];
+
+fn token() -> LaunchToken {
+    LaunchToken::from_bytes(TOKEN_BYTES).expect("non-zero token")
+}
+
+fn listen_port(port: u16) -> ListenPort {
+    port.to_string().parse().expect("a non-zero listen port")
+}
+
+fn guest_flow(seq: u32) -> FlowId {
+    FlowId::new(FlowOrigin::Guest, seq).expect("seq < 2^31")
+}
+
+fn host_flow(seq: u32) -> FlowId {
+    FlowId::new(FlowOrigin::Host, seq).expect("seq < 2^31")
+}
+
+/// The flow request header the golden cases share: magic `OF`, version 2.
+fn request_bytes(kind: u8, flow: [u8; 4], addr: [u8; 4], port: u16, listen: u16) -> [u8; 32] {
+    let mut bytes = [0u8; FLOW_REQUEST_LEN];
+    bytes[0..2].copy_from_slice(b"OF");
+    bytes[2] = 2;
+    bytes[3] = kind;
+    bytes[4..8].copy_from_slice(&flow);
+    bytes[8..12].copy_from_slice(&addr);
+    bytes[12..14].copy_from_slice(&port.to_be_bytes());
+    bytes[14..16].copy_from_slice(&listen.to_be_bytes());
+    bytes[16..32].copy_from_slice(&TOKEN_BYTES);
+    bytes
+}
+
+fn control_bytes(ty: u8, detail: u8, port: u16, flow: u32) -> [u8; CONTROL_MESSAGE_LEN] {
+    let mut bytes = [0u8; CONTROL_MESSAGE_LEN];
+    bytes[0] = ty;
+    bytes[1] = detail;
+    bytes[2..4].copy_from_slice(&port.to_be_bytes());
+    bytes[4..8].copy_from_slice(&flow.to_be_bytes());
+    bytes
+}
+
+// ---------------------------------------------------------------------------
 // Strategies
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
-/// A non-zero 16-byte launch token (all-zero is the one invalid encoding).
 fn a_token() -> impl Strategy<Value = LaunchToken> {
-    any::<[u8; 16]>().prop_map(|mut bytes| {
-        if bytes.iter().all(|&b| b == 0) {
-            bytes[0] = 1;
-        }
-        LaunchToken::from_bytes(bytes).expect("non-zero bytes are a valid launch token")
-    })
+    any::<[u8; 16]>()
+        .prop_filter_map("all zero is not a token", |bytes| LaunchToken::from_bytes(bytes).ok())
 }
 
-/// A guest-origin flow id (`seq < 2^31`); kinds 1–3 require origin Guest.
 fn a_guest_flow() -> impl Strategy<Value = FlowId> {
-    (0u32..(1 << 31))
-        .prop_map(|seq| FlowId::new(FlowOrigin::Guest, seq).expect("seq < 2^31 is valid"))
+    (0u32..(1 << 31)).prop_map(guest_flow)
 }
 
-/// A host-origin flow id; kind 4 (`TcpAccept`) requires origin Host.
 fn a_host_flow() -> impl Strategy<Value = FlowId> {
-    (0u32..(1 << 31))
-        .prop_map(|seq| FlowId::new(FlowOrigin::Host, seq).expect("seq < 2^31 is valid"))
+    (0u32..(1 << 31)).prop_map(host_flow)
 }
 
-/// A unicast-shaped `SocketAddrV4`; the port field is never 0 (wire contract).
+fn any_flow() -> impl Strategy<Value = FlowId> {
+    prop_oneof![a_guest_flow(), a_host_flow()]
+}
+
 fn a_sockaddr() -> impl Strategy<Value = SocketAddrV4> {
     (any::<[u8; 4]>(), 1u16..=u16::MAX)
         .prop_map(|(octets, port)| SocketAddrV4::new(Ipv4Addr::from(octets), port))
 }
 
-/// A non-zero guest listen port (`TcpAccept.listen_port`).
+/// A declared or reported listen port. The guest never reports a port of its
+/// own reservation (`guest_reserved_ports()`, 61,000..=62,024), so no valid
+/// sender encodes one (DG-12): the round-trip property ranges over ports
+/// outside it.
 fn a_listen_port() -> impl Strategy<Value = ListenPort> {
-    (1u16..=u16::MAX).prop_map(|p| ListenPort::new(p).expect("non-zero listen port is valid"))
+    prop_oneof![1u16..61_000, 62_025u16..=u16::MAX].prop_map(listen_port)
 }
 
 fn a_flow_request() -> impl Strategy<Value = FlowRequest> {
@@ -99,129 +158,192 @@ fn a_flow_request() -> impl Strategy<Value = FlowRequest> {
 }
 
 fn a_refusal() -> impl Strategy<Value = FlowRefusal> {
-    prop_oneof![
-        Just(FlowRefusal::NotActive),
-        Just(FlowRefusal::Policy),
-        Just(FlowRefusal::IntakeUnavailable),
-        Just(FlowRefusal::Capacity),
-        Just(FlowRefusal::Malformed),
-        Just(FlowRefusal::Unsupported),
-        Just(FlowRefusal::Quiesced),
-        Just(FlowRefusal::MeshUnreachable),
-        Just(FlowRefusal::ResolveFailed),
-        Just(FlowRefusal::DestinationUnreachable),
-        Just(FlowRefusal::ApplicationNotListening),
-        Just(FlowRefusal::HostInternal),
-    ]
+    proptest::sample::select(REFUSAL_TABLE.map(|(refusal, _)| refusal).to_vec())
 }
 
 fn a_control_message() -> impl Strategy<Value = ControlMessage> {
     prop_oneof![
-        a_guest_flow().prop_map(|flow| ControlMessage::Paired { flow }),
-        a_host_flow().prop_map(|flow| ControlMessage::Paired { flow }),
-        (a_guest_flow(), a_refusal())
+        any_flow().prop_map(|flow| ControlMessage::Paired { flow }),
+        (any_flow(), a_refusal())
             .prop_map(|(flow, refusal)| ControlMessage::Refused { flow, refusal }),
-        a_guest_flow().prop_map(|flow| ControlMessage::Abort { flow }),
+        any_flow().prop_map(|flow| ControlMessage::Abort { flow }),
         (a_listen_port(), any::<bool>())
             .prop_map(|(port, listening)| ControlMessage::ListenState { port, listening }),
-        a_guest_flow().prop_map(|flow| ControlMessage::HalfClose { flow }),
-        a_host_flow().prop_map(|flow| ControlMessage::HalfCloseAck { flow }),
+        any_flow().prop_map(|flow| ControlMessage::HalfClose { flow }),
+        any_flow().prop_map(|flow| ControlMessage::HalfCloseAck { flow }),
     ]
 }
 
-// -----------------------------------------------------------------------------
-// P2-S1 — flow request / control open / launch token roundtrip + reject-all-zero
-// -----------------------------------------------------------------------------
+// ===========================================================================
+// P2-S1 — flow request and control open
+// ===========================================================================
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
-    /// Every flow-request kind round-trips carrying its launch token unchanged.
+    /// Every request kind round-trips; its kind, flow and launch token
+    /// survive bit-exact (ATTR-TOKEN).
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-    fn flow_request_round_trips(req in a_flow_request()) {
+    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    fn every_flow_request_round_trips(req in a_flow_request()) {
         let bytes = req.encode();
         prop_assert_eq!(bytes.len(), FLOW_REQUEST_LEN);
-        let decoded = FlowRequest::decode(&bytes).expect("canonical encoding decodes");
+        let decoded = FlowRequest::decode(&bytes).expect("a canonical encoding decodes");
         prop_assert_eq!(decoded, req);
-        // The launch token survives the round trip bit-exact (ATTR-TOKEN).
+        prop_assert_eq!(decoded.kind(), req.kind());
+        prop_assert_eq!(decoded.flow(), req.flow());
         prop_assert_eq!(decoded.launch(), req.launch());
+        // Kinds 1–3 are guest-opened, kind 4 host-opened.
+        let host_opened = matches!(req.kind(), FlowKind::TcpAccept);
+        prop_assert_eq!(req.flow().origin() == FlowOrigin::Host, host_opened);
     }
 
-    /// Launch token round-trips through `from_bytes` / `as_bytes` and through
-    /// `Display` / `FromStr` (32 lowercase hex); never all zero.
+    /// `decode` accepts only canonical encodings: any 32 bytes it accepts
+    /// re-encode to exactly those bytes.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-    fn launch_token_round_trips(token in a_token()) {
-        let via_bytes = LaunchToken::from_bytes(*token.as_bytes()).expect("non-zero");
-        prop_assert_eq!(via_bytes, token);
-
-        let rendered = token.to_string();
-        prop_assert_eq!(rendered.len(), 32, "32 hex characters");
-        prop_assert!(
-            rendered.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
-            "lowercase hex only, got {rendered:?}"
-        );
-        let parsed = LaunchToken::from_str(&rendered).expect("display output re-parses");
-        prop_assert_eq!(parsed, token);
+    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    fn every_accepted_request_is_canonical(bytes in any::<[u8; FLOW_REQUEST_LEN]>()) {
+        if let Ok(req) = FlowRequest::decode(&bytes) {
+            prop_assert_eq!(req.encode(), bytes);
+        }
     }
 
-    /// `ControlOpen` round-trips carrying the guest's own launch token.
+    /// A request near the canonical form (valid header, one field mutated)
+    /// either decodes to a value that re-encodes to the same bytes or is
+    /// refused — the arbitrary-bytes property rarely reaches past the magic.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-    fn control_open_round_trips(launch in a_token()) {
+    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    fn every_mutated_request_is_canonical_or_refused(
+        req in a_flow_request(),
+        index in 2usize..FLOW_REQUEST_LEN,
+        value in any::<u8>(),
+    ) {
+        let mut bytes = req.encode();
+        bytes[index] = value;
+        if let Ok(decoded) = FlowRequest::decode(&bytes) {
+            prop_assert_eq!(decoded.encode(), bytes);
+        }
+    }
+
+    /// `ControlOpen` round-trips carrying the guest's launch token, and any
+    /// 24 bytes it accepts are canonical.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    fn control_open_round_trips_and_is_canonical(
+        launch in a_token(),
+        bytes in any::<[u8; CONTROL_OPEN_LEN]>(),
+    ) {
         let open = ControlOpen { launch };
-        let bytes = open.encode();
-        prop_assert_eq!(bytes.len(), CONTROL_OPEN_LEN);
-        prop_assert_eq!(ControlOpen::decode(&bytes).expect("decodes"), open);
+        let encoded = open.encode();
+        prop_assert_eq!(encoded.len(), CONTROL_OPEN_LEN);
+        prop_assert_eq!(ControlOpen::decode(&encoded).expect("decodes"), open);
+        if let Ok(decoded) = ControlOpen::decode(&bytes) {
+            prop_assert_eq!(decoded.encode(), bytes);
+        }
+    }
+
+    /// Launch tokens round-trip through their bytes and their 32-character
+    /// lowercase hex form (the kernel command-line value).
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    fn launch_token_round_trips(launch in a_token()) {
+        prop_assert_eq!(LaunchToken::from_bytes(*launch.as_bytes()), Ok(launch));
+        let rendered = launch.to_string();
+        prop_assert_eq!(rendered.len(), 32);
+        prop_assert_eq!(LaunchToken::from_str(&rendered), Ok(launch));
     }
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn all_zero_launch_token_is_rejected_everywhere() {
-    // from_bytes rejects all zero as the invalid encoding (ATTR-TOKEN).
-    assert_eq!(LaunchToken::from_bytes([0u8; 16]), Err(LaunchTokenError::Zero));
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn golden_flow_requests_pin_every_kind() {
+    let destination = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 7), 443);
+    let guest_one = [0x00, 0x00, 0x00, 0x01];
+    let cases = [
+        (
+            FlowRequest::TcpConnect { flow: guest_flow(1), destination, launch: token() },
+            request_bytes(1, guest_one, [192, 0, 2, 7], 443, 0),
+        ),
+        (
+            FlowRequest::DatagramStream { flow: guest_flow(1), destination, launch: token() },
+            request_bytes(2, guest_one, [192, 0, 2, 7], 443, 0),
+        ),
+        (
+            FlowRequest::DatagramSeqpacket { flow: guest_flow(1), destination, launch: token() },
+            request_bytes(3, guest_one, [192, 0, 2, 7], 443, 0),
+        ),
+        (
+            FlowRequest::TcpAccept {
+                flow: host_flow(2),
+                client: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 50_000),
+                listen_port: listen_port(8080),
+                launch: token(),
+            },
+            request_bytes(4, [0x80, 0x00, 0x00, 0x02], [10, 0, 0, 9], 50_000, 8080),
+        ),
+    ];
+    let kinds = [
+        FlowKind::TcpConnect,
+        FlowKind::DatagramStream,
+        FlowKind::DatagramSeqpacket,
+        FlowKind::TcpAccept,
+    ];
+    for ((req, golden), kind) in cases.into_iter().zip(kinds) {
+        assert_eq!(req.encode(), golden, "{kind:?} encodes to its golden bytes");
+        assert_eq!(FlowRequest::decode(&golden), Ok(req), "{kind:?} golden bytes decode");
+        assert_eq!(req.kind(), kind);
+    }
+    assert_eq!(token().to_string(), "0102030405060708090a0b0c0d0e0f10");
+}
 
-    // 32 zero hex characters decode to all-zero bytes → Zero.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn golden_control_open() {
+    let mut golden = [0u8; CONTROL_OPEN_LEN];
+    golden[0..2].copy_from_slice(b"OC");
+    golden[2] = 1;
+    golden[8..24].copy_from_slice(&TOKEN_BYTES);
+    let open = ControlOpen { launch: token() };
+    assert_eq!(open.encode(), golden);
+    assert_eq!(ControlOpen::decode(&golden), Ok(open));
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn an_all_zero_launch_token_is_refused_everywhere() {
+    assert_eq!(LaunchToken::from_bytes([0u8; 16]), Err(LaunchTokenError::Zero));
     assert_eq!(LaunchToken::from_str(&"0".repeat(32)), Err(LaunchTokenError::Zero));
 
-    // A flow request whose token field is all zero is InvalidField { LaunchToken }.
-    let mut bytes = canonical_tcp_connect();
-    for b in &mut bytes[16..32] {
-        *b = 0;
-    }
+    let mut request = request_bytes(1, [0, 0, 0, 1], [192, 0, 2, 7], 443, 0);
+    request[16..32].fill(0);
     assert_eq!(
-        FlowRequest::decode(&bytes),
+        FlowRequest::decode(&request),
+        Err(FlowWireError::InvalidField { field: WireField::LaunchToken })
+    );
+
+    let mut open = ControlOpen { launch: token() }.encode();
+    open[8..24].fill(0);
+    assert_eq!(
+        ControlOpen::decode(&open),
         Err(FlowWireError::InvalidField { field: WireField::LaunchToken })
     );
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn launch_token_from_str_rejects_non_canonical() {
-    // Uppercase hex is rejected (machine-generated, never typed; case-sensitive).
-    assert_eq!(
-        LaunchToken::from_str("0102030405060708090A0B0C0D0E0F10"),
-        Err(LaunchTokenError::Unparseable)
-    );
-    // Wrong length (31 and 33 characters).
-    assert_eq!(LaunchToken::from_str(&"a".repeat(31)), Err(LaunchTokenError::Unparseable));
-    assert_eq!(LaunchToken::from_str(&"a".repeat(33)), Err(LaunchTokenError::Unparseable));
-    // Non-hex character.
-    assert_eq!(LaunchToken::from_str(&"g".repeat(32)), Err(LaunchTokenError::Unparseable));
-}
-
-// -----------------------------------------------------------------------------
-// P2-S1 — flow id origin / seq boundaries and decode rejections
-// -----------------------------------------------------------------------------
-
-#[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn flow_id_origin_bit_and_seq_boundary() {
-    // seq boundary: 2^31 - 1 is valid, 2^31 is rejected.
-    let max = FlowId::new(FlowOrigin::Guest, (1 << 31) - 1).expect("2^31 - 1 is valid");
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn the_flow_id_carries_its_origin_in_the_top_bit() {
+    let max = guest_flow((1 << 31) - 1);
     assert_eq!(max.origin(), FlowOrigin::Guest);
+    assert_eq!(max.get(), (1 << 31) - 1);
     assert_eq!(
         FlowId::new(FlowOrigin::Guest, 1 << 31),
         Err(FlowWireError::InvalidField { field: WireField::FlowSeq })
@@ -230,258 +352,248 @@ fn flow_id_origin_bit_and_seq_boundary() {
         FlowId::new(FlowOrigin::Host, u32::MAX),
         Err(FlowWireError::InvalidField { field: WireField::FlowSeq })
     );
-
-    // The top bit carries the origin: a guest-origin and a host-origin id for
-    // the same seq differ exactly in the top bit.
-    let g = FlowId::new(FlowOrigin::Guest, 1).expect("valid");
-    let h = FlowId::new(FlowOrigin::Host, 1).expect("valid");
-    assert_eq!(g.origin(), FlowOrigin::Guest);
-    assert_eq!(h.origin(), FlowOrigin::Host);
-    assert_eq!(h.get(), g.get() | (1 << 31));
+    assert_eq!(host_flow(1).origin(), FlowOrigin::Host);
+    assert_eq!(host_flow(1).get(), guest_flow(1).get() | (1 << 31));
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn flow_request_decode_rejects_malformed() {
-    // Bad magic.
-    let mut bytes = canonical_tcp_connect();
-    bytes[0] = b'X';
-    assert_eq!(
-        FlowRequest::decode(&bytes),
-        Err(FlowWireError::BadMagic { observed: [b'X', b'F'] })
-    );
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn malformed_flow_requests_are_refused_with_their_cause() {
+    let connect = || request_bytes(1, [0, 0, 0, 1], [192, 0, 2, 7], 443, 0);
+    let accept = || request_bytes(4, [0x80, 0, 0, 2], [10, 0, 0, 9], 50_000, 8080);
 
-    // Unsupported version.
-    let mut bytes = canonical_tcp_connect();
+    let mut bytes = connect();
+    bytes[0] = b'X';
+    assert_eq!(FlowRequest::decode(&bytes), Err(FlowWireError::BadMagic { observed: *b"XF" }));
+
+    let mut bytes = connect();
     bytes[2] = 3;
     assert_eq!(FlowRequest::decode(&bytes), Err(FlowWireError::UnsupportedVersion { version: 3 }));
 
-    // Unknown kind (0 and 5).
-    let mut bytes = canonical_tcp_connect();
-    bytes[3] = 0;
-    assert_eq!(FlowRequest::decode(&bytes), Err(FlowWireError::UnknownKind { kind: 0 }));
-    bytes[3] = 5;
-    assert_eq!(FlowRequest::decode(&bytes), Err(FlowWireError::UnknownKind { kind: 5 }));
+    for kind in [0u8, 5, 255] {
+        let mut bytes = connect();
+        bytes[3] = kind;
+        assert_eq!(FlowRequest::decode(&bytes), Err(FlowWireError::UnknownKind { kind }));
+    }
 
-    // Origin mismatch: a TcpConnect (kind 1, must be Guest-origin) whose flow id
-    // has the host-origin top bit set.
-    let mut bytes = canonical_tcp_connect();
-    bytes[4] |= 0x80; // set the origin top bit of the BE flow id
+    // Kinds 1–3 must be guest-opened; kind 4 host-opened.
+    let mut bytes = connect();
+    bytes[4] |= 0x80;
     assert_eq!(
         FlowRequest::decode(&bytes),
         Err(FlowWireError::OriginMismatch { kind: FlowKind::TcpConnect })
     );
-
-    // Port 0 is never valid (kinds 1–3 destination port, kind 4 peer port).
-    let mut bytes = canonical_tcp_connect();
-    bytes[12] = 0;
-    bytes[13] = 0;
+    let mut bytes = accept();
+    bytes[4] &= 0x7F;
     assert_eq!(
         FlowRequest::decode(&bytes),
-        Err(FlowWireError::InvalidField { field: WireField::Port })
+        Err(FlowWireError::OriginMismatch { kind: FlowKind::TcpAccept })
+    );
+
+    // The port is never 0, for any kind.
+    for mut bytes in [connect(), accept()] {
+        bytes[12..14].fill(0);
+        assert_eq!(
+            FlowRequest::decode(&bytes),
+            Err(FlowWireError::InvalidField { field: WireField::Port })
+        );
+    }
+
+    // Kind 4 carries a non-zero declared listen port; kinds 1–3 carry 0.
+    let mut bytes = accept();
+    bytes[14..16].fill(0);
+    assert_eq!(
+        FlowRequest::decode(&bytes),
+        Err(FlowWireError::InvalidField { field: WireField::ListenPort })
+    );
+    let mut bytes = connect();
+    bytes[14..16].copy_from_slice(&8080u16.to_be_bytes());
+    assert_eq!(
+        FlowRequest::decode(&bytes),
+        Err(FlowWireError::InvalidField { field: WireField::ListenPort })
     );
 }
 
-// -----------------------------------------------------------------------------
-// P2-S1 — golden bytes (pin the exact wire layout; the one golden set the host
-//          and guest programs mirror)
-// -----------------------------------------------------------------------------
-
-/// Canonical `TcpConnect` bytes: flow Guest(1), dst 192.0.2.7:443, token 01..10.
-fn canonical_tcp_connect() -> [u8; FLOW_REQUEST_LEN] {
-    [
-        b'O', b'F', // magic
-        2,    // version
-        1,    // kind = TcpConnect
-        0x00, 0x00, 0x00, 0x01, // flow id (Guest, seq 1)
-        192, 0, 2, 7, // address 192.0.2.7
-        0x01, 0xBB, // port 443
-        0x00, 0x00, // listen port (0 for kinds 1–3)
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // launch token
-        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
-    ]
-}
-
+/// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn golden_tcp_connect_request() {
-    let token = LaunchToken::from_bytes([
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-        0x10,
-    ])
-    .expect("non-zero");
-    let req = FlowRequest::TcpConnect {
-        flow: FlowId::new(FlowOrigin::Guest, 1).expect("valid"),
-        destination: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 7), 443),
-        launch: token,
-    };
-    assert_eq!(req.encode(), canonical_tcp_connect());
-    assert_eq!(FlowRequest::decode(&canonical_tcp_connect()).expect("decodes"), req);
-    // The Display form of the token is the kernel command-line value
-    // (`overdrive.transport=vsock2,...,launch=<hex>`).
-    assert_eq!(token.to_string(), "0102030405060708090a0b0c0d0e0f10");
-}
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn malformed_control_opens_are_refused_with_their_cause() {
+    let base = ControlOpen { launch: token() }.encode();
 
-#[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn golden_tcp_accept_request_carries_listen_port() {
-    let token = LaunchToken::from_bytes([0xAA; 16]).expect("non-zero");
-    let req = FlowRequest::TcpAccept {
-        flow: FlowId::new(FlowOrigin::Host, 2).expect("valid"),
-        client: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 50000),
-        listen_port: ListenPort::new(8080).expect("non-zero"),
-        launch: token,
-    };
-    let bytes = req.encode();
-    // kind byte = 4; flow id top bit set (Host origin); listen port field 8080.
-    assert_eq!(bytes[3], 4);
-    assert_eq!(bytes[4] & 0x80, 0x80);
-    assert_eq!(u16::from_be_bytes([bytes[14], bytes[15]]), 8080);
-    assert_eq!(FlowRequest::decode(&bytes).expect("decodes"), req);
-}
-
-#[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn golden_control_open() {
-    let open = ControlOpen { launch: LaunchToken::from_bytes([0x11; 16]).expect("non-zero") };
-    let bytes = open.encode();
-    assert_eq!(&bytes[0..2], b"OC");
-    assert_eq!(bytes[2], 1, "version");
-    assert_eq!(&bytes[3..8], &[0u8; 5], "reserved all zero");
-    assert_eq!(&bytes[8..24], &[0x11u8; 16]);
-    assert_eq!(ControlOpen::decode(&bytes).expect("decodes"), open);
-}
-
-#[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn control_open_decode_rejects_malformed() {
-    let base =
-        ControlOpen { launch: LaunchToken::from_bytes([0x22; 16]).expect("non-zero") }.encode();
-
-    // Bad magic.
     let mut bytes = base;
     bytes[0] = b'Z';
-    assert_eq!(
-        ControlOpen::decode(&bytes),
-        Err(FlowWireError::BadMagic { observed: [b'Z', b'C'] })
-    );
+    assert_eq!(ControlOpen::decode(&bytes), Err(FlowWireError::BadMagic { observed: *b"ZC" }));
 
-    // Unsupported version.
     let mut bytes = base;
     bytes[2] = 2;
     assert_eq!(ControlOpen::decode(&bytes), Err(FlowWireError::UnsupportedVersion { version: 2 }));
 
-    // A non-zero reserved byte is InvalidField { ControlOpenReserved }.
-    let mut bytes = base;
-    bytes[5] = 1;
-    assert_eq!(
-        ControlOpen::decode(&bytes),
-        Err(FlowWireError::InvalidField { field: WireField::ControlOpenReserved })
-    );
-
-    // All-zero launch token is still rejected.
-    let mut bytes = base;
-    for b in &mut bytes[8..24] {
-        *b = 0;
+    for reserved in 3..8 {
+        let mut bytes = base;
+        bytes[reserved] = 1;
+        assert_eq!(
+            ControlOpen::decode(&bytes),
+            Err(FlowWireError::InvalidField { field: WireField::ControlOpenReserved }),
+            "reserved byte {reserved}",
+        );
     }
-    assert_eq!(
-        ControlOpen::decode(&bytes),
-        Err(FlowWireError::InvalidField { field: WireField::LaunchToken })
-    );
 }
 
-// -----------------------------------------------------------------------------
-// P2-S2 — control message (incl. HalfClose / HalfCloseAck) codec
-// -----------------------------------------------------------------------------
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn launch_token_text_is_exactly_32_lowercase_hex_characters() {
+    for text in [
+        "0102030405060708090A0B0C0D0E0F10".to_owned(),
+        "a".repeat(31),
+        "a".repeat(33),
+        "g".repeat(32),
+    ] {
+        assert_eq!(LaunchToken::from_str(&text), Err(LaunchTokenError::Unparseable), "{text:?}");
+    }
+}
+
+// ===========================================================================
+// P2-S2 — control messages, half-close signals included
+// ===========================================================================
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
-    /// Every control-message type round-trips, including the half-close signals.
+    /// Every control message type round-trips.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-    fn control_message_round_trips(msg in a_control_message()) {
+    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    fn every_control_message_round_trips(msg in a_control_message()) {
         let bytes = msg.encode();
         prop_assert_eq!(bytes.len(), CONTROL_MESSAGE_LEN);
-        prop_assert_eq!(ControlMessage::decode(&bytes).expect("decodes"), msg);
+        prop_assert_eq!(ControlMessage::decode(&bytes), Ok(msg));
     }
 
-    /// The refusal code is a stable bijection with `FlowRefusal` over 1..=12.
+    /// Any 8 bytes `decode` accepts re-encode to themselves.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-    fn refusal_code_is_bijective(refusal in a_refusal()) {
-        let code = refusal.as_u8();
-        prop_assert!((1..=12).contains(&code), "refusal codes are 1..=12, got {code}");
-        // The code embedded in a Refused control message round-trips.
-        let msg = ControlMessage::Refused {
-            flow: FlowId::new(FlowOrigin::Guest, 7).expect("valid"),
-            refusal,
-        };
-        prop_assert_eq!(ControlMessage::decode(&msg.encode()).expect("decodes"), msg);
+    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    fn every_accepted_control_message_is_canonical(bytes in any::<[u8; CONTROL_MESSAGE_LEN]>()) {
+        if let Ok(msg) = ControlMessage::decode(&bytes) {
+            prop_assert_eq!(msg.encode(), bytes);
+        }
+    }
+
+    /// DG-12: a `ListenState` whose port lies in `guest_reserved_ports()` is
+    /// refused `InvalidField { field: ListenPort }`, listening or not — no
+    /// valid sender produces it, so a canonical decoder does not accept it.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    fn every_reserved_port_in_a_listen_state_is_refused(
+        port in guest_reserved_ports(),
+        listening in any::<bool>(),
+    ) {
+        prop_assert_eq!(
+            ControlMessage::decode(&control_bytes(4, u8::from(listening), port, 0)),
+            Err(FlowWireError::InvalidField { field: WireField::ListenPort })
+        );
     }
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn control_message_decode_rejects_unknown_type_and_refusal() {
-    // Control message type 0 and 7 (out of the defined 1..=6 range) are rejected.
-    let mut bytes = [0u8; CONTROL_MESSAGE_LEN];
-    bytes[0] = 0;
-    assert_eq!(ControlMessage::decode(&bytes), Err(FlowWireError::UnknownControlType { ty: 0 }));
-    bytes[0] = 7;
-    assert_eq!(ControlMessage::decode(&bytes), Err(FlowWireError::UnknownControlType { ty: 7 }));
-
-    // A Refused (type 2) carrying an undefined refusal code is UnknownRefusal.
-    let mut bytes = [0u8; CONTROL_MESSAGE_LEN];
-    bytes[0] = 2; // Refused
-    bytes[1] = 0; // refusal code 0 (undefined)
-    bytes[4..8].copy_from_slice(&1u32.to_be_bytes());
-    assert_eq!(ControlMessage::decode(&bytes), Err(FlowWireError::UnknownRefusal { code: 0 }));
-    bytes[1] = 13; // refusal code 13 (undefined)
-    assert_eq!(ControlMessage::decode(&bytes), Err(FlowWireError::UnknownRefusal { code: 13 }));
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn golden_control_messages_pin_every_type_and_refusal_code() {
+    let flow = guest_flow(3);
+    let cases = [
+        (ControlMessage::Paired { flow }, control_bytes(1, 0, 0, 3)),
+        (ControlMessage::Abort { flow }, control_bytes(3, 0, 0, 3)),
+        (
+            ControlMessage::ListenState { port: listen_port(8443), listening: true },
+            control_bytes(4, 1, 8443, 0),
+        ),
+        (
+            ControlMessage::ListenState { port: listen_port(8443), listening: false },
+            control_bytes(4, 0, 8443, 0),
+        ),
+        (ControlMessage::HalfClose { flow }, control_bytes(5, 0, 0, 3)),
+        (ControlMessage::HalfCloseAck { flow: host_flow(3) }, control_bytes(6, 0, 0, 0x8000_0003)),
+    ];
+    for (msg, golden) in cases {
+        assert_eq!(msg.encode(), golden, "{msg:?}");
+        assert_eq!(ControlMessage::decode(&golden), Ok(msg));
+    }
+    for (refusal, code) in REFUSAL_TABLE {
+        assert_eq!(refusal.as_u8(), code, "{refusal:?}");
+        let msg = ControlMessage::Refused { flow, refusal };
+        let golden = control_bytes(2, code, 0, 3);
+        assert_eq!(msg.encode(), golden, "Refused({refusal:?})");
+        assert_eq!(ControlMessage::decode(&golden), Ok(msg));
+    }
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn golden_half_close_messages() {
-    let flow = FlowId::new(FlowOrigin::Guest, 3).expect("valid");
-    // HalfClose = type 5; HalfCloseAck = type 6; flow id in the last 4 bytes.
-    let half = ControlMessage::HalfClose { flow };
-    let half_bytes = half.encode();
-    assert_eq!(half_bytes[0], 5);
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn malformed_control_messages_are_refused_with_their_cause() {
+    for ty in [0u8, 7, 255] {
+        assert_eq!(
+            ControlMessage::decode(&control_bytes(ty, 0, 0, 1)),
+            Err(FlowWireError::UnknownControlType { ty })
+        );
+    }
+    for code in [0u8, 13, 255] {
+        assert_eq!(
+            ControlMessage::decode(&control_bytes(2, code, 0, 1)),
+            Err(FlowWireError::UnknownRefusal { code })
+        );
+    }
+    // ListenState: the detail byte is 0 or 1, the port is non-zero, the flow
+    // field is 0.
     assert_eq!(
-        u32::from_be_bytes([half_bytes[4], half_bytes[5], half_bytes[6], half_bytes[7]]),
-        flow.get()
+        ControlMessage::decode(&control_bytes(4, 2, 8443, 0)),
+        Err(FlowWireError::InvalidField { field: WireField::ControlDetail })
     );
-    assert_eq!(ControlMessage::decode(&half_bytes).expect("decodes"), half);
-
-    let ack = ControlMessage::HalfCloseAck { flow };
-    let ack_bytes = ack.encode();
-    assert_eq!(ack_bytes[0], 6);
-    assert_eq!(ControlMessage::decode(&ack_bytes).expect("decodes"), ack);
+    // Port 0 is no listen port (DG-12: as for a reserved port).
+    assert_eq!(
+        ControlMessage::decode(&control_bytes(4, 1, 0, 0)),
+        Err(FlowWireError::InvalidField { field: WireField::ListenPort })
+    );
+    assert_eq!(
+        ControlMessage::decode(&control_bytes(4, 1, 8443, 9)),
+        Err(FlowWireError::InvalidField { field: WireField::ControlFlow })
+    );
+    // Flow-scoped types carry no detail and no port.
+    for ty in [1u8, 3, 5, 6] {
+        assert_eq!(
+            ControlMessage::decode(&control_bytes(ty, 1, 0, 1)),
+            Err(FlowWireError::InvalidField { field: WireField::ControlDetail }),
+            "type {ty} detail",
+        );
+        assert_eq!(
+            ControlMessage::decode(&control_bytes(ty, 0, 80, 1)),
+            Err(FlowWireError::InvalidField { field: WireField::ControlPort }),
+            "type {ty} port",
+        );
+    }
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn golden_listen_state_message() {
-    // ListenState = type 4; detail byte 0/1 listening; port in bytes 2..4; flow 0.
-    let msg = ControlMessage::ListenState {
-        port: ListenPort::new(8443).expect("non-zero"),
-        listening: true,
-    };
-    let bytes = msg.encode();
-    assert_eq!(bytes[0], 4);
-    assert_eq!(bytes[1], 1, "listening = true");
-    assert_eq!(u16::from_be_bytes([bytes[2], bytes[3]]), 8443);
-    assert_eq!(&bytes[4..8], &[0u8; 4], "flow id field is 0 for ListenState");
-    assert_eq!(ControlMessage::decode(&bytes).expect("decodes"), msg);
-}
+#[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+fn kinds_and_refusals_have_distinct_labels() {
+    let kinds: BTreeSet<&str> = [
+        FlowKind::TcpConnect,
+        FlowKind::DatagramStream,
+        FlowKind::DatagramSeqpacket,
+        FlowKind::TcpAccept,
+    ]
+    .map(FlowKind::as_str)
+    .into_iter()
+    .collect();
+    assert_eq!(kinds.len(), 4);
+    assert!(kinds.iter().all(|label| !label.is_empty()));
 
-/// Keep `IGNORE` referenced so the constant documents the single activation
-/// reason even though each test spells its own `#[ignore]` literal (proptest
-/// attribute macros require a string literal, not a `const`).
-#[test]
-#[ignore = "pending DELIVER: overdrive-core::guest_transport wire codec + LaunchToken + ListenPort (roadmap-reconciliation core-vocabulary step)"]
-fn ignore_reason_documented() {
-    assert!(IGNORE.contains("roadmap-reconciliation"));
+    let refusals: BTreeSet<&str> =
+        REFUSAL_TABLE.map(|(refusal, _)| refusal.as_str()).into_iter().collect();
+    assert_eq!(refusals.len(), REFUSAL_TABLE.len());
+    assert!(refusals.iter().all(|label| !label.is_empty()));
 }

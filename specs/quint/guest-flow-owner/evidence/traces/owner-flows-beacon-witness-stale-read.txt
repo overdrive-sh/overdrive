@@ -40,13 +40,13 @@ State 4 [step]
   alloc = "Retiring"
 
 State 5 [step]
-  bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 
 State 6 [step]
   vmUp = FALSE
 
 State 7 [step]
-  bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 
 State 8 [step]
   drvLive = FALSE

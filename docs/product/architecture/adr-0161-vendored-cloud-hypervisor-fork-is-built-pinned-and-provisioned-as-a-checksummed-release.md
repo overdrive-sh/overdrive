@@ -7,12 +7,13 @@ further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded
 Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
 
 It implements the provisioning half of ruling **D13 = (a), APPROVED
-2026-10-05**: the vendored fork is the production VMM path, and how it is
-built, pinned and provisioned replaces the upstream release download.
+2026-10-05**: the vendored fork is the only VMM Overdrive runs with, and this
+ADR fixes how it is built, pinned and provisioned.
 
 ## Context
 
-Today every host gets Cloud Hypervisor from the upstream release:
+Today every host downloads Cloud Hypervisor from the `cloud-hypervisor`
+project's GitHub releases:
 
 - `infra/provision/versions.env` pins `CLOUD_HYPERVISOR_VERSION="v53.0"`;
 - `infra/provision/common-system.sh` downloads
@@ -24,9 +25,9 @@ Today every host gets Cloud Hypervisor from the upstream release:
 - `infra/metal/native-preflight.sh` only checks that `cloud-hypervisor` is on
   `PATH`.
 
-Nothing verifies the binary's content. A version-string match cannot tell the
-upstream release from the fork, and the upstream release lacks the required
-backend.
+Nothing verifies the binary's content, and Overdrive requires the fork's
+`backend=vhost-kernel` vsock (ADR-0146): the binary must be the pinned fork
+build, byte for byte.
 
 The fork is the submodule `vendors/cloud-hypervisor` (URL
 `https://github.com/overdrive-sh/cloud-hypervisor.git`), branch
@@ -51,15 +52,15 @@ exists for x86_64 only.
    `common-system.sh` and the Lima template download the pinned asset from the
    fork release, verify its SHA-256 against `versions.env` before installing,
    and refuse on mismatch. They install to `/usr/local/bin/cloud-hypervisor`
-   as today. The upstream download is removed.
-4. **Provisioning checks the capability it needs.** After install, provisioning
-   refuses unless `cloud-hypervisor --help` lists both `--landlock` (today's
-   check) and the `backend=vhost-kernel` vsock option.
-5. **Runtime does not trust provisioning.** `Vmm::probe` repeats the capability
-   check against the binary it will launch and refuses the node with a typed
-   error (ADR-0146). Provisioning keeps a host from being built wrong; the
-   probe keeps a wrongly built host from running.
-6. **Lima stays a compile surface for the fork.** Lima installs the same
+   as today. The previous download source is removed. The checksum is the
+   identity check: a host carries the pinned fork build or provisioning fails.
+4. **No runtime binary identification.** Overdrive runs only with the vendored
+   fork. Neither provisioning nor `Vmm::probe` inspects the installed binary to
+   tell the fork from any other Cloud Hypervisor build; no typed error exists
+   for "a different build is installed". `Vmm::probe` keeps its existing
+   stages (including the `--landlock` check), and `/dev/vhost-vsock` access —
+   a host fact — is proven by the claim probe (ADR-0170).
+5. **Lima stays a compile surface for the fork.** Lima installs the same
    pinned aarch64 asset so local tooling matches, but Lima remains non-signal
    for microVM boots (`.claude/rules/testing.md`).
 
@@ -73,9 +74,14 @@ Upstreaming the change to Cloud Hypervisor is outside this decision.
   Rejected.
 - **Commit binaries into the repository.** Large binary blobs in git, and no
   provenance link to a CI build. Rejected.
-- **Keep the upstream download and patch at install time.** Not a binary
+- **Keep the existing download and patch at install time.** Not a binary
   patch target. Rejected.
 - **Pin only the tag.** A tag can be moved; a SHA-256 cannot. Rejected.
+- **Detect a non-fork binary at runtime (`--help` capability probe, typed
+  refusal).** Overdrive is only ever run with the vendored fork, and the
+  checksum already pins its identity; a runtime probe for an unsupported
+  configuration adds a stage, an error variant and tests that defend nothing.
+  Rejected.
 
 ## Consequences
 
@@ -83,7 +89,7 @@ Upstreaming the change to Cloud Hypervisor is outside this decision.
   source SHA and per-architecture asset SHA-256s. `overdrive-dev.yaml`'s
   parameter is replaced the same way. The exact keys are pinned in the feature
   delta (§ *VMM fork provisioning contract*).
-- Rebasing the fork (a new CH upstream release) is a deliberate change: new
+- Rebasing the fork onto a new Cloud Hypervisor version is a deliberate change: new
   SHA, new tag, new checksums, and the V-1 evidence re-run on qualified metal.
 - The fork's aarch64 binary has compile and lint evidence only.
 - Any host image that ships Cloud Hypervisor consumes the same pinned

@@ -92,7 +92,7 @@ fn crashing_spec(alloc: &AllocationId) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: None,
+        transport: None,
         service_ports: Vec::new(),
     }
 }

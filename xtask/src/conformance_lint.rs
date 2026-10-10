@@ -15,17 +15,32 @@
 //! * `State::from_driver` reads a `Sim*` adapter or only the driver's own
 //!   bookkeeping, so the comparison checks the model against itself.
 //!
-//! This module scans every quint-connect driver for those three shapes. A
-//! driver lives in the production owner's crate as a
-//! `#[cfg(all(test, feature = "integration-tests"))]` module under
-//! `crates/*/src/`, or in `tests/conformance/tests/` when it spans several
-//! owners. A file is a driver when it uses quint-connect (a `quint_connect`
-//! path or a `#[quint_run]` / `#[quint_test]` attribute); every other file is
-//! ignored. The `integration-tests` gate is fine; only always-false `cfg`s are
-//! flagged. It is shaped like [`crate::cloexec_lint`]: pure functions over
-//! already-read source, file access only in [`scan_workspace`] and [`run`]. The
-//! scanner is purely syntactic and imports no `overdrive-*` crate. It fails
-//! closed: a file it cannot read or parse is an error, never a skipped file.
+//! This module scans every quint-connect driver for those three shapes, and
+//! three more that make a conformance target hollow or absent:
+//!
+//! * a driver pins none of the spec's named runs: it has `#[quint_run]`
+//!   randomized traces but no `#[quint_test]`, or a `#[quint_test]` names a run
+//!   the spec (and the files it imports) does not declare;
+//! * a file references a Quint spec — a string literal naming `specs/quint/`
+//!   or a `.qnt` file — without using quint-connect, i.e. checks the
+//!   implementation against the spec by some other mechanism;
+//! * test or conformance code spawns the `quint` CLI or REPL itself as an
+//!   oracle (`Command::new("quint")`, through a `const`, or via a package
+//!   runner such as `npx`).
+//!
+//! The scan covers every Rust file under `crates/*/src/`, `crates/*/tests/`
+//! and `tests/conformance/`. A file that never mentions quint or `.qnt` is
+//! skipped unparsed; a driver is a file that uses quint-connect (a
+//! `quint_connect` path or a `#[quint_run]` / `#[quint_test]` attribute).
+//! Doc comments do not count as spec references. A `#[quint_test]` spec path
+//! is resolved against the owning crate's manifest directory, as quint-connect
+//! resolves it. The `integration-tests` gate is fine; only always-false `cfg`s
+//! are flagged. It is shaped like [`crate::cloexec_lint`]: pure functions over
+//! already-read source ([`scan_source`], [`scan_file`]), file access only in
+//! [`scan_workspace`] and [`run`]. The scanner is purely syntactic, reads Quint
+//! specs with the lexical [`spec_index`], and imports no `overdrive-*` crate. It
+//! fails closed: a file or spec it cannot read or parse is an error, never a
+//! skipped file.
 //!
 //! One exemption marker exists, for the case the rule permits: a `Sim*`
 //! adapter that is the authentic arbiter of a driven-port fact. Write
@@ -40,6 +55,8 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use proc_macro2::{Span, TokenStream, TokenTree};
+
+use crate::quint::spec_index;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
@@ -63,6 +80,14 @@ pub enum ConformanceRule {
     SimInProjection,
     /// `State::from_driver` makes no call on a production owner field.
     ProjectionWithoutOwnerAccessor,
+    /// A file references a Quint spec but does not use quint-connect.
+    SpecWithoutQuintConnect,
+    /// Test or conformance code spawns the `quint` CLI (or its REPL) itself.
+    QuintCliOracle,
+    /// A quint-connect driver pins none of the spec's named runs.
+    NoQuintTest,
+    /// A `#[quint_test]` names a run its spec does not declare.
+    UnknownQuintRun,
 }
 
 impl ConformanceRule {
@@ -73,6 +98,10 @@ impl ConformanceRule {
             Self::EmptyActionHandler => "empty-action-handler",
             Self::SimInProjection => "sim-in-projection",
             Self::ProjectionWithoutOwnerAccessor => "projection-without-owner-accessor",
+            Self::SpecWithoutQuintConnect => "spec-without-quint-connect",
+            Self::QuintCliOracle => "quint-cli-oracle",
+            Self::NoQuintTest => "no-quint-test",
+            Self::UnknownQuintRun => "unknown-quint-run",
         }
     }
 
@@ -97,6 +126,24 @@ impl ConformanceRule {
             Self::ProjectionWithoutOwnerAccessor => {
                 "State must be read through the accessors the design pins on the production \
                  owner, not from the driver's own maps, counters or literals"
+            }
+            Self::SpecWithoutQuintConnect => {
+                "the only conformance mechanism is quint-connect trace replay of a stateful spec; \
+                 drive the production owner from a quint-connect driver, and model a stateless \
+                 definition as a state machine of the production-reachable transitions"
+            }
+            Self::QuintCliOracle => {
+                "never use the quint CLI or REPL as an oracle; replay the spec's traces with \
+                 quint-connect (`#[quint_test]` / `#[quint_run]`) against the production owner"
+            }
+            Self::NoQuintTest => {
+                "pin each of the spec's named runs with `#[quint_test(spec, main, test = \"<run>\")]` \
+                 beside the `#[quint_run]` randomized traces; a spec without named runs is a \
+                 DESIGN gap"
+            }
+            Self::UnknownQuintRun => {
+                "name a `run` the spec (or a file it imports) declares, with the spec path \
+                 relative to the owning crate's manifest directory"
             }
         }
     }
@@ -343,7 +390,7 @@ impl<'ast> Visit<'ast> for QuintDetector {
     }
 }
 
-fn collect_rs_files(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     let entries =
         fs::read_dir(dir).wrap_err_with(|| format!("read directory {}", dir.display()))?;
     for entry in entries {
@@ -351,9 +398,7 @@ fn collect_rs_files(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> Resu
         let path = entry.path();
         let kind = entry.file_type().wrap_err_with(|| format!("stat {}", path.display()))?;
         if kind.is_dir() {
-            if recursive {
-                collect_rs_files(&path, true, out)?;
-            }
+            collect_rs_files(&path, out)?;
         } else if kind.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
             out.push(path);
         }
@@ -361,11 +406,11 @@ fn collect_rs_files(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> Resu
     Ok(())
 }
 
-/// Candidate files under the workspace `root`: `crates/*/src/**/*.rs` and
-/// `tests/conformance/tests/*.rs`, sorted.
+/// Candidate files under the workspace `root`: `crates/*/src/**/*.rs`,
+/// `crates/*/tests/**/*.rs` and `tests/conformance/**/*.rs`, sorted.
 ///
-/// Fails closed: a missing `crates` or `tests/conformance/tests` directory is
-/// `Err` naming the path.
+/// Fails closed: a missing `crates` or `tests/conformance` directory is `Err`
+/// naming the path.
 pub fn candidate_files(root: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let crates = root.join("crates");
@@ -373,35 +418,428 @@ pub fn candidate_files(root: &Path) -> Result<Vec<PathBuf>> {
         .wrap_err_with(|| format!("read crates directory {}", crates.display()))?;
     for member in members {
         let member = member.wrap_err_with(|| format!("read entry in {}", crates.display()))?;
-        let src = member.path().join("src");
-        if src.is_dir() {
-            collect_rs_files(&src, true, &mut files)?;
+        for sub in ["src", "tests"] {
+            let dir = member.path().join(sub);
+            if dir.is_dir() {
+                collect_rs_files(&dir, &mut files)?;
+            }
         }
     }
-    collect_rs_files(&conformance_dir(root), false, &mut files)?;
+    collect_rs_files(&conformance_root(root), &mut files)?;
     files.sort();
     Ok(files)
 }
 
-/// Scan every quint-connect driver in the workspace rooted at `root`.
+/// One `#[quint_test]` attribute: the spec it names, as written (relative to
+/// the owning crate's manifest directory), and its run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuintTestRef {
+    /// The `spec = "…"` argument.
+    pub spec: String,
+    /// The `test = "…"` argument: the name of a `run` in the spec.
+    pub run: String,
+    /// 1-based line of the attribute.
+    pub line: usize,
+    /// 1-based column of the attribute.
+    pub column: usize,
+}
+
+/// What [`scan_file`] found in one file.
+#[derive(Debug, Default)]
+pub struct FileScan {
+    /// Violations, in source order.
+    pub violations: Vec<ConformanceViolation>,
+    /// The file's `#[quint_test]` attributes, for [`scan_workspace`] to
+    /// resolve against their specs.
+    pub quint_tests: Vec<QuintTestRef>,
+}
+
+/// Whether a file can concern Quint at all; every other file is skipped
+/// unparsed.
+fn mentions_quint(source: &str) -> bool {
+    source.contains("quint") || source.contains(".qnt")
+}
+
+/// Scan one already-read file for every rule that needs no other file.
 ///
-/// Fails closed: an unreadable file, or a quint-connect file [`scan_source`]
-/// cannot parse, is `Err` naming the path.
+/// - Any file whose code (not its doc comments) holds a string literal
+///   naming a Quint spec — a `specs/quint/` path or a `.qnt` file — must use
+///   quint-connect (`spec-without-quint-connect`).
+/// - No file may spawn the `quint` CLI: `Command::new` with the quint program,
+///   directly or through a `const`, or a package runner (`npx`, `deno`, …)
+///   given a `quint` argument (`quint-cli-oracle`).
+/// - A quint-connect driver gets every [`scan_source`] rule, and must carry at
+///   least one `#[quint_test]` (`no-quint-test`).
+///
+/// A file that mentions quint but cannot be parsed is `Err`.
+pub fn scan_file(source: &str, file: impl AsRef<Path>) -> Result<FileScan> {
+    let file = file.as_ref().to_path_buf();
+    if !mentions_quint(source) {
+        return Ok(FileScan::default());
+    }
+    let parsed = syn::parse_file(source)
+        .wrap_err_with(|| format!("parse Rust source {}", file.display()))?;
+    let tokens: TokenStream =
+        source.parse().map_err(|e| eyre!("lex Rust source {}: {e}", file.display()))?;
+    let mut report = Reporter { file: file.clone(), out: Vec::new() };
+    let driver = is_quint_driver(source, &file)?;
+
+    if !driver && let Some((span, text)) = first_spec_literal(tokens) {
+        report.push(
+            span,
+            ConformanceRule::SpecWithoutQuintConnect,
+            format!("references the Quint spec {text} but does not use quint-connect"),
+        );
+    }
+
+    let mut consts = StrConsts::default();
+    consts.visit_file(&parsed);
+    let mut spawns = QuintSpawns { consts: &consts.values, hits: Vec::new() };
+    spawns.visit_file(&parsed);
+    for (span, what) in spawns.hits {
+        report.push(span, ConformanceRule::QuintCliOracle, what);
+    }
+
+    let mut quint_tests = Vec::new();
+    if driver {
+        let mut attrs = QuintAttrs::default();
+        attrs.visit_file(&parsed);
+        if attrs.tests.is_empty() {
+            let (line, column) = attrs.first_run.map_or((1, 1), |span| {
+                let start = span.start();
+                (start.line, start.column + 1)
+            });
+            report.out.push(ConformanceViolation {
+                file: file.clone(),
+                line,
+                column,
+                rule: ConformanceRule::NoQuintTest,
+                detail: "the driver has no `#[quint_test]`: none of the spec's named runs is \
+                         replayed"
+                    .to_owned(),
+            });
+        }
+        quint_tests = attrs.tests;
+        report.out.append(&mut scan_source(source, &file)?);
+    }
+
+    let mut violations = report.out;
+    violations.sort_by_key(|v| (v.line, v.column, v.rule));
+    violations.dedup();
+    Ok(FileScan { violations, quint_tests })
+}
+
+/// The first string literal in `tokens` that names a Quint spec, skipping
+/// doc attributes (`///` and `//!` comments lex as `#[doc = "…"]`).
+fn first_spec_literal(tokens: TokenStream) -> Option<(Span, String)> {
+    let mut iter = tokens.into_iter().peekable();
+    while let Some(tree) = iter.next() {
+        match tree {
+            TokenTree::Punct(p) if p.as_char() == '#' => {
+                let mut look = iter.clone();
+                if matches!(look.peek(), Some(TokenTree::Punct(bang)) if bang.as_char() == '!') {
+                    look.next();
+                }
+                if let Some(TokenTree::Group(g)) = look.next()
+                    && g.delimiter() == proc_macro2::Delimiter::Bracket
+                    && matches!(g.stream().into_iter().next(), Some(TokenTree::Ident(i)) if i == "doc")
+                {
+                    iter = look;
+                }
+            }
+            TokenTree::Group(g) => {
+                if let Some(hit) = first_spec_literal(g.stream()) {
+                    return Some(hit);
+                }
+            }
+            TokenTree::Literal(lit) => {
+                let text = lit.to_string();
+                if names_spec(&text) {
+                    return Some((lit.span(), text));
+                }
+            }
+            TokenTree::Ident(_) | TokenTree::Punct(_) => {}
+        }
+    }
+    None
+}
+
+/// Whether a literal's source text names a Quint spec: a `specs/quint/` path
+/// or a `.qnt` file.
+fn names_spec(text: &str) -> bool {
+    text.contains("specs/quint/")
+        || text.match_indices(".qnt").any(|(at, _)| {
+            !text[at + 4..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_')
+        })
+}
+
+/// `const` / `static` string items of a file, by name.
+#[derive(Default)]
+struct StrConsts {
+    values: BTreeMap<String, String>,
+}
+
+fn str_lit(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => Some(s.value()),
+        Expr::Reference(r) => str_lit(&r.expr),
+        Expr::Group(g) => str_lit(&g.expr),
+        Expr::Paren(p) => str_lit(&p.expr),
+        _ => None,
+    }
+}
+
+impl<'ast> Visit<'ast> for StrConsts {
+    fn visit_item_const(&mut self, item: &'ast syn::ItemConst) {
+        if let Some(v) = str_lit(&item.expr) {
+            self.values.insert(item.ident.to_string(), v);
+        }
+        syn::visit::visit_item_const(self, item);
+    }
+
+    fn visit_item_static(&mut self, item: &'ast syn::ItemStatic) {
+        if let Some(v) = str_lit(&item.expr) {
+            self.values.insert(item.ident.to_string(), v);
+        }
+        syn::visit::visit_item_static(self, item);
+    }
+}
+
+/// Package runners that can launch the Quint CLI from its npm package.
+const PACKAGE_RUNNERS: [&str; 8] = ["npx", "bunx", "pnpx", "npm", "pnpm", "yarn", "deno", "node"];
+
+/// Whether `program` (as passed to `Command::new`) is the quint CLI.
+fn is_quint_program(program: &str) -> bool {
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let base = base.strip_suffix(".cmd").or_else(|| base.strip_suffix(".exe")).unwrap_or(base);
+    base == "quint"
+}
+
+fn is_quint_package_arg(arg: &str) -> bool {
+    arg == "quint" || arg.starts_with("@informalsystems/quint")
+}
+
+/// Calls that spawn the quint CLI.
+struct QuintSpawns<'c> {
+    consts: &'c BTreeMap<String, String>,
+    hits: Vec<(Span, String)>,
+}
+
+impl QuintSpawns<'_> {
+    /// The program a `Command::new(<program>)` call names, if it is one.
+    fn command_program(&self, expr: &Expr) -> Option<String> {
+        let Expr::Call(call) = expr else { return None };
+        let Expr::Path(func) = &*call.func else { return None };
+        let segments: Vec<String> =
+            func.path.segments.iter().map(|segment| segment.ident.to_string()).collect();
+        if !segments.ends_with(&["Command".to_owned(), "new".to_owned()]) {
+            return None;
+        }
+        let arg = call.args.first()?;
+        str_lit(arg).or_else(|| match arg {
+            Expr::Path(path) => {
+                path.path.get_ident().and_then(|ident| self.consts.get(&ident.to_string()).cloned())
+            }
+            _ => None,
+        })
+    }
+
+    fn arg_values(expr: &Expr) -> Vec<String> {
+        match expr {
+            Expr::Array(array) => array.elems.iter().filter_map(str_lit).collect(),
+            Expr::Reference(r) => Self::arg_values(&r.expr),
+            Expr::Macro(m) if m.mac.path.is_ident("vec") => m
+                .mac
+                .parse_body_with(syn::punctuated::Punctuated::<Expr, Token![,]>::parse_terminated)
+                .map(|elems| elems.iter().filter_map(str_lit).collect())
+                .unwrap_or_default(),
+            other => str_lit(other).into_iter().collect(),
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for QuintSpawns<'_> {
+    fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        let expr = Expr::Call(call.clone());
+        if let Some(program) = self.command_program(&expr)
+            && is_quint_program(&program)
+        {
+            self.hits.push((
+                call.span(),
+                format!("spawns the quint CLI (`Command::new(\"{program}\")`) as an oracle"),
+            ));
+        }
+        syn::visit::visit_expr_call(self, call);
+    }
+
+    fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        if call.method == "arg" || call.method == "args" {
+            let mut root = &*call.receiver;
+            while let Expr::MethodCall(inner) = root {
+                root = &inner.receiver;
+            }
+            if let Some(runner) = self.command_program(root)
+                && PACKAGE_RUNNERS.contains(&runner.rsplit('/').next().unwrap_or(&runner))
+                && let Some(arg) =
+                    call.args.iter().flat_map(Self::arg_values).find(|a| is_quint_package_arg(a))
+            {
+                self.hits.push((
+                    call.span(),
+                    format!("spawns the quint CLI through `{runner} {arg}` as an oracle"),
+                ));
+            }
+        }
+        syn::visit::visit_expr_method_call(self, call);
+    }
+}
+
+/// The quint-connect test attributes of a driver.
+#[derive(Default)]
+struct QuintAttrs {
+    tests: Vec<QuintTestRef>,
+    first_run: Option<Span>,
+}
+
+impl<'ast> Visit<'ast> for QuintAttrs {
+    fn visit_attribute(&mut self, attr: &'ast Attribute) {
+        let last = attr.path().segments.last().map(|segment| segment.ident.to_string());
+        match last.as_deref() {
+            Some("quint_run") => {
+                self.first_run.get_or_insert_with(|| attr.span());
+            }
+            Some("quint_test") => {
+                let (mut spec, mut run) = (None, None);
+                // A malformed attribute fails to compile; only read what parses.
+                let _ = attr.parse_nested_meta(|meta| {
+                    let value = meta.value()?;
+                    if meta.path.is_ident("spec") {
+                        spec = Some(value.parse::<syn::LitStr>()?.value());
+                    } else if meta.path.is_ident("test") {
+                        run = Some(value.parse::<syn::LitStr>()?.value());
+                    } else {
+                        value.parse::<Expr>()?;
+                    }
+                    Ok(())
+                });
+                let start = attr.span().start();
+                if let (Some(spec), Some(run)) = (spec, run) {
+                    self.tests.push(QuintTestRef {
+                        spec,
+                        run,
+                        line: start.line,
+                        column: start.column + 1,
+                    });
+                }
+            }
+            _ => {}
+        }
+        syn::visit::visit_attribute(self, attr);
+    }
+}
+
+/// The directory of the crate that owns `file`: its nearest ancestor holding
+/// a `Cargo.toml`, below `root`. quint-connect resolves a spec path against
+/// it (the test's working directory).
+fn crate_dir(root: &Path, file: &Path) -> PathBuf {
+    file.ancestors()
+        .skip(1)
+        .take_while(|dir| dir.starts_with(root))
+        .find(|dir| dir.join("Cargo.toml").is_file())
+        .unwrap_or(root)
+        .to_path_buf()
+}
+
+/// Every run declared by `spec` or a file it imports (transitively). An
+/// unreadable or unindexable spec is `Err`.
+fn reachable_runs(spec: &Path) -> Result<BTreeSet<String>> {
+    let mut runs = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    let mut todo = vec![spec.to_path_buf()];
+    while let Some(next) = todo.pop() {
+        if !seen.insert(next.clone()) {
+            continue;
+        }
+        let body = fs::read_to_string(&next)
+            .wrap_err_with(|| format!("read Quint spec {}", next.display()))?;
+        let idx = spec_index::index(&body)
+            .map_err(|e| eyre!("index Quint spec {}: {e}", next.display()))?;
+        runs.extend(idx.run_names().map(str::to_owned));
+        let dir = next.parent().unwrap_or_else(|| Path::new("."));
+        for import in &idx.imports {
+            let mut path = dir.join(import);
+            if path.extension().is_none_or(|ext| ext != "qnt") {
+                path.set_extension("qnt");
+            }
+            if path.is_file() {
+                todo.push(path);
+            }
+        }
+    }
+    Ok(runs)
+}
+
+/// The `unknown-quint-run` violation of one `#[quint_test]`, if any.
+fn check_quint_test(
+    root: &Path,
+    file: &Path,
+    r: &QuintTestRef,
+) -> Result<Option<ConformanceViolation>> {
+    let base = crate_dir(root, file);
+    let spec = base.join(&r.spec);
+    let detail = if spec.is_file() {
+        let runs = reachable_runs(&spec)?;
+        if runs.contains(&r.run) {
+            return Ok(None);
+        }
+        let declared = if runs.is_empty() {
+            "none".to_owned()
+        } else {
+            runs.iter().map(|run| format!("`{run}`")).collect::<Vec<_>>().join(", ")
+        };
+        format!(
+            "`#[quint_test]` names run `{}`, which {} and the files it imports do not declare \
+             (declared: {declared})",
+            r.run, r.spec
+        )
+    } else {
+        format!(
+            "`#[quint_test]` names the spec {}, which does not exist (resolved against {})",
+            r.spec,
+            base.display()
+        )
+    };
+    Ok(Some(ConformanceViolation {
+        file: file.to_path_buf(),
+        line: r.line,
+        column: r.column,
+        rule: ConformanceRule::UnknownQuintRun,
+        detail,
+    }))
+}
+
+/// Scan every candidate file in the workspace rooted at `root`: the
+/// [`scan_file`] rules, then each `#[quint_test]` against its spec.
+///
+/// Fails closed: an unreadable file, a quint-mentioning file that cannot be
+/// parsed, or a spec a `#[quint_test]` names that cannot be read or indexed,
+/// is `Err` naming the path.
 pub fn scan_workspace(root: &Path) -> Result<Vec<ConformanceViolation>> {
     let mut violations = Vec::new();
     for path in candidate_files(root)? {
         let source = fs::read_to_string(&path)
             .wrap_err_with(|| format!("read candidate file {}", path.display()))?;
-        if is_quint_driver(&source, &path)? {
-            violations.append(&mut scan_source(&source, &path)?);
+        let scan = scan_file(&source, &path)?;
+        violations.extend(scan.violations);
+        for r in &scan.quint_tests {
+            violations.extend(check_quint_test(root, &path, r)?);
         }
     }
     Ok(violations)
 }
 
-/// The directory of root-level, multi-owner conformance tests under `root`.
-pub fn conformance_dir(root: &Path) -> PathBuf {
-    root.join("tests").join("conformance").join("tests")
+/// The root of the root-level, multi-owner conformance package under `root`.
+pub fn conformance_root(root: &Path) -> PathBuf {
+    root.join("tests").join("conformance")
 }
 
 /// The workspace root for the root manifest at `manifest_path`.
@@ -1104,9 +1542,20 @@ impl D { fn observe(&self) -> u32 { self.seen.clone().len() as u32 } }
     fn fixture_workspace() -> tempfile::TempDir {
         let root = tempfile::tempdir().expect("tempdir");
         fs::create_dir_all(root.path().join("crates/owner/src/deep")).expect("mkdir");
+        fs::create_dir_all(root.path().join("crates/owner/tests")).expect("mkdir");
         fs::create_dir_all(root.path().join("tests/conformance/tests")).expect("mkdir");
+        fs::create_dir_all(root.path().join("tests/conformance/src")).expect("mkdir");
+        fs::create_dir_all(root.path().join("specs/quint/x")).expect("mkdir");
+        fs::write(root.path().join("crates/owner/Cargo.toml"), "[package]\nname = \"owner\"\n")
+            .expect("write");
+        fs::write(root.path().join("specs/quint/x/lease.qnt"), LEASE_SPEC).expect("write");
+        fs::write(root.path().join("specs/quint/x/lease_ok.qnt"), LEASE_INSTANCE).expect("write");
         root
     }
+
+    /// A stateful spec with one named run, and an instance file importing it.
+    const LEASE_SPEC: &str = "module lease {\n  var n: int\n  action init = n' = 0\n  action step = n' = n + 1\n  run happyPath = init.then(step)\n}\n";
+    const LEASE_INSTANCE: &str = "module lease_ok { import lease.* from \"./lease\" }\n";
 
     /// A hollow driver placed as a gated module inside a crate's `src/`.
     const HOLLOW_IN_CRATE: &str = r#"
@@ -1147,6 +1596,10 @@ mod conformance {
             })
         }
     }
+    #[quint_test(spec = "../../specs/quint/x/lease.qnt", main = "lease", test = "happyPath")]
+    fn happy_path() -> impl Driver { D::new() }
+    #[quint_run(spec = "../../specs/quint/x/lease.qnt", main = "lease")]
+    fn random() -> impl Driver { D::new() }
 }
 "#;
 
@@ -1208,10 +1661,153 @@ mod conformance {
         assert!(!is_quint_driver("fn f() {}", "f.rs").expect("parses"));
     }
 
+    fn file_rules(source: &str) -> Vec<(usize, ConformanceRule)> {
+        scan_file(source, "fixture.rs")
+            .expect("fixture parses")
+            .violations
+            .into_iter()
+            .map(|v| (v.line, v.rule))
+            .collect()
+    }
+
+    #[test]
+    fn a_spec_reference_without_quint_connect_is_flagged_but_a_doc_mention_is_not() {
+        // The tests/conformance prefix_landing shape: the spec path built into
+        // a const, evaluated by some other mechanism.
+        let src = r#"//! Spec: `specs/quint/x/landing.qnt`, referenced in place.
+/// Replays nothing; see specs/quint/x/landing.qnt.
+const SPEC: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../specs/quint/x/landing.qnt");
+fn lands() -> bool { true }
+"#;
+        assert_eq!(file_rules(src), vec![(4, ConformanceRule::SpecWithoutQuintConnect)]);
+        // Only doc comments mention the spec: not a reference.
+        let doc_only =
+            "//! Spec: `specs/quint/x/landing.qnt`.\n/// see `prefix_boot.qnt`\nfn f() {}\n";
+        assert!(file_rules(doc_only).is_empty(), "{:?}", file_rules(doc_only));
+        // A bare `.qnt` file literal counts; a longer extension does not.
+        assert_eq!(
+            file_rules("fn f() -> &'static str { \"owner_flows.qnt\" }"),
+            vec![(1, ConformanceRule::SpecWithoutQuintConnect)]
+        );
+        assert!(file_rules("fn f() -> &'static str { \"quint.qnty\" }").is_empty());
+        // In a quint-connect driver the reference is the point.
+        let driver =
+            "#[quint_test(spec = \"../../specs/quint/x/lease.qnt\", test = \"r\")]\nfn t() {}\n";
+        assert_eq!(count(&file_rules(driver), ConformanceRule::SpecWithoutQuintConnect), 0);
+    }
+
+    #[test]
+    fn spawning_the_quint_cli_is_flagged_in_every_shape() {
+        let src = r#"
+use std::process::Command;
+const QUINT: &str = "quint";
+fn a() { Command::new("quint").arg("repl"); }
+fn b() { std::process::Command::new("/usr/local/bin/quint").arg("test"); }
+fn c() { Command::new(QUINT).arg("run"); }
+fn d() { Command::new("npx").arg("@informalsystems/quint").arg("repl"); }
+fn e() { tokio::process::Command::new("npx").args(["quint", "test"]); }
+fn f() { Command::new("quint.cmd"); }
+"#;
+        let lines: Vec<usize> = file_rules(src)
+            .into_iter()
+            .filter(|(_, r)| *r == ConformanceRule::QuintCliOracle)
+            .map(|(l, _)| l)
+            .collect();
+        assert_eq!(lines, vec![4, 5, 6, 7, 8, 9]);
+        // Not the quint CLI.
+        let fine = r#"
+use std::process::Command;
+fn a() { Command::new("rustc").arg("--edition=2024"); }
+fn b() { Command::new("quintessence"); }
+fn c() { Command::new("npx").arg("prettier"); }
+fn d() -> &'static str { "quint" }
+"#;
+        assert!(file_rules(fine).is_empty(), "{:?}", file_rules(fine));
+    }
+
+    #[test]
+    fn a_driver_without_a_quint_test_is_flagged_at_its_first_quint_run() {
+        let src = "use quint_connect::Driver;\n\n#[quint_run(spec = \"s.qnt\", main = \"m\")]\nfn random() -> impl Driver { D::new() }\n";
+        assert_eq!(count(&file_rules(src), ConformanceRule::NoQuintTest), 1);
+        assert!(
+            file_rules(src).contains(&(3, ConformanceRule::NoQuintTest)),
+            "{:?}",
+            file_rules(src)
+        );
+        let pinned = format!(
+            "{src}#[quint_test(spec = \"s.qnt\", main = \"m\", test = \"happy\")]\nfn happy() -> impl Driver {{ D::new() }}\n"
+        );
+        assert_eq!(count(&file_rules(&pinned), ConformanceRule::NoQuintTest), 0);
+        let scan = scan_file(&pinned, "fixture.rs").expect("parses");
+        assert_eq!(
+            scan.quint_tests,
+            vec![QuintTestRef { spec: "s.qnt".into(), run: "happy".into(), line: 5, column: 1 }]
+        );
+        // A non-driver is never required to carry one.
+        assert_eq!(count(&file_rules("fn quint_helper() {}"), ConformanceRule::NoQuintTest), 0);
+    }
+
+    #[test]
+    fn a_quint_test_must_name_a_run_its_spec_declares() {
+        let root = fixture_workspace();
+        let driver = |test: &str, spec: &str| {
+            format!(
+                "use quint_connect::Driver;\n#[quint_test(spec = \"{spec}\", main = \"lease_ok\", test = \"{test}\")]\nfn t() -> impl Driver {{ D::new() }}\n"
+            )
+        };
+        let path = root.path().join("crates/owner/tests/lease_conformance.rs");
+        // Declared by the spec, or by a file the named spec imports.
+        for spec in ["../../specs/quint/x/lease.qnt", "../../specs/quint/x/lease_ok.qnt"] {
+            fs::write(&path, driver("happyPath", spec)).expect("write");
+            let found = scan_workspace(root.path()).expect("scan");
+            assert!(found.iter().all(|v| v.rule != ConformanceRule::UnknownQuintRun), "{found:#?}");
+        }
+        fs::write(&path, driver("happyPth", "../../specs/quint/x/lease.qnt")).expect("write");
+        let found = scan_workspace(root.path()).expect("scan");
+        let unknown: Vec<_> =
+            found.iter().filter(|v| v.rule == ConformanceRule::UnknownQuintRun).collect();
+        assert_eq!(unknown.len(), 1, "{found:#?}");
+        assert!(
+            unknown[0].detail.contains("names run `happyPth`")
+                && unknown[0].detail.contains("(declared: `happyPath`)"),
+            "{}",
+            unknown[0].detail
+        );
+        assert_eq!((unknown[0].line, unknown[0].file.clone()), (2, path.clone()));
+        fs::write(&path, driver("happyPath", "../../specs/quint/x/missing.qnt")).expect("write");
+        let found = scan_workspace(root.path()).expect("scan");
+        assert!(
+            found.iter().any(|v| v.rule == ConformanceRule::UnknownQuintRun
+                && v.detail.contains("does not exist")),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn scope_covers_crate_tests_and_the_whole_conformance_package() {
+        let root = fixture_workspace();
+        let oracle = "fn f() { std::process::Command::new(\"quint\").arg(\"repl\"); }\n";
+        fs::write(root.path().join("crates/owner/tests/oracle.rs"), oracle).expect("write");
+        fs::write(root.path().join("tests/conformance/src/landing.rs"), oracle).expect("write");
+        let found = scan_workspace(root.path()).expect("scan");
+        for file in ["crates/owner/tests/oracle.rs", "tests/conformance/src/landing.rs"] {
+            assert!(
+                found
+                    .iter()
+                    .any(|v| v.file.ends_with(file) && v.rule == ConformanceRule::QuintCliOracle),
+                "{file}: {found:#?}"
+            );
+        }
+        let files = candidate_files(root.path()).expect("candidates");
+        assert!(files.iter().any(|f| f.ends_with("crates/owner/tests/oracle.rs")));
+        assert!(files.iter().all(|f| f.extension().is_some_and(|e| e == "rs")));
+    }
+
     #[test]
     fn workspace_root_resolves_relative_to_manifest() {
         assert_eq!(workspace_root(Path::new("Cargo.toml")), Path::new("."));
         assert_eq!(workspace_root(Path::new("/w/Cargo.toml")), Path::new("/w"));
-        assert_eq!(conformance_dir(Path::new("/w")), Path::new("/w/tests/conformance/tests"));
+        assert_eq!(conformance_root(Path::new("/w")), Path::new("/w/tests/conformance"));
     }
 }

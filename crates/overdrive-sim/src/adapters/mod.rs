@@ -16,6 +16,9 @@
 
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, dead_code)]
 
+// netns-density-295 DG-4 / QPROJ-7 — `SimBeaconIo`, the in-memory node beacon
+// listener (`overdrive_core::vm::beacon::BeaconIo`), coupled to `SimVmm`.
+pub mod beacon_io;
 pub mod ca;
 // microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42) —
 // `SimCgroupAccounting`, the in-memory
@@ -40,6 +43,9 @@ pub mod kek;
 pub mod dataplane;
 pub mod driver;
 pub mod entropy;
+// GH #295 D16-CLAIM — `SimGuestCidClaim`, the in-memory double of the
+// host-kernel CID-claim port (`overdrive_core::guest_transport::GuestCidClaim`).
+pub mod guest_cid_claim;
 // GH #295 D-295-R16 — `SimGuestDnsFactory` / `SimGuestDns`, the socket-free
 // doubles of the control-plane shared-gateway DNS owner port.
 pub mod guest_dns;
@@ -102,6 +108,7 @@ pub mod vmm;
 // through the same call sequence.
 pub mod vm_host_state;
 
+pub use beacon_io::{SimBeaconIo, SimBeaconSocketObservation};
 pub use ca::SimCa;
 pub use cgroup_accounting::SimCgroupAccounting;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
@@ -110,7 +117,7 @@ pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
 pub use mtls_intercept::{
-    SimAcceptScript, SimInterceptFault, SimInterceptListener, SimMtlsIntercept,
+    SimAcceptScript, SimInterceptFault, SimInterceptListener, SimMtlsIntercept, SimSharedTable,
 };
 pub use mtls_intercept_lifecycle::{
     SimMtlsInterceptLifecycle, SimMtlsInterceptLifecycleEvent, SimMtlsInterceptLifecycleSnapshot,

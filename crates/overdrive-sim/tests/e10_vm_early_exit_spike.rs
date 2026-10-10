@@ -30,6 +30,7 @@ use overdrive_control_plane::reconciler_runtime::{
 };
 use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
+use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
     DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent,
@@ -123,8 +124,8 @@ impl Vmm for RecordedVmm {
     async fn probe(&self) -> Result<(), VmmProbeError> {
         self.inner.probe().await
     }
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config).await?;
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config, vsock).await?;
         self.controls.lock().push(process.control.clone());
         self.executions.lock().push((
             config.alloc.clone(),

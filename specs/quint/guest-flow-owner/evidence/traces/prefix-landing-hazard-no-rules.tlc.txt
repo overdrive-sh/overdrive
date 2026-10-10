@@ -1,0 +1,51 @@
+State 1: <Initial predicate>
+/\ landing_bugNoRules_landing_machine_marked = FALSE
+/\ landing_bugNoRules_landing_machine_seen = << >>
+/\ landing_bugNoRules_landing_machine_reject = FALSE
+/\ landing_bugNoRules_landing_machine_entries = {}
+/\ landing_bugNoRules_landing_machine_steer = "none"
+/\ landing_bugNoRules_landing_machine_lis = {}
+/\ landing_bugNoRules_landing_machine_route = "absent"
+/\ landing_bugNoRules_landing_machine_wl = {}
+/\ landing_bugNoRules_landing_machine_everBooted = FALSE
+/\ landing_bugNoRules_landing_machine_divert = FALSE
+/\ landing_bugNoRules_landing_machine_legC = FALSE
+
+State 2: <landing_bugNoRules_landing_machine_Boot line 216, col 3 to line 221, col 48 of module landing_bugNoRules>
+/\ landing_bugNoRules_landing_machine_marked = TRUE
+/\ landing_bugNoRules_landing_machine_seen = << >>
+/\ landing_bugNoRules_landing_machine_reject = FALSE
+/\ landing_bugNoRules_landing_machine_entries = {}
+/\ landing_bugNoRules_landing_machine_steer = "ours"
+/\ landing_bugNoRules_landing_machine_lis = {}
+/\ landing_bugNoRules_landing_machine_route = "local"
+/\ landing_bugNoRules_landing_machine_wl = {}
+/\ landing_bugNoRules_landing_machine_everBooted = TRUE
+/\ landing_bugNoRules_landing_machine_divert = FALSE
+/\ landing_bugNoRules_landing_machine_legC = TRUE
+
+State 3: <landing_bugNoRules_landing_machine_Deploy line 227, col 3 to line 235, col 104 of module landing_bugNoRules>
+/\ landing_bugNoRules_landing_machine_marked = TRUE
+/\ landing_bugNoRules_landing_machine_seen = << >>
+/\ landing_bugNoRules_landing_machine_reject = FALSE
+/\ landing_bugNoRules_landing_machine_entries = {}
+/\ landing_bugNoRules_landing_machine_steer = "ours"
+/\ landing_bugNoRules_landing_machine_lis = {}
+/\ landing_bugNoRules_landing_machine_route = "local"
+/\ landing_bugNoRules_landing_machine_wl = {"listening"}
+/\ landing_bugNoRules_landing_machine_everBooted = TRUE
+/\ landing_bugNoRules_landing_machine_divert = FALSE
+/\ landing_bugNoRules_landing_machine_legC = TRUE
+
+State 4: <landing_bugNoRules_landing_machine_OpenIntake line 241, col 3 to line 249, col 50 of module landing_bugNoRules>
+/\ landing_bugNoRules_landing_machine_marked = TRUE
+/\ landing_bugNoRules_landing_machine_seen = << >>
+/\ landing_bugNoRules_landing_machine_reject = FALSE
+/\ landing_bugNoRules_landing_machine_entries = {1}
+/\ landing_bugNoRules_landing_machine_steer = "ours"
+/\ landing_bugNoRules_landing_machine_lis = {1}
+/\ landing_bugNoRules_landing_machine_route = "local"
+/\ landing_bugNoRules_landing_machine_wl = {"listening"}
+/\ landing_bugNoRules_landing_machine_everBooted = TRUE
+/\ landing_bugNoRules_landing_machine_divert = FALSE
+/\ landing_bugNoRules_landing_machine_legC = TRUE

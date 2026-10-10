@@ -30,8 +30,14 @@
  *     and the slot index it was opened from.
  *   - Control messages are per-flow-id sets (order between different flow ids does not matter;
  *     each flow id gets at most one Paired/Refused).
- *   - Time is abstract: GUEST_DATAGRAM_SLOT_IDLE (120 s) is a nondeterministic IdleRelease of a slot
- *     with nothing parked.
+ *   - Time is abstract. The guest owner's audit tick (GUEST_OWNER_AUDIT_PERIOD, DG-5-A) is ONE action,
+ *     GuestAudit: the release audit, then the idle release of every slot idle for GUEST_DATAGRAM_SLOT_IDLE
+ *     since the tick that last saw a change (a nondeterministic subset of the owned slots with nothing
+ *     parked: which have reached the idle deadline is a matter of time), then the quarantine and
+ *     `listener_map` retries (not modelled). There is no separate idle-release action. Each timer action
+ *     (GuestAudit, GuestPairingTimeout) fires its own deadline only, one deadline per step; the order of
+ *     simultaneously due deadlines (earliest first) is the driver's clock and is not modelled.
+ *   - MAXFID only disables minting a new association id (DG-5-B); see its definition.
  *   - Cells (CELL-RECREATE): each slot carries a cell generation, recreated (advanced) at every end
  *     of association; every datagram parked in a cell queues a readiness event registered for the
  *     slot's generation then current, in `ready`. Generations only grow and dispatch compares an
@@ -56,14 +62,22 @@
  */
 module udp_slots {
   // OFF: design rules switched off (hazard instances in hazard/udp_slots_hazards.qnt); CFG: "ok" (two
-  // destinations, three association ids) or "live" (one destination: small enough for TLC)
+  // destinations, three association ids), "live" (one destination: small enough for TLC) or "conf" (as "ok"
+  // with MAXFID above any driver trace: the conformance instance, DG-5-B)
   const OFF: Set[str]
   const CFG: str
 
   val SOCKS: Set[int] = Set(1, 2)
   val DESTS: Set[int] = if (CFG == "live") Set(1) else Set(1, 2)
   val SLOTS: Set[int] = Set(0, 1)
-  val MAXFID: int = if (CFG == "live") 2 else 3
+  // MAXFID is a model-checking bound with no production counterpart (production allocates FlowIds
+  // monotonically, skipping live ids; DG-5-B): it only disables minting (GuestReady starts no association
+  // once nextFid > MAXFID). The conformance instance ("conf") sizes it above the reach of any trace within a
+  // driver's step bound: every step mints at most one flow id, and CONF_STEP_BOUND exceeds the step bound of
+  // the quint-connect drivers (`#[quint_run]` max steps 10 by default; a driver raising its bound beyond
+  // CONF_STEP_BOUND raises this constant with it).
+  val CONF_STEP_BOUND: int = 32
+  val MAXFID: int = if (CFG == "live") 2 else if (CFG == "conf") CONF_STEP_BOUND + 1 else 3
 
   val BUG_CLAIM_SPLIT: bool = OFF.contains("claimSplit")                // slot claim: "is s free?" and "take s" are two steps
   val BUG_KEEP_FRAMES: bool = OFF.contains("keepFrames")                // P-35: release returns the slot with frames still parked
@@ -389,19 +403,23 @@ module udp_slots {
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, misdelivered' = misdelivered, lateIgnored' = lateIgnored, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
   }
-  // level-triggered audit: slots whose socket cookie no longer exists
-  action GuestAudit: bool = all {
-    val orphans = SLOTS.filter(s => slots.get(s).owned and not(sockAlive.get(slots.get(s).sock)))
-    all { orphans != Set(), releaseSet(orphans) },
-    sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
-    host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
-    toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, misdelivered' = misdelivered,
-    lateIgnored' = lateIgnored, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
+  // The guest owner's audit tick (DG-5-A: periodic at GUEST_OWNER_AUDIT_PERIOD, fixed rate) — ONE step, in
+  // this order: the release audit (slots whose socket cookie no longer exists, K-B2), then the idle release
+  // of the slots idle for GUEST_DATAGRAM_SLOT_IDLE since the tick that last saw a change (an owned slot with
+  // nothing parked that is not an orphan just released; time is abstract, so WHICH idle slots have reached
+  // the idle deadline is the nondeterministic subset `idle`), then the quarantine retry and the
+  // `listener_map` retry (not modelled). Idle release has no timer of its own. The tick fires only its own
+  // deadline: the pairing deadline is a separate action (GuestPairingTimeout), one deadline per step.
+  action GuestAudit: bool = {
+    nondet idle = SLOTS.powerset().oneOf()
+    GuestAuditIdle(idle)
   }
-  // GUEST_DATAGRAM_SLOT_IDLE elapsed with no datagram either way (nothing parked)
-  action IdleRelease(s: int): bool = all {
-    slots.get(s).owned, slots.get(s).parked == Set(),
-    releaseSet(Set(s)),
+  action GuestAuditIdle(idle: Set[int]): bool = all {
+    val orphans = SLOTS.filter(s => slots.get(s).owned and not(sockAlive.get(slots.get(s).sock)))
+    all {
+      idle.forall(s => slots.get(s).owned and slots.get(s).parked == Set() and not(orphans.contains(s))),
+      releaseSet(orphans.union(idle)),
+    },
     sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, misdelivered' = misdelivered,
@@ -420,7 +438,7 @@ module udp_slots {
       AppSendOnSlot(k, d, s), AppClaim(k, d, s), AppPick(k, d, s), AppTake(k, d, s),
       dispatchReady, Refill(s), HostPair(i), HostRefuse(i), HostAbortAssoc(i), GuestRecvPaired(i),
       GuestRecvEnd(i), GuestPairingTimeout(s), HostRecvEnd(i), SockClose(k), SockCloseReportLost(k), GuestReleaseSock(k),
-      GuestAudit, IdleRelease(s),
+      GuestAudit,
     }
   }
 
@@ -463,6 +481,98 @@ module udp_slots {
     and { weakFair(releaseAny, slots), weakFair(GuestAudit, slots) }
       .implies(always(anyOrphan.implies(eventually(not(anyOrphan)))))
 
+  // ------------------------------------------------------------------ named runs (critical scenarios)
+  // Deterministic scenarios on `slots_ok` (readiness events are dispatched with `GuestReady(slot,
+  // current?)` rather than the nondeterministic `dispatchReady`), each ending in an `expect` of its
+  // outcome with `Safety` checked along the way.
+  // Datagram happy path: the first datagram claims a slot and parks; its readiness event opens the
+  // association; the host pairs; Paired routes the parked frame to the association; later datagrams
+  // are delivered directly
+  run DatagramAssociationClaimsPairsAndRoutes = init
+    .then(AppClaim(1, 1, 0)).expect(Safety and slots.get(0).owned and slots.get(0).parked == Set((1, 1)) and ready == Set((0, true)))
+    .then(GuestReady(0, true)).expect(Safety and slots.get(0).fid == 1 and host.get(1).st == "req" and ready == Set())
+    .then(HostPair(1)).then(GuestRecvPaired(1))
+    .expect(Safety and slots.get(0).routed and slots.get(0).parked == Set() and host.get(1).st == "paired")
+    .then(AppSendOnSlot(1, 1, 0)).expect(Safety and not(misdelivered) and slots.get(0).routed)
+  // two sockets claim distinct slots; each slot has exactly one owner
+  run TwoSocketsClaimDistinctSlots = init
+    .then(AppClaim(1, 1, 0)).then(AppClaim(2, 1, 1))
+    .expect(Safety and ownerOf(1, 1) == Set(0) and ownerOf(2, 1) == Set(1) and slots.get(0).holders == 1 and slots.get(1).holders == 1)
+  // U-2 / A-18: Refused discards the parked frames (the cells are recreated), the slot stays owned and
+  // does not re-associate; only a new datagram from the application starts a new association
+  run RefusedDiscardsParkedFramesAndOnlyNewDatagramReassociates = init
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0, true)).then(HostRefuse(1)).then(GuestRecvEnd(1))
+    .expect(Safety and slots.get(0).owned and slots.get(0).fid == 0 and slots.get(0).parked == Set() and endedNoNew == Set(0))
+    .then(AppSendOnSlot(1, 1, 0)).expect(Safety and slots.get(0).parked == Set((1, 1)) and endedNoNew == Set())
+    .then(GuestReady(0, true)).expect(Safety and slots.get(0).fid == 2 and host.get(2).st == "req" and not(staleReassoc))
+  // a host abort of a live association: Abort received, the slot stays owned and unrouted
+  run HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned = init
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0, true)).then(HostPair(1)).then(GuestRecvPaired(1))
+    .then(HostAbortAssoc(1)).then(GuestRecvEnd(1))
+    .expect(Safety and slots.get(0).owned and not(slots.get(0).routed) and slots.get(0).fid == 0 and host.get(1).st == "closed")
+    .then(AppSendOnSlot(1, 1, 0)).then(GuestReady(0, true)).expect(Safety and slots.get(0).fid == 2 and not(staleReassoc))
+  // CELL-RECREATE: an event queued before the association ended is of an earlier generation and is
+  // discarded: no association starts from it
+  run StaleGenerationReadinessEventIsDiscarded = init
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0, true)).then(AppSendOnSlot(1, 1, 0))
+    .expect(Safety and ready == Set((0, true)))
+    .then(HostRefuse(1)).then(GuestRecvEnd(1)).expect(Safety and ready == Set((0, false)) and slots.get(0).parked == Set())
+    .then(GuestReady(0, false)).expect(Safety and ready == Set() and slots.get(0).fid == 0 and not(staleGenStart) and not(staleReassoc))
+  // SLOT-ABORT: the socket closes and its slot is released before the host's Paired arrives; the
+  // late Paired is answered with Abort and routed nowhere
+  run LatePairedForReleasedSlotIsAnsweredWithAbort = init
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0, true)).then(SockClose(1)).then(GuestReleaseSock(1))
+    .expect(Safety and not(slots.get(0).owned) and toHostEnd == Set(1))
+    .then(HostPair(1)).then(GuestRecvPaired(1))
+    .expect(Safety and toHostAbort == Set(1) and not(lateIgnored) and not(slots.get(0).routed))
+    .then(HostRecvEnd(1)).expect(Safety and host.get(1).st == "closed" and toHostAbort == Set() and toHostEnd == Set())
+  // K-B2: the sock_release report is lost; the level-triggered audit finds the slot whose cookie no
+  // longer exists and releases it
+  run LostReleaseReportIsFoundByAudit = init
+    .then(AppClaim(1, 1, 0)).then(SockCloseReportLost(1))
+    .expect(Safety and slots.get(0).owned and not(sockAlive.get(1)) and not(releasePending.get(1)))
+    .then(GuestAudit).expect(Safety and not(slots.get(0).owned) and slots.get(0).parked == Set())
+  // closing a socket releases every slot it owns
+  run SocketCloseReleasesEverySlotItOwns = init
+    .then(AppClaim(1, 1, 0)).then(AppClaim(1, 2, 1)).then(SockClose(1)).then(GuestReleaseSock(1))
+    .expect(Safety and not(slots.get(0).owned) and not(slots.get(1).owned))
+  // GUEST_DATAGRAM_SLOT_IDLE: an idle routed association's slot is released by the audit tick (no timer of
+  // its own, DG-5-A) and the host observes the end
+  run IdleSlotReleaseEndsAssociation = init
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0, true)).then(HostPair(1)).then(GuestRecvPaired(1))
+    .then(GuestAuditIdle(Set(0))).expect(Safety and not(slots.get(0).owned) and not(slots.get(0).routed) and toHostEnd == Set(1))
+    .then(HostRecvEnd(1)).expect(Safety and host.get(1).st == "closed")
+  // DG-5-A: one audit tick runs, in order, the release audit (the slot of a closed socket whose report was
+  // lost) and then the idle release (an idle routed slot): both slots are released in that one step. The
+  // orphan is released by the release audit, so it is not among the idle slots chosen; a slot with frames
+  // parked is not idle
+  run AuditTickReleasesOrphansAndIdleSlotsInOneStep = init
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0, true)).then(HostPair(1)).then(GuestRecvPaired(1))
+    .then(AppClaim(2, 1, 1)).expect(Safety and slots.get(1).parked == Set((2, 1)))
+    .then(GuestReady(1, true)).then(HostPair(2)).then(GuestRecvPaired(2))
+    .then(SockCloseReportLost(1))
+    .expect(Safety and slots.get(0).routed and slots.get(1).routed and not(sockAlive.get(1)) and sockAlive.get(2))
+    .then(GuestAuditIdle(Set(1)))
+    .expect(Safety and not(slots.get(0).owned) and not(slots.get(1).owned) and toHostEnd == Set(1, 2))
+  // FLOW_PAIRING_DEADLINE: the guest ends an unpaired association itself and sends Abort; the slot stays
+  // owned with its frames discarded; the host's late Paired is discarded without a second Abort (U-5)
+  run PairingDeadlineAbortsAndLatePairedIsDiscarded = init
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0, true)).then(GuestPairingTimeout(0))
+    .expect(Safety and slots.get(0).owned and slots.get(0).fid == 0 and slots.get(0).parked == Set() and toHostAbort == Set(1) and guestEnded == Set(1))
+    .then(HostPair(1)).then(GuestRecvPaired(1))
+    .expect(Safety and toHostAbort == Set(1) and toGuestPaired == Set() and not(slots.get(0).routed) and not(lateIgnored))
+    .then(HostRecvEnd(1)).expect(Safety and host.get(1).st == "closed")
+  // P-35: a slot recycled to a new owner never carries the previous owner's frames: its frames are
+  // discarded at release, the old readiness event is of an earlier generation, and the new owner's
+  // association delivers only its own frames to its own destination
+  run RecycledSlotNeverDeliversPreviousOwnersFrames = init
+    .then(AppClaim(1, 1, 0)).then(SockClose(1)).then(GuestReleaseSock(1))
+    .expect(Safety and not(slots.get(0).owned) and slots.get(0).parked == Set() and ready == Set((0, false)))
+    .then(AppClaim(2, 2, 0)).expect(Safety and slots.get(0).parked == Set((2, 2)))
+    .then(GuestReady(0, false)).expect(Safety and slots.get(0).fid == 0 and not(staleGenStart))
+    .then(GuestReady(0, true)).then(HostPair(1)).then(GuestRecvPaired(1))
+    .expect(Safety and slots.get(0).routed and host.get(1).sock == 2 and host.get(1).dest == 2 and not(misdelivered))
+
   // ------------------------------------------------------------------ non-vacuity witnesses
   val WitnessNoLatePaired: bool = toHostAbort == Set()
   val WitnessNoRouted: bool = SLOTS.forall(s => not(slots.get(s).routed))
@@ -480,3 +590,6 @@ module udp_slots {
 module slots_ok { import udp_slots(OFF = Set(), CFG = "ok").* from "./udp_slots" }
 // the design, one destination: small enough for TLC (exhaustive safety and liveness)
 module slots_live { import udp_slots(OFF = Set(), CFG = "live").* from "./udp_slots" }
+// conformance (DG-5-B): as `slots_ok`, with MAXFID above any trace of a driver's step bound; the runs are
+// checked on it, the exhaustive checks on `slots_ok` / `slots_live`
+module slots_conf { import udp_slots(OFF = Set(), CFG = "conf").* from "./udp_slots" }

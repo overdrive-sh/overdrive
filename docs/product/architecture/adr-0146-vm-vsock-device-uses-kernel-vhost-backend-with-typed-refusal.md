@@ -1,4 +1,4 @@
-# ADR-0146 — Every VM's vsock device uses the kernel vhost-vsock backend of the vendored Cloud Hypervisor; any other backend is a typed refusal
+# ADR-0146 — Every VM's vsock device uses the kernel vhost-vsock backend of the vendored Cloud Hypervisor; no other backend is ever launched
 
 ## Status
 
@@ -63,10 +63,12 @@ production launch hook, uid drop, launch seccomp filter or Landlock rules.
 - **No fallback.** The VMM adapter never launches a VM with the Unix backend,
   with no vsock device, with a second vsock device, or without a claimed
   device.
-- **Typed refusal at startup.** `Vmm::probe` refuses the node when the
-  installed CH does not advertise `backend=vhost-kernel` with the `fd=`
-  handoff. Access to `/dev/vhost-vsock` is checked by the claim probe
-  (ADR-0170) under the `serve` identity; the VMM never opens the device.
+- **The fork is the only VMM.** Overdrive runs only with the vendored fork
+  (ADR-0161); no stage of `Vmm::probe` inspects the installed binary for the
+  backend, and no other Cloud Hypervisor build is a supported configuration.
+  Access to `/dev/vhost-vsock` — a host fact, not a property of the binary —
+  is checked by the claim probe (ADR-0170) under the `serve` identity; the VMM
+  never opens the device.
 - **Per-launch failure.** A launch whose device the fork cannot set up makes
   CH exit before READY. The driver projects it through the existing pre-READY
   VMM-exit start failure; the lease is retired and released, and placement
@@ -112,5 +114,5 @@ the feature delta (§ *Core vocabulary*, § *VMM backend contract*).
   a launch surprise (the ADR-0144 principle: no silent correctness dependence
   on host configuration).
 - The host kernel must provide `CONFIG_VHOST_VSOCK` and the guest kernel
-  `CONFIG_VIRTIO_VSOCKETS`; the startup probe and the guest's setup checks
+  `CONFIG_VIRTIO_VSOCKETS`; the claim probe and the guest's setup checks
   refuse when they are absent. Observed on stock 7.0.0-29.

@@ -157,6 +157,6 @@
   (`9b68dbb57`, `41a619d19` on v53.0), vendored as the submodule
   `vendors/cloud-hypervisor`, becomes the production VMM path, which also
   rules D13 as option (a). How the fork is built, pinned and provisioned
-  replaces the upstream release download, and lands through DESIGN
+  replaces the current Cloud Hypervisor download, and lands through DESIGN
   (ADR-0146) and DISTILL/DELIVER. The probe and its evidence in
   `spike-scratch/netns-density-295-ch-vhost-vsock/` are retained.

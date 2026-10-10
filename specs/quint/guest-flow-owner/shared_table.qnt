@@ -213,6 +213,87 @@ module shared_table {
     QuiescedClosesListeners,
   }
 
+  // ------------------------------------------------------------------ named runs (critical scenarios)
+  // Each run ends in an `expect` of its scenario's outcome and checks `Safety` along the way. Runs
+  // that need the default instance run on table_ok; the repair-forever run on table_live.
+  // happy path: boot steps 1-9, the table complete, the steering pinned, the route local, the
+  // owner brings up the wanted port
+  run HappyPathBootAndBringUp = init
+    .then(BootStep).expect(Safety and phase == "rules")
+    .then(BootStep).expect(Safety and complete)
+    .then(BootStep).expect(Safety and open and link == "pinned" and route == "local")
+    .then(BringUp(1)).expect(Safety and lis == Set(1) and entries == Set(1) and not(g.bypassed))
+  // K-D3 / U-QP-1: step 8's transaction fails on a node with no table; boot keeps the route and the
+  // steering; no wildcard reachable with the table absent; the leg-C bypass window opens
+  run TableAbsentAtBootKeepsRouteAndSteering = init
+    .then(BootStep).then(RulesFail).expect(Safety and not(complete))
+    .then(BootStep)
+    .expect(Safety and open and not(complete) and route == "local" and link == "pinned")
+    .then(BringUp(1)).expect(Safety and bypassed and g.bypassed)
+  // D8a-HOLD: the IpRules recovery quiesces (closing every intake listener, M-7), repairs the table
+  // in one transaction and restores; the owner brings the port up again behind the complete table
+  run IpRulesRecoveryRepairsAbsentTable = init
+    .then(BootStep).then(RulesFail).then(BootStep).then(BringUp(1))
+    .then(RecQuiesce("IpRules")).expect(Safety and lis == Set() and entries == Set() and holders == Set("IpRules"))
+    .then(RecRepair("IpRules")).expect(Safety and complete)
+    .then(RecRestore("IpRules")).expect(Safety and holders == Set() and rec.get("IpRules") == "idle")
+    .then(BringUp(1)).expect(Safety and lis == Set(1) and not(bypassed))
+  // K-L4: the absent table persists while serve is down (crash after boot) and the route stays; nothing
+  // is delivered to a host socket; the restart's boot step 8 converges the table
+  run AbsentTablePersistsWhileDownThenBootConverges = init
+    .then(BootStep).then(RulesFail).then(BootStep)
+    .then(Crash).expect(Safety and not(up) and not(complete) and route == "local" and link == "pinned" and not(deliveredOn(net, PORTS)))
+    .then(Restart).then(BootStep).then(BootStep).expect(Safety and complete and phase == "steer")
+    .then(BootStep).expect(Safety and open and complete and not(bypassed))
+  // crash at each boot step: the table stays as it was (a transaction in progress leaves it so),
+  // restart re-runs boot from step 1
+  run CrashAtEachBootStepThenRestart = init
+    .then(Crash).expect(Safety and not(up) and not(complete))
+    .then(Restart).then(BootStep)
+    .then(Crash).expect(Safety and not(up) and not(complete) and phase == "start")
+    .then(Restart).then(BootStep).then(BootStep)
+    .then(Crash).expect(Safety and not(up) and complete and link == "none")
+    .then(Restart).then(BootStep).then(BootStep).then(BootStep)
+    .expect(Safety and open and complete and link == "pinned" and route == "local")
+    .then(Crash).expect(Safety and not(up) and complete and link == "pinned" and not(deliveredOn(net, PORTS)))
+    .then(Restart).then(BootStep).then(BootStep).then(BootStep).expect(Safety and open)
+  // a runtime replacement transaction fails: the table stays as it was and the steering is unchanged
+  run RuntimeReplacementFailureLeavesTableAsWas = init
+    .then(BootStep).then(BootStep).then(BootStep).then(BringUp(1))
+    .then(MtlsReplaceFail).expect(Safety and complete and link == "pinned" and lis == Set(1))
+  // FlowListeners recovery: a listener-task exit, quiesce closes the intake listeners, repair, restore
+  run FlowListenersRecoveryAfterTaskExit = init
+    .then(BootStep).then(BootStep).then(BootStep).then(BringUp(1))
+    .then(ListenerTaskExit).expect(Safety and flDmg)
+    .then(RecQuiesce("FlowListeners")).expect(Safety and lis == Set() and holders == Set("FlowListeners"))
+    .then(RecRepair("FlowListeners")).expect(Safety and not(flDmg))
+    .then(RecRestore("FlowListeners")).expect(Safety and holders == Set())
+    .then(BringUp(1)).expect(Safety and lis == Set(1))
+  // D8a-HOLD: two recoveries hold at once; restoring one does not reopen forwarding while the other
+  // has not repaired
+  run SecondHolderKeepsForwardingClosed = init
+    .then(BootStep).then(RulesFail).then(BootStep).then(ListenerTaskExit)
+    .then(RecQuiesce("IpRules")).then(RecQuiesce("FlowListeners"))
+    .expect(Safety and holders == Set("IpRules", "FlowListeners"))
+    .then(RecRepair("IpRules")).then(RecRestore("IpRules"))
+    .expect(Safety and holders == Set("FlowListeners") and not(serving(1)) and not(g.reopenEarly))
+    .then(RecRepair("FlowListeners")).then(RecRestore("FlowListeners"))
+    .expect(Safety and holders == Set() and serving(1))
+  // one repair failure (table_ok): the recovery retries under its hold and completes
+  run RepairFailureRetriesUnderHold = init
+    .then(BootStep).then(RulesFail).then(BootStep)
+    .then(RecQuiesce("IpRules")).then(RepFail("IpRules"))
+    .expect(Safety and att.get("IpRules") == 1 and holders == Set("IpRules") and not(complete))
+    .then(RecRepair("IpRules")).then(RecRestore("IpRules")).expect(Safety and complete and holders == Set())
+  // a repair that fails forever (table_live): after MAXATT attempts the recovery fail-stops serve; the
+  // hold is released with the process and the next boot converges the table
+  run RepairFailsForeverFailStopsThenBootConverges = init
+    .then(BootStep).then(RulesFail).then(BootStep)
+    .then(RecQuiesce("IpRules")).then(RepFail("IpRules")).then(RepFail("IpRules"))
+    .expect(Safety and att.get("IpRules") == MAXATT)
+    .then(FailStop("IpRules")).expect(Safety and not(up) and holders == Set() and not(complete))
+    .then(Restart).then(BootStep).then(BootStep).then(BootStep).expect(Safety and open and complete)
+
   // ------------------------------------------------------------------ witnesses (expected violated)
   // the leg-C bypass window exists (documented: ADR-0124 bound, ended by the IpRules recovery)
   val WitnessNoBypass: bool = not(bypassed)

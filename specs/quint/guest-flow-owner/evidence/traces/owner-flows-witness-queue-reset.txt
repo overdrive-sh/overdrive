@@ -52,10 +52,9 @@ State 8
   hf = Map(1 -> { gen: 1, st: "req" })
 
 State 9
-  alloc = "Retiring"
-  claim = 0
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "closed" })
+  quiesced = true
   hf = Map(1 -> { gen: 1, st: "closed" })
+  toGuestAbort = Set(1)
 
 State 10
   gf = Map(1 -> { c: 0, gen: 1, st: "reset" })

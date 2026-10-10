@@ -40,7 +40,7 @@ emitted_actions:
                 memory_bytes: 134217728,
             },
             probe_descriptors: [],
-            network: None,
+            transport: None,
             service_ports: [],
         },
         kind: Job,

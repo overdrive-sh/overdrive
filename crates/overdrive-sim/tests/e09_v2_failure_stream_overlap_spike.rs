@@ -1,7 +1,7 @@
 //! Diagnostic of E09-v2's overlapping healthy-stop/failure-submit schedule.
 //! <!-- DES-ENFORCEMENT : exempt -->
-//! No lifecycle state is seeded. Production WorkloadLifecycle, ServiceLifecycle,
-//! action dispatch, ProbeRunner, and Service stream compose over existing Sim ports.
+//! No lifecycle state is seeded. Production `WorkloadLifecycle`, `ServiceLifecycle`,
+//! action dispatch, `ProbeRunner`, and Service stream compose over existing Sim ports.
 //! The selected serial per-tick order models a batch already drained by the loop;
 //! this is not a broker scheduling test or native VM stop-duration measurement.
 #![cfg(feature = "integration-tests")]

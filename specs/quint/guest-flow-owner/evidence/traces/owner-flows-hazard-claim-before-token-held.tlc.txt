@@ -44,7 +44,7 @@ State 1: <Initial predicate>
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 0
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 2: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 3507, col 55 of module flows_bugClaimBeforeToken>
+State 2: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -90,7 +90,7 @@ State 2: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 3: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 3507, col 55 of module flows_bugClaimBeforeToken>
+State 3: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -136,7 +136,7 @@ State 3: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 4: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 3507, col 55 of module flows_bugClaimBeforeToken>
+State 4: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -182,7 +182,7 @@ State 4: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 5: <flows_bugClaimBeforeToken_owner_flows_step line 3508, col 9 to line 3509, col 55 of module flows_bugClaimBeforeToken>
+State 5: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3539, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -228,7 +228,7 @@ State 5: <flows_bugClaimBeforeToken_owner_flows_step line 3508, col 9 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 6: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 3507, col 55 of module flows_bugClaimBeforeToken>
+State 6: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -274,7 +274,7 @@ State 6: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 7: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 3507, col 55 of module flows_bugClaimBeforeToken>
+State 7: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -320,7 +320,7 @@ State 7: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 8: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 3507, col 55 of module flows_bugClaimBeforeToken>
+State 8: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -366,7 +366,7 @@ State 8: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 9: <flows_bugClaimBeforeToken_owner_flows_step line 3508, col 9 to line 3509, col 55 of module flows_bugClaimBeforeToken>
+State 9: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -376,8 +376,8 @@ State 9: <flows_bugClaimBeforeToken_owner_flows_step line 3508, col 9 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Provisioned"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
-/\ flows_bugClaimBeforeToken_owner_flows_claim = 1
-/\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
@@ -406,13 +406,13 @@ State 9: <flows_bugClaimBeforeToken_owner_flows_step line 3508, col 9 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugClaimBeforeToken_owner_flows_toHostRefused = {}
-/\ flows_bugClaimBeforeToken_owner_flows_vmUp = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_vmUp = TRUE
 /\ flows_bugClaimBeforeToken_owner_flows_quiesced = FALSE
-/\ flows_bugClaimBeforeToken_owner_flows_vmGen = 1
+/\ flows_bugClaimBeforeToken_owner_flows_vmGen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 10: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 3507, col 55 of module flows_bugClaimBeforeToken>
+State 10: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3539, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -458,7 +458,7 @@ State 10: <flows_bugClaimBeforeToken_owner_flows_step line 3506, col 4 to line 3
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 11: <flows_bugClaimBeforeToken_owner_flows_step line 3508, col 9 to line 3509, col 55 of module flows_bugClaimBeforeToken>
+State 11: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3539, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
@@ -504,7 +504,7 @@ State 11: <flows_bugClaimBeforeToken_owner_flows_step line 3508, col 9 to line 3
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 12: <flows_bugClaimBeforeToken_owner_flows_step line 3508, col 9 to line 3509, col 55 of module flows_bugClaimBeforeToken>
+State 12: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3539, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE

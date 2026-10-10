@@ -290,6 +290,22 @@ same way as `Lifecycle Gate Ownership`.
   decision and pin it, do not guess in the spec.
 - **Invariants and progress properties** for every safety or liveness promise
   the design makes, each named after the decision it defends.
+- **A named `run` for each critical scenario.** Every module that declares a
+  `step` relation carries a named `run` for each critical scenario the design
+  names: the happy path, each fault-and-recovery sequence the design claims to
+  survive, and each boundary the `Lifecycle Gate Ownership` section requires.
+  Each run is listed in `checks.toml` as a `[[check]]` with `run = "<name>"`
+  and `backend = "evaluator"` (executed by `quint test`; `expect = "holds"`
+  when every `expect` along the run must hold). The `Formal protocol model`
+  section lists, for each critical scenario, the named run that encodes it;
+  these are the runs DISTILL's conformance drivers pin with `#[quint_test]`.
+- **Every conformance target is a state machine.** Every spec module a
+  conformance driver targets declares a `step` relation. A definitions-only
+  module (pure definitions, no state, no `step`) may be imported by stateful
+  specs, but it is never itself a conformance target. Behaviour the design
+  needs checked against real-kernel or production state is modelled as
+  actions over the production-reachable configuration transitions, not as a
+  standalone pure function to be evaluated.
 - **A hazard variant per design rule.** Remove or weaken the rule and show the
   checker finds a counterexample (`expect = "violation"` in `checks.toml`). An
   invariant that never fails proves nothing; this is how the spec proves each
@@ -360,6 +376,10 @@ needed; a check that needs more declares `heap_mb` / `workers` in
 `checks.toml`. Authors never script their own runners, watchdogs, sleeps or
 kills around it. Mark checks that
 finish in under two minutes `ci = true`; CI runs them on every change.
+Both `typecheck` and `check` fail, naming the spec file, module and run, when
+a module that declares a `step` relation declares no named `run`, when a named
+`run` is not listed in its subsystem's `checks.toml`, or when a listed run is
+declared neither by its spec nor by a file the spec imports.
 
 Evidence is written only by the command: a full run with `--record` replaces
 `evidence/` with the summary (tool versions, spec hashes, every verdict) and
@@ -447,6 +467,10 @@ The DESIGN reviewer blocks approval when any of the following is true:
   the `Formal protocol model` section is absent, has unrun checks, lacks a
   hazard variant per rule, carries an unresolved counterexample, or leaves an
   assumption with no discharging validation item;
+- the `Formal protocol model` section names no `run` for a critical scenario,
+  or a spec module with a `step` relation declares no named `run`;
+- a spec module the design names as a conformance target is definitions-only
+  (it has no `step` relation);
 - a spec-modelled variable has no pinned owner accessor in the feature-delta
   interface contract, or the action-to-driving-port mapping is unpinned
   (§ "Pin the observable projection the conformance driver reads"), or a

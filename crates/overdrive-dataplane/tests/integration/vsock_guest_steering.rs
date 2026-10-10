@@ -1,342 +1,694 @@
 //! P4 — guest-prefix steering kernel facts (Tier-3, `sk_lookup`).
 //!
-//! netns-density-295 vsock Attachment Replacement DESIGN
-//! (`docs/feature/netns-density-295/feature-delta.md` § "Driven port —
-//! guest-prefix steering `overdrive-dataplane::guest_steering`",
-//! ADR-0171 D8a-LOOKUP, ADR-0175 D8a-LOAD-SWAP, ADR-0176 D8a-CAP) and
-//! validation item V-26 (`spike/findings-v26.md`: all seven kernel claims
-//! HOLD on 7.0.0-29/7.0.0-34).
+//! netns-density-295 vsock attachment replacement, DISTILL piece P4
+//! (`docs/feature/netns-density-295/distill/test-scenarios-p4-steering-intake-boot.md`,
+//! P4-S1..P4-S5). Contract: `docs/feature/netns-density-295/feature-delta.md`
+//! § "[REF] Driven port — guest-prefix steering
+//! `overdrive-dataplane::guest_steering`" (D8a-LOOKUP, D8a-LOAD-SWAP, D8a-CAP;
+//! ADR-0171, ADR-0175, ADR-0176), V-26 (P-40).
 //!
-//! This is an **adapter-integration** file (`.claude/rules/tdd-methodology`
-//! § "Infrastructure Layer"): it drives the real `GuestPrefixSteering`
-//! adapter against the real host kernel (`sk_lookup` link under
-//! `GUEST_PREFIX_STEERING_PIN_DIR`, a listener-keyed socket map, `lo`), with
-//! hand-bound listening TCPv4 sockets standing in for the owner's intake
-//! listeners. The full composition fact — "a steered connection reaches the
-//! guest application" — is the production exposure test
-//! (`vsock_prefix_exposure.rs`, V-19) and the P6 walking skeleton; here the
-//! oracle is the *kernel's* landing decision for a real `lo` connect.
+//! Adapter integration: every test drives the real `GuestPrefixSteering`
+//! (`load` → `GuestSteeringCandidate::attach` → `steer`) against the real
+//! kernel, with hand-bound listening TCPv4 sockets standing in for the owner's
+//! intake listeners. The oracle is the kernel's landing decision for a real
+//! `connect()` — refused (the program dropped the lookup, so TCP answers with a
+//! reset) or accepted by the steered listener, with a byte-distinct
+//! request/response exchange.
 //!
-//! Lane: Tier-3, example-based (Mandate 11 — layer-3 sad paths are enumerated,
-//! never PBT-generated). Node-global kernel state (the root-namespace
-//! `sk_lookup` link + pinned map, `lo`, the guest-prefix nft table): this
-//! MODULE joins the `host-kernel-shared` nextest group
-//! (`.config/nextest.toml`, `max-threads = 1`, matched by module —
-//! `.claude/rules/testing.md` § "Node-global kernel state"). DELIVER adds the
-//! group filter entry when it registers this module.
+//! The prefix is a `TestCidrLease` `/24`, never the production guest prefix:
+//! the lease's gateway is the `gateway` argument, and the fixture installs the
+//! lease's `local <prefix> dev lo` route — the precondition the shared
+//! guest-network owner provides in production (boot step D8a-ROUTE). The pin
+//! under `GUEST_PREFIX_STEERING_PIN_DIR` is removed by RAII.
 //!
-//! ## GATED — pending DELIVER roadmap reconciliation + steering adapter
+//! Lane: Tier-3, example-based (Mandate 11). The whole
+//! `overdrive-dataplane` `integration` binary is in the `host-kernel-shared`
+//! nextest group (`.config/nextest.toml`), which serializes this module's
+//! node-global state (the root-namespace `sk_lookup` link and its pin).
 //!
-//! The production surface this file calls does NOT exist yet
-//! (`GuestPrefixSteering`, `GuestSteeringCandidate`, `GuestSteeringError`,
-//! `GUEST_PREFIX_STEERING_PIN_DIR`, `guest_intake_host_port`,
-//! `GUEST_INTAKE_STEERING_MAX`). Per shared-test-infrastructure.md § 0 and
-//! CLAUDE.md § "Implement to the design — never invent API surface", these
-//! scaffolds are NOT invented here; DELIVER creates them at the roadmap
-//! reconciliation + step 9/12 and only then **registers this module** in
-//! `crates/overdrive-dataplane/tests/integration.rs`
-//! (`mod vsock_guest_steering;`). Until registered, Cargo never compiles this
-//! file, so the authored bodies below are the pre-authored RED scaffolds the
-//! crafter lifts (the complete executable bodies the testing.md
-//! § "RED acceptance scaffolds" convention wants, parked build-safe).
+//! Every test carries the reasoned `#[ignore]` naming its activating DELIVER
+//! step; the crafter removes only the marker.
 //!
-//! Each test carries a reasoned `#[ignore]` naming its activating step; the
-//! crafter removes only the marker and records a semantic RED before touching
-//! production code.
+//! Not covered here (no pinned seam or owner-crate concern): a verifier
+//! rejection at `load` (`Load`), a failing `BPF_LINK_UPDATE` (`Update`), a
+//! failing first-attach pin (`Pin`), `KernelMemory` from `steer`, the
+//! production nft guest-prefix rules (PREFIX-REPLY's constant rules are the
+//! owner's), and a fill of all `GUEST_INTAKE_STEERING_MAX` entries (bounded
+//! cell below).
 
-use std::io::{Read as _, Write as _};
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
-use std::os::fd::AsFd as _;
+#![allow(
+    clippy::expect_used,
+    clippy::doc_markdown,
+    clippy::print_stderr,
+    clippy::unnecessary_debug_formatting
+)]
+
+use std::fs;
+use std::io::{self, Read as _, Write as _};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
+use std::os::fd::{AsFd as _, AsRawFd as _, OwnedFd};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use ipnet::Ipv4Net;
-use overdrive_core::guest_transport::{GUEST_INTAKE_STEERING_MAX, guest_intake_host_port};
+use nix::sys::socket::{
+    AddressFamily, Backlog, SockFlag, SockType, SockaddrIn, bind, connect, listen, socket,
+};
+use overdrive_core::guest_transport::guest_intake_host_port;
 use overdrive_dataplane::guest_steering::{
     GUEST_PREFIX_STEERING_PIN_DIR, GuestPrefixSteering, GuestSteeringError,
 };
+use overdrive_testing::cidr_lease::TestCidrLease;
 
-// --- fixture vocabulary (DELIVER's real-kernel fixtures replace these) ------
+use super::helpers::guest_net::{PeerLink, in_netns, run_cleanup, run_ok, run_stdout};
 
-/// The constant node guest prefix (D8a; `100.95.0.0/16`). A `/16` with its
-/// gateway at the first host address, matching `GuestAddressPool::new`.
-fn guest_prefix() -> Ipv4Net {
-    "100.95.0.0/16".parse().expect("constant prefix parses")
-}
-fn gateway() -> Ipv4Addr {
-    Ipv4Addr::new(100, 95, 0, 1)
-}
-/// A leased workload address inside the prefix (not the gateway).
-fn workload_addr() -> Ipv4Addr {
-    Ipv4Addr::new(100, 95, 0, 2)
-}
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
 
-/// Bind + listen a real TCPv4 socket on `addr`, the intake-block port for the
-/// declared port at `index` (INTAKE-BIND: `workload_addr:guest_intake_host_port(i)`,
-/// never the declared port). Returns the listener; its fd is handed to `steer`.
-fn bind_intake_listener(addr: Ipv4Addr, index: u16) -> TcpListener {
-    let host_port = guest_intake_host_port(index).expect("index within the intake block");
-    TcpListener::bind(SocketAddrV4::new(addr, host_port)).expect("intake bind succeeds")
+/// A leased `/24` made local on `lo` (`ip route add local <cidr> dev lo table
+/// local`): the guest prefix for one test. In production the shared owner
+/// writes this route only over a pinned steering link (D8a-ROUTE); the test
+/// supplies it directly because it exercises the steering adapter alone.
+struct SteeringPrefix {
+    prefix: Ipv4Net,
+    lease: TestCidrLease,
 }
 
-/// Drive a real host-local TCP connect to `dst` and classify the kernel's
-/// landing decision — the V-26 oracle. `Ok` iff the connect completes.
-fn connect_outcome(dst: SocketAddrV4) -> std::io::Result<TcpStream> {
+impl SteeringPrefix {
+    fn acquire(owner: &str) -> Self {
+        let lease = TestCidrLease::acquire(owner)
+            .unwrap_or_else(|e| panic!("precondition: test CIDR lease {owner}: {e}"));
+        let prefix: Ipv4Net = lease.cidr().parse().expect("a lease CIDR parses as Ipv4Net");
+        run_ok("ip", &["route", "add", "local", lease.cidr(), "dev", "lo", "table", "local"]);
+        Self { prefix, lease }
+    }
+
+    /// The gateway the steering excludes (the lease's first host address).
+    const fn gateway(&self) -> Ipv4Addr {
+        self.lease.host_gateway()
+    }
+
+    /// A workload address inside the prefix (the lease's second address).
+    const fn workload(&self) -> Ipv4Addr {
+        self.lease.workload_addr()
+    }
+
+    /// The `n`th address of the prefix (`n` ≥ 3 is neither gateway nor the
+    /// default workload address).
+    fn host(&self, n: u8) -> Ipv4Addr {
+        Ipv4Addr::from(u32::from(self.prefix.network()) + u32::from(n))
+    }
+}
+
+impl Drop for SteeringPrefix {
+    fn drop(&mut self) {
+        run_cleanup(
+            "ip",
+            &["route", "del", "local", self.lease.cidr(), "dev", "lo", "table", "local"],
+        );
+    }
+}
+
+/// Owns the pin directory's contents for one test: removes any link left
+/// behind by an interrupted earlier run at creation (so a first `attach`
+/// really is a first attach), and removes every pin on `Drop` — the links this
+/// test pinned — so the root namespace carries no steering afterwards.
+struct PinnedSteeringGuard;
+
+impl PinnedSteeringGuard {
+    fn claim() -> Self {
+        for entry in pin_entries() {
+            fs::remove_file(&entry).unwrap_or_else(|e| {
+                panic!("precondition: leftover steering pin {entry:?} is removable: {e}")
+            });
+        }
+        Self
+    }
+}
+
+impl Drop for PinnedSteeringGuard {
+    fn drop(&mut self) {
+        for entry in pin_entries() {
+            if let Err(e) = fs::remove_file(&entry) {
+                eprintln!("cleanup: steering pin {entry:?} not removed: {e}");
+            }
+        }
+    }
+}
+
+/// Every object pinned under `GUEST_PREFIX_STEERING_PIN_DIR`.
+fn pin_entries() -> Vec<PathBuf> {
+    match fs::read_dir(GUEST_PREFIX_STEERING_PIN_DIR) {
+        Ok(dir) => dir.map(|e| e.expect("pin dir entry is readable").path()).collect(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => panic!("pin dir {GUEST_PREFIX_STEERING_PIN_DIR} is readable: {e}"),
+    }
+}
+
+/// The pinned link's kernel identity, read with `bpftool` (never through the
+/// adapter's private fields).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PinnedLink {
+    link_id: u64,
+    prog_id: u64,
+}
+
+/// The single link pinned under the pin dir.
+fn pinned_link() -> PinnedLink {
+    let entries = pin_entries();
+    assert_eq!(entries.len(), 1, "exactly one steering link is pinned: {entries:?}");
+    let path = entries[0].to_str().expect("pin path is UTF-8").to_owned();
+    let json = run_stdout("bpftool", &["-j", "link", "show", "pinned", &path]);
+    let v: serde_json::Value = serde_json::from_str(&json).expect("bpftool emits JSON");
+    PinnedLink {
+        link_id: v["id"].as_u64().expect("link has an id"),
+        prog_id: v["prog_id"].as_u64().expect("link has a prog_id"),
+    }
+}
+
+/// Boot steering for the prefix the way boot `converge_shared` does: `load`
+/// then `attach`.
+fn boot_steering(prefix: &SteeringPrefix) -> GuestPrefixSteering {
+    GuestPrefixSteering::load(prefix.prefix, prefix.gateway())
+        .expect("load: the verifier accepts this binary's steering program")
+        .attach()
+        .expect("attach: the steering link is attached and pinned")
+}
+
+/// Bind and listen an intake listener on `addr:guest_intake_host_port(index)`
+/// (INTAKE-BIND: the intake host block, never the declared port).
+fn intake_listener(addr: Ipv4Addr, index: u16) -> TcpListener {
+    let port = guest_intake_host_port(index).expect("index lies in the intake host block");
+    TcpListener::bind(SocketAddrV4::new(addr, port)).expect("precondition: intake listener binds")
+}
+
+/// A wildcard host service on an ephemeral port: the socket a prefix lookup
+/// must never reach (B-2). Non-blocking, so "nothing accepted" is observable.
+fn wildcard_service() -> (TcpListener, u16) {
+    let l = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
+        .expect("precondition: wildcard host service binds");
+    l.set_nonblocking(true).expect("wildcard service non-blocking");
+    let port = l.local_addr().expect("wildcard has a port").port();
+    (l, port)
+}
+
+fn accepted_nothing(l: &TcpListener) -> bool {
+    matches!(l.accept(), Err(e) if e.kind() == io::ErrorKind::WouldBlock)
+}
+
+/// A host-local connect, classified by the kernel's landing decision.
+fn connect_to(dst: SocketAddrV4) -> io::Result<TcpStream> {
     TcpStream::connect_timeout(&dst.into(), Duration::from_secs(1))
 }
 
-/// Byte-distinct request/response litmus so the assertion proves the real
-/// server→client pipe, not an echo.
-const REQUEST: &[u8] = b"p4-steer-req";
-const RESPONSE: &[u8] = b"p4-steer-rsp";
+fn is_refused(r: &io::Result<TcpStream>) -> bool {
+    matches!(r, Err(e) if e.kind() == io::ErrorKind::ConnectionRefused)
+}
 
+const REQUEST: &[u8] = b"p4-steer-request";
+const RESPONSE: &[u8] = b"p4-steer-reply!!";
+
+/// Byte-distinct exchange both ways between `client` and the connection the
+/// steered `listener` accepts.
 fn exchange_both_ways(mut client: TcpStream, listener: &TcpListener) {
-    let (mut server, _peer) = listener.accept().expect("steered listener accepts");
+    let (mut server, _) = listener.accept().expect("the steered listener accepts the connection");
     client.write_all(REQUEST).expect("client writes");
     let mut got = [0u8; REQUEST.len()];
-    server.read_exact(&mut got).expect("server reads request");
-    assert_eq!(&got, REQUEST, "server sees the real request bytes");
+    server.read_exact(&mut got).expect("server reads the request");
+    assert_eq!(&got, REQUEST, "the steered listener receives the client's bytes");
     server.write_all(RESPONSE).expect("server writes");
     let mut back = [0u8; RESPONSE.len()];
-    client.read_exact(&mut back).expect("client reads response");
-    assert_eq!(&back, RESPONSE, "client sees the real response bytes");
+    client.read_exact(&mut back).expect("client reads the response");
+    assert_eq!(&back, RESPONSE, "the client receives the steered listener's bytes");
 }
 
-/// Boot the steering at the prefix the way `converge_shared` boot step 9 does:
-/// `load` → `attach` (a first attach pins a new link under
-/// `GUEST_PREFIX_STEERING_PIN_DIR`).
-fn boot_steering() -> GuestPrefixSteering {
-    GuestPrefixSteering::load(guest_prefix(), gateway())
-        .expect("load: the verifier accepts the shipped program")
-        .attach()
-        .expect("attach: a first link is attached and pinned")
+/// Connect from source address `src` (bound before `connect`).
+fn connect_from(src: Ipv4Addr, dst: SocketAddrV4) -> io::Result<TcpStream> {
+    let fd = socket(AddressFamily::Inet, SockType::Stream, SockFlag::SOCK_CLOEXEC, None)
+        .map_err(io::Error::from)?;
+    bind(fd.as_raw_fd(), &SockaddrIn::from(SocketAddrV4::new(src, 0))).map_err(io::Error::from)?;
+    connect(fd.as_raw_fd(), &SockaddrIn::from(dst)).map_err(io::Error::from)?;
+    Ok(TcpStream::from(fd))
 }
 
-// --- P4-S1 / R5-1, R5-2 (steering-layer half; G-V8, V-26 K-L1/K-L5/K-L10) ---
+/// A TCP socket bound to `addr` but not listening.
+fn bound_unlistening_tcp(addr: Ipv4Addr) -> OwnedFd {
+    let fd = socket(AddressFamily::Inet, SockType::Stream, SockFlag::SOCK_CLOEXEC, None)
+        .expect("precondition: TCP socket");
+    bind(fd.as_raw_fd(), &SockaddrIn::from(SocketAddrV4::new(addr, 0)))
+        .expect("precondition: TCP socket binds");
+    fd
+}
 
+/// A listening TCP socket bound to `addr` on an ephemeral port.
+fn listening_tcp(addr: Ipv4Addr) -> OwnedFd {
+    let fd = bound_unlistening_tcp(addr);
+    listen(&fd, Backlog::new(8).expect("backlog 8 is valid")).expect("precondition: listen");
+    fd
+}
+
+// ---------------------------------------------------------------------------
+// P4-S1 — only a steered listener is reachable at the prefix declared port
+// (R5-1, R5-2 steering half; G-V8; V-26 K-L1/K-L5/K-L10)
+// ---------------------------------------------------------------------------
+
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 09/12 (GuestPrefixSteering adapter; roadmap reconciliation)"]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
 fn only_a_steered_listener_is_reachable_at_the_prefix_declared_port() {
-    // GIVEN the boot steering is attached and no entry names the declared port,
-    // a host service bound wildcard on the declared port, and nothing steered.
-    let steering = boot_steering();
-    let declared_port: u16 = 2222;
-    let _wildcard_host_service =
-        TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, declared_port))
-            .expect("a host service may hold 0.0.0.0:declared_port");
-    let intake_dst = SocketAddrV4::new(workload_addr(), declared_port);
+    let prefix = SteeringPrefix::acquire("vsock-steering-s1");
+    let _pins = PinnedSteeringGuard::claim();
+    let steering = boot_steering(&prefix);
 
-    // WHEN a host-local connect reaches the prefix with no steering entry:
-    // THEN the kernel drops the lookup; TCP is answered with a reset (K-L1,
-    // never the wildcard host service — B-2 defect closed).
-    assert!(
-        matches!(connect_outcome(intake_dst), Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused),
-        "no entry -> reset, never the wildcard host service",
-    );
+    // GIVEN a wildcard host service on the declared port and no entry for it.
+    let (wildcard, declared) = wildcard_service();
+    let intake = SocketAddrV4::new(prefix.workload(), declared);
 
-    // WHEN the owner binds an intake listener on the intake-block port and
-    // steers (workload_addr, declared_port) to it (K-L10: the entry assigns
-    // the listener whatever port it is bound to).
-    let intake = bind_intake_listener(workload_addr(), 0);
-    steering
-        .steer(intake_dst, intake.as_fd())
-        .expect("steer succeeds: admission reserved the port, map has room");
+    // WHEN a host-local connect reaches the prefix with no entry,
+    // THEN the lookup is dropped (reset) and never reaches the wildcard service.
+    assert!(is_refused(&connect_to(intake)), "no entry -> refused");
+    assert!(accepted_nothing(&wildcard), "the wildcard host service is never reached (B-2)");
 
-    // THEN a connect to workload_addr:declared_port reaches the intake listener,
-    let client = connect_outcome(intake_dst).expect("steered declared port reaches the intake");
-    exchange_both_ways(client, &intake);
+    // WHEN an intake listener bound in the intake host block is steered,
+    let listener = intake_listener(prefix.workload(), 0);
+    steering.steer(intake, listener.as_fd()).expect("steer: the entry is present");
 
-    // AND a connect to the listener's own bound block port (not a declared
-    // served port) is reset — it is decided by its own (absent) entry, not by
-    // the bound address (K-L10).
-    let bound_block = SocketAddrV4::new(workload_addr(), guest_intake_host_port(0).unwrap());
-    assert!(
-        matches!(connect_outcome(bound_block), Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused),
-        "the bound block port has no entry of its own -> reset",
-    );
+    // THEN a connect to the declared port reaches it and exchanges both ways,
+    exchange_both_ways(connect_to(intake).expect("steered intake is reachable"), &listener);
+
+    // AND repeating the steer for the same listener is Ok with no change,
+    steering.steer(intake, listener.as_fd()).expect("re-steer of the same listener is Ok");
+    exchange_both_ways(connect_to(intake).expect("still reachable after re-steer"), &listener);
+
+    // AND the listener's own bound block port has no entry of its own: refused.
+    let bound = match listener.local_addr().expect("listener address") {
+        std::net::SocketAddr::V4(a) => a,
+        std::net::SocketAddr::V6(a) => panic!("listener is IPv4, got {a}"),
+    };
+    assert!(is_refused(&connect_to(bound)), "bound block port -> refused (K-L10)");
+    assert!(accepted_nothing(&wildcard), "the wildcard host service is never reached");
 }
 
-// --- P4-S2 / R5-3, K-L1: unassigned/released prefix address reaches nothing ---
+// ---------------------------------------------------------------------------
+// P4-S2 — an unassigned prefix address reaches no host socket; the gateway and
+// out-of-prefix destinations pass untouched; UDP and device ingress are dropped
+// (R5-3, K-L1; G-V1/G-V8; D8a-LOOKUP decision)
+// ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 09/12 (GuestPrefixSteering adapter; roadmap reconciliation)"]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
 fn an_unassigned_prefix_address_reaches_no_host_socket() {
-    // GIVEN the boot steering is attached and a wildcard host service on a port.
-    let _steering = boot_steering();
-    let port: u16 = 2223;
-    let _wildcard_host_service = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port))
-        .expect("host service binds");
-    // WHEN a host-local connect targets a prefix address with no lease / entry:
-    let unassigned = SocketAddrV4::new(Ipv4Addr::new(100, 95, 200, 200), port);
-    // THEN the lookup is dropped and no host socket is reached (with the nft
-    // constant rules both present and — the DELIVER Tier-3 cell — deleted; the
-    // steering alone keeps the prefix closed, K-L1).
+    let prefix = SteeringPrefix::acquire("vsock-steering-s2");
+    let _pins = PinnedSteeringGuard::claim();
+    let _steering = boot_steering(&prefix);
+    let (wildcard, port) = wildcard_service();
+
+    // A prefix address with no lease and no entry: refused, no host socket.
+    let unassigned = SocketAddrV4::new(prefix.host(200), port);
+    assert!(is_refused(&connect_to(unassigned)), "unassigned prefix address -> refused");
+    assert!(accepted_nothing(&wildcard), "the wildcard host service is never reached");
+
+    // The gateway is excluded: its lookup passes untouched to the host socket.
+    let via_gateway = connect_to(SocketAddrV4::new(prefix.gateway(), port));
+    assert!(via_gateway.is_ok(), "gateway passes untouched: {via_gateway:?}");
+    assert!(!accepted_nothing(&wildcard), "the gateway connection lands on the host service");
+
+    // A destination outside the prefix passes untouched.
+    let outside = connect_to(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
+    assert!(outside.is_ok(), "out-of-prefix passes untouched: {outside:?}");
+    assert!(!accepted_nothing(&wildcard), "the loopback connection lands on the host service");
+}
+
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
+fn udp_to_a_prefix_address_reaches_no_host_socket() {
+    let prefix = SteeringPrefix::acquire("vsock-steering-udp");
+    let _pins = PinnedSteeringGuard::claim();
+    let _steering = boot_steering(&prefix);
+
+    // GIVEN a wildcard UDP host service.
+    let service = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
+        .expect("precondition: wildcard UDP service binds");
+    service.set_read_timeout(Some(Duration::from_millis(500))).expect("read timeout");
+    let port = service.local_addr().expect("UDP service port").port();
+    let client = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).expect("UDP client");
+    let mut buf = [0u8; 64];
+
+    // Control: outside the prefix the service receives the datagram.
+    client
+        .send_to(b"outside", SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
+        .expect("send to loopback");
+    let n = service.recv(&mut buf).expect("the host service receives out-of-prefix UDP");
+    assert_eq!(&buf[..n], b"outside");
+
+    // WHEN a datagram targets a prefix address, THEN no host socket receives it.
+    client.send_to(b"prefix", SocketAddrV4::new(prefix.workload(), port)).expect("send to prefix");
+    let got = service.recv(&mut buf);
     assert!(
-        matches!(connect_outcome(unassigned), Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused),
-        "unassigned prefix address -> reset, reaches no host socket",
+        matches!(&got, Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)),
+        "UDP to the prefix reaches no host socket: {got:?}",
     );
 }
 
-// --- P4-S3 / R5-22 close, D8a-CAP, K-L3: close removes the entry + cap cycle --
-
+/// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 09/12 (GuestPrefixSteering adapter; roadmap reconciliation)"]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
+fn a_connection_arriving_on_a_device_is_dropped_even_for_a_steered_intake() {
+    let prefix = SteeringPrefix::acquire("vsock-steering-dev");
+    let _pins = PinnedSteeringGuard::claim();
+    let steering = boot_steering(&prefix);
+
+    // GIVEN a steered intake that a host-local client reaches,
+    let (wildcard, declared) = wildcard_service();
+    let intake = SocketAddrV4::new(prefix.workload(), declared);
+    let listener = intake_listener(prefix.workload(), 0);
+    steering.steer(intake, listener.as_fd()).expect("steer");
+    exchange_both_ways(
+        connect_to(intake).expect("host-local client reaches the intake"),
+        &listener,
+    );
+
+    // AND a remote client in another namespace, routed to the prefix over a veth.
+    let link = PeerLink::create("vsock-steering-dev-link", 0);
+    link.route_from_peer(&prefix.prefix.to_string());
+
+    // Control: the remote path delivers TCP to the host (the gateway passes).
+    let gateway_dst = SocketAddrV4::new(prefix.gateway(), declared);
+    let control = in_netns(&link.netns.name, move || connect_to(gateway_dst).map(|_| ()));
+    assert!(control.is_ok(), "the remote client reaches the host via the gateway: {control:?}");
+
+    // WHEN the remote client connects to the steered intake (ingress = the veth),
+    // THEN the lookup is dropped: only loopback ingress is steered.
+    let remote = in_netns(&link.netns.name, move || connect_to(intake).map(|_| ()));
+    assert!(
+        matches!(&remote, Err(e) if e.kind() == io::ErrorKind::ConnectionRefused),
+        "device ingress to the prefix is refused even with an entry: {remote:?}",
+    );
+    listener.set_nonblocking(true).expect("listener non-blocking");
+    assert!(accepted_nothing(&listener), "the steered listener accepted nothing remote");
+    drop(wildcard);
+}
+
+// ---------------------------------------------------------------------------
+// P4-S3 — close removes the entry in the same step; a freed slot is reusable
+// (R5-22 close, D8a-CAP, K-L3; G-V8)
+// ---------------------------------------------------------------------------
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
 fn closing_a_listener_frees_its_steering_slot_in_the_same_step() {
-    let steering = boot_steering();
-    let port: u16 = 2300;
-    let dst = SocketAddrV4::new(workload_addr(), port);
+    let prefix = SteeringPrefix::acquire("vsock-steering-s3");
+    let _pins = PinnedSteeringGuard::claim();
+    let steering = boot_steering(&prefix);
+    let (_wildcard, declared) = wildcard_service();
+    let intake = SocketAddrV4::new(prefix.workload(), declared);
 
-    // GIVEN a steered listener, a connect reaches it.
-    let intake = bind_intake_listener(workload_addr(), 0);
-    steering.steer(dst, intake.as_fd()).expect("steer");
-    connect_outcome(dst).expect("steered -> reachable").shutdown(std::net::Shutdown::Both).ok();
+    let first = intake_listener(prefix.workload(), 0);
+    steering.steer(intake, first.as_fd()).expect("steer");
+    exchange_both_ways(connect_to(intake).expect("steered -> reachable"), &first);
 
-    // WHEN the listener closes (dropped) the kernel removes the entry in the
-    // same step (K-L3): the slot is free and the next connect is reset.
-    drop(intake);
-    assert!(
-        matches!(connect_outcome(dst), Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused),
-        "close removes the entry in the same kernel step -> reset",
+    // WHEN the listener closes, THEN the next connect is refused at once.
+    drop(first);
+    assert!(is_refused(&connect_to(intake)), "close removes the entry in the same step");
+
+    // AND a fresh listener steered to the same intake is reachable at once.
+    let second = intake_listener(prefix.workload(), 0);
+    steering.steer(intake, second.as_fd()).expect("re-steer after close: the slot was freed");
+    exchange_both_ways(connect_to(intake).expect("re-steered -> reachable"), &second);
+}
+
+/// Bounded capacity cycle. The full `GUEST_INTAKE_STEERING_MAX` (262,144)
+/// fill needs one listening socket per entry — far beyond the test lane's
+/// descriptor limit and memory — and over-capacity is a precondition the
+/// owner's admission excludes (D8a-CAP: `steer` never fails for capacity), so
+/// this cell proves the slot-recycling half at 256 entries over 4 addresses.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
+fn closing_steered_listeners_frees_every_slot_for_new_listeners() {
+    const ADDRESSES: u8 = 4;
+    const PER_ADDRESS: u16 = 64;
+    const DECLARED_BASE: u16 = 41_000;
+
+    let prefix = SteeringPrefix::acquire("vsock-steering-cap");
+    let _pins = PinnedSteeringGuard::claim();
+    let steering = boot_steering(&prefix);
+
+    let intakes: Vec<(SocketAddrV4, Ipv4Addr, u16)> = (0..ADDRESSES)
+        .flat_map(|a| {
+            let addr = prefix.host(10 + a);
+            (0..PER_ADDRESS).map(move |i| (SocketAddrV4::new(addr, DECLARED_BASE + i), addr, i))
+        })
+        .collect();
+
+    let steer_all = || -> Vec<TcpListener> {
+        intakes
+            .iter()
+            .map(|(intake, addr, index)| {
+                let l = intake_listener(*addr, *index);
+                steering.steer(*intake, l.as_fd()).expect("steer within capacity");
+                l
+            })
+            .collect()
+    };
+
+    let generation = steer_all();
+    let (sample, _, _) = intakes[intakes.len() / 2];
+    exchange_both_ways(
+        connect_to(sample).expect("sampled intake reachable"),
+        &generation[intakes.len() / 2],
     );
-    // AND a fresh listener steered on the same port is reachable at once.
-    let intake2 = bind_intake_listener(workload_addr(), 0);
-    steering.steer(dst, intake2.as_fd()).expect("re-steer at once, the slot was freed");
-    exchange_both_ways(connect_outcome(dst).expect("re-steered reachable"), &intake2);
+
+    drop(generation);
+    for (intake, _, _) in intakes.iter().step_by(37) {
+        assert!(is_refused(&connect_to(*intake)), "closed listener's entry is gone: {intake}");
+    }
+
+    let regenerated = steer_all();
+    for (i, (intake, _, _)) in intakes.iter().enumerate().step_by(37) {
+        exchange_both_ways(
+            connect_to(*intake).expect("re-steered intake reachable"),
+            &regenerated[i],
+        );
+    }
 }
 
+// ---------------------------------------------------------------------------
+// steer preconditions (IntakeOutsideGuestPrefix, IntakeAlreadySteered,
+// UnsupportedSocket) — each refusal leaves the entry absent
+// ---------------------------------------------------------------------------
+
+/// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 09/12 (GuestPrefixSteering adapter; roadmap reconciliation)"]
-fn steering_map_at_capacity_refuses_one_more_then_a_close_frees_a_slot() {
-    // GIVEN the map at GUEST_INTAKE_STEERING_MAX entries (DELIVER fills it with
-    // distinct (address, port) entries over the prefix — P-40 filled 262,144 as
-    // 5 ports x 52,429 prefix addresses). This fixture is Tier-3-heavy; DELIVER
-    // supplies the real fill helper. Here the oracle is the kernel's E2BIG.
-    let steering = boot_steering();
-    let filled = fill_steering_to_capacity(&steering); // DELIVER fixture
-    assert_eq!(filled.len() as u32, GUEST_INTAKE_STEERING_MAX, "the map holds its max_entries");
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
+fn an_intake_outside_the_prefix_or_at_the_gateway_is_refused() {
+    let prefix = SteeringPrefix::acquire("vsock-steering-outside");
+    let _pins = PinnedSteeringGuard::claim();
+    let steering = boot_steering(&prefix);
 
-    // WHEN one more insert is attempted on a free (address, port):
-    let overflow_port: u16 = 2399;
-    let overflow = bind_intake_listener(workload_addr(), 1);
-    let err = steering
-        .steer(SocketAddrV4::new(workload_addr(), overflow_port), overflow.as_fd())
-        .expect_err("a full map refuses the insert");
-    // THEN the kernel refuses with the map-full path (E2BIG surfaces as a
-    // MapUpdate on this adapter; D8a-CAP guarantees the owner never hits it,
-    // but the kernel fact is asserted here).
-    assert!(matches!(err, GuestSteeringError::MapUpdate { .. }), "full map -> MapUpdate");
+    // Outside the prefix (loopback).
+    let outside = listening_tcp(Ipv4Addr::LOCALHOST);
+    let intake = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 41_500);
+    let err = steering.steer(intake, outside.as_fd()).expect_err("outside the prefix");
+    assert!(
+        matches!(err, GuestSteeringError::IntakeOutsideGuestPrefix { intake: i } if i == intake),
+        "outside -> IntakeOutsideGuestPrefix: {err:?}",
+    );
 
-    // AND after one earlier listener closes, its slot frees and the insert
-    // succeeds.
-    drop(filled.into_iter().next().expect("at least one entry"));
-    steering
-        .steer(SocketAddrV4::new(workload_addr(), overflow_port), overflow.as_fd())
-        .expect("a freed slot lets the insert succeed");
+    // The gateway.
+    let at_gateway = listening_tcp(prefix.gateway());
+    let intake = SocketAddrV4::new(prefix.gateway(), 41_501);
+    let err = steering.steer(intake, at_gateway.as_fd()).expect_err("the gateway");
+    assert!(
+        matches!(err, GuestSteeringError::IntakeOutsideGuestPrefix { intake: i } if i == intake),
+        "gateway -> IntakeOutsideGuestPrefix: {err:?}",
+    );
 }
 
-/// DELIVER-provided Tier-3 fixture: fill the steering map to its `max_entries`
-/// with distinct `(address, port)` entries over the prefix. Named here so the
-/// scaffold reads; the crafter supplies the body co-sequenced with the adapter.
-fn fill_steering_to_capacity(_steering: &GuestPrefixSteering) -> Vec<TcpListener> {
-    unreachable!("DELIVER real-kernel fixture: fill to GUEST_INTAKE_STEERING_MAX")
-}
-
-// --- P4-S4 / R5-24, R5-34, D8a-LOAD-SWAP, K-L9: pinned link + atomic swap -----
-
+/// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 09/12 (GuestPrefixSteering adapter; roadmap reconciliation)"]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
+fn a_socket_that_is_not_a_listener_bound_to_the_intake_address_is_refused() {
+    let prefix = SteeringPrefix::acquire("vsock-steering-unsupported");
+    let _pins = PinnedSteeringGuard::claim();
+    let steering = boot_steering(&prefix);
+    let intake = SocketAddrV4::new(prefix.workload(), 41_600);
+
+    let udp = UdpSocket::bind(SocketAddrV4::new(prefix.workload(), 0)).expect("UDP binds");
+    let not_listening = bound_unlistening_tcp(prefix.workload());
+    let other_address = listening_tcp(prefix.host(3));
+    let wildcard = listening_tcp(Ipv4Addr::UNSPECIFIED);
+
+    for (label, fd) in [
+        ("UDP socket", udp.as_fd()),
+        ("bound, not listening", not_listening.as_fd()),
+        ("listening on another prefix address", other_address.as_fd()),
+        ("listening on 0.0.0.0", wildcard.as_fd()),
+    ] {
+        let err = steering.steer(intake, fd).expect_err(label);
+        assert!(matches!(err, GuestSteeringError::UnsupportedSocket), "{label}: {err:?}");
+        assert!(is_refused(&connect_to(intake)), "{label}: the entry is absent");
+    }
+}
+
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
+fn an_intake_steered_to_another_open_listener_is_refused_without_change() {
+    let prefix = SteeringPrefix::acquire("vsock-steering-already");
+    let _pins = PinnedSteeringGuard::claim();
+    let steering = boot_steering(&prefix);
+    let intake = SocketAddrV4::new(prefix.workload(), 41_700);
+
+    let first = intake_listener(prefix.workload(), 0);
+    steering.steer(intake, first.as_fd()).expect("first steer");
+    let second = intake_listener(prefix.workload(), 1);
+
+    // WHEN a second open listener is steered to the same intake,
+    let err = steering.steer(intake, second.as_fd()).expect_err("already steered");
+    assert!(
+        matches!(err, GuestSteeringError::IntakeAlreadySteered { intake: i } if i == intake),
+        "-> IntakeAlreadySteered: {err:?}",
+    );
+    // THEN nothing changed: the first listener still receives the connection.
+    exchange_both_ways(connect_to(intake).expect("still steered to the first"), &first);
+
+    // AND once the first closes, the second can be steered.
+    drop(first);
+    steering.steer(intake, second.as_fd()).expect("the freed intake is steerable");
+    exchange_both_ways(connect_to(intake).expect("now steered to the second"), &second);
+}
+
+// ---------------------------------------------------------------------------
+// P4-S4 — load, then swap: a first attach pins; a later boot swaps over the
+// pinned link atomically and never detaches it (R5-24/R5-34, D8a-LOAD-SWAP,
+// K-L9; G-V1)
+// ---------------------------------------------------------------------------
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
+fn a_first_attach_pins_a_link_that_outlives_the_handle() {
+    let prefix = SteeringPrefix::acquire("vsock-steering-pin");
+    let _pins = PinnedSteeringGuard::claim();
+    let (wildcard, port) = wildcard_service();
+    let dst = SocketAddrV4::new(prefix.workload(), port);
+
+    // `load` attaches and pins nothing.
+    let candidate = GuestPrefixSteering::load(prefix.prefix, prefix.gateway()).expect("load");
+    assert!(pin_entries().is_empty(), "load pins nothing");
+    let link = {
+        let _steering = candidate.attach().expect("first attach");
+        // A first attach pins one link.
+        let link = pinned_link();
+        assert_ne!(link.prog_id, 0, "the pinned link runs a program");
+        link
+    };
+
+    // Dropping the handle (end of the block above) closes only this
+    // process's descriptors: the pinned link keeps deciding the prefix.
+    assert_eq!(pinned_link(), link, "the pin keeps the same link and program");
+    assert!(is_refused(&connect_to(dst)), "the prefix stays steered after the handle drops");
+    assert!(accepted_nothing(&wildcard), "the wildcard host service is never reached");
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER vsock new-step 13 (steering load and swap)"]
 fn boot_over_a_left_behind_pinned_link_swaps_atomically_and_never_detaches() {
-    // GIVEN an earlier boot left a pinned link running its program (DELIVER
-    // leaves one, then drops the owner handle without unpinning — U-4). A
-    // connect loop runs across the load and the swap; `sshd` is on 0.0.0.0:port.
-    let port: u16 = 22;
-    let _sshd =
-        TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)).expect("stand-in sshd");
+    let prefix = SteeringPrefix::acquire("vsock-steering-swap");
+    let _pins = PinnedSteeringGuard::claim();
 
-    // WHEN a new binary boots over the adopted pinned link: `load` a new
-    // program+map, `attach` swaps it in with BPF_LINK_UPDATE (never a detach).
-    let candidate = GuestPrefixSteering::load(guest_prefix(), gateway()).expect("load new program");
-    // A connect-loop oracle runs concurrently across the next line; DELIVER's
-    // Tier-3 harness spawns it and asserts every connect across the update is
-    // decided only by the earlier program or the new one — never `sshd`.
-    let steering = candidate.attach().expect("attach: BPF_LINK_UPDATE swaps atomically, no detach");
+    // GIVEN an earlier boot pinned a link and exited (its listeners closed —
+    // K-L4: the earlier map holds no live socket when a later boot runs).
+    let (_svc, declared) = wildcard_service();
+    let intake = SocketAddrV4::new(prefix.workload(), declared);
+    {
+        let earlier = boot_steering(&prefix);
+        let old_listener = intake_listener(prefix.workload(), 0);
+        earlier.steer(intake, old_listener.as_fd()).expect("earlier steer");
+        exchange_both_ways(connect_to(intake).expect("earlier steering serves"), &old_listener);
+    }
+    let before = pinned_link();
 
-    // THEN the pinned link still exists (never detached) and runs this boot's
-    // program; a connect to a workload address with no entry is reset, never
-    // reaching `sshd` at any instant of the loop.
-    assert!(
-        pinned_link_exists(GUEST_PREFIX_STEERING_PIN_DIR),
-        "the pinned link is never detached across the swap (K-L9)",
-    );
-    let dst = SocketAddrV4::new(workload_addr(), port);
-    assert!(
-        matches!(connect_outcome(dst), Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused),
-        "no entry -> reset, never `sshd`, across and after the swap",
-    );
-    drop(steering);
+    // AND a wildcard host service the prefix must never reach, probed by a
+    // connect loop running across the load and the swap.
+    let (wildcard, port) = wildcard_service();
+    let probe = SocketAddrV4::new(prefix.host(50), port);
+    let stop = Arc::new(AtomicBool::new(false));
+    let attempts = Arc::new(AtomicU64::new(0));
+    let reached = Arc::new(AtomicU64::new(0));
+    let loop_handle = {
+        let (stop, attempts, reached) =
+            (Arc::clone(&stop), Arc::clone(&attempts), Arc::clone(&reached));
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                if connect_to(probe).is_ok() {
+                    reached.fetch_add(1, Ordering::AcqRel);
+                }
+                attempts.fetch_add(1, Ordering::AcqRel);
+            }
+        })
+    };
+
+    // WHEN a new boot loads its program and swaps it into the pinned link,
+    let candidate = GuestPrefixSteering::load(prefix.prefix, prefix.gateway()).expect("load");
+    let steering = candidate.attach().expect("attach: BPF_LINK_UPDATE over the pinned link");
+    let at_swap = attempts.load(Ordering::Acquire);
+    while attempts.load(Ordering::Acquire) < at_swap + 200 {
+        std::thread::yield_now();
+    }
+    stop.store(true, Ordering::Release);
+    loop_handle.join().expect("connect loop completes");
+
+    // THEN the link was never detached nor replaced: same link, new program,
+    let after = pinned_link();
+    assert_eq!(after.link_id, before.link_id, "the pinned link is never detached (K-L9)");
+    assert_ne!(after.prog_id, before.prog_id, "the link now runs this boot's program");
+
+    // AND no connect across the load and swap reached the wildcard service,
+    assert!(attempts.load(Ordering::Acquire) > 200, "the loop ran across the swap");
+    assert_eq!(reached.load(Ordering::Acquire), 0, "no prefix connect reached a host socket");
+    assert!(accepted_nothing(&wildcard), "the wildcard host service accepted nothing");
+
+    // AND the swapped-in program steers with its own map.
+    let listener = intake_listener(prefix.workload(), 1);
+    steering.steer(intake, listener.as_fd()).expect("steer after the swap");
+    exchange_both_ways(connect_to(intake).expect("steered after the swap"), &listener);
 }
 
+// ---------------------------------------------------------------------------
+// P4-S5 — a host-local client whose source lies in the prefix completes to a
+// steered intake (R5-43, PREFIX-REPLY steering half; G-V8). The constant nft
+// reply-accept rules are the owner's (control-plane) and are not present here.
+// ---------------------------------------------------------------------------
+
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 09/12 (GuestPrefixSteering adapter; roadmap reconciliation)"]
-fn a_failed_swap_leaves_the_earlier_program_attached() {
-    // GIVEN a pinned link running an earlier program and a scripted
-    // BPF_LINK_UPDATE failure (DELIVER injects it on the real kernel path; the
-    // sim path is vsock_prefix_boot_order.rs).
-    let candidate = GuestPrefixSteering::load(guest_prefix(), gateway()).expect("load");
-    // WHEN the swap fails:
-    let err = candidate.attach().expect_err("the scripted BPF_LINK_UPDATE fails");
-    // THEN the link still runs the earlier program, unchanged (K-L9), and the
-    // error is `Update`.
-    assert!(matches!(err, GuestSteeringError::Update { .. }), "swap failure -> Update");
-    assert!(
-        pinned_link_exists(GUEST_PREFIX_STEERING_PIN_DIR),
-        "a failed swap leaves the earlier pinned link and its program",
-    );
-}
-
-/// DELIVER-provided Tier-3 helper: does a pinned `sk_lookup` link exist under
-/// the pin dir? Observed by a kernel link query (`bpftool net` / the link pin),
-/// never through the owner's private fields.
-fn pinned_link_exists(_pin_dir: &str) -> bool {
-    unreachable!("DELIVER real-kernel fixture: query the pinned sk_lookup link")
-}
-
-// --- P4-S5 / R5-43, PREFIX-REPLY: reply path for an in-prefix source ----------
-
-#[test]
-#[ignore = "pending DELIVER step 09/12 (GuestPrefixSteering adapter; roadmap reconciliation)"]
+#[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
 fn a_host_local_client_whose_source_lies_in_the_prefix_completes_to_a_steered_intake() {
-    // GIVEN the production constant guest-prefix rules are present (PREFIX-REPLY:
-    // `ct state established,related accept` sits before each reject/drop, after
-    // the leg-S exemption and the leg-C divert), the steering is attached, and a
-    // declared port is steered to an intake listener.
-    let steering = boot_steering();
-    let port: u16 = 2500;
-    let dst = SocketAddrV4::new(workload_addr(), port);
-    let intake = bind_intake_listener(workload_addr(), 0);
-    steering.steer(dst, intake.as_fd()).expect("steer");
+    let prefix = SteeringPrefix::acquire("vsock-steering-s5");
+    let _pins = PinnedSteeringGuard::claim();
+    let steering = boot_steering(&prefix);
+    let intake = SocketAddrV4::new(prefix.workload(), 41_800);
+    let listener = intake_listener(prefix.workload(), 0);
+    steering.steer(intake, listener.as_fd()).expect("steer");
 
-    // WHEN a host-local client whose SOURCE address lies in the prefix (the
-    // gateway) connects to the steered intake:
-    // DELIVER binds the client socket to the gateway source; here the oracle is
-    // that the connection completes AND exchanges both ways (replies pass the
-    // guest-prefix rules whatever their address, PREFIX-REPLY).
-    let client = connect_from_source(gateway(), dst).expect("admitted connection completes");
-    exchange_both_ways(client, &intake);
+    // WHEN a client sourced at the gateway connects to the steered intake,
+    let client = connect_from(prefix.gateway(), intake).expect("in-prefix-source client completes");
+    // THEN it exchanges both ways (the replies to the in-prefix source pass).
+    exchange_both_ways(client, &listener);
 
-    // AND a NEW unmarked host-local connect to the prefix with no entry is still
-    // rejected at once (the accept decides only established/related — rule 5/8
-    // unchanged for connection-opening packets).
-    let fresh = SocketAddrV4::new(workload_addr(), 2501);
+    // AND a new connect to an unsteered port of the prefix is still refused.
+    let fresh = connect_from(prefix.gateway(), SocketAddrV4::new(prefix.workload(), 41_801));
     assert!(
-        matches!(connect_outcome(fresh), Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused),
-        "a new connection-opening packet is still rejected; only replies pass",
+        matches!(&fresh, Err(e) if e.kind() == io::ErrorKind::ConnectionRefused),
+        "an unsteered prefix port is refused: {fresh:?}",
     );
-    // (leg-C-diverted and leg-S connections keeping their paths are the P5
-    // enforcement cells and the exposure test, not asserted at this layer.)
-}
-
-/// DELIVER-provided helper: connect with the client socket bound to `src` as
-/// its source address (a `local`-route preferred source inside the prefix).
-fn connect_from_source(_src: Ipv4Addr, _dst: SocketAddrV4) -> std::io::Result<TcpStream> {
-    unreachable!("DELIVER real-kernel fixture: bind the client source, then connect")
 }

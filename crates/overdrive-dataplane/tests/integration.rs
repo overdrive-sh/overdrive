@@ -114,4 +114,19 @@ mod integration {
     /// phase-2-xdp-service-map Slice 01 (US-01; S-2.2-01..03) —
     /// real-iface XDP attach. RED scaffolds.
     mod veth_attach;
+    /// netns-density-295 P5 (P5-S1, P5-S3; D5a-IFACE, D5a-IFACE-BOOT,
+    /// USO-NO-SEGMENT) — the real `GuestFlowForwarder`'s egress unframe
+    /// program: `lo` at load, boot convergence onto veth interfaces, the
+    /// classified attach failures, byte-exact guest datagrams. Pending DELIVER
+    /// vsock new-step 4.
+    mod vsock_egress_unframe;
+    /// netns-density-295 P5 (P5-S4; FRAG-MAP-LIFECYCLE) — the egress unframe
+    /// program's fragment-tracking map under cut trains, capacity pressure from
+    /// several CPUs and a congested qdisc. Pending DELIVER vsock new-step 4.
+    mod vsock_fragment_map;
+    /// netns-density-295 P4 (P4-S1..P4-S5; D8a-LOOKUP, D8a-LOAD-SWAP,
+    /// D8a-CAP) — the real `GuestPrefixSteering` `sk_lookup` adapter over a
+    /// leased prefix made local on `lo`. Pending DELIVER vsock new-steps 9 and
+    /// 13.
+    mod vsock_guest_steering;
 }

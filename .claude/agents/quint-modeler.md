@@ -26,30 +26,47 @@ before running it).
    an underspecified point is a finding you return, naming the decision id.
 2. Encode each safety and liveness promise as an invariant or temporal
    property named after the decision it defends.
-3. For every design rule, keep a hazard variant in `hazard/` that removes or
+3. Write a named `run` for every critical scenario the design names (the
+   happy path, each fault-and-recovery sequence it claims to survive, each
+   gate boundary), in the stateful module that declares `step`, and list each
+   one in `checks.toml` as a `[[check]]` with `run = "<name>"`,
+   `backend = "evaluator"` and its `expect`. Every run is always written and
+   listed: DISTILL's conformance drivers pin these runs with `#[quint_test]`,
+   and `cargo xtask quint typecheck` / `check` fail when a module with a
+   `step` relation has no named run, when a named run is not listed in
+   `checks.toml`, or when a listed run names nothing the spec declares.
+   Return the scenario → run mapping so the design's `Formal protocol model`
+   section can list it.
+4. Any module a conformance driver will check is a state machine — state
+   variables, `init` and `step` — never a standalone module of pure
+   functions. A definitions-only module may be imported by stateful specs,
+   but is never a conformance target; behaviour to be checked against real
+   kernel or production state is modelled as actions over the
+   production-reachable configuration transitions.
+5. For every design rule, keep a hazard variant in `hazard/` that removes or
    weakens the rule, with `expect = "violation"` in `checks.toml`.
-4. State kernel, VMM, network and environment behaviour as explicit
+6. State kernel, VMM, network and environment behaviour as explicit
    assumptions, each mapped in `README.md` to the validation item that
    discharges it. Model environment faults (crash at each step, foreign
    mutation, restart) as actions.
-5. Run everything through the xtask command, inside Lima, in the foreground:
+7. Run everything through the xtask command, inside Lima, in the foreground:
    - `cargo xtask lima run -- cargo xtask quint typecheck`
    - `cargo xtask lima run -- cargo xtask quint check --subsystem <subsystem> --name <check>`
    **While you edit, run only the checks you affected**: each check of the
    module you changed, plus its hazards, one `--name` at a time (seconds to a
    few minutes each). Never run the whole subsystem to see the effect of an
-   edit — the full run is the final record in step 7.
+   edit — the full run is the final record in step 9.
    The command owns timeouts, process cleanup, server ports and parallelism.
    Do not write your own runner scripts, watchdogs, or `kill`/`pkill`
    sequences. If the command misbehaves (hangs, leaks processes,
    misclassifies an outcome), stop and return that as a tooling defect with
    the log path — do not work around it.
-6. Mark `ci = true` only for checks that finish in under two minutes.
-7. When every affected check passes and the specs are final for this design
+8. Mark `ci = true` only for checks that finish in under two minutes.
+9. When every affected check passes and the specs are final for this design
    revision, record evidence with one full run: `cargo xtask lima run --
    cargo xtask quint check --subsystem <subsystem> --record`, then confirm it
    with `cargo xtask quint verify-evidence --subsystem <subsystem>`. The
-   record run is yours to finish: if it reports a mismatch, fix it (step 5
+   record run is yours to finish: if it reports a mismatch, fix it (step 7
    checks again), then re-record. A full run can outlast one 30-minute tool
    call; then start it detached with an exit-code file
    (`nohup sh -c '<command> > target/quint-record.log 2>&1; echo $? > target/quint-record.exit' &`)
@@ -79,6 +96,7 @@ before running it).
   state count per area.
 - Every unexpected result: a plain-language counterexample (a short sequence
   of events), the design rule it breaks, and the decision id.
+- The critical scenario → named `run` mapping, and the run checks' results.
 - Underspecified points (decision id + what is missing).
 - Assumptions without a discharging validation item.
 - Whether `verify-evidence` passes.

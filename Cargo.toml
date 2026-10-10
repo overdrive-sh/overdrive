@@ -225,6 +225,14 @@ trybuild        = "=1.0.101"
 # implementation. Dev-dependency use only. Pinned exactly to the version
 # the conformance precedent was validated against with Quint v0.32.0.
 quint-connect   = "=0.1.2"
+# ITF trace deserialization helpers (`itf::de::As`) the quint-connect drivers
+# use for Quint maps, sets and options. Same major as quint-connect's own dep.
+itf             = "0.4"
+# `quint_connect::switch!` expands to `anyhow::bail!` for an unmapped action and
+# `quint_connect::Result` is `anyhow::Result`: the drivers need the crate in
+# scope. Dev-dependency of the driver crates only; library error types stay
+# thiserror (`.claude/rules/rust.md` § Errors).
+anyhow          = "1"
 
 # --- Async streams --------------------------------------------------------
 tokio-stream    = { version = "0.1", features = ["sync"] }

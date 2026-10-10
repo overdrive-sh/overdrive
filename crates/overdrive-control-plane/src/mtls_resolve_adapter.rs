@@ -202,6 +202,7 @@ use futures::StreamExt;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::ServiceId;
 use overdrive_core::traits::dataplane::Backend;
+use overdrive_dataplane::allocators::VipRange;
 
 use crate::dns_responder::frontend_addr_allocator::{
     FrontendAddrAllocator, WORKLOAD_FRONTEND_BASE,
@@ -632,6 +633,11 @@ pub struct ServiceBackendsResolve {
     /// the registration-vs-shutdown race. Once sealed, later probes fail rather
     /// than spawning a task beyond the server owner boundary.
     drain_sealed: AtomicBool,
+    /// The configured service VIP ranges — the same value the service VIP
+    /// allocator is built from (D24a, one SSOT at composition). Consulted by
+    /// the VIP classification branch (step 11).
+    #[allow(dead_code, reason = "the D24a VIP classification branch lands in step 11")]
+    vip_ranges: VipRange,
 }
 
 impl ServiceBackendsResolve {
@@ -645,12 +651,19 @@ impl ServiceBackendsResolve {
     /// starts empty and no watch is open yet; [`probe`](MtlsResolve::probe)
     /// Lists the snapshot into the index, projects `by_frontend` from the
     /// allocator, and opens the single-owner watch (the Earned-Trust
-    /// "wire → probe → use" gate).
+    /// "wire → probe → use" gate). `vip_ranges` is the configured service VIP
+    /// range, the same value the VIP allocator receives (mandatory, no
+    /// default; D24a).
     #[must_use]
-    pub fn new(store: Arc<dyn ObservationStore>, frontend: FrontendAddrAllocator) -> Self {
+    pub fn new(
+        store: Arc<dyn ObservationStore>,
+        frontend: FrontendAddrAllocator,
+        vip_ranges: VipRange,
+    ) -> Self {
         Self {
             store,
             frontend,
+            vip_ranges,
             index: Arc::new(RwLock::new(BackendIndex::default())),
             // Healthy until proven otherwise: a resolve before any probe (which
             // the composition root forbids — wire → probe → use) reads an empty
@@ -975,6 +988,7 @@ mod tests {
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(store) as Arc<dyn ObservationStore>,
             FrontendAddrAllocator::new(),
+            VipRange::default(),
         );
         // List-at-probe seeds the pre-existing rows into the index.
         adapter.probe().await.expect("probe Lists the pre-existing rows");
@@ -1052,6 +1066,7 @@ mod tests {
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(&store) as Arc<dyn ObservationStore>,
             FrontendAddrAllocator::new(),
+            VipRange::default(),
         );
         adapter.probe().await.expect("probe Lists the pre-existing snapshot");
 
@@ -1145,6 +1160,7 @@ mod tests {
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(&store) as Arc<dyn ObservationStore>,
             FrontendAddrAllocator::new(),
+            VipRange::default(),
         );
         adapter.probe().await.expect("probe on an empty store is Ok");
         // The address is a miss right now (the row does not exist yet).
@@ -1216,6 +1232,7 @@ mod tests {
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(&store) as Arc<dyn ObservationStore>,
             FrontendAddrAllocator::new(),
+            VipRange::default(),
         );
         adapter.probe().await.expect("probe on an empty store opens the channel watch");
 
@@ -1276,6 +1293,7 @@ mod tests {
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(&store) as Arc<dyn ObservationStore>,
             FrontendAddrAllocator::new(),
+            VipRange::default(),
         );
 
         // Probe succeeds (List Ok, subscribe_all_events Ok) — but the
@@ -1314,6 +1332,7 @@ mod tests {
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(&store) as Arc<dyn ObservationStore>,
             FrontendAddrAllocator::new(),
+            VipRange::default(),
         );
 
         let err = adapter.probe().await.expect_err("an errored List surfaces as Err at probe time");
@@ -1339,6 +1358,7 @@ mod tests {
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(&store) as Arc<dyn ObservationStore>,
             FrontendAddrAllocator::new(),
+            VipRange::default(),
         );
         adapter.probe().await.expect("probe opens one pending watch drain");
 
@@ -1414,6 +1434,7 @@ mod tests {
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(&store) as Arc<dyn ObservationStore>,
             frontend.clone(),
+            VipRange::default(),
         );
         adapter.probe().await.expect("probe projects by_frontend from the shared allocator");
 

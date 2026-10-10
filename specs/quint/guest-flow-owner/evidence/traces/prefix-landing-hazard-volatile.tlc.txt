@@ -1,0 +1,38 @@
+State 1: <Initial predicate>
+/\ landing_bugVolatile_landing_machine_seen = << >>
+/\ landing_bugVolatile_landing_machine_reject = FALSE
+/\ landing_bugVolatile_landing_machine_everBooted = FALSE
+/\ landing_bugVolatile_landing_machine_lis = {}
+/\ landing_bugVolatile_landing_machine_steer = "none"
+/\ landing_bugVolatile_landing_machine_route = "absent"
+/\ landing_bugVolatile_landing_machine_divert = FALSE
+/\ landing_bugVolatile_landing_machine_legC = FALSE
+/\ landing_bugVolatile_landing_machine_entries = {}
+/\ landing_bugVolatile_landing_machine_marked = FALSE
+/\ landing_bugVolatile_landing_machine_wl = {}
+
+State 2: <landing_bugVolatile_landing_machine_Boot line 217, col 3 to line 222, col 49 of module landing_bugVolatile>
+/\ landing_bugVolatile_landing_machine_seen = << >>
+/\ landing_bugVolatile_landing_machine_reject = TRUE
+/\ landing_bugVolatile_landing_machine_everBooted = TRUE
+/\ landing_bugVolatile_landing_machine_lis = {}
+/\ landing_bugVolatile_landing_machine_steer = "ours"
+/\ landing_bugVolatile_landing_machine_route = "local"
+/\ landing_bugVolatile_landing_machine_divert = TRUE
+/\ landing_bugVolatile_landing_machine_legC = TRUE
+/\ landing_bugVolatile_landing_machine_entries = {}
+/\ landing_bugVolatile_landing_machine_marked = TRUE
+/\ landing_bugVolatile_landing_machine_wl = {}
+
+State 3: <landing_bugVolatile_landing_machine_Down line 334, col 3 to line 334, col 82 of module landing_bugVolatile>
+/\ landing_bugVolatile_landing_machine_seen = << >>
+/\ landing_bugVolatile_landing_machine_reject = FALSE
+/\ landing_bugVolatile_landing_machine_everBooted = TRUE
+/\ landing_bugVolatile_landing_machine_lis = {}
+/\ landing_bugVolatile_landing_machine_steer = "none"
+/\ landing_bugVolatile_landing_machine_route = "absent"
+/\ landing_bugVolatile_landing_machine_divert = FALSE
+/\ landing_bugVolatile_landing_machine_legC = FALSE
+/\ landing_bugVolatile_landing_machine_entries = {}
+/\ landing_bugVolatile_landing_machine_marked = FALSE
+/\ landing_bugVolatile_landing_machine_wl = {}

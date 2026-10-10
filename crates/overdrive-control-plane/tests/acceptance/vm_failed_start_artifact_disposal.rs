@@ -18,6 +18,7 @@ use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::veth_provisioner::{
     NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
 };
+use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::cgroup::CgroupPath;
@@ -109,7 +110,7 @@ impl Vmm for CloneRemovalPartitionVmm {
         Ok(())
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+    async fn create(&self, config: &VmConfig, _vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
         self.creates.fetch_add(1, Ordering::SeqCst);
         std::fs::create_dir_all(config.rootfs.clone_dest()).map_err(|source| VmmError::Create {
             detail: format!("stage clone-removal partition: {source}"),
@@ -153,7 +154,7 @@ fn spec(
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: None,
+        transport: None,
         service_ports: Vec::new(),
     }
 }

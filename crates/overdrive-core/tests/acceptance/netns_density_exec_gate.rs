@@ -2,6 +2,7 @@
 
 #![allow(clippy::doc_markdown)]
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,18 +12,16 @@ use overdrive_core::guest_network::{
 use overdrive_sim::adapters::clock::SimClock;
 use proptest::prelude::*;
 
-const COMPONENTS: [SharedGuestNetworkComponent; 12] = [
-    SharedGuestNetworkComponent::Bridge,
+const COMPONENTS: [SharedGuestNetworkComponent; 10] = [
+    SharedGuestNetworkComponent::Forwarder,
+    SharedGuestNetworkComponent::FlowListeners,
+    SharedGuestNetworkComponent::ControlListener,
+    SharedGuestNetworkComponent::IntakeListeners,
     SharedGuestNetworkComponent::LegF,
     SharedGuestNetworkComponent::LegC,
-    SharedGuestNetworkComponent::Dns,
-    SharedGuestNetworkComponent::TcxLink,
-    SharedGuestNetworkComponent::EndpointMap,
-    SharedGuestNetworkComponent::CounterMap,
-    SharedGuestNetworkComponent::BpffsPin,
-    SharedGuestNetworkComponent::BridgeGuard,
     SharedGuestNetworkComponent::IpRules,
     SharedGuestNetworkComponent::IpSets,
+    SharedGuestNetworkComponent::Dns,
     SharedGuestNetworkComponent::Supervisor,
 ];
 
@@ -63,8 +62,8 @@ enum ModelState {
 fn operation_strategy() -> impl Strategy<Value = Operation> {
     prop_oneof![
         Just(Operation::OpenAfterBoot),
-        (0_u8..12).prop_map(Operation::BeginRecovery),
-        prop::option::of(0_u8..12).prop_map(Operation::CompleteAttempt),
+        (0_u8..10).prop_map(Operation::BeginRecovery),
+        prop::option::of(0_u8..10).prop_map(Operation::CompleteAttempt),
         (0_u8..8).prop_map(Operation::FailStop),
         Just(Operation::Claim),
         Just(Operation::DropClaim),
@@ -90,14 +89,14 @@ async fn recovery_closes_new_exec_claims_and_full_read_back_reopens_them() {
     assert!(supervisor.open_after_boot());
 
     let pre_detection = gate.claim_release().await.expect("Open admits an EXEC claim");
-    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::TcxLink));
+    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::Forwarder));
 
     let waiting_gate = Arc::clone(&gate);
     let waiter = tokio::spawn(async move { waiting_gate.claim_release().await });
     tokio::task::yield_now().await;
     assert!(!waiter.is_finished(), "Recovering must not release a new command");
 
-    assert!(supervisor.complete_attempt(None));
+    assert!(supervisor.complete_attempt(BTreeSet::new()));
     let post_audit = waiter.await.expect("waiter task joins").expect("full audit reopens EXEC");
     drop(post_audit);
     drop(pre_detection);
@@ -113,9 +112,9 @@ async fn fail_stop_refuses_waiting_and_future_exec_without_revoking_a_prior_clai
     let supervisor = wiring.supervisor();
     assert!(supervisor.open_after_boot());
     let prior_claim = gate.claim_release().await.expect("pre-detection claim is retained");
-    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::BridgeGuard));
+    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::ControlListener));
     let before_fail_stop =
-        supervisor.recovery_progress().expect("Recovering exposes one immutable snapshot");
+        supervisor.recovery_progress().pop().expect("Recovering exposes one immutable snapshot");
 
     let waiting_gate = Arc::clone(&gate);
     let recovering_waiter = tokio::spawn(async move { waiting_gate.claim_release().await });
@@ -126,11 +125,11 @@ async fn fail_stop_refuses_waiting_and_future_exec_without_revoking_a_prior_clai
     let receipt = supervisor
         .fail_stop(SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded)
         .expect("first fail-stop returns the one receipt");
-    assert_eq!(receipt.component, SharedGuestNetworkComponent::BridgeGuard);
+    assert_eq!(receipt.component, SharedGuestNetworkComponent::ControlListener);
     assert_eq!(receipt.cause, SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded);
     assert_eq!(receipt.attempts, before_fail_stop.attempts);
     assert_eq!(receipt.elapsed, Duration::from_secs(5));
-    assert!(supervisor.recovery_progress().is_none(), "FailStop consumes only recovery state");
+    assert!(supervisor.recovery_progress().is_empty(), "FailStop consumes only recovery state");
     assert!(
         supervisor.fail_stop(SharedGuestNetworkFailStopCause::SupervisorFailed).is_none(),
         "request emission is first-wins and idempotent"
@@ -183,7 +182,7 @@ proptest! {
                 }
                 Operation::CompleteAttempt(remaining) => {
                     let remaining = remaining.map(|index| COMPONENTS[usize::from(index)]);
-                    let accepted = supervisor.complete_attempt(remaining);
+                    let accepted = supervisor.complete_attempt(remaining.into_iter().collect());
                     let ModelState::Recovering { attempts, .. } = model else {
                         prop_assert!(!accepted);
                         continue;
@@ -263,15 +262,15 @@ proptest! {
                     }
 
                     prop_assert_eq!(supervisor.is_boot_closed(), model == ModelState::BootClosed);
-                    match (model, supervisor.recovery_progress()) {
-                        (ModelState::Recovering { component, attempts }, Some(progress)) => {
+                    match (model, supervisor.recovery_progress().as_slice()) {
+                        (ModelState::Recovering { component, attempts }, [progress]) => {
                             prop_assert_eq!(progress.component, component);
                             prop_assert_eq!(progress.attempts, attempts);
                         }
-                        (ModelState::Recovering { .. }, None) => {
-                            prop_assert!(false, "Recovering has a snapshot");
+                        (ModelState::Recovering { .. }, _) => {
+                            prop_assert!(false, "Recovering has exactly one snapshot");
                         }
-                        (_, progress) => prop_assert!(progress.is_none()),
+                        (_, progress) => prop_assert!(progress.is_empty()),
                     }
                 }
                 for waiter in waiting_claims {
@@ -303,7 +302,7 @@ async fn every_fail_stop_cause_is_closed_and_first_request_wins() {
             assert!(
                 supervisor.fail_stop(SharedGuestNetworkFailStopCause::SupervisorFailed).is_none()
             );
-            assert!(supervisor.recovery_progress().is_none());
+            assert!(supervisor.recovery_progress().is_empty());
             assert!(
                 gate.claim_release().await.is_none(),
                 "terminal state refuses future EXEC claims"
@@ -317,24 +316,24 @@ async fn every_fail_stop_cause_is_closed_and_first_request_wins() {
 #[test]
 fn illegal_event_from_every_gate_state_is_rejected() {
     let boot = GuestNetworkExecWiring::new(Arc::new(SimClock::new())).supervisor();
-    assert!(!boot.begin_recovery(SharedGuestNetworkComponent::Bridge));
-    assert!(!boot.complete_attempt(None));
+    assert!(!boot.begin_recovery(SharedGuestNetworkComponent::Forwarder));
+    assert!(!boot.complete_attempt(BTreeSet::new()));
 
     let open = GuestNetworkExecWiring::new(Arc::new(SimClock::new())).supervisor();
     assert!(open.open_after_boot());
     assert!(!open.open_after_boot());
-    assert!(!open.complete_attempt(None));
+    assert!(!open.complete_attempt(BTreeSet::new()));
 
     let recovering = GuestNetworkExecWiring::new(Arc::new(SimClock::new())).supervisor();
     assert!(recovering.open_after_boot());
-    assert!(recovering.begin_recovery(SharedGuestNetworkComponent::Bridge));
+    assert!(recovering.begin_recovery(SharedGuestNetworkComponent::Forwarder));
     assert!(!recovering.open_after_boot());
     assert!(!recovering.begin_recovery(SharedGuestNetworkComponent::Dns));
 
     let failed = GuestNetworkExecWiring::new(Arc::new(SimClock::new())).supervisor();
     assert!(failed.fail_stop(SharedGuestNetworkFailStopCause::SupervisorFailed).is_some());
     assert!(!failed.open_after_boot());
-    assert!(!failed.begin_recovery(SharedGuestNetworkComponent::Bridge));
-    assert!(!failed.complete_attempt(None));
+    assert!(!failed.begin_recovery(SharedGuestNetworkComponent::Forwarder));
+    assert!(!failed.complete_attempt(BTreeSet::new()));
     assert!(failed.fail_stop(SharedGuestNetworkFailStopCause::SupervisorReturned).is_none());
 }

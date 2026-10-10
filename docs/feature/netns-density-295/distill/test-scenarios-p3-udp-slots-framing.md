@@ -1,5 +1,23 @@
 # DISTILL — P3: datagram associations, UDP slots, framing, cells
 
+> **DISTILL status (2026-10-10, second increment after DG-1..DG-16).** Every
+> round-1 `UI-*` item P3 depended on is closed: the Rust frame codec by DG-8
+> (`DatagramFrame` / `DatagramFrameError`), the guest owner by DG-5 / QPROJ-5
+> (`overdrive-init` `guest_flow` module, source-local tests), the host owner's
+> seam by DG-3 / QPROJ-1 (`GuestFlowOwnerPorts`, `with_flow_io`,
+> `SimGuestFlowIo`). What is authored now and what is authored at the
+> attachment cut (DG-2) is recorded per scenario below and summarised in §1.
+> Authored now: P3-S1 (`overdrive-core` `vsock_datagram_frame`), the guest
+> halves of P3-S2, S4, S5, S6, S9, S10 (`overdrive-init`
+> `guest_flow::tests::udp_slots`) and the guest side of the P3-S8 driver
+> (`overdrive-init` `guest_flow::quint_udp_slots`; model fidelity open,
+> UI-R2-5 — a correct implementation may fail it until the model decision). Authored at the attachment
+> cut: the host halves (P3-S6 owner refusal, P3-S7, P3-S9 host half; DG-2 rows
+> 2, 3, 7, 9, new-step 10), the `udp_slots` host-side driver, and the
+> real-guest-kernel cells (P3-S3, the Tier-3 parts of S5, S6, S7, S10) inside
+> the P6-S13 walking skeleton. The frame's kernel behaviour is exercised by
+> P5's `vsock_egress_unframe.rs` / `vsock_fragment_map.rs`.
+
 Piece P3 of the parallel DISTILL for the vsock attachment replacement
 (netns-density-295). Scope: the guest datagram path — the datagram **frame**
 (D5), the per-VM **UDP slot** pool (D25), the **association** lifecycle and the
@@ -23,63 +41,60 @@ through the production owner.
 
 ---
 
-## 0. Load-bearing sequencing constraint — what is authorable now
+## 0. Authoring times (DG-2)
 
-The replacement production surface P3's bodies call —
-`overdrive_core::guest_transport::wire` (the datagram frame codec, `FlowRequest`,
-`ControlMessage`), the guest intake constants + `guest_reserved_ports()`, the
-`overdrive-init` slot model, the `overdrive-control-plane` owner's datagram-flow
-seam — **does not exist yet** (verified 2026-10-09: `guest_transport` /
-`DATAGRAM_FRAME_MAGIC` / `GUEST_UDP_SLOTS` absent from `overdrive-core`;
-`overdrive-init` is a single `main.rs` with no testable component). DELIVER is
-stopped at old-model 08-04; the **roadmap reconciliation is the first DELIVER
-activity** (feature-delta L16554).
+DG-2 splits P3 by the surface each body names:
 
-Consequence (shared-infra §0): this scenario doc is the real, authorable-now
-DISTILL product. The four Rust files are authored as complete RED scaffolds
-against the exact design-pinned API shapes, every test marked
-`#[ignore = "pending DELIVER …"]`. They **do not compile until** DELIVER
-reconciliation creates the production scaffolds (the `[REF] Interface contracts`
-shapes) and registers the module in its entrypoint — registration + compiling
-body co-arrive with that scaffold (shared-infra §6). Nothing P3 rests on is
-blocked on a validation item: V-5(c) (P-41, CELL-RECREATE), K-B2/K-B3 (audit,
-recreate-vs-empty) have all run; R5-14/R5-15/R5-27 are DELIVER-step example
-bodies marked `#[ignore]`, not "blocked". Per CLAUDE.md §"Implement to the
-design", where the design does not pin the exact testable shape a scenario
-needs, §9 records it as a **testability gap** — no production API is invented
-to make a body compile.
+- **Authored now** — bodies that name only additive surface: the core frame
+  codec and constants (`overdrive_core::guest_transport::wire::DatagramFrame`,
+  DG-8; `GUEST_UDP_SLOTS`, `GUEST_DATAGRAM_SLOT_IDLE`, `guest_reserved_ports()`),
+  and the `overdrive-init` `guest_flow` module with its seam sim
+  `SimGuestOwnerIo` + `SimGuestClock` (`#[cfg(test)] guest_flow::sim`, read
+  surface `guest_socket_observation`) and the owner's QPROJ-5
+  `guest_observation()`. Each body is complete, compiles, and carries
+  `#[ignore = "pending DELIVER vsock new-step N (…)"]`.
+- **Authored at the attachment cut** — bodies that must call a DG-2 row-1..18
+  replacement: the host owner's datagram-association side (`pool.assign` →
+  `provision` → `activate` over `SimGuestFlowIo`, rows 2, 3, 7, 9, plus
+  new-step 10 for datagrams) and the `udp_slots` host-side driver. These cannot
+  compile before the cut and are not in the tree; their plan is the
+  feature-delta § *Attachment-cut DISTILL increment*.
+- **Real guest kernel** — the `EADDRINUSE` bind (P3-S3), the capture program's
+  `EPERM` (P3-S10), the concurrent no-loss cell (P3-S7) and the Tier-3 shapes of
+  S5 / S6 are cells of the P6-S13 walking skeleton, at the cut (rows 1-6).
+
+Validation items P3 rests on have all run: V-5(c) (P-41, CELL-RECREATE),
+K-B2 / K-B3 (audit, recreate-vs-empty). Where the design leaves a value a body
+needs unpinned, it is recorded as a round-2 upstream item (UI-R2-5), not
+invented; the golden payload is DISTILL-owned fixture data (UI-R2-4,
+reclassified).
 
 ---
 
-## 1. File ownership (disjoint) + entrypoint registration + nextest group
+## 1. File ownership and nextest group
 
-| File | Crate / layer | Scenarios | Registration (co-arrives DELIVER) |
+| File | Crate / layer | Scenarios | Status |
 |---|---|---|---|
-| `crates/overdrive-core/tests/acceptance/vsock_datagram_frame.rs` | overdrive-core, unit/proptest (layer 1) | P3-S1 | `mod vsock_datagram_frame;` in `tests/acceptance.rs` |
-| `crates/overdrive-init/tests/acceptance/vsock_guest_udp_slots.rs` | overdrive-init, acceptance (host-runnable parts) | P3-S2, S3(pure), S4(model), S5(model), plus D25 reserved/token/exhaustion | P3 **creates** `crates/overdrive-init/tests/acceptance.rs` (distinct from P6's `tests/integration.rs`); `mod vsock_guest_udp_slots;` |
-| `crates/overdrive-control-plane/tests/acceptance/vsock_owner_datagram_assoc.rs` | overdrive-control-plane, seeded-sim acceptance (default lane) | P3-S6, S9, D4 direction, D10 | `mod vsock_owner_datagram_assoc;` in `tests/acceptance.rs` |
-| `tests/conformance/tests/vsock_udp_slots_conformance.rs` | root conformance, standalone binary (`integration-tests`) | P3-S8 (all udp_slots invariants) | standalone binary — no `mod` line; needs shared `tests/conformance/src/quint_driver.rs` (shared layer) |
+| `crates/overdrive-core/tests/acceptance/vsock_datagram_frame.rs` (registered in `tests/acceptance.rs`) | `overdrive-core`, unit / `proptest` (layer 1) | P3-S1 | authored; ignored `pending DELIVER vsock new-step 2 (core types and wire codec)`; one default-lane GUARD (`refusals_render_their_pinned_messages`) |
+| `crates/overdrive-init/src/guest_flow/tests/udp_slots.rs` (source-local `#[cfg(test)]`; binary crate, no library target, DG-5) | `overdrive-init`, guest-owner acceptance over `SimGuestOwnerIo` | P3-S2, S4, S5, S6, S9 guest half, S10 guest half | authored; ignored `pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)` |
+| `crates/overdrive-init/src/guest_flow/quint_udp_slots.rs` (in-crate conformance module) | `overdrive-init`, `quint-connect` driver | P3-S8 guest side (`slots_ok`, `slots_live`) | authored; model fidelity open (UI-R2-5) — a correct implementation may fail it until the model decision; ignored `pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init); model fidelity open, upstream UI-R2-5` |
+| `crates/overdrive-core/tests/acceptance/vsock_guest_transport_vocabulary.rs` (P1's file) | `overdrive-core`, unit | P3-S3 pure range fact | authored (P1); `the_reserved_range_holds_the_tcp_intake_and_every_udp_slot_above_the_ephemeral_range` ignored `pending DELIVER vsock new-step 5 (guest intakes, D25)` |
+| host datagram-association tests, source-local beside the owner in `overdrive-control-plane` (starting draft: `overdrive-control-plane/tests/acceptance/vsock_owner_datagram_assoc.rs` @91f9436ff, removed) | `overdrive-control-plane`, seam acceptance over `SimGuestFlowIo` | P3-S6 owner half, P3-S7 owner half, P3-S9 host half, §6 row 6 | attachment cut (DG-2 rows 2, 3, 7, 9; new-step 10) |
+| `udp_slots` host-side driver, in-crate in `overdrive-control-plane` | `quint-connect` driver | P3-S8 host side (`slots_ok` / `slots_live`) | attachment cut (DG-2 rows 2, 3, 7, 8, 9) |
+| P6-S13 walking-skeleton cells (native metal, `run_server` + public API) | Tier-3 | P3-S3, Tier-3 parts of P3-S5, S6, S7, S10, S9b / S9c wire | attachment cut (DG-2 rows 1-6) |
 
-Entrypoints are NOT pre-created now (shared-infra §6: pre-creating stubs is
-premature churn before the reconciliation reshapes the step→crate→file map and
-retires the old-model modules). The three `tests/acceptance/*.rs` subfiles sit
-**unregistered** until DELIVER (Cargo does not compile an unregistered
-`tests/acceptance/<file>.rs`, so the tree stays green). `overdrive-init` has no
-test entrypoint today: P3 owns creating `tests/acceptance.rs`; P6 owns
-`tests/integration.rs` — distinct files, no collision.
+The files `overdrive-init/tests/acceptance/vsock_guest_udp_slots.rs`,
+`overdrive-control-plane/tests/acceptance/vsock_owner_datagram_assoc.rs` and
+`tests/conformance/tests/vsock_udp_slots_conformance.rs` named by the previous
+pass do not exist; `overdrive-init` has no `tests/` entrypoint (its tests are
+source-local), and no shared `tests/conformance/src/quint_driver.rs` base
+exists — each driver is an in-crate module of its owner.
 
-**nextest group (`.config/nextest.toml`, `host-kernel-shared`, `max-threads=1`,
-matched by MODULE).** P3's **host-runnable acceptance tests touch no node-global
-kernel state** (the datagram frame codec and reserved-port function are pure;
-the owner seeded-sim runs through the private seam with `Sim*` at driven ports;
-the overdrive-init slot-model acceptance tests use in-memory doubles for the
-kernel-map port). They stay in the default lane and add **no** group entry. The
-**Tier-3 guest-kernel cells** (R5-15 real `EADDRINUSE` bind, R5-14/R5-27 real
-capture+pairing, R5-14 concurrent-no-loss) run **inside the P6 walking
-skeleton** (shared-infra §6: guest-only real-kernel behaviour is a Tier-3 cell
-in the WS, not a standalone host test); P6 owns their `host-kernel-shared`
-module entries (process-global `AF_VSOCK` 1240/1241, the guest's own kernel).
-P3 adds no `host-kernel-shared` entry of its own.
+**nextest group.** P3's authored tests touch no node-global kernel state (the
+frame codec is pure; the guest-owner tests and driver run over the in-memory
+`SimGuestOwnerIo`). They stay in the default lane and add no
+`host-kernel-shared` entry. The real-guest-kernel cells run inside the P6-S13
+walking skeleton, whose group assignment is P6's.
 
 ---
 
@@ -88,7 +103,8 @@ P3 adds no `host-kernel-shared` entry of its own.
 Domain concepts are the `overdrive-core` newtypes the design pins (no
 `domain_types.py`): `GuestCid`, `LaunchToken`, `FlowId` / `FlowKind` /
 `FlowOrigin`, `FlowRequest`, `ControlMessage` / `FlowRefusal`, `ListenPort`,
-and the datagram constants `DATAGRAM_FRAME_MAGIC` / `DATAGRAM_FRAME_HEADER_LEN`
+the frame codec `DatagramFrame` / `DatagramFrameError` (DG-8), and the
+datagram constants `DATAGRAM_FRAME_MAGIC` / `DATAGRAM_FRAME_HEADER_LEN`
 / `MAX_GUEST_DATAGRAM_PAYLOAD`, the slot constants `GUEST_TCP_INTAKE_PORT` /
 `GUEST_UDP_SLOT_BASE` / `GUEST_UDP_SLOTS` / `GUEST_DATAGRAM_SLOT_IDLE` /
 `GUEST_TCP_PARK_CELLS` and `guest_reserved_ports()`. Step bodies invoke
@@ -145,7 +161,7 @@ names only, never private fields), **evidence tier**, **PBT layer**, and its
 `#[ignore]` DELIVER marker. Target ≥40% error/edge (P3: S3, S4b, S5c, S6, S9a,
 S10 + the boundary rows 2/4/5 are failure/edge — well over 40%).
 
-### P3-S1 — A guest datagram of any size crosses the transport frame unchanged `@property @driving_port`
+### P3-S1 — A guest datagram of any size crosses the transport frame unchanged `@property @driving_port @contract-shape:pure-function`
 
 ```gherkin
 Property: the datagram frame carries any logical payload and restores it exactly
@@ -164,9 +180,14 @@ Property: the datagram frame carries any logical payload and restores it exactly
   property, Hebert §3); the golden-bytes pin for an empty frame and a maximum
   frame (feature-delta L18170).
 - **Production-owner path:** `overdrive_core::guest_transport::wire` frame codec
-  (the "Rust codec" the golden-bytes test pins across, L18174). **Testability
-  gap G-1:** the design pins the three constants but not the exact codec
-  type/method — §9.
+  `DatagramFrame::{new, payload, encode, decode}` and `DatagramFrameError::{Truncated,
+  BadMagic, Oversize, LengthMismatch}` (DG-8; the "Rust codec" the golden-bytes
+  test pins across, L18174).
+- **Golden frames:** empty frame `OVD1 00 00 00 00`; maximum frame header
+  `OVD1 00 00 E6 78` (BE 59_000) followed by a payload whose byte `i` is
+  `i mod 251`. The payload is DISTILL-owned fixture data (UI-R2-4,
+  reclassified): `i mod 251` is the golden, and the host and guest BPF-side
+  goldens adopt the same bytes when they are authored.
 - **Oracle:** universe = { decoded payload bytes, decode result variant };
   `encode(p) |> decode == Ok(p)` for every `p`; empty → header-only (len = 8);
   malformed (bad magic, length > 59_000, truncated body) → typed `Err`, and the
@@ -176,9 +197,19 @@ Property: the datagram frame carries any logical payload and restores it exactly
   with pinned `@example` for 0, 1, 1_431, 59_000). Boundary C1b: 59_000 (max),
   59_001 (max+1 → `Err`), and (if the codec validates on encode) encode of
   > 59_000 refused.
-- `#[ignore = "pending DELIVER: datagram frame codec in overdrive-core guest_transport::wire (D5)"]`
+- **Status — authored:** `overdrive-core` `tests/acceptance/vsock_datagram_frame.rs`::
+  `every_payload_up_to_the_maximum_round_trips`, `every_accepted_byte_string_is_canonical`,
+  `every_non_canonical_frame_is_refused`, `golden_empty_frame_is_the_header_alone`,
+  `golden_maximum_frame_carries_the_inclusive_bound`, `the_spike_sizes_round_trip`,
+  `a_payload_over_the_maximum_is_refused_oversize_by_new`,
+  `a_declared_length_over_the_maximum_is_refused_oversize_by_decode`,
+  `fewer_bytes_than_the_header_are_refused_truncated`, `a_wrong_magic_is_refused_bad_magic`,
+  `a_body_shorter_or_longer_than_declared_is_refused_length_mismatch` — ignored
+  `pending DELIVER vsock new-step 2 (core types and wire codec)`.
+  `refusals_render_their_pinned_messages` is a default-lane GUARD (not ignored)
+  over the pinned `Display` texts.
 
-### P3-S2 — One UDP slot per (application socket, destination) `@driving_port`
+### P3-S2 — One UDP slot per (application socket, destination) `@driving_port @contract-shape:bounded-change`
 
 ```gherkin
 Property: a socket sending to N destinations holds exactly N slots, each distinct
@@ -193,23 +224,23 @@ Property: a socket sending to N destinations holds exactly N slots, each distinc
   original destination); Quint `SlotHeldOnce` (holders ≤ 1; distinct
   (sock,dest)); the claim is one atomic step (Quint `AppClaim`, not
   `AppPick`/`AppTake`).
-- **Production-owner path:** `overdrive-init`'s slot-ownership table keyed by
-  socket cookie, driven through its kernel-slot-map read port (in-memory double
-  at the acceptance layer). **Testability gap G-2:** the design describes the
-  table as `overdrive-init` internal state read from the kernel slot map; it
-  does not pin a pure, host-testable slot-table component — §9. The full slot
-  state machine is covered by the Quint `udp_slots` conformance (P3-S8); this
-  acceptance scenario asserts the (socket,dest)→slot allocation decision if a
-  pure component is exposed, else it collapses into P3-S8 + the P6 Tier-3 cell.
+- **Production-owner path:** the `overdrive-init` guest owner `GuestFlowOwner`
+  (DG-5) driven over the seam sim `SimGuestOwnerIo` (the guest kernel's capture
+  program, slot map and cells); slot ownership observed through QPROJ-5
+  `guest_observation().slots` and the sim's `guest_socket_observation`. The full
+  slot state machine is also replayed by the Quint `udp_slots` conformance
+  (P3-S8).
 - **Oracle:** universe = { owned-slot count for the socket, the set of
   (socket,dest) tags over owned slots, slot reuse on repeat destination };
   delta = N owned slots, all tags distinct, repeat send adds 0 slots.
-- **Evidence tier:** layer-2 acceptance with in-memory kernel-map double (if
-  G-2 resolved), else Quint conformance + P6 Tier-3. PBT: `parametrize` N ∈
-  {0, 1, 2, 1_024} (C3 cardinality) — not generative (finite pool).
-- `#[ignore = "pending DELIVER: overdrive-init slot-ownership table (D25)"]`
+- **Evidence tier:** guest-owner acceptance over `SimGuestOwnerIo` + Quint
+  conformance (P3-S8). PBT: `parametrize` N ∈ {0, 1, 2, 1_024} (C3
+  cardinality) — not generative (finite pool).
+- **Status — authored:** `overdrive-init` `guest_flow::tests::udp_slots`::
+  `one_slot_per_socket_destination_pair` — ignored `pending DELIVER vsock
+  new-step 5 (guest adaptation in overdrive-init)`.
 
-### P3-S3 — A reserved intake port rejects an application bind of the same protocol `@real-io`
+### P3-S3 — A reserved intake port rejects an application bind of the same protocol `@real-io @contract-shape:unbounded-preservation`
 
 ```gherkin
 Scenario: an application bind on a reserved intake port fails EADDRINUSE
@@ -230,24 +261,29 @@ Scenario: an application bind on a reserved intake port fails EADDRINUSE
   `net.ipv4.ip_local_reserved_ports` so no reserved port is ephemeral; the TCP
   intake is excluded from `ListenState` (D23). D15-R2 (reserved-range residual).
 - **Production-owner path:** `overdrive-init` boot (intakes bound before READY
-  without `SO_REUSEADDR`/`SO_REUSEPORT`). The **host-runnable** part of this
-  scenario in `vsock_guest_udp_slots.rs` is the pure predicate: `guest_reserved_ports()`
-  bounds, and the per-(port,protocol) bind-decision (TCP 61_000 / UDP 61_001..=62_024
-  reserved; TCP 61_001 / UDP 61_000 free). The **real `EADDRINUSE` on a live
-  guest kernel is Tier-3** → a cell inside the **P6 walking skeleton** (R5-15
-  lane; shared-infra §6). Cross-reference recorded as coordination gap §9 G-5.
-- **Oracle (host part):** `guest_reserved_ports()` is `61_000..=62_024`
-  inclusive; `reserved(port, Tcp) ⇔ port == 61_000`;
-  `reserved(port, Udp) ⇔ 61_001 ≤ port ≤ 62_024`. **Oracle (Tier-3, P6):**
+  without `SO_REUSEADDR`/`SO_REUSEPORT`). The pure range fact
+  (`guest_reserved_ports()` = `61_000..=62_024`, TCP intake at the start, every
+  UDP slot inside, the guest ephemeral range ending at 60_999) is P1's
+  `vsock_guest_transport_vocabulary` test. The bind refusal itself needs a
+  real guest kernel: it is a cell of the **P6-S13 walking skeleton** at the
+  attachment cut (R5-15 lane). The design pins no host-side per-(port, protocol)
+  bind-decision function, so no host predicate test is authored for it.
+- **Oracle (pure part):** `guest_reserved_ports()` is `61_000..=62_024`
+  inclusive, starting at `GUEST_TCP_INTAKE_PORT` and ending at
+  `GUEST_UDP_SLOT_BASE + GUEST_UDP_SLOTS - 1`. **Oracle (Tier-3, P6-S13):**
   real `bind()` errno == `EADDRINUSE` on the reserved/protocol pairs and `Ok`
   on the free pairs; the TCP intake absent from two `NETLINK_SOCK_DIAG`
   `TCPF_LISTEN` dumps.
-- **Evidence tier:** host part layer-1 `proptest` over `u16` (refusal iff
-  reserved-and-matching-protocol; C6 robustness: wrong-protocol bind on a
-  reserved port succeeds); Tier-3 example-based in P6 WS (R5-15).
-- `#[ignore = "pending DELIVER: guest_reserved_ports + reserved-port bind decision (D25-BIND); Tier-3 EADDRINUSE in P6 walking skeleton (R5-15)"]`
+- **Evidence tier:** range fact layer-1 (P1's file); bind refusal Tier-3
+  example-based in the P6-S13 walking skeleton (R5-15).
+- **Status:** range fact authored in `overdrive-core`
+  `vsock_guest_transport_vocabulary`::`the_reserved_range_holds_the_tcp_intake_and_every_udp_slot_above_the_ephemeral_range`
+  — ignored `pending DELIVER vsock new-step 5 (guest intakes, D25)`.
+  **Attachment cut (DG-2 rows 1-6):** the P6-S13 walking-skeleton cell drives
+  `run_server` + the public API on native metal and asserts the real `bind()`
+  outcomes and the `TCPF_LISTEN` dumps above.
 
-### P3-S4 — An idle datagram association is released after 120 s; a lost release report is recovered by the audit `@driving_port`
+### P3-S4 — An idle datagram association is released after 120 s; a lost release report is recovered by the audit `@driving_port @contract-shape:bounded-change`
 
 ```gherkin
 Scenario: a datagram association idle in both directions for 120 s is released
@@ -262,9 +298,9 @@ Scenario: a datagram association idle in both directions for 120 s is released
   per-slot counters); K-B2 — a lost `sock_release` report is recovered by the
   `sock_diag`-based audit; Quint progress `ReleasedSlotBecomesFree` (weak
   fairness of `releaseAny` + `GuestAudit`). D15-R2 (120 s idle residual).
-- **Production-owner path:** `overdrive-init` slot model: `IdleRelease`
-  (nothing parked) and `GuestAudit` (orphan slots whose cookie is gone), driven
-  with an injected clock (`SimClock`) and in-memory kernel-map double.
+- **Production-owner path:** `overdrive-init` `GuestFlowOwner` idle release
+  (nothing parked) and audit (orphan slots whose cookie is gone), driven over
+  `SimGuestOwnerIo` with the injected `SimGuestClock`.
 - **Oracle:** universe = { owned-slot set, pool-free count, `toHostEnd` (the
   host observes the association's end) }; delta = idle slot moves owned→free
   after the idle deadline; orphan slot (socket closed, report lost) moves
@@ -273,9 +309,15 @@ Scenario: a datagram association idle in both directions for 120 s is released
   the lane is layer 3+ / seeded-sim per Mandate 11); Quint conformance covers
   the liveness (P3-S8, `udp-slots-release-liveness`). Real idle + real audit at
   density is the P6 Tier-3 / V-9 cell.
-- `#[ignore = "pending DELIVER: overdrive-init idle release + sock_release audit (D25, K-B2, R5-14)"]`
+- **Status — authored:** `overdrive-init` `guest_flow::tests::udp_slots`::
+  `an_idle_association_is_released_and_a_busy_one_kept`,
+  `a_lost_release_report_is_recovered_by_the_audit`,
+  `a_release_report_releases_every_slot_of_the_socket` — ignored `pending
+  DELIVER vsock new-step 5 (guest adaptation in overdrive-init)`. The audit's
+  period is not pinned; the tests advance the clock to the owner's next
+  deadline.
 
-### P3-S5 — Ending an association recreates its cells and discards parked frames; no stale-generation event starts an association `@driving_port @property`
+### P3-S5 — Ending an association recreates its cells and discards parked frames; no stale-generation event starts an association `@driving_port @property @contract-shape:bounded-change`
 
 ```gherkin
 Scenario: a burst parked in a slot is discarded by cell recreation, not re-delivered
@@ -297,8 +339,9 @@ Scenario: a burst parked in a slot is discarded by cell recreation, not re-deliv
   `ReleasedSlotCarriesNoData`; R5-14 (burst discarded; reply cut never reaches
   app; generation dispatch; quarantine). End-of-association order (feature-delta
   L18369).
-- **Production-owner path:** `overdrive-init` end-of-association + readiness
-  dispatch (by (slot, generation)); the guest cell framing/reassembly recreate.
+- **Production-owner path:** `overdrive-init` `GuestFlowOwner`
+  end-of-association + readiness dispatch (by (slot, `CellGeneration`)); the
+  cell recreation is a seam effect observed on `SimGuestOwnerIo`.
 - **Fault stimulus:** (a) burst parked then association ended; (b) scripted
   cell-creation failure (`ENOMEM`/`EMFILE`/sockmap insert) → quarantine.
 - **Oracle:** universe = { parked-frame set after recreate, associations started
@@ -309,12 +352,20 @@ Scenario: a burst parked in a slot is discarded by cell recreation, not re-deliv
   association and is not in the pool until the audit's retry succeeds (counter
   `guest_udp_slot_quarantined`).
 - **Evidence tier:** Quint conformance (P3-S8, hazards `cells-emptied-only`,
-  `fd-dispatch`, `fd-dispatch-generation`) + seeded-sim example (guest-owner
-  seam) + P6 Tier-3 (the P-41 increment-e shape through `serve` + `deploy`).
-  PBT only at the Quint/model layer; Tier-3 is example-based (Mandate 11).
-- `#[ignore = "pending DELIVER: overdrive-init cell recreation + generation dispatch (CELL-RECREATE, R5-14)"]`
+  `fd-dispatch`, `fd-dispatch-generation`) + guest-owner example over
+  `SimGuestOwnerIo` + P6-S13 Tier-3 (the P-41 increment-e shape through
+  `serve` + `deploy`). PBT only at the Quint/model layer; Tier-3 is
+  example-based (Mandate 11).
+- **Status — authored:** `overdrive-init` `guest_flow::tests::udp_slots`::
+  `recreated_cells_discard_parked_frames_and_stale_generation_events`,
+  `a_cell_creation_failure_quarantines_the_slot_until_the_audit_retry` — ignored
+  `pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)`.
+  **Attachment cut (DG-2 rows 1-6):** the reply cut by the association's end at
+  the real application, and the burst on real cells, are P6-S13 walking-skeleton
+  cells. The `guest_udp_slot_quarantined` counter has no accessor (UI-R2-6); the
+  test asserts the quarantine through the slot state, not the counter.
 
-### P3-S6 — A refused or aborted association keeps its slot, discards parked frames, and re-associates only on the next application datagram `@driving_port`
+### P3-S6 — A refused or aborted association keeps its slot, discards parked frames, and re-associates only on the next application datagram `@driving_port @contract-shape:bounded-change`
 
 ```gherkin
 Scenario: a destination refused Policy/HostInternal keeps the slot and does not self-retry
@@ -334,24 +385,37 @@ Scenario: a destination refused Policy/HostInternal keeps the slot and does not 
   one. Quint `NoReassociationWithoutNewDatagram`; R5-27 (at most one attempt per
   round trip; cells recreated so backlog never starts an association;
   re-associate on next datagram). CELL-RECREATE.
-- **Production-owner path:** two seams. (a) **Owner side** (`vsock_owner_datagram_assoc.rs`):
-  the host owner refusing a datagram association (`FlowRefusal::Policy` /
-  `HostInternal`) and the guest receiving `Refused`/`Abort` — driven through the
-  seeded-sim **private seam** (`SimGuestFlowForwarder` + the owner's flow-request
-  delivery seam). (b) **Guest side** (model/Quint): `GuestRecvEnd` /
-  `GuestPairingTimeout` keep the slot, discard parked, no self-reassoc.
+- **Production-owner path:** two seams. (a) **Host owner side:** the host
+  owner refusing a datagram association (`FlowRefusal::Policy` /
+  `HostInternal`), driven through `HostSharedGuestNetworkOwner::with_flow_io`
+  over `SimGuestFlowIo` (`overdrive-control-plane` `#[cfg(test)]
+  guest_network::flow_io::sim`). (b) **Guest side:** `GuestFlowOwner` receiving
+  `Refused` / `Abort` or reaching `FLOW_PAIRING_DEADLINE` keeps the slot,
+  discards parked frames, does not re-associate by itself — over
+  `SimGuestOwnerIo` + `SimGuestClock`, and in the Quint `udp_slots` replay.
 - **Fault stimulus:** destination refused every attempt (500-send burst);
   connected socket aborted after `Paired`.
 - **Oracle:** universe = { slot ownership, parked set, association count per
   send, `toHostAbort`/`toGuestRefused` }; delta = slot stays owned, parked = ∅,
   exactly one association per application send, re-association on the next
   datagram of a connected socket.
-- **Evidence tier:** seeded-sim example (guest-owner seam) + Quint conformance
-  (P3-S8, hazard `keep-frames-on-end`) + P6 Tier-3 (the P-41 refused-burst
-  shape). Example-based at Tier-3 (Mandate 11).
-- `#[ignore = "pending DELIVER: owner datagram refusal seam + guest keep-slot (U-2, R5-27)"]`
+- **Evidence tier:** guest-owner example + host-owner seam example + Quint
+  conformance (P3-S8, hazard `keep-frames-on-end`) + P6-S13 Tier-3 (the P-41
+  refused-burst shape). Example-based at Tier-3 (Mandate 11).
+- **Status — authored (guest half):** `overdrive-init`
+  `guest_flow::tests::udp_slots`::`a_refused_burst_keeps_the_slot_and_starts_one_association_per_send`,
+  `an_aborted_paired_association_reassociates_only_on_the_next_datagram`,
+  `the_pairing_deadline_aborts_the_association_and_keeps_the_slot` — ignored
+  `pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)`.
+- **Attachment cut (DG-2 rows 2, 3, 7, 9; new-step 10) — host half:** source-local
+  beside the owner in `overdrive-control-plane` (starting draft
+  `vsock_owner_datagram_assoc.rs` @91f9436ff): `pool.assign` → `provision` →
+  queued 1240 / 1241 datagram connections with buffered requests on
+  `SimGuestFlowIo` → `activate`; asserts O3 `flow_observation().datagrams`, the
+  sim's `outbox` (`Refused(Policy | HostInternal)`) and `closed_by_owner`, with
+  `FlowCloseCause`. The real refused burst is a P6-S13 cell.
 
-### P3-S7 — Concurrent datagram associations lose no datagram; every loss is attributed to a stage `@real-io`
+### P3-S7 — Concurrent datagram associations lose no datagram; every loss is attributed to a stage `@real-io @contract-shape:unbounded-preservation`
 
 ```gherkin
 Scenario: 4 senders x 250 datagrams through the production owner lose nothing unattributed
@@ -372,12 +436,30 @@ Scenario: 4 senders x 250 datagrams through the production owner lose nothing un
   (capture / pairing / parking) }; delta = Σ delivered + Σ attributed losses ==
   Σ sent; 0 unattributed loss. The abort-to-reset latency is reported p50/p99,
   not asserted (R5-14 pattern).
-- **Evidence tier:** Tier-3 example-based (P6 WS); the model's concurrency is
-  the Quint `udp_slots` interleaving (P3-S8). P3 records the obligation; the
-  executable cell is P6's.
-- `#[ignore = "pending DELIVER: concurrent-no-loss Tier-3 cell inside P6 walking skeleton (R5-14)"]`
+- **Evidence tier:** Tier-3 example-based (P6-S13 walking skeleton); the
+  model's concurrency is the Quint `udp_slots` interleaving (P3-S8). P3 records
+  the obligation; the executable cell is P6's.
+- **Status — attachment cut (DG-2 rows 2, 3, 7, 9; new-step 10):** no test is
+  authored now. The host owner's concurrent-association half is part of the
+  owner-flow seam tests in `overdrive-control-plane` (several queued datagram
+  associations on `SimGuestFlowIo` → `activate`; asserts O3
+  `flow_observation().datagrams` and the sim's `socket_observation()`). The
+  no-loss count over a real guest kernel is a P6-S13 walking-skeleton cell
+  (rows 1-6) on native metal.
 
-### P3-S8 — The guest-flow owner conforms to the `udp_slots` Quint model `@property`
+### P3-S8 — The guest-flow owner conforms to the `udp_slots` Quint model `@property @contract-shape:bounded-change`
+
+> **Driver status (2026-10-10).** Placement, `State` projection and action
+> map are pinned by QPROJ-1, QPROJ-5, QPROJ-7 and DG-15. Guest side **authored**:
+> `crates/overdrive-init/src/guest_flow/quint_udp_slots.rs`, `#[quint_run]`
+> instances `quint_udp_slots_guest_slots_ok` (`slots_ok`) and
+> `quint_udp_slots_guest_slots_live` (`slots_live`) — ignored `pending DELIVER
+> vsock new-step 5 (guest adaptation in overdrive-init); model fidelity open,
+> upstream UI-R2-5`. Authored; model fidelity open (UI-R2-5) — a correct
+> implementation may fail them until the model decision. Host side: **attachment
+> cut** (DG-2 rows 2, 3, 7, 8, 9), an in-crate driver in `overdrive-control-plane`
+> over the QPROJ host-side action map on `SimGuestFlowIo`, projecting O2, O3 and
+> S `socket_observation()`.
 
 ```gherkin
 Property: the production datagram-slot path follows the udp_slots model along generated traces
@@ -392,27 +474,39 @@ Property: the production datagram-slot path follows the udp_slots model along ge
   NoReassociationWithoutNewDatagram, NoStaleGenerationStart) + the
   `ReleasedSlotBecomesFree` liveness; the witnesses pin non-vacuity. (`.claude/rules/testing.md`
   §"Quint conformance".)
-- **Production-owner path:** the conformance driver drives the production guest
-  datagram-slot path (the owner's datagram-association seam + the guest slot
-  model) through its driving ports with `Sim*` at driven ports; **State is
-  projected from the observable surface** (owner's datagram-association table
-  via its public/observable accessors; the slot pool's observable snapshot) —
-  never private fields. **Testability gap G-3:** the design pins no public "step
-  the datagram slot machine" surface; the driver depends on the shared
-  `tests/conformance/src/quint_driver.rs` base (shared layer, first-needer
-  creates — P3 does not edit it; reported §9) and on the owner's seeded-sim
-  seam. Spec referenced **in place** (`udp_slots.qnt`), never copied.
-- **Modes:** `#[quint_test]` for the named `checks.toml` runs
-  (`udp-slots-safety-tlc`, `udp-slots-safety-apalache`,
-  `udp-slots-release-liveness`, each `udp-slots-witness-*`); `#[quint_run]`
-  randomized with the seed printed on failure. Hazard runs are the model's own
-  teeth (not replayed against code — they prove the invariants bite).
-- **Evidence tier:** conformance (spawns `quint`; `integration-tests`; `cargo
-  xtask lima run --`; placed in `tests/conformance`). Complementary to
-  seeded-sim, never a substitute (`.claude/rules/testing.md`).
-- `#[ignore = "pending DELIVER: udp_slots quint-connect driver + shared quint_driver base + production owner seam"]`
+- **Production-owner path (guest side):** the driver holds the production
+  `GuestFlowOwner` over `SimGuestOwnerIo` + `SimGuestClock` and plays the host
+  owner and the applications as stimulus. Actions: `AppClaim` / `AppSendOnSlot`
+  → `app_send_on`; `GuestReady(s, cur)` → the seam releases the readiness
+  event(s), then both leg connects complete; `GuestRecvPaired` / `GuestRecvEnd`
+  → `host_control`; `GuestPairingTimeout`, `GuestAudit`, `IdleRelease` →
+  `SimGuestClock`; `SockClose` / `SockCloseReportLost` → `app_close_socket`;
+  `GuestReleaseSock` → `release_socket_report`; host actions are stimulus;
+  `AppPick`, `AppTake`, `Refill` are hazard-only and return a typed error.
+  **State** is projected from O5 `GuestFlowOwner::guest_observation().slots`
+  (`slots(s).owned / sock / dest / fid / routed`) and from the QPROJ-7 arbiter
+  `SimGuestOwnerIo::guest_socket_observation` (`parked`, `ready` — current iff
+  O5's generation —, `releasePending`, `toHostAbort` ← `outbox`, `toHostEnd` ←
+  `legs_closed_unobserved`); ghost and hazard-only variables are not compared.
+  Spec referenced **in place** (`udp_slots.qnt`), never copied.
+- **Model bound (UI-R2-5(b)):** the model bounds association ids by `MAXFID`
+  (3 for `slots_ok`, 2 for `slots_live`); the production owner has no such
+  bound. A `GuestReady` that would open an association past `MAXFID` returns
+  `DriverError::ModelBound`, so a trace is not replayed past that point.
+- **Production-owner path (host side, attachment cut):** the in-crate
+  `overdrive-control-plane` driver over `HostSharedGuestNetworkOwner::with_flow_io`
+  and `SimGuestFlowIo`.
+- **Modes:** `#[quint_run]` randomized traces only, with the seed printed on
+  failure. The specs define no Quint `run`, so there is no `#[quint_test]` pin
+  (UI-R2-1); the `checks.toml` `udp-slots-*` entries are invariant, witness and
+  hazard checks of the model, run by `cargo xtask quint check`, not replayed
+  against code.
+- **Evidence tier:** conformance (spawns `quint`; `cargo xtask lima run --`),
+  an in-crate module of the owner (`overdrive-init` guest side,
+  `overdrive-control-plane` host side). Complementary to the guest-owner
+  examples, never a substitute (`.claude/rules/testing.md`).
 
-### P3-S9 — A late `Paired` for a released slot is answered with `Abort`; the datagram direction + DNS obligations `@driving_port`
+### P3-S9 — A late `Paired` for a released slot is answered with `Abort`; the datagram direction + DNS obligations `@driving_port @contract-shape:bounded-change`
 
 ```gherkin
 Scenario (S9a, SLOT-ABORT): a late Paired for a released slot is answered with Abort, routing nothing
@@ -444,10 +538,12 @@ Scenario (S9c, D10): guest DNS travels as an ordinary datagram association to th
 - **Production-owner path:** S9a guest-side late-`Paired` handling (owner's
   datagram-association seam + `ControlMessage::Paired`/`Abort`); S9b the owner's
   datagram association install order (`T_h`/`Q_h`, per-kind total order step 4,
-  feature-delta L18334) — the structural `PairedSocket` read-only proof that no
-  `Read`/`AsyncRead` exists on the SEQPACKET-fed socket (trybuild-adjacent);
+  feature-delta L18334) — the structural rule that no read or write exists for
+  a `PairSocket` of `GuestFlowIo` (DG-3; enforced by the seam signatures, no
+  `trybuild` fixture, since the types are crate-private);
   S9c the owner's datagram association to `gateway:53` resolving to the
-  `DnsResponder`. Driven through the seeded-sim private seam.
+  `DnsResponder`. Guest half (S9a) over `SimGuestOwnerIo`; host half (S9a host
+  side, S9b, S9c) over `SimGuestFlowIo` at the attachment cut.
 - **Oracle:** S9a universe = { `toHostAbort` (Abort emitted), routed-frame set,
   `control_discarded` counter }; delta = late-`Paired`-for-released → +1 Abort,
   0 frames routed; unknown/closed flow → +1 discarded, 0 reply; live-assoc
@@ -455,14 +551,30 @@ Scenario (S9c, D10): guest DNS travels as an ordinary datagram association to th
   delta = host writes on Q == 0. S9c universe = { the datagram association's
   destination, refusal }; delta = `gateway:53` paired (not refused), any other
   guest-prefix UDP destination → `Refused(Policy)`.
-- **Evidence tier:** seeded-sim example (owner seam) + Quint conformance (S9a =
-  `LatePairedAborted`, hazard `ignore-late-paired` / `late-paired-by-slot-*`);
-  S9b the structural `PairedSocket` test (compile-fail-adjacent) + Tier-3 wire
-  observation in P6 WS; S9c unit (resolve branch) + P6 Tier-3 (real DNS, the
+- **Evidence tier:** guest-owner example (S9a guest half) + host-owner seam
+  example at the cut + Quint conformance (S9a = `LatePairedAborted`, hazard
+  `ignore-late-paired` / `late-paired-by-slot-*`); S9b the seam signatures
+  (DG-3, reviewer-checked) + Tier-3 wire observation in P6-S13; S9c unit (resolve branch) + P6 Tier-3 (real DNS, the
   P-29 `dig @1.1.1.1` shape). Example-based at Tier-3 (Mandate 11).
-- `#[ignore = "pending DELIVER: owner datagram SLOT-ABORT + direction + DNS association (D4, D10, SLOT-ABORT, U-5)"]`
+- **Status — authored (guest half):** `overdrive-init`
+  `guest_flow::tests::udp_slots`::`a_late_paired_for_a_released_slot_is_answered_with_abort`
+  — ignored `pending DELIVER vsock new-step 5 (guest adaptation in
+  overdrive-init)`. The guest's U-5 discard of a control message for an
+  unknown or closed flow is P2's
+  `guest_flow::tests::tcp_accept::control_messages_for_unknown_or_closed_flows_are_discarded_without_reply`
+  (same ignore reason). The `control_discarded` counter has no guest accessor
+  (UI-R2-6).
+- **Attachment cut (DG-2 rows 2, 3, 7, 9; new-step 10) — host half:** owner-flow
+  seam tests in `overdrive-control-plane` (queued 1240 / 1241 connections on
+  `SimGuestFlowIo` → `activate`) assert O3 `flow_observation().datagrams`, the
+  sim's `outbox` and `closed_by_owner` with `FlowCloseCause`: a late `Paired`
+  path routes nothing, and a datagram association to `gateway:53` pairs while
+  any other guest-prefix UDP destination is `Refused(Policy)` (S9c). S9b's
+  "host never writes on SEQPACKET" is structural (no write exists for a
+  `PairSocket` of `GuestFlowIo`, DG-3); its wire observation is a P6-S13 cell.
+  The `gateway:53` end-to-end accept is a P6-S13 cell (UI-R2-14).
 
-### P3-S10 — Slot exhaustion refuses a new destination with `EPERM` `@driving_port`
+### P3-S10 — Slot exhaustion refuses a new destination with `EPERM` `@driving_port @contract-shape:unbounded-preservation`
 
 ```gherkin
 Scenario: a socket opening a GUEST_UDP_SLOTS+1-th destination is refused EPERM
@@ -476,16 +588,21 @@ Scenario: a socket opening a GUEST_UDP_SLOTS+1-th destination is refused EPERM
   destination, counted `guest_udp_slot_exhausted`; existing flows unaffected
   (the per-allocation bulkhead, ADR-0147). D15-R2 (pool-size residual).
 - **Production-owner path:** the guest capture program's refusal (Tier-3, guest
-  kernel) — the executable cell is a **P6 walking-skeleton Tier-3 cell**; the
-  host-runnable part is the pool-accounting invariant (1_024 slots, exhaustion
-  at the 1_025-th distinct destination) if a pure slot-pool component is exposed
-  (G-2). C1b boundary (1_024 ok, 1_025 refused).
+  kernel) — the executable cell is a **P6-S13 walking-skeleton cell**; the
+  guest-owner part (every slot owned, a new destination refused, existing
+  associations unaffected) runs over `SimGuestOwnerIo`, where the sim plays the
+  capture program. C1b boundary (1_024 ok, 1_025 refused).
 - **Oracle:** universe = { free-slot count, the new send's result, existing
   associations }; delta = at 0 free slots the new-destination send → `EPERM`;
   existing associations unchanged.
-- **Evidence tier:** host part layer-2 (if G-2 resolved) `parametrize` boundary;
-  Tier-3 example in P6 WS.
-- `#[ignore = "pending DELIVER: guest slot exhaustion EPERM (D25); Tier-3 in P6 walking skeleton"]`
+- **Evidence tier:** guest-owner example over `SimGuestOwnerIo`; Tier-3
+  example in the P6-S13 walking skeleton.
+- **Status — authored (guest half):** `overdrive-init`
+  `guest_flow::tests::udp_slots`::`exhaustion_refuses_a_new_destination_and_leaves_existing_associations`
+  — ignored `pending DELIVER vsock new-step 5 (guest adaptation in
+  overdrive-init)`. **Attachment cut (DG-2 rows 1-6):** the real `EPERM` from
+  the guest capture program and the `guest_udp_slot_exhausted` count are a
+  P6-S13 walking-skeleton cell.
 
 ---
 
@@ -519,16 +636,17 @@ remove guest-`lo` unframe tuple.
 
 | # | Datagram-association row | Scenario | Lane |
 |---|---|---|---|
-| 1 Available | `Paired`; frames flow in order after routing; early parked bytes included | P3-S6 (happy edge), P3-S8 | seeded-sim + Quint + P6 Tier-3 |
-| 2 Typed failure in owner domain | `Refused(Policy/HostInternal/Capacity/Malformed)`; `PairingTimeout` after `FLOW_PAIRING_DEADLINE` | P3-S6, P3-S9c; P3-S10 (`EPERM`) | seeded-sim + Tier-3 |
-| 3 Unrelated unchanged | other associations / allocations stay Running | P3-S6, P3-S7 | seeded-sim |
-| 4 Late success can't resurrect | **SLOT-ABORT**: late `Paired` for a released slot → `Abort`, routes nothing (P3-S9a); late `Paired` for a still-closed flow → discarded (U-5) | P3-S9a | seeded-sim + Quint (`LatePairedAborted`) |
-| 5 Disconnect / reconnect | control-session loss aborts live associations; a reconnect does not resurrect them; parked frames discarded by recreation | P3-S6 (abort path), cross-ref P2 session loss | seeded-sim |
-| 6 Feature disabled | sim-driver fixture `transport: None` behaves as today's `network: None` — no owner, no slot pool | one fixture row in `vsock_owner_datagram_assoc.rs` | seeded-sim |
+| 1 Available | `Paired`; frames flow in order after routing; early parked bytes included | P3-S6 (happy edge), P3-S8 | guest-owner example (authored) + Quint + P6-S13 Tier-3 (cut) |
+| 2 Typed failure in owner domain | `Refused(Policy/HostInternal/Capacity/Malformed)`; `PairingTimeout` after `FLOW_PAIRING_DEADLINE` | P3-S6, P3-S9c; P3-S10 (`EPERM`) | guest-owner example (authored); host-owner seam example and Tier-3 (cut) |
+| 3 Unrelated unchanged | other associations / allocations stay Running | P3-S6, P3-S7 | guest-owner example (authored, P3-S10 existing associations); host-owner seam (cut) |
+| 4 Late success can't resurrect | **SLOT-ABORT**: late `Paired` for a released slot → `Abort`, routes nothing (P3-S9a); late `Paired` for a still-closed flow → discarded (U-5) | P3-S9a | guest-owner example (authored) + Quint (`LatePairedAborted`) |
+| 5 Disconnect / reconnect | control-session loss aborts live associations; a reconnect does not resurrect them; parked frames discarded by recreation | P3-S6 (abort path), cross-ref P2 session loss (`guest_flow::tests::session`) | guest-owner example (authored) |
+| 6 Feature disabled | sim-driver fixture `transport: None` behaves as today's `network: None` — no owner, no slot pool | one fixture row of the host datagram-association tests at the attachment cut (`AllocationSpec.transport` is DG-2 row 4) | attachment cut |
 
-Rows 2/4/5 use a seeded `overdrive-sim` invariant through the production owner
-path; the kernel-effect rows (1 at the wire, P3-S7) are native Tier-3 through
-`serve` + `deploy` in the P6 walking skeleton.
+Rows 2/4/5 run through the production owner path (the guest owner over
+`SimGuestOwnerIo` now, the host owner over `SimGuestFlowIo` at the cut); the
+kernel-effect rows (1 at the wire, P3-S7) are native Tier-3 through `serve` +
+`deploy` in the P6-S13 walking skeleton.
 
 ---
 
@@ -552,9 +670,11 @@ path; the kernel-effect rows (1 at the wire, P3-S7) are native Tier-3 through
 | C7b interruption mid-flow | PASS | P3-S6 abort mid-association; P3-S4 lost report + audit |
 | C7c concurrent actors | PASS | P3-S7 (4 senders); P3-S8 Quint interleavings |
 
-**Count: 15/15 applicable PASS (C5b N/A documented) → COMPLETE** (≥13/15).
-All gaps are `AT_GAP_IN_DELIVERY_SCOPE` (filled by DELIVER co-arrival) or the
-testability gaps §9; **zero `SPECIFICATION_AMBIGUITY`** (no upstream C2/C5/C6/C7
+**Count: 15/15 applicable PASS (C5b N/A documented) → COMPLETE** (≥13/15)
+over the P3 scenario set. Over what is authored now, the C5a disable row (§6
+row 6) and the host halves are `AT_GAP_IN_DELIVERY_SCOPE`, authored at the
+attachment cut (feature-delta § *Prerequisites and Completeness*: C5a, C5b, C6c
+owed to the cut bodies); **zero `SPECIFICATION_AMBIGUITY`** (no upstream C2/C5/C6/C7
 artifact is absent — the design pins the datagram state machine in `udp_slots.qnt`,
 the error contract in the wire tables, and the slot pool in D25). No
 `CLARIFICATION_NEEDED` upstream routing.
@@ -575,50 +695,47 @@ four-reviewer Final Wave Review Gate run over the assembled six-piece set
 | Datagram frame codec (P3-S1) | `proptest` full (`st.vec(u8, 0..=59_000)`) + pinned `@example` | unbounded payload domain, symmetric roundtrip invariant (Mandate 9 layer 1) |
 | `guest_reserved_ports` / reserved-protocol predicate (P3-S3) | `proptest` over `u16` | unbounded port domain, boolean invariant |
 | Slot cardinality N (P3-S2), pool boundary (P3-S10) | `parametrize` {0,1,2,1_024,1_025} | finite closed domain (falsifier-gate: parametrize, not PBT) |
-| Owner seeded-sim (S4/S5/S6/S9) | example-based | layer 3+ / seeded-sim — sad paths enumerated (Mandate 11) |
-| Quint conformance (P3-S8) | model-generated traces (`#[quint_run]` randomized + `#[quint_test]` named) | the model is the generator; production replays |
+| Guest-owner examples (S2/S4/S5/S6/S9/S10) and host-owner seam examples at the cut | example-based | seam-sim layer — sad paths enumerated (Mandate 11) |
+| Quint conformance (P3-S8) | model-generated traces (`#[quint_run]` randomized only; no `#[quint_test]`, UI-R2-1) | the model is the generator; production replays |
 | Concurrency (P3-S7) | example-based Tier-3 | real guest kernel, Mandate 11 |
 
 ---
 
-## 9. Testability gaps + coordination (reported, not invented)
+## 9. Testability gaps + coordination
 
-- **G-1 (frame codec type).** D5 pins `DATAGRAM_FRAME_MAGIC`,
-  `DATAGRAM_FRAME_HEADER_LEN`, `MAX_GUEST_DATAGRAM_PAYLOAD` and that a "Rust
-  codec" exists (golden-bytes, L18174) but **not** the exact codec type/method
-  (unlike `FlowRequest`/`ControlMessage`, which have `encode`/`decode`). P3-S1
-  is authored against the design-implied `overdrive_core::guest_transport::wire`
-  frame-codec shape; DELIVER pins the exact signature. **Not a DESIGN blocker**
-  (internal structure per CLAUDE.md); a note for the DELIVER reviewer.
-- **G-2 (pure guest slot-table / pool component).** D25 describes the
-  slot-ownership table + dispatch + pool as `overdrive-init` internal state read
-  from the kernel slot map; it pins no **pure, host-testable** slot-table/pool
-  component. P3-S2/S4/S5/S10's host-runnable halves need one; absent it, those
-  halves collapse into the Quint `udp_slots` conformance (P3-S8) + the P6 Tier-3
-  cells. Test-support surface is DISTILL's to shape (CLAUDE.md) — recommend
-  DELIVER expose a pure `SlotTable` component with a kernel-map read port; if it
-  does not, the obligation is discharged by P3-S8 + P6 Tier-3 and this is
-  documented, not a blocker.
-- **G-3 (owner datagram-flow seam + shared quint_driver base).** The owner's
-  flow acceptor is internal (D7). The seeded-sim lane and the Quint conformance
-  driver both depend on (a) the owner's private flow-request-delivery seam
-  (`SimGuestFlowForwarder`, shared-infra §3 — **shared**, first of P2/P3/P6
-  creates; P3 does not edit it) and (b) `tests/conformance/src/quint_driver.rs`
-  (shared base, first-needer creates; P3 does not edit it). P3's conformance
-  file specialises that base. **Reported, not edited** (task: do not edit shared
-  files).
-- **G-4 (`quint-connect` 0.1.2 API).** The exact `quint-connect` driver API
-  (trace ingest, per-step dispatch trait, `#[quint_test]` / `#[quint_run]`
-  macro surface) is not vendored locally (offline). P3-S8 is authored against
-  the shape `.claude/rules/testing.md` §"Quint conformance" + shared-infra §4
-  describe; DELIVER pins it when the shared base lands.
-- **G-5 (R5-15 / R5-14 / R5-27 / P3-S7 / P3-S10 Tier-3 cells → P6).** The real
-  guest-kernel behaviours (EADDRINUSE bind, concurrent capture-no-loss,
-  refused-burst re-association, slot-exhaustion EPERM) run as cells **inside the
-  P6 walking skeleton** (shared-infra §6). P3 owns their **spec**; P6 owns their
-  executable cells + the `host-kernel-shared` nextest entries. Coordination
-  recorded; no P3 file change.
-- **Entrypoint ownership.** P3 owns creating `crates/overdrive-init/tests/acceptance.rs`
-  at DELIVER co-arrival (distinct from P6's `tests/integration.rs`); the
-  `overdrive-core` and `overdrive-control-plane` entrypoints already exist —
-  P3's `mod` lines are added at co-arrival, not now (shared-infra §6).
+Round-1 gaps, all closed:
+
+- **G-1 (frame codec type)** — closed by DG-8: `DatagramFrame::{new, payload,
+  encode, decode}`, `DatagramFrameError`.
+- **G-2 (host-testable guest slot pool)** — closed by DG-5 / QPROJ-5 /
+  QPROJ-7: the `overdrive-init` `guest_flow` module (`GuestFlowOwner`,
+  `guest_observation()`) with the seam sim `SimGuestOwnerIo` + `SimGuestClock`;
+  P3-S2, S4, S5, S6, S9 and S10 guest halves are authored over it.
+- **G-3 (owner datagram-flow seam, shared `quint_driver` base)** — closed by
+  DG-3 / QPROJ-1: the host owner's seam is `GuestFlowOwnerPorts` /
+  `with_flow_io` with `SimGuestFlowIo`; conformance drivers are in-crate
+  modules of their owner; no shared base or `SimGuestFlowForwarder` exists.
+- **G-4 (`quint-connect` API)** — closed: `quint-connect` is a dev-dependency
+  of `overdrive-init` and the guest driver compiles against it; drivers use
+  `#[quint_run]` only (UI-R2-1).
+- **G-5 (real-guest-kernel cells → P6)** — coordination, unchanged in
+  substance: the `EADDRINUSE` bind, the concurrent no-loss count, the
+  refused-burst shape and the exhaustion `EPERM` are P6-S13 walking-skeleton
+  cells, authored at the attachment cut (DG-2 rows 1-6). P3 owns their spec.
+- **Entrypoint ownership** — obsolete: `overdrive-init` tests are source-local
+  (DG-5); `vsock_datagram_frame` is registered in `overdrive-core`'s
+  `tests/acceptance.rs`.
+
+Round-2 items affecting P3 (`upstream-issues.md` round 2):
+
+- **UI-R2-4** — reclassified as DISTILL-owned fixture data: byte `i` =
+  `i mod 251` behind the pinned header `OVD1 00 00 E6 78` is the golden; the
+  BPF-side goldens adopt it.
+- **UI-R2-5** — the guest driver cannot faithfully replay some model
+  situations; for `udp_slots`, (b) the model's `MAXFID` bound has no production
+  counterpart, so the driver stops with `DriverError::ModelBound`; one
+  `SimGuestClock` drives every guest timer (pairing deadline, idle, audit).
+- **UI-R2-6** — guest counters (`guest_udp_slot_quarantined`,
+  `guest_udp_slot_exhausted`, `guest_flow.control_discarded`) have no accessor;
+  the authored tests assert the state they count (or, for exhaustion, the
+  sim's own `exhausted_sends()` count of refused sends), not the counters.

@@ -16,9 +16,9 @@ State 1
   adopted = FALSE
   link = "none"
 
-State 2 [Restart]
+State 2 [RestartWith]
   stop = "none"
-  bin = "v2"
+  bin = "v1"
   up = TRUE
 
 State 3 [BootStep]

@@ -163,6 +163,20 @@ protocol's owner. Conformance tests use the
 traces from `specs/quint/<subsystem>/`, and a Rust driver replays each step
 against the implementation and compares state after every step.
 
+- **quint-connect trace replay is the only conformance mechanism.** The spec
+  is checked against production only by replaying its traces through a
+  quint-connect driver. Spawning the `quint` CLI or REPL from test or
+  conformance code to evaluate spec definitions and compare the answers with
+  the implementation is forbidden: it checks one definition against one
+  hand-chosen input, with no trace, no per-step state comparison and no
+  coverage of the protocol's interleavings. A definitions-only (stateless)
+  module — pure definitions, no state variables, no `step` — may be imported
+  by stateful specs, but it is never itself a conformance target. When the
+  behaviour under conformance is real-kernel or production behaviour (a route
+  landing, a steering table, a boot sequence), the spec models it as a state
+  machine whose actions are the production-reachable configuration
+  transitions, and the driver drives the production owner through those
+  transitions and reads the resulting kernel or owner state at each step.
 - **The driver drives production, not a copy.** Each Quint action maps to a
   call on the production owner through its driving ports, with `Sim*` adapters
   at the driven ports. A driver that re-implements the protocol in test code
@@ -209,10 +223,15 @@ against the implementation and compares state after every step.
   divergence between the spec and the test oracle is the drift this lane exists
   to prevent. A behaviour change goes into the spec first (DESIGN), then the
   driver.
-- **Both trace modes.** Pin the named Quint runs that encode the design's
-  critical scenarios (`#[quint_test]`) and run randomized simulation traces
-  (`#[quint_run]`) with the seed printed on failure, under the same
-  reproducibility rules as DST.
+- **Both trace modes, in every driver.** Pin each named Quint run that
+  encodes one of the design's critical scenarios with
+  `#[quint_test(spec = …, main = …, test = "<run>")]`, and run randomized
+  simulation traces with `#[quint_run]`, the seed printed on failure, under
+  the same reproducibility rules as DST. A driver with only `#[quint_run]` is
+  incomplete. A spec whose stateful module declares no named runs is a DESIGN
+  gap: route it back to DESIGN (`.claude/rules/design.md` § "Concurrent
+  protocols carry a model-checked Quint specification"), never write the
+  driver around it.
 - **Complementary to `overdrive-sim`, never a substitute.** Conformance shows
   the code follows the modelled protocol along generated traces. Seeded
   simulation still covers the real composition — action dispatch, ports,
@@ -259,23 +278,49 @@ item, and cites the line that establishes it:
 5. `from_driver` reads no `Sim*` adapter, except a marked arbiter read that
    cites its paired Tier-3 test. It reads no driver-maintained map, counter,
    or literal.
-6. The spec is referenced in place. Both `#[quint_test]` pins for the named
-   runs and `#[quint_run]` randomized traces are present.
+6. The spec is referenced in place. Every named run that encodes a critical
+   scenario has a `#[quint_test]` naming it, each `#[quint_test]` names a run
+   the spec declares, and `#[quint_run]` randomized traces are present.
+7. The target spec module is a state machine (it has a `step` relation), not
+   a definitions-only module, and nothing in the test evaluates the spec by
+   another mechanism: no `quint` CLI or REPL is spawned.
 
-`cargo xtask conformance-lint` checks items 1, 3 and 5 syntactically over
-every file that uses quint-connect (a `quint_connect` path, `#[quint_run]` or
-`#[quint_test]`) under `crates/*/src/**/*.rs` and `tests/conformance/tests/*.rs`.
-A file without quint-connect is ignored. It runs in CI and in pre-push. It
-cannot judge whether a non-empty handler calls the right port, or whether a
-method named like an accessor is pinned by the design. Those judgements belong
-to the critic.
+`cargo xtask conformance-lint` checks items 1, 3, 5, 6 and 7 syntactically
+over every Rust file under `crates/*/src/**`, `crates/*/tests/**` and
+`tests/conformance/**` that mentions quint, and runs in CI and in pre-push. Its
+rules are:
+
+- `always-false-cfg`, `empty-action-handler`, `sim-in-projection` and
+  `projection-without-owner-accessor` (items 1, 3 and 5) on every
+  quint-connect driver (a `quint_connect` path, `#[quint_run]` or
+  `#[quint_test]`);
+- `no-quint-test`: a driver with no `#[quint_test]`;
+- `unknown-quint-run`: a `#[quint_test]` whose `test` is declared neither by
+  its spec nor by a file the spec imports (the spec path resolved against the
+  owning crate's manifest directory, as quint-connect resolves it), or whose
+  spec does not exist;
+- `spec-without-quint-connect`: a file whose code (not its doc comments)
+  holds a string literal naming a spec — a `specs/quint/` path or a `.qnt`
+  file — without using quint-connect;
+- `quint-cli-oracle`: `Command::new` with the quint program (directly or
+  through a `const`), or a package runner (`npx`, `deno`, …) given a `quint`
+  argument.
+
+It cannot judge whether a non-empty handler calls the right port, whether a
+method named like an accessor is pinned by the design, or whether the pinned
+runs cover every critical scenario. Those judgements belong to the critic.
 
 **Symptoms during review:** `#![cfg(any())]` or `#[cfg(any())] mod pending_…`
 on a driver; a header comment explaining that the body is "complete against
 the pinned shapes" while the handlers are `{}`; an `observe_*` helper on the
 driver that returns the driver's own map or a literal `0`; a `Sim*` adapter
 field on the driver read inside `from_driver`; a driver struct with no field
-for the production owner; `_ => {}` in `switch!`.
+for the production owner; `_ => {}` in `switch!`; a driver with `#[quint_run]`
+and no `#[quint_test]`, or a header explaining that "the spec defines no Quint
+`run` declarations, so there is no named run for `#[quint_test]`"; a test that
+spawns `quint` or its REPL to evaluate a spec definition and compares the
+answer with production; a conformance test whose spec is a definitions-only
+module with no `step`.
 
 ---
 

@@ -400,7 +400,7 @@ mod tests {
 
     /// Chain step 6.2: the first `converge_allocation_elements(∅)` began after
     /// the owner's sweep and after the owner's `converge_shared` (step 5,
-    /// `BridgeConverge`) that follows the sweep, and no `observe_shared` or
+    /// `ForwarderLoad`) that follows the sweep, and no `observe_shared` or
     /// `converge_shared` call precedes it (FD § "[REF] Boot ordering
     /// (D-295-R12)" steps 4, 5, 6.2). Returns its index.
     fn assert_stale_member_clear(
@@ -441,7 +441,7 @@ mod tests {
             .iter()
             .enumerate()
             .skip(sweep_index + 1)
-            .find(|(_, operation)| **operation == GuestNetworkOperation::BridgeConverge)
+            .find(|(_, operation)| **operation == GuestNetworkOperation::ForwarderLoad)
             .map(|(index, _)| index);
         if bridge_converge.is_none_or(|index| index >= clear_call.owner_calls) {
             chain_failure(
@@ -450,7 +450,7 @@ mod tests {
                 &format!(
                     "the shared owner's converge_shared (R12 step 5) must run after the sweep \
                      (owner call {sweep_index}) and before the stale-member clear (#{clear}, \
-                     which began with {} owner calls recorded); first BridgeConverge after the \
+                     which began with {} owner calls recorded); first ForwarderLoad after the \
                      sweep: owner call {bridge_converge:?}; owner calls: {owner_ops:?}",
                     clear_call.owner_calls
                 ),

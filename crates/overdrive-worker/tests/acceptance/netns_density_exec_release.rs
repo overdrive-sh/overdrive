@@ -8,8 +8,7 @@
     reason = "reasoned-pending acceptance bodies use exact diagnostics and real beacon fixtures"
 )]
 
-use std::os::fd::AsRawFd as _;
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,10 +22,8 @@ use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverPayload, Resources, VmPayload,
 };
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
-use overdrive_core::vm::config::{
-    Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfinement, VmRunDir, VmmIdentity,
-};
+use overdrive_core::vm::beacon::BeaconMessage;
+use overdrive_core::vm::config::{Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfinement, VmmIdentity};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
@@ -35,8 +32,8 @@ use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
-use tokio::net::UnixStream;
+
+use super::support::{BeaconHarness, GuestSession};
 
 fn probe_runner() -> Arc<ProbeRunner> {
     Arc::new(ProbeRunner::new(
@@ -82,58 +79,46 @@ fn spec(tmp: &TempDir, alloc: &AllocationId, argument_bytes: usize) -> Allocatio
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: Some(overdrive_core::traits::driver::GuestNetworkAssignment {
-            address: "100.95.0.2".parse().expect("guest address"),
-            tap: "ovd-tp-0002".to_owned(),
-            mac: [0x02, 0, 100, 95, 0, 2],
-            gateway: "100.95.0.1".parse().expect("gateway"),
-            prefix: 16,
-            dns: "100.95.0.1".parse().expect("DNS"),
-        }),
+        transport: Some(super::support::transport(
+            "100.95.0.2".parse().expect("guest address"),
+            "100.95.0.1".parse().expect("gateway"),
+            0,
+        )),
         service_ports: Vec::new(),
     }
 }
 
-fn driver(tmp: &TempDir, wiring: &GuestNetworkExecWiring) -> (VmDriver, PathBuf, SimVmm) {
+async fn driver(
+    tmp: &TempDir,
+    wiring: &GuestNetworkExecWiring,
+) -> (VmDriver, BeaconHarness, SimVmm) {
     let layout = layout(tmp);
-    let run_root = layout.run_dir_root.clone();
     let vmm = SimVmm::new();
+    let beacon = BeaconHarness::new(&vmm);
     let driver = VmDriver::new(
-        Arc::new(vmm.clone()),
+        beacon.vmm(Arc::new(vmm.clone())),
         Arc::new(SimClock::new()),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
         probe_runner(),
         wiring.gate(),
         layout,
+        beacon.intake().await,
     );
-    (driver, run_root, vmm)
+    (driver, beacon, vmm)
 }
 
-async fn connect(path: &Path) -> UnixStream {
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        match UnixStream::connect(path).await {
-            Ok(stream) => return stream,
-            Err(_) if std::time::Instant::now() < deadline => {
-                tokio::time::sleep(Duration::from_millis(2)).await;
-            }
-            Err(error) => panic!("beacon did not bind at {}: {error}", path.display()),
-        }
-    }
-}
-
+/// Spawn `start`, the guest connects with READY once its VMM exists, and
+/// `start` admits the VM.
 async fn start(
     driver: &VmDriver,
     spec: &AllocationSpec,
-    run_root: &Path,
-) -> (AllocationHandle, UnixStream) {
-    let socket = VmRunDir::for_alloc(run_root, &spec.alloc).beacon_socket(BEACON_VSOCK_PORT);
+    beacon: &BeaconHarness,
+) -> (AllocationHandle, GuestSession) {
     let owned_driver = driver.clone();
     let owned_spec = spec.clone();
     let start = tokio::spawn(async move { owned_driver.start(&owned_spec).await });
-    let mut guest = connect(&socket).await;
-    guest.write_all(b"READY pid=1 port=1234\n").await.expect("write READY");
+    let guest = beacon.dial_ready(spec).await;
     let handle = start.await.expect("start joins").expect("READY admits VM");
     (handle, guest)
 }
@@ -144,11 +129,11 @@ async fn yields() {
     }
 }
 
-async fn assert_no_line(guest: &mut BufReader<UnixStream>) {
-    let mut line = String::new();
+async fn assert_no_line(guest: &mut GuestSession) {
+    let observed = tokio::time::timeout(Duration::from_millis(50), guest.next_line()).await;
     assert!(
-        tokio::time::timeout(Duration::from_millis(50), guest.read_line(&mut line)).await.is_err(),
-        "guest must not receive EXEC while release is closed; observed {line:?}"
+        observed.is_err(),
+        "guest must not receive EXEC while release is closed; observed {observed:?}"
     );
 }
 
@@ -160,25 +145,23 @@ async fn recovering_waiter_keeps_pending_exec_untaken_until_recovered_event_prec
     let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
     let supervisor = wiring.supervisor();
     assert!(supervisor.open_after_boot());
-    let (driver, run_root, _vmm) = driver(&tmp, &wiring);
+    let (driver, beacon, _vmm) = driver(&tmp, &wiring).await;
     let alloc = AllocationId::new("nd295-recovery-before-release").expect("allocation id");
     let assignment = spec(&tmp, &alloc, 0);
-    let (handle, guest) = start(&driver, &assignment, &run_root).await;
-    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::TcxLink));
+    let (handle, mut guest) = start(&driver, &assignment, &beacon).await;
+    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::Forwarder));
 
     let release_driver = driver.clone();
     let release_handle = handle.clone();
     let release = tokio::spawn(async move {
         release_driver.release_for_exit_emission(&release_handle).await;
     });
-    let mut guest = BufReader::new(guest);
     yields().await;
     assert!(!release.is_finished(), "Recovering waiter remains owned by the release future");
     assert_no_line(&mut guest).await;
 
-    assert!(supervisor.complete_attempt(None), "recovered event reopens release");
-    let mut exec = String::new();
-    tokio::time::timeout(Duration::from_secs(1), guest.read_line(&mut exec))
+    assert!(supervisor.complete_attempt(BTreeSet::new()), "recovered event reopens release");
+    let exec = tokio::time::timeout(Duration::from_secs(1), guest.next_line())
         .await
         .expect("recovered release is bounded")
         .expect("read EXEC");
@@ -201,22 +184,13 @@ async fn claim_before_detection_backpressure_and_cancellation_do_not_create_a_se
     let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
     let supervisor = wiring.supervisor();
     assert!(supervisor.open_after_boot());
-    let (driver, run_root, _vmm) = driver(&tmp, &wiring);
+    let (driver, beacon, _vmm) = driver(&tmp, &wiring).await;
     let alloc = AllocationId::new("nd295-claim-before-detection").expect("allocation id");
     let assignment = spec(&tmp, &alloc, 16 * 1024 * 1024);
-    let (handle, mut guest) = start(&driver, &assignment, &run_root).await;
-    let receive_bytes: libc::c_int = 4 * 1024;
-    // SAFETY: `guest` owns a live Unix socket and the option points to one integer.
-    let configured = unsafe {
-        libc::setsockopt(
-            guest.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_RCVBUF,
-            std::ptr::from_ref(&receive_bytes).cast(),
-            libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes)).expect("socklen"),
-        )
-    };
-    assert_eq!(configured, 0);
+    let (handle, guest) = start(&driver, &assignment, &beacon).await;
+    // The guest's receive side stops draining: the 16 MiB EXEC write cannot
+    // complete (the former shrunk-`SO_RCVBUF` backpressure).
+    guest.backpressure();
 
     let release_driver = driver.clone();
     let release_handle = handle.clone();
@@ -225,34 +199,21 @@ async fn claim_before_detection_backpressure_and_cancellation_do_not_create_a_se
     });
     yields().await;
     assert!(!release.is_finished(), "writer acknowledgement is backpressured");
-    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::BridgeGuard));
+    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::IpSets));
     assert!(!release.is_finished(), "the pre-detection claim keeps the one writer owned");
 
     release.abort();
     assert!(release.await.expect_err("release is cancelled").is_cancelled());
-    let mut observed = Vec::new();
-    tokio::time::timeout(
-        Duration::from_secs(1),
-        tokio::io::AsyncReadExt::read_to_end(&mut guest, &mut observed),
-    )
-    .await
-    .expect("writer cancellation closes the beacon")
-    .expect("read through EOF");
+    let observed = tokio::time::timeout(Duration::from_secs(1), guest.session_to_end())
+        .await
+        .expect("writer cancellation closes the beacon");
     // The Published Language defines a complete command at its existing
     // newline-framing plus typed-parser boundary. A pre-detection claim may
-    // have already transmitted any prefix (or the whole first command) before
-    // cancellation; a raw `EXEC ` byte prefix is therefore not a message and
-    // is not evidence of a second writer.
+    // have already transmitted the whole first command before cancellation;
+    // every line the host delivered must parse as a typed message.
     let complete_messages: Vec<BeaconMessage> = observed
-        .split_inclusive(|byte| *byte == b'\n')
-        .filter(|frame| frame.ends_with(b"\n"))
-        .map(|frame| {
-            let line = std::str::from_utf8(frame).unwrap_or_else(|error| {
-                panic!(
-                    "every newline-complete beacon frame must be valid UTF-8: {error}; \
-                     frame={frame:?}"
-                )
-            });
+        .iter()
+        .map(|line| {
             line.parse::<BeaconMessage>().unwrap_or_else(|error| {
                 panic!(
                     "every newline-complete beacon frame must parse through the Published \
@@ -277,11 +238,11 @@ async fn fail_stop_wakes_the_real_vm_driver_waiter_without_writing_exec() {
     let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
     let supervisor: Arc<GuestNetworkExecSupervisor> = wiring.supervisor();
     assert!(supervisor.open_after_boot());
-    let (driver, run_root, _vmm) = driver(&tmp, &wiring);
+    let (driver, beacon, _vmm) = driver(&tmp, &wiring).await;
     let alloc = AllocationId::new("nd295-fail-stop-refusal").expect("allocation id");
     let assignment = spec(&tmp, &alloc, 0);
-    let (handle, guest) = start(&driver, &assignment, &run_root).await;
-    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::EndpointMap));
+    let (handle, mut guest) = start(&driver, &assignment, &beacon).await;
+    assert!(supervisor.begin_recovery(SharedGuestNetworkComponent::FlowListeners));
 
     let release_driver = driver.clone();
     let release_handle = handle.clone();
@@ -295,7 +256,6 @@ async fn fail_stop_wakes_the_real_vm_driver_waiter_without_writing_exec() {
     );
     release.await.expect("FailStop wakes the real VmDriver waiter");
 
-    let mut guest = BufReader::new(guest);
     assert_no_line(&mut guest).await;
     assert_eq!(driver.live_allocations(), Some(vec![alloc]));
 }

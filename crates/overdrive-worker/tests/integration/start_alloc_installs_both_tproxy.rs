@@ -290,7 +290,7 @@ fn build_spec(alloc: &AllocationId, _host_veth: Option<String>) -> AllocationSpe
         probe_descriptors: Vec::new(),
         // The C3 provision seam sets this in production (JOIN-6); the AT supplies
         // it directly to exercise the OUTBOUND egress-rule install.
-        network: None,
+        transport: None,
         service_ports: Vec::new(),
     }
 }

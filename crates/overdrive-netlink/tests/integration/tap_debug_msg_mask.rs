@@ -14,7 +14,7 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use overdrive_netlink::ethtool::{debug_msg_mask, debug_msg_masks};
 use overdrive_netlink::{Client, NetlinkError, block_on_host_netlink};
 
-use super::tap_queue_attach::{AbsentNameGuard, ScratchTap, require_root, scratch_name};
+use super::scratch_tap::{AbsentNameGuard, ScratchTap, require_root, scratch_name};
 
 /// A level inside the `NETIF_MSG_CLASS_COUNT` classes the ethtool bitset
 /// reports (bits 0-14), with distinct bits set so a byte-order or word-offset

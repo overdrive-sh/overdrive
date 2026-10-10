@@ -9,7 +9,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
-use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -21,6 +20,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::aggregate::probe_descriptor::ProbeDescriptor;
+use crate::guest_transport::GuestTransportAssignment;
 use crate::{AllocationId, SpiffeId};
 
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
@@ -259,6 +259,12 @@ pub enum DriverError {
     /// (ADR-0082 §D4 Amendment 2026-08-18.)
     #[error("driver {driver} does not support resize for allocation {alloc}: {detail}")]
     ResizeUnsupported { driver: DriverType, alloc: AllocationId, detail: String },
+    /// A VM start whose spec has no [`GuestTransportAssignment`], or whose
+    /// claim was already taken (D16-CLAIM). Non-terminal start failure; it
+    /// arises only from a composition error or a second start of the same
+    /// allocation, which placement never issues.
+    #[error("allocation {alloc} has no claimed guest CID to hand to the VMM")]
+    VsockClaimUnavailable { alloc: AllocationId },
 }
 
 /// Resource envelope for an allocation — cgroup limits for processes,
@@ -278,17 +284,6 @@ pub enum DriverError {
 pub struct Resources {
     pub cpu_milli: u32,
     pub memory_bytes: u64,
-}
-
-/// Complete transient guest-network handoff for one allocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GuestNetworkAssignment {
-    pub address: Ipv4Addr,
-    pub tap: String,
-    pub mac: [u8; 6],
-    pub gateway: Ipv4Addr,
-    pub prefix: u8,
-    pub dns: Ipv4Addr,
 }
 
 /// What the scheduler handed to the node agent.
@@ -325,8 +320,11 @@ pub struct AllocationSpec {
     /// reconciler-emitted `AllocationSpec`.
     pub probe_descriptors: Vec<ProbeDescriptor>,
 
-    /// Complete all-or-none guest network handoff for this allocation.
-    pub network: Option<GuestNetworkAssignment>,
+    /// The allocation's guest transport handoff (D16-CLAIM): workload
+    /// address, gateway, launch token and the claimed guest CID. `None`
+    /// means no guest owner is composed (sim-driver fixtures only);
+    /// production `StartAllocation` always sets it.
+    pub transport: Option<GuestTransportAssignment>,
 
     /// Declared Service listener ports projected from the live intent at
     /// hydrate-desired time via

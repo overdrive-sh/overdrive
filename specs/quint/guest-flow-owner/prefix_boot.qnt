@@ -120,13 +120,14 @@ module prefix_boot {
   }
 
   // a serve (re)start runs a binary; the first boot starts here too
+  action RestartWith(b: str): bool = all {
+    not(up),
+    up' = true, phase' = "start", stop' = "none", bin' = b, loaded' = false, swapOk' = false,
+    adopted' = false, keepSteer, keepRoute, keepCounters, g' = g,
+  }
   action Restart = {
     nondet b = BINS.oneOf()
-    all {
-      not(up),
-      up' = true, phase' = "start", stop' = "none", bin' = b, loaded' = false, swapOk' = false,
-      adopted' = false, keepSteer, keepRoute, keepCounters, g' = g,
-    }
+    RestartWith(b)
   }
   action init = all {
     up' = false, phase' = "start", stop' = "init", bin' = "none", link' = "none", prog' = "none",
@@ -233,6 +234,86 @@ module prefix_boot {
     LocalOnlyOverLink, RouteOnlyAfterSwap, NoWildcardReached, NothingDeliveredWhileDown,
     NoElsewhere, NeverDetached, OpenConverged,
   }
+
+  // ------------------------------------------------------------------ named runs (critical scenarios)
+  // The runs pick the binary version with `RestartWith` so they are deterministic; each ends in an
+  // `expect` of its scenario's outcome and checks `Safety` along the way. A first boot is five
+  // `BootStep`s (start, load, swap, pin, route); a boot that adopts a pinned link is four
+  // (start, load, swap, route).
+  // happy path: the first boot loads, attaches, pins, writes the route and opens
+  run FirstBootConvergesLinkThenRoute = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).expect(Safety and phase == "swap" and loaded and route == "absent")
+    .then(BootStep).expect(Safety and phase == "pin" and link == "attached" and route == "absent")
+    .then(BootStep).expect(Safety and phase == "route" and link == "pinned" and route == "absent")
+    .then(BootStep).expect(Safety and open and link == "pinned" and prog == "v1" and route == "local" and swapOk and not(g.routeUnswapped))
+  // serve exits gracefully (or crashes) with the route `local`: the pinned link and route persist
+  // (U-4, K-D3, K-L4) and nothing is delivered to a host socket
+  run SteeringAndRoutePersistWhileServeDown = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .then(Crash).expect(Safety and not(up) and route == "local" and link == "pinned" and prog == "v1" and g.crashLocal)
+    .expect(NothingDeliveredWhileDown and LocalOnlyOverLinkWhileDown and NoElsewhere)
+  // a new binary adopts the pinned link and replaces its program atomically (BPF_LINK_UPDATE, K-L9);
+  // there is no pin step and no detach
+  run NewBinaryUpdatesAdoptedLinkAtomically = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .then(Crash)
+    .then(RestartWith("v2")).then(BootStep).then(BootStep).expect(Safety and phase == "swap" and prog == "v1")
+    .then(BootStep).expect(Safety and phase == "route" and prog == "v2" and link == "pinned" and adopted and g.updated and not(g.detached))
+    .then(BootStep).expect(Safety and open and prog == "v2" and link == "pinned" and route == "local")
+  // verifier rejects the new binary's program at `load`: startup refuses, the route is untouched and the
+  // earlier program keeps running (K-L9); the next boot with an accepted program converges
+  run LoadRejectionRefusesAndKeepsEarlierProgram = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .then(Crash).then(RestartWith("v2")).then(BootStep)
+    .then(Fail).expect(Safety and not(up) and stop == "refused" and g.loadRefused and link == "pinned" and prog == "v1" and route == "local")
+    .expect(NothingDeliveredWhileDown)
+    .then(RestartWith("v2")).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .expect(Safety and open and prog == "v2")
+  // load rejected on a node that has no steering yet: nothing is attached and the route is not written
+  run FirstBootLoadRejectionLeavesNothingAttached = init
+    .then(RestartWith("v1")).then(BootStep)
+    .then(Fail).expect(Safety and stop == "refused" and g.refused and link == "none" and prog == "none" and route == "absent")
+  // swap fails on an adopted link: the link keeps its earlier program and the route stays `local`
+  run SwapFailureKeepsEarlierProgram = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .then(Crash).then(RestartWith("v2")).then(BootStep).then(BootStep)
+    .then(Fail).expect(Safety and stop == "refused" and g.swapFailKept and prog == "v1" and link == "pinned" and route == "local")
+    .then(RestartWith("v2")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).expect(Safety and open and prog == "v2")
+  // pin fails after a first attach: the unpinned link vanishes with the process, the route was never
+  // written; the next boot starts again from nothing
+  run PinFailureLeavesNoLinkAndNoRoute = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep)
+    .then(Fail).expect(Safety and stop == "refused" and link == "none" and prog == "none" and route == "absent")
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .expect(Safety and open and link == "pinned" and route == "local")
+  // the route write fails after a first attach and pin: the pinned steering stays, the route stays
+  // absent (no `local` without this boot's swap); the next boot adopts the link and writes the route
+  run RouteWriteFailureKeepsPinnedLinkThenNextBootAdopts = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .then(Fail).expect(Safety and stop == "refused" and link == "pinned" and route == "absent" and not(estab))
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).expect(Safety and phase == "route" and adopted and route == "absent")
+    .then(BootStep).expect(Safety and open and route == "local" and not(g.routeUnswapped))
+  // crash between a first attach and its pin: the process-scoped link vanishes, no route exists
+  run CrashBetweenAttachAndPinRecoversOnNextBoot = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep)
+    .then(Crash).expect(Safety and not(up) and g.crashMidAttach and link == "none" and route == "absent")
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .expect(Safety and open and link == "pinned" and route == "local")
+  // crash right after the swap of a boot under the route `local`, before the route step: the steering
+  // is already the new program, the route persists, nothing is delivered; the next boot converges
+  run CrashAfterSwapBeforeRouteConvergesOnRestart = init
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .then(Crash).then(RestartWith("v2")).then(BootStep).then(BootStep).then(BootStep)
+    .then(Crash).expect(Safety and not(up) and g.crashAfterSwap and prog == "v2" and route == "local" and link == "pinned")
+    .expect(NothingDeliveredWhileDown)
+    .then(RestartWith("v2")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).expect(Safety and open and prog == "v2")
+  // repeated refusals (boot_faulty: unbounded failures): each leaves a state the next boot converges
+  run RepeatedRefusalsThenBootConverges = init
+    .then(RestartWith("v1")).then(BootStep).then(Fail)
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(Fail)
+    .expect(Safety and not(up) and link == "none" and route == "absent")
+    .then(RestartWith("v1")).then(BootStep).then(BootStep).then(BootStep).then(BootStep).then(BootStep)
+    .expect(Safety and open and link == "pinned" and route == "local")
 
   // ------------------------------------------------------------------ witnesses (expected violated)
   val WitnessNoRefusal: bool = not(g.refused)

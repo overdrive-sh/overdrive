@@ -29,11 +29,15 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use overdrive_core::AllocationId;
+use overdrive_core::guest_transport::{
+    GUEST_CID_BASE, GuestCid, GuestCidClaim as _, GuestTransportAssignment, LaunchToken,
+};
 use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::driver::{AllocationSpec, GuestNetworkAssignment, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, Resources};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
 use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
@@ -200,20 +204,14 @@ pub fn build_inbound_spec(
         ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: workload_addr.map(|address| GuestNetworkAssignment {
-            address,
-            tap: "ovd-tp-test".to_owned(),
-            mac: [
-                0x02,
-                0x00,
-                address.octets()[0],
-                address.octets()[1],
-                address.octets()[2],
-                address.octets()[3],
-            ],
-            gateway: address,
-            prefix: 16,
-            dns: address,
+        transport: workload_addr.map(|address| {
+            let [_, _, high, low] = address.octets();
+            let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
+                .expect("an in-range guest CID");
+            let claim =
+                SimGuestCidClaim::new().claim(cid).expect("claim the allocation's guest CID");
+            let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
+            GuestTransportAssignment::new(address, address, launch, claim)
         }),
         service_ports,
     }

@@ -16,7 +16,7 @@ State 1
   prog = "none"
   phase = "start"
 
-State 2 [Restart]
+State 2 [RestartWith]
   stop = "none"
   up = TRUE
   bin = "v2"

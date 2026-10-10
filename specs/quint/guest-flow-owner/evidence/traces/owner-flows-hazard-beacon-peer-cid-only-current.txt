@@ -1,4 +1,4 @@
-# owner-flows-hazard-beacon-peer-cid-only-current: counterexample, 7 state(s) (from the TLC trace)
+# owner-flows-hazard-beacon-peer-cid-only-current: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
   resurrected = FALSE
@@ -37,14 +37,17 @@ State 3 [step]
   drvLive = TRUE
 
 State 4 [step]
-  bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  alloc = "Retiring"
 
 State 5 [step]
-  bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 6 [step]
-  drvLive = FALSE
+  bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 7 [step]
+  drvLive = FALSE
+
+State 8 [step]
   bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
   bclaim = 1

@@ -10,7 +10,7 @@
 #                          cargo-nextest, cargo-deny
 #   Networking             tcpdump, iproute2, bridge-utils
 #   Debugging              pwru (Cilium — packet trace through kernel hooks)
-#   Formal methods         quint (pinned), Temurin JDK 21, pre-fetched Apalache
+#   Formal methods         quint (npm, pinned) on Node.js LTS, Temurin JDK 21, pre-fetched Apalache
 #
 # Yocto / bitbake are deliberately NOT installed — Image Factory builds are
 # 60–90 minutes cold and 100 GB+ of sstate cache; belongs on dedicated CI.
@@ -123,7 +123,16 @@ param:
   # it is the version the quint-connect 0.1.2 conformance precedent was
   # validated against. Clears once v0.33.0 runs the specs/quint/** checks
   # and quint-connect green.
-  QUINT_VERSION:            "v0.32.0"
+  QUINT_VERSION:            "0.32.0"
+  # sha512 of the registry tarball quint-0.32.0.tgz (npm `dist.integrity`).
+  # Quint runs from its npm package under Node.js, NOT the `deno compile`
+  # release binary, whose HTTP/2 client stalls against the Apalache server.
+  QUINT_TGZ_SHA512:         "f58a238bb0d4ea6a119b5a1f0da37e7ed77135c1067228866e6ede37832395c09b7efeff63fcdc85a75c5d746631998df684cf5d493d1a686340e8400c9b2249"
+  # Node.js 24 LTS (Krypton), latest 24.x as of 2026-10; tarball sha256 from
+  # https://nodejs.org/dist/v24.21.0/SHASUMS256.txt.
+  NODE_VERSION:             "v24.21.0"
+  NODE_SHA256_X64:          "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
+  NODE_SHA256_ARM64:        "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2"
   # Apalache version Quint v0.32.0 downloads by default; the provisioning
   # step pre-fetches it into QUINT_HOME and fails if this dir is absent.
   QUINT_APALACHE_VERSION:   "0.56.1"
@@ -272,7 +281,7 @@ provision:
       pwru --version
 
   # -------------------------------------------------------------------------
-  # Quint formal-methods toolchain — Quint binary, Temurin JDK 21, and a
+  # Quint formal-methods toolchain — Node.js LTS + the quint npm package, Temurin JDK 21, and a
   # pre-populated QUINT_HOME (/opt/quint-toolchain/quint-home: the Apalache
   # distribution and the Rust evaluator Quint otherwise downloads lazily).
   # /usr/local/bin/quint is a wrapper that defaults QUINT_HOME and JAVA_HOME,
@@ -285,27 +294,39 @@ provision:
       #!/usr/bin/env bash
       set -euxo pipefail
       QUINT_VERSION="{{ .Param.QUINT_VERSION }}"
+      NODE_VERSION="{{ .Param.NODE_VERSION }}"
       APALACHE_VERSION="{{ .Param.QUINT_APALACHE_VERSION }}"
       JDK_RELEASE="{{ .Param.TEMURIN_JDK21_RELEASE }}"
       JDK_FILE_VERSION="$(echo "${JDK_RELEASE#jdk-}" | tr '+' '_')"
       PREFIX=/opt/quint-toolchain
       BIN_DIR=/usr/local/bin
       case "$(uname -m)" in
-        x86_64)  QARCH=amd64; JARCH=x64 ;;
-        aarch64) QARCH=arm64; JARCH=aarch64 ;;
+        x86_64)  NARCH=x64; NSHA="{{ .Param.NODE_SHA256_X64 }}"; JARCH=x64 ;;
+        aarch64) NARCH=arm64; NSHA="{{ .Param.NODE_SHA256_ARM64 }}"; JARCH=aarch64 ;;
         *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
       esac
-      QUINT_DIR="${PREFIX}/quint/${QUINT_VERSION}"
+      NODE_DIR="${PREFIX}/node"
+      NPM_PREFIX="${PREFIX}/npm"
       JDK_DIR="${PREFIX}/jdk"
       QUINT_HOME_DIR="${PREFIX}/quint-home"
       WORK="$(mktemp -d)"
       trap 'rm -rf "${WORK}"' EXIT
-      mkdir -p "${QUINT_DIR}" "${QUINT_HOME_DIR}"
+      mkdir -p "${QUINT_HOME_DIR}" "${NPM_PREFIX}"
 
-      if [ ! -x "${QUINT_DIR}/quint" ]; then
-        curl -fsSL -o "${WORK}/quint" \
-          "https://github.com/quint-co/quint/releases/download/${QUINT_VERSION}/quint-linux-${QARCH}"
-        install -m 0755 "${WORK}/quint" "${QUINT_DIR}/quint"
+      if [ ! -x "${NODE_DIR}/bin/node" ]; then
+        curl -fsSL -o "${WORK}/node.tar.xz" \
+          "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${NARCH}.tar.xz"
+        echo "${NSHA}  ${WORK}/node.tar.xz" | sha256sum -c -
+        rm -rf "${NODE_DIR}"; mkdir -p "${NODE_DIR}"
+        tar -xJf "${WORK}/node.tar.xz" -C "${NODE_DIR}" --strip-components=1
+      fi
+
+      if [ ! -x "${NPM_PREFIX}/bin/quint" ] \
+         || [ "$("${NODE_DIR}/bin/node" "${NPM_PREFIX}/bin/quint" --version)" != "${QUINT_VERSION}" ]; then
+        curl -fsSL -o "${WORK}/quint.tgz" \
+          "https://registry.npmjs.org/@informalsystems/quint/-/quint-${QUINT_VERSION}.tgz"
+        echo "{{ .Param.QUINT_TGZ_SHA512 }}  ${WORK}/quint.tgz" | sha512sum -c -
+        PATH="${NODE_DIR}/bin:${PATH}" npm install -g --prefix "${NPM_PREFIX}" "${WORK}/quint.tgz"
       fi
 
       if [ ! -x "${JDK_DIR}/bin/java" ]; then
@@ -319,8 +340,8 @@ provision:
       #!/bin/sh
       export QUINT_HOME="\${QUINT_HOME:-${QUINT_HOME_DIR}}"
       export JAVA_HOME="\${JAVA_HOME:-${JDK_DIR}}"
-      export PATH="\${JAVA_HOME}/bin:\${PATH}"
-      exec "${QUINT_DIR}/quint" "\$@"
+      export PATH="${NODE_DIR}/bin:\${JAVA_HOME}/bin:\${PATH}"
+      exec "${NPM_PREFIX}/bin/quint" "\$@"
       EOF
       chmod 0755 "${BIN_DIR}/quint"
       ln -sf "${JDK_DIR}/bin/java" "${BIN_DIR}/java"
@@ -492,7 +513,7 @@ probes:
       pwru --version
     hint: "pwru binary missing — check provisioning log."
 
-  - description: "quint toolchain installed (quint + JDK 21 + pre-fetched Apalache)"
+  - description: "quint toolchain installed (quint on Node + JDK 21 + pre-fetched Apalache)"
     script: |
       #!/usr/bin/env bash
       set -eu

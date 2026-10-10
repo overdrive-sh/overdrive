@@ -1,0 +1,31 @@
+# prefix-landing-hazard-volatile: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  seen = << >>
+  reject = FALSE
+  everBooted = FALSE
+  lis = {}
+  steer = "none"
+  route = "absent"
+  divert = FALSE
+  legC = FALSE
+  entries = {}
+  marked = FALSE
+  wl = {}
+
+State 2 [Boot]
+  reject = TRUE
+  everBooted = TRUE
+  steer = "ours"
+  route = "local"
+  divert = TRUE
+  legC = TRUE
+  marked = TRUE
+
+State 3 [Down]
+  reject = FALSE
+  steer = "none"
+  route = "absent"
+  divert = FALSE
+  legC = FALSE
+  marked = FALSE

@@ -60,12 +60,8 @@
 //! - [`VmRunDir::landlock_grant`] — the explicit `access=rw` grant on the
 //!   run directory (CH auto-derives kernel/disk/serial/api grants but NOT the
 //!   vsock socket it binds itself — P5 correction 2).
-//! - [`VmNetworkAttachment::tap_sysfs_landlock_grant`] — the private
-//!   `access=r` grant on the selected TAP's sysfs leaf, which CH reads while
-//!   constructing the network device under Landlock.
-//! - [`VmConfig::landlock_rules`] — the sole complete ordered composer: a
-//!   networked VM emits the selected TAP read grant followed by the run-dir
-//!   write grant; a non-networked VM emits only the run-dir grant.
+//! - [`VmConfig::landlock_rules`] — the sole complete ordered composer: the
+//!   run-dir write grant.
 //! - [`VmConfinement::launch_wrapper`] — the `prlimit … -- setpriv … --`
 //!   argv PREFIX that applies uid-drop + `setrlimit` with NO `unsafe`
 //!   `pre_exec` (the resolution to `overdrive-host`'s
@@ -536,22 +532,20 @@ impl VmConfinement {
 /// The access mode used by a private Landlock rule producer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LandlockAccess {
-    ReadOnly,
     ReadWrite,
 }
 
 impl LandlockAccess {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::ReadOnly => "r",
             Self::ReadWrite => "rw",
         }
     }
 }
 
 /// One `--landlock-rules` grant (ADR-0082 §(a)). The access mode is private so
-/// callers cannot widen a producer's grant. The grant names a directory or
-/// selected sysfs leaf, never a socket path: CH validates rule paths for
+/// callers cannot widen a producer's grant. The grant names a directory,
+/// never a socket path: CH validates rule paths for
 /// existence at config-parse time and the vsock UDS does not exist yet (P5
 /// correction 2).
 ///
@@ -819,21 +813,6 @@ impl VmRunDir {
         &self.0
     }
 
-    /// `<dir>/vsock` — Cloud Hypervisor binds this (the guest connects
-    /// out to it).
-    #[must_use]
-    pub fn vsock_socket(&self) -> PathBuf {
-        self.0.join("vsock")
-    }
-
-    /// `<dir>/vsock_<port>` — the DRIVER binds this; Cloud Hypervisor's
-    /// guest→host vsock path connects out to `<vsock_socket>_<port>`
-    /// (ADR-0082 §D2.2).
-    #[must_use]
-    pub fn beacon_socket(&self, port: VsockPort) -> PathBuf {
-        self.0.join(format!("vsock_{}", port.as_u32()))
-    }
-
     /// `<dir>/api` — Cloud Hypervisor's `--api-socket`.
     #[must_use]
     pub fn api_socket(&self) -> PathBuf {
@@ -854,7 +833,7 @@ impl VmRunDir {
     /// Hypervisor loads the copy and auto-derives its read-only kernel
     /// Landlock grant against it. The operator's own kernel is only ever
     /// OPENED READ-ONLY to source the copy — never mode-widened. Sibling of
-    /// [`console_log`](Self::console_log) / [`vsock_socket`](Self::vsock_socket)
+    /// [`console_log`](Self::console_log) / [`api_socket`](Self::api_socket)
     /// per SD-2's "`VmRunDir` owns every path inside it"; reclaimed with the
     /// run dir at teardown, and inside this allocation's OWN Landlock
     /// boundary.
@@ -882,24 +861,6 @@ impl VmRunDir {
 // overdrive-core-resident type (ADR-0082 §D2, 2026-08-12 amendment).
 // -----------------------------------------------------------------------
 
-/// The complete host-side attachment for a VM NIC.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VmNetworkAttachment {
-    /// Persistent TAP interface already provisioned on the host bridge.
-    pub tap: String,
-    /// Slot-derived locally administered unicast MAC for the virtio NIC.
-    pub mac: [u8; 6],
-}
-
-impl VmNetworkAttachment {
-    fn tap_sysfs_landlock_grant(&self) -> LandlockRule {
-        LandlockRule {
-            path: PathBuf::from(format!("/sys/class/net/{}", self.tap)),
-            access: LandlockAccess::ReadOnly,
-        }
-    }
-}
-
 /// One VM launch's complete, validated configuration — the value
 /// [`crate::traits::vmm::Vmm::create`] takes. Every field is either
 /// already-validated (`kernel`, `memory`, `confinement`) or a pure
@@ -922,9 +883,6 @@ pub struct VmConfig {
     pub vcpus: NonZeroU8,
     pub run_dir: VmRunDir,
     pub confinement: VmConfinement,
-    /// `Some` only when this VM has a complete persistent-TAP attachment;
-    /// `None` preserves the pre-mesh host-netns launch.
-    pub network: Option<VmNetworkAttachment>,
     pub cgroup_scope: CgroupPath,
 }
 
@@ -953,21 +911,13 @@ impl VmConfig {
     }
 
     /// The complete explicit Landlock rules for this launch (ADR-0082 §(b),
-    /// gap 5). A networked VM gets the selected TAP sysfs leaf with `access=r`
-    /// first, then the exclusive run directory with `access=rw`. A
-    /// non-networked VM keeps the legacy run-directory-only sequence. CH
-    /// auto-derives the kernel/disk/serial/api grants, so this list carries
-    /// only the dependencies CH omits. This method is the sole complete
-    /// ordered composer.
+    /// gap 5): the exclusive run directory with `access=rw`. CH auto-derives
+    /// the kernel/disk/serial/api grants, so this list carries only the
+    /// dependencies CH omits. This method is the sole complete ordered
+    /// composer.
     #[must_use]
     pub fn landlock_rules(&self) -> Vec<LandlockRule> {
-        let explicit_rule_count = 1 + usize::from(self.network.is_some());
-        let mut rules = Vec::with_capacity(explicit_rule_count);
-        if let Some(network) = self.network.as_ref() {
-            rules.push(network.tap_sysfs_landlock_grant());
-        }
-        rules.push(self.run_dir.landlock_grant());
-        rules
+        vec![self.run_dir.landlock_grant()]
     }
 }
 
@@ -1152,41 +1102,19 @@ mod tests {
 
     proptest! {
         /// Every socket/log path `VmRunDir` exposes is `<dir>/<fixed
-        /// name>`, and `beacon_socket` embeds the port number.
+        /// name>`.
         #[test]
         fn vm_run_dir_paths_are_dir_joined_names(
             root_name in "[a-z0-9]{1,8}",
             alloc_suffix in ALLOC_SUFFIX_STRATEGY,
-            port in any::<u32>(),
         ) {
             let alloc = AllocationId::new(&alloc_suffix).unwrap();
             let root = PathBuf::from(format!("/run/overdrive/{root_name}"));
             let run_dir = VmRunDir::for_alloc(&root, &alloc);
             let dir = run_dir.path();
 
-            prop_assert_eq!(run_dir.vsock_socket(), dir.join("vsock"));
             prop_assert_eq!(run_dir.api_socket(), dir.join("api"));
             prop_assert_eq!(run_dir.console_log(), dir.join("console.log"));
-
-            let beacon = run_dir.beacon_socket(VsockPort::new(port));
-            // Exact derivation relation (review remediation F5): CH's wire
-            // contract is `<vsock_socket>_<port>` (ADR-0082 §D2.2 / P2) --
-            // pin it precisely, not just "some file under dir whose name
-            // contains the port", which survives a `"vsock_{}"` ->
-            // `"beacon_{}"` prefix mutation.
-            prop_assert_eq!(
-                &beacon,
-                &PathBuf::from(format!("{}_{}", run_dir.vsock_socket().display(), port))
-            );
-            prop_assert_eq!(beacon.parent(), Some(dir));
-
-            let beacon_name = beacon.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-            let port_str = port.to_string();
-            prop_assert!(
-                beacon_name.contains(port_str.as_str()),
-                "beacon socket name {beacon_name:?} must embed the port {port}",
-            );
-            prop_assert_ne!(run_dir.vsock_socket(), beacon);
         }
     }
 
@@ -1225,7 +1153,6 @@ mod tests {
                 VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
                 1024,
             ),
-            network: None,
             cgroup_scope: CgroupPath::for_alloc(&alloc),
         }
     }
@@ -1237,39 +1164,17 @@ mod tests {
             reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
         )]
         #[test]
-        fn landlock_rules_are_exact_and_ordered_for_network_presence(
-            network_present in any::<bool>(),
-            tap_suffix in "[0-9a-f]{4}",
+        fn landlock_rules_are_exactly_the_run_dir_grant(
+            master_bytes in any::<u64>(),
         ) {
-            let mut config = sample_vm_config(0, 0);
-            let tap = format!("ovd-tp-{tap_suffix}");
-            config.network = network_present.then(|| VmNetworkAttachment {
-                tap: tap.clone(),
-                mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x01],
-            });
-
+            let config = sample_vm_config(master_bytes, 0);
             let run_dir_path = config.run_dir.path().to_path_buf();
             let rules = config.landlock_rules();
             let paths: Vec<_> = rules.iter().map(LandlockRule::path).collect();
             let rendered: Vec<_> = rules.iter().map(LandlockRule::to_rule_arg).collect();
 
-            if network_present {
-                let tap_path = PathBuf::from(format!("/sys/class/net/{tap}"));
-                prop_assert_eq!(paths, vec![tap_path.as_path(), run_dir_path.as_path()]);
-                prop_assert_eq!(
-                    rendered,
-                    vec![
-                        format!("path={},access=r", tap_path.display()),
-                        format!("path={},access=rw", run_dir_path.display()),
-                    ],
-                );
-            } else {
-                prop_assert_eq!(paths, vec![run_dir_path.as_path()]);
-                prop_assert_eq!(
-                    rendered,
-                    vec![format!("path={},access=rw", run_dir_path.display())],
-                );
-            }
+            prop_assert_eq!(paths, vec![run_dir_path.as_path()]);
+            prop_assert_eq!(rendered, vec![format!("path={},access=rw", run_dir_path.display())]);
         }
     }
 

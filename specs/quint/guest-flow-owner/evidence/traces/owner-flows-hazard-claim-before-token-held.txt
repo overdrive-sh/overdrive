@@ -52,12 +52,12 @@ State 8 [step]
   gen = 2
 
 State 9 [step]
-  claim = 1
-  sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
-
-State 10 [step]
   vmUp = TRUE
   vmGen = 2
+
+State 10 [step]
+  claim = 1
+  sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 11 [step]
   sess = <<[st |-> "reading", gen |-> 1], [st |-> "pending", gen |-> 2]>>

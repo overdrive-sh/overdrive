@@ -39,16 +39,17 @@ State 4
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
 
 State 5
-  vmUp = false
-
-State 6
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "reading" })
 
-State 7
+State 6
   alloc = "Retiring"
 
-State 8
+State 7
   claim = 2
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "live" })
+
+State 8
+  vmUp = false
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "dead" })
 
 State 9

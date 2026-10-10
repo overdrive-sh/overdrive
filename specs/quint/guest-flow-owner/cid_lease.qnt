@@ -288,6 +288,9 @@ module cid_lease {
   def launchingOff(o: int): bool = ALLOCS.exists(a => al.get(a).st == "launching" and al.get(a).off == o)
   action Boot = {
     nondet S = OFFS.powerset().oneOf()
+    BootWith(S)
+  }
+  action BootWith(S: Set[int]): bool = {
     all {
       bootLeft != 0,
       kern' = OFFS.mapBy(o =>
@@ -341,6 +344,86 @@ module cid_lease {
   val Safety: bool = and {
     CidUnique, ClaimHeld, NoLaunchClash, NoSkipWhileClaimable, NoLeakedClaim, RefusalEachClaimInUse,
   }
+
+  // ------------------------------------------------------------------ named runs (critical scenarios)
+  // Deterministic scenarios on the design instance `lease_ok` (offsets 0-2, workloads 1 and 2, a
+  // surviving VMM on offset 0 from before the first boot, one claim error, one pre-READY exit),
+  // each ending in an `expect` of its outcome with `Safety` checked along the way. `BootWith(S)` is
+  // `Boot` with the set of in-transit claims whose VMM had inherited the device chosen by the run.
+  def st(a: int): str = al.get(a).st
+  // D16-CLAIM happy path: next-fit assign skips the surviving VMM's CID (InUse, nothing remembered),
+  // claims the next free offset, hands the claim to the VMM at create, and a stop releases it
+  run AssignSkipsSurvivorClaimsLaunchesAndReleases = init
+    .then(AssignBegin(1)).then(AssignTry)
+    .expect(Safety and walker == 1 and g.skipOrphan and st(1) == "wait")
+    .then(AssignTry)
+    .expect(Safety and walker == 0 and st(1) == "admitted" and al.get(1).off == 1 and kern.get(1) == 1 and al.get(1).loc == "slot" and cursor == 2)
+    .then(LaunchBegin(1)).expect(Safety and st(1) == "launching" and al.get(1).loc == "taken" and kern.get(1) == 1)
+    .then(CreateOk(1)).expect(Safety and st(1) == "running" and al.get(1).loc == "vmm" and kern.get(1) == 1)
+    .then(Stop(1)).expect(Safety and st(1) == "retiring" and kern.get(1) == 0 and lease.get(1) == 1)
+    .then(Release(1)).expect(Safety and st(1) == "done" and lease.get(1) == 0 and kern.get(1) == 0)
+    .then(Redeploy(1)).expect(Safety and st(1) == "wait" and al.get(1).remembered == Set())
+  // the surviving VMM exits: its CID is claimable again; next-fit continues from the cursor
+  run SurvivorExitFreesItsCidForLaterAssigns = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry)
+    .then(OrphanExit(0)).expect(Safety and kern.get(0) == 0)
+    .then(AssignBegin(2)).then(AssignTry).expect(Safety and st(2) == "admitted" and al.get(2).off == 2 and cursor == 3 % N)
+    .then(Stop(1)).expect(Safety)
+    .then(Release(1)).then(Redeploy(1)).then(AssignBegin(1)).then(AssignTry)
+    .expect(Safety and st(1) == "admitted" and al.get(1).off == 3 % N and kern.get(3 % N) == 1)
+  // an untaken claim (admitted, never launched) is released at pool.release, not at the stop
+  run UntakenClaimReleasedAtPoolRelease = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry)
+    .then(Stop(1)).expect(Safety and st(1) == "retiring" and al.get(1).loc == "slot" and kern.get(1) == 1)
+    .then(Release(1)).expect(Safety and st(1) == "done" and kern.get(1) == 0 and lease.get(1) == 0)
+  // Vmm::create Err drops the claim (released); the lease retires and placement retries
+  run CreateErrDropsClaimAndPlacementRetries = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1))
+    .then(CreateErr(1)).expect(Safety and st(1) == "retiring" and kern.get(1) == 0 and al.get(1).retry)
+    .then(Release(1)).expect(Safety and st(1) == "wait" and lease.get(1) == 0)
+    .then(AssignBegin(1)).then(AssignTry).expect(Safety and st(1) == "admitted" and al.get(1).off == 2 and kern.get(2) == 1)
+  // the VMM exits before READY: the device closes, the kernel frees the CID, placement retries
+  run VmmExitsBeforeReadyReleasesCidAndRetries = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1)).then(CreateOk(1))
+    .then(VmmFail(1)).expect(Safety and st(1) == "retiring" and kern.get(1) == 0 and al.get(1).retry)
+    .then(Release(1)).expect(Safety and st(1) == "wait" and lease.get(1) == 0)
+  // a claim error other than InUse: a typed error, no state change, no further offset tried; the
+  // next call places the workload
+  run ClaimErrorLeavesNoStateChange = init
+    .then(AssignBegin(1)).then(AssignClaimErr)
+    .expect(Safety and walker == 0 and st(1) == "wait" and lease == OFFS.mapBy(o => 0) and cursor == 0 and g.claimErr)
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).expect(Safety and st(1) == "admitted")
+  // serve crash with a running VMM: its device survives (kernel holder -2), the pool is rebuilt empty,
+  // and the restarted placement skips the surviving CID with no clash
+  run ServeCrashWithRunningVmmSurvivesAndReplaceSkipsIt = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1)).then(CreateOk(1))
+    .then(BootWith(Set()))
+    .expect(Safety and kern.get(1) == -2 and st(1) == "wait" and lease == OFFS.mapBy(o => 0) and cursor == 0)
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(AssignTry)
+    .expect(Safety and st(1) == "admitted" and al.get(1).off == 2 and kern.get(2) == 1 and not(g.clash))
+  // serve crash with a claim in transit to create: it survives iff the VMM had inherited the device
+  run ServeCrashClaimInTransitInheritedSurvives = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1))
+    .then(BootWith(Set(1))).expect(Safety and kern.get(1) == -2 and st(1) == "wait")
+  run ServeCrashClaimInTransitNotInheritedIsReleased = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1))
+    .then(BootWith(Set())).expect(Safety and kern.get(1) == 0 and st(1) == "wait")
+  // serve crash with a claim still in the take-once slot: serve's reference closes, the CID is free
+  run ServeCrashReleasesUntakenClaim = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry)
+    .then(BootWith(Set())).expect(Safety and kern.get(1) == 0 and kern.get(0) == -2 and st(1) == "wait")
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).expect(Safety and st(1) == "admitted" and al.get(1).off == 1)
+  // GuestCidsHeldElsewhere: every free offset's claim returns InUse (surviving VMMs on all of them);
+  // no state change and nothing remembered; once one survivor exits the next call places the workload
+  run AllOffsetsHeldElsewhereRefusesThenPlacesAfterExit = init
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1)).then(CreateOk(1))
+    .then(AssignBegin(2)).then(AssignTry).then(LaunchBegin(2)).then(CreateOk(2))
+    .expect(Safety and kern.get(1) == 1 and kern.get(2) == 2)
+    .then(BootWith(Set()))
+    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(AssignTry)
+    .expect(Safety and walker == 0 and st(1) == "wait" and g.refusedHeld and lease == OFFS.mapBy(o => 0) and al.get(1).remembered == Set())
+    .then(OrphanExit(0)).then(AssignBegin(1)).then(AssignTry)
+    .expect(Safety and st(1) == "admitted" and al.get(1).off == 0)
 
   // ------------------------------------------------------------------ witnesses (expected violated)
   val WitnessNoSkip: bool = not(g.skipped)

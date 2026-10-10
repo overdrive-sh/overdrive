@@ -1,4 +1,4 @@
-# shared-table-hazard-any-restore: counterexample, 14 state(s) (from the TLC trace)
+# shared-table-hazard-any-restore: counterexample, 15 state(s) (from the TLC trace)
 
 State 1
   rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
@@ -30,36 +30,36 @@ State 4 [BootStep]
 State 5 [ListenerTaskExit]
   flDmg = TRUE
 
-State 6 [BringUp]
-  entries = {1}
-  lis = {1}
-  g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> FALSE]
+State 6 [RecQuiesce]
+  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+  holders = {"IpRules"}
 
 State 7 [RecQuiesce]
+  rec = [IpRules |-> "held", FlowListeners |-> "held"]
+  holders = {"IpRules", "FlowListeners"}
+
+State 8 [RecRepair]
+  rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
+  flDmg = FALSE
+
+State 9 [RecRestore]
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  holders = {}
+  g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> TRUE]
+
+State 10 [BringUp]
+  entries = {1}
+  lis = {1}
+  g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> TRUE]
+
+State 11 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "idle"]
   entries = {}
   lis = {}
   holders = {"IpRules"}
 
-State 8 [RecQuiesce]
-  rec = [IpRules |-> "held", FlowListeners |-> "held"]
-  holders = {"IpRules", "FlowListeners"}
-
-State 9 [RecRepair]
-  rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
-  flDmg = FALSE
-
-State 10 [RecRestore]
-  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
-  holders = {}
-  g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> TRUE]
-
-State 11 [ListenerTaskExit]
+State 12 [ListenerTaskExit]
   flDmg = TRUE
-
-State 12 [RecQuiesce]
-  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
-  holders = {"IpRules"}
 
 State 13 [RecQuiesce]
   rec = [IpRules |-> "held", FlowListeners |-> "held"]
@@ -68,5 +68,9 @@ State 13 [RecQuiesce]
 State 14 [RecRepair]
   rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
   flDmg = FALSE
+
+State 15 [RecRestore]
+  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  holders = {}
 
 -> loops back to State 10

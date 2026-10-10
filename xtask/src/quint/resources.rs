@@ -54,6 +54,11 @@ pub const QUINT_TLC_MB: u64 = 2048;
 /// Resident memory of the Quint process on the Apalache path. Measured peak:
 /// about 480 MiB.
 pub const QUINT_APALACHE_MB: u64 = 512;
+/// Resident memory reserved for a named-run check (`quint test`).
+///
+/// The Quint process holding the parsed spec, sized like the TLC path's
+/// [`QUINT_TLC_MB`], plus Quint's Rust evaluator. Not separately measured.
+pub const QUINT_EVALUATOR_MB: u64 = QUINT_TLC_MB + 512;
 /// Memory left unbudgeted for the kernel, page cache and everything else.
 pub const DEFAULT_HEADROOM_MB: u64 = 2048;
 /// How long the head of the queue may be bypassed by smaller checks before
@@ -189,6 +194,8 @@ impl ResourceConfig {
             Backend::Apalache => {
                 Sizing { heap_mb: check.heap_mb.unwrap_or(self.apalache_heap_mb), workers: 1 }
             }
+            // No JVM: `parse_checks` rejects `heap_mb` and `workers` here.
+            Backend::Evaluator => Sizing { heap_mb: 0, workers: 1 },
         }
     }
 
@@ -198,6 +205,7 @@ impl ResourceConfig {
         match check.backend {
             Backend::Tlc => tlc_reservation(s.heap_mb, s.workers),
             Backend::Apalache => apalache_reservation(s.heap_mb),
+            Backend::Evaluator => evaluator_reservation(),
         }
     }
 }
@@ -222,6 +230,11 @@ pub const fn tlc_reservation(heap_mb: u64, workers: u32) -> Reservation {
 /// Reservation of an Apalache check.
 pub const fn apalache_reservation(heap_mb: u64) -> Reservation {
     Reservation { mem_mb: heap_mb + JVM_OVERHEAD_MB + Z3_NATIVE_MB + QUINT_APALACHE_MB, cpus: 1 }
+}
+
+/// Reservation of a named-run check.
+pub const fn evaluator_reservation() -> Reservation {
+    Reservation { mem_mb: QUINT_EVALUATOR_MB, cpus: 1 }
 }
 
 /// Which queued check (index into `queue`) to start next, if any.

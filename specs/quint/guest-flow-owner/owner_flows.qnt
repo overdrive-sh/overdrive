@@ -43,13 +43,25 @@
  *        vsock end for an unannounced direction aborts at once with reset (UnannouncedVsockEnd).
  *        The announcing wait ends by the acknowledgement, Abort, session loss, a flow error,
  *        teardown or quiescence; no timer.
+ *   DG-5-C/D/E/F (round 2 remediation, approved by the user 2026-10-10)
+ *        C  The clean close happens in the step that completes the second direction (no separate step).
+ *        D  Drain wait, both owners: the wait for a direction starts at its EPOLLRDHUP (for an outer EOF
+ *           recorded before Paired, at Paired), and ends when `drained(key, dir)` returns true; HalfClose
+ *           only after the drain toward the vsock, the outer shutdown only after the drain toward the
+ *           outer leg; the drain deadline (FLOW_DRAIN_DEADLINE) aborts with Abort. A not-yet-drained
+ *           re-check is stuttering and not modelled.
+ *        E  The guest watches an installed, unrouted V_g: the host's close of V_h ends the flow with no
+ *           message, an error aborts it with Abort; either leaves it Closed.
+ *        F  Guest session loss aborts every flow of the lost session in the one step that observes it,
+ *           before any reconnect.
  *
  * Abstraction:
  *   - CFG selects the instance: "core" (sessions, guest-opened flows, host-opened TcpAccept flows,
  *     the allocation lifecycle), "beacon" (the allocation lifecycle, VM start / exit, driver.stop and
  *     the beacon; ADR-0157) or "half" (one paired TCP flow between the guest owner and the host owner
- *     with the half-close handshake, owner death per side and session loss; the opener is chosen at
- *     init: guest = TcpConnect, host = TcpAccept). The parts share nothing else, so each is checked
+ *     with the half-close handshake and its drain waits, owner death per side and session loss; the
+ *     opener is chosen at init: guest = TcpConnect, host = TcpAccept); "core2" is "core" with two
+ *     host-opened flows (the all-flows session-loss run, DG-5-F). The parts share nothing else, so each is checked
  *     on its own instance; the state of the parts an instance switches off stays constant.
  *   - ONE guest CID. Successive allocations (leases) that lease the CID are distinguished by `gen`;
  *     one launch per lease (VmStart once per gen), so the launch token is the lease's `gen`
@@ -74,9 +86,13 @@
  *     messages (`ch`, FIFO per direction) are independent channels with no order between them.
  *     A dying owner's own far end is reset by linger; its in-flight control messages are still
  *     delivered before the survivor observes the session's end; its vsock end reaches the survivor
- *     as its own action (VsockEndReachesSurvivor), unordered against that loss (K-B4). Drains are
- *     one step (FLOW_DRAIN_DEADLINE is a flow error). Teardown, quiescence and every flow error are
- *     one fault action per side (HcFlowError).
+ *     as its own action (VsockEndReachesSurvivor), unordered against that loss (K-B4). A drain is a
+ *     wait per direction (DG-5-D): `drainV(s)` toward the vsock, set when `outEof ∧ paired` and ended by
+ *     HcAnnounce; `drainO(s)` toward the outer leg, set at the vsock end of an acknowledged direction
+ *     and ended by HcOuterDrained; the drain deadline (FLOW_DRAIN_DEADLINE) is a flow error, and so
+ *     are teardown and quiescence (one fault action per side, HcFlowError). Not-yet-drained re-checks
+ *     (FLOW_DRAIN_RECHECK_PERIOD) are stuttering and not modelled. The clean close is part of the step
+ *     that completes the second direction (HcRecv of the acknowledgement, or HcOuterDrained: DG-5-C).
  *   - Per-CID serialization (M-7): provision, activate, teardown, quiesce, restore, driver.stop,
  *     session / beacon claim and loss are each ONE atomic action. The read of a first record is
  *     its own step and interleaves with them.
@@ -85,6 +101,9 @@
  *     first record right after connecting, well within FLOW_REQUEST_DEADLINE, so a read with
  *     nothing buffered fails only once the connection's VM is gone (the deadline is not modelled
  *     against a live writer).
+ *   - Timers: each deadline action fires its own deadline only, one deadline per step (reconnect =
+ *     GuestOpenSession, the drain deadline = HcFlowError, the pairing deadline in module B); the order
+ *     of simultaneously due deadlines (earliest first, DG-5-A) is the driver's clock and not modelled.
  *   - Not modelled: flow quotas; the stale-entry 4-tuple refusal of a new connect (P-37) — a
  *     refused connect is a connect the guest retries, which the reconnect already covers; the
  *     drain counters (K2) and the linger clearing on a clean close.
@@ -112,9 +131,9 @@
 module owner_flows {
   // ------------------------------------------------------------------ parameters
   const OFF: Set[str]
-  const CFG: str            // "core" | "beacon" | "half" | "half_host" | "half_guest"
+  const CFG: str            // "core" | "core2" | "beacon" | "half" | "half_host" | "half_guest"
 
-  val CORE: bool = CFG == "core"
+  val CORE: bool = CFG == "core" or CFG == "core2"
   val BEACON: bool = CFG == "beacon"
   // `half` is the design instance. `half_host` / `half_guest` (S-4) are the conformance instances, one
   // per owner under test: `HcPeerDefectEnd(s)` is a defect of `s`'s own code, which a production owner
@@ -126,7 +145,7 @@ module owner_flows {
   val BCONNS: Set[int] = Set(1, 2)
   val FLOW_IDS: Set[int] = Set(1, 2)
   val MAXGEN: int = 2
-  val HFLOWS: Set[int] = Set(1)
+  val HFLOWS: Set[int] = if (CFG == "core2") Set(1, 2) else Set(1)
   val SIDES: Set[str] = Set("g", "h")
 
   val BUG_SESSION_SPLIT_CLAIM: bool = OFF.contains("sessionSplitClaim")     // L-3 violated: "no live claim?" checked, then claimed later
@@ -151,6 +170,15 @@ module owner_flows {
   val BUG_ACK_WAITS: bool = OFF.contains("ackWaits")                        // the acknowledging side waits (acks only after its own outer
                                                                             // EOF) instead of acknowledging at once
   val BUG_EARLY_EOF_ABORTS: bool = OFF.contains("earlyEofAborts")           // an outer EOF before Paired aborts the flow
+  val BUG_NO_DRAIN_WAIT_OUTER: bool = OFF.contains("noDrainWaitOuter")      // DG-5-D off: a vsock end for an announced direction shuts the outer
+                                                                            // leg at once, while the drain toward it is still owed
+  val BUG_NO_DRAIN_WAIT_VSOCK: bool = OFF.contains("noDrainWaitVsock")      // DG-5-D off: HalfClose is sent at the outer EOF, while the drain
+                                                                            // toward the vsock is still owed
+  val BUG_ABORT_KEEPS_DRAIN: bool = OFF.contains("abortKeepsDrain")         // DG-5-D off: an abort leaves the direction's drain wait armed
+  val BUG_SEPARATE_CLOSE: bool = OFF.contains("separateClose")              // DG-5-C off: the clean close is a separate later step (HcLateClose)
+  val BUG_RECONNECT_BEFORE_LOSS_ABORT: bool = OFF.contains("reconnectBeforeLossAbort") // DG-5-F off: the guest may open a new session while a flow of
+                                                                            // the lost session is still open
+  val BUG_NO_INSTALLED_WATCH: bool = OFF.contains("noInstalledWatch")       // DG-5-E off: an installed, unrouted V_g is not watched
   val ENV_GUEST_MISSES_HOST_CLOSE: bool = OFF.contains("K-A4")              // drop K-A4: the guest never observes the host's close of V_h
   val ALT_GUEST_ABORT_TOMBSTONE: bool = OFF.contains("altTombstone")        // candidate: the guest keeps an Abort for a host-origin id it
                                                                             // has not accepted yet, and closes that flow at accept
@@ -199,6 +227,8 @@ module owner_flows {
     vEnd: str -> bool,          // an end-of-stream of s's flow vsock in flight toward the other side
     vEndSent: str -> bool,      // s's flow vsock has ended (shutdown, abort or death)
     held: str -> bool,          // altPendingWait only: s holds a bare vsock end pending
+    drainV: str -> bool,        // DG-5-D: s waits for the drain of direction s toward its flow vsock (set when outEof and paired)
+    drainO: str -> bool,        // DG-5-D: s waits for the drain of the peer's direction toward s's outer leg (set at the vsock end of an acknowledged direction)
     earlyShut: bool,            // ghost: a vsock was shut down before the peer's acknowledgement
     faulted: bool,              // ghost: a fault happened (owner death, session drop, flow error, outer reset, defect)
   }
@@ -226,6 +256,7 @@ module owner_flows {
   var toHostPaired: Set[int]
   var toHostRefused: Set[int]
   var toGuestAbort: Set[int]
+  var toHostAbort: Set[int]  // guest -> host Abort for a host-opened flow (DG-5-E: an error on an installed V_g)
   var resurrected: bool    // ghost: a host flow left `closed`
   var abortDiscarded: Set[int] // ghost: Aborts the guest discarded because the flow was unknown to it
   var phantom: bool        // ghost: the guest connected the application for a flow the host had
@@ -269,7 +300,7 @@ module owner_flows {
   def abortMsgs(liveAfter: bool): Set[int] = if (liveAfter) toGuestAbort.union(openH) else Set()
   action keepH = all {
     hf' = hf, gf' = gf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused,
-    toGuestAbort' = toGuestAbort, resurrected' = resurrected, abortDiscarded' = abortDiscarded,
+    toGuestAbort' = toGuestAbort, resurrected' = resurrected, abortDiscarded' = abortDiscarded, toHostAbort' = toHostAbort,
     phantom' = phantom,
   }
   action keepGhostsH = all { resurrected' = resurrected, abortDiscarded' = abortDiscarded, phantom' = phantom }
@@ -281,7 +312,11 @@ module owner_flows {
   action keepX = all { keepB, hc' = hc }
 
   // ------------------------------------------------------------------ init
-  action init = all {
+  action init = {
+    nondet o = (if (HALF) Set("g", "h") else Set("g")).oneOf()
+    InitWith(o)
+  }
+  action InitWith(o: str): bool = all {
     alloc' = "Absent",
     gen' = 0,
     vmGen' = 0,
@@ -293,11 +328,10 @@ module owner_flows {
     badPaired' = false, crossMsg' = false, heldByOther' = false,
     hf' = HFLOWS.mapBy(h => { st: "none", gen: 0 }),
     gf' = HFLOWS.mapBy(h => { st: "none", gen: 0, c: 0 }),
-    toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(),
+    toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(), toHostAbort' = Set(),
     resurrected' = false, abortDiscarded' = Set(), phantom' = false,
     drvLive' = false, bclaim' = 0, bcn' = BCONNS.mapBy(b => { st: "none", gen: 0 }),
     readyCross' = false, bHeldByOther' = false,
-    nondet o = (if (HALF) Set("g", "h") else Set("g")).oneOf()
     hc' = {
       opener: o,
       paired: SIDES.mapBy(x => false), outEof: SIDES.mapBy(x => false), farHc: SIDES.mapBy(x => false),
@@ -305,7 +339,8 @@ module owner_flows {
       outShut: SIDES.mapBy(x => false), open: SIDES.mapBy(x => true), far: SIDES.mapBy(x => "none"),
       dead: SIDES.mapBy(x => false), loss: SIDES.mapBy(x => false), ctlDown: false,
       ch: SIDES.mapBy(x => List()), vEnd: SIDES.mapBy(x => false), vEndSent: SIDES.mapBy(x => false),
-      held: SIDES.mapBy(x => false), earlyShut: false, faulted: false,
+      held: SIDES.mapBy(x => false), drainV: SIDES.mapBy(x => false), drainO: SIDES.mapBy(x => false),
+      earlyShut: false, faulted: false,
     },
   }
 
@@ -349,7 +384,7 @@ module owner_flows {
     alloc' = alloc, gen' = gen, vmGen' = vmGen, quiesced' = quiesced, claim' = claim,
     badPaired' = badPaired, keepAttr,
     gf' = gf.keys().mapBy(h => if (gf.get(h).gen == vmGen and gf.get(h).st != "none") { ...gf.get(h), st: "closed" } else gf.get(h)),
-    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
+    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     keepGhostsH,
     drvLive' = drvLive, bclaim' = bclaim, readyCross' = readyCross, bHeldByOther' = bHeldByOther, hc' = hc,
   }
@@ -375,7 +410,7 @@ module owner_flows {
     claim' = 0,
     flows' = if (BUG_TEARDOWN_SKIPS_FLOWS) flows else abortAll,
     gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced, badPaired' = badPaired, keepAttr,
-    hf' = abortAllH, gf' = gf, toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(),
+    hf' = abortAllH, gf' = gf, toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(), toHostAbort' = Set(),
     keepGhostsH, keepX,
   }
   // pool.release after driver.stop and teardown (ADR-0133): the CID may be leased again
@@ -391,7 +426,7 @@ module owner_flows {
     quiesced' = true, flows' = abortAll,
     alloc' = alloc, gen' = gen, vmGen' = vmGen, vmUp' = vmUp, claim' = claim, sess' = sess,
     badPaired' = badPaired, keepAttr, hf' = abortAllH, gf' = gf, toHostPaired' = toHostPaired,
-    toHostRefused' = toHostRefused, toGuestAbort' = abortMsgs(sessLive), keepGhostsH, keepX,
+    toHostRefused' = toHostRefused, toGuestAbort' = abortMsgs(sessLive), keepGhostsH, keepX, toHostAbort' = toHostAbort,
   }
   action Restore = all {
     quiesced,
@@ -407,10 +442,17 @@ module owner_flows {
   }
   // the guest connects to (2, 1243) and writes its ControlOpen (its own launch token) — two first
   // connects may race (R5-18, L-3) — and reconnects after its connection ended (refusal or loss)
+  def connLive(c: int): bool = CONNS.exists(x => x == c and sess.get(x).st == "live")
   def guestHasConn: bool = CONNS.exists(x =>
     sess.get(x).gen == vmGen and sess.get(x).st.in(Set("pending", "reading", "checked", "live", "dead")))
+  // DG-5-F: no flow of a lost session outlives the dispatch that observes the loss, so a new connection
+  // is not opened while any flow of a lost session is still open (a flow accepted with no live session,
+  // gf.c = 0, belongs to no session)
+  val lostSessionFlowOpen: bool = HFLOWS.exists(h =>
+    gf.get(h).st.in(Set("acc", "routed")) and gf.get(h).c != 0 and not(connLive(gf.get(h).c)))
   action GuestOpenSession(c: int): bool = all {
     vmUp, sess.get(c).st == "none" or (sess.get(c).st == "closed" and not(guestHasConn)),
+    BUG_RECONNECT_BEFORE_LOSS_ABORT or not(lostSessionFlowOpen),
     sess' = sess.set(c, { st: "pending", gen: vmGen }),
     claim' = claim, heldByOther' = heldByOther, keepSessRest,
   }
@@ -470,7 +512,7 @@ module owner_flows {
     claim' = if (claim == c) 0 else claim,
     flows' = if (BUG_NO_ABORT_ON_LOSS) flows else abortAll,
     alloc' = alloc, gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced,
-    badPaired' = badPaired, keepAttr, hf' = abortAllH, gf' = gf, toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(),
+    badPaired' = badPaired, keepAttr, hf' = abortAllH, gf' = gf, toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(), toHostAbort' = Set(),
     keepGhostsH, keepX,
   }
   // the owner processes the loss of a session whose VM is gone (fair in SessionBecomesLive)
@@ -507,9 +549,12 @@ module owner_flows {
   // step 3: read the request in userspace (in one or two pieces); once all of it is read, compare
   // its launch token with the CID's live launch token: a mismatch closes V_h and removes the
   // registration, with no control message (StaleLaunch); a match completes the registration.
-  action HostReadReq(f: int): bool = all {
-    flows.get(f).st == "accepted", flows.get(f).req < 2,
+  action HostReadReq(f: int): bool = {
     nondet n = Set(1, 2).oneOf()
+    HostReadReqN(f, n)
+  }
+  action HostReadReqN(f: int, n: int): bool = all {
+    flows.get(f).st == "accepted", flows.get(f).req < 2,
     val x = flows.get(f)
     val r = if (x.req + n > 2) 2 else x.req + n
     val done = r == 2
@@ -548,9 +593,12 @@ module owner_flows {
   // refusals, request / pairing deadlines, connect failure, peer EOF/reset: the flow closes. A flow
   // whose request was read and matched may be answered (Refused / Abort on the session); one not yet
   // attributed is closed with no message (its flow id is unknown or another launch's).
-  action HostFlowEnds(f: int): bool = all {
-    registered(flows.get(f).st) or flows.get(f).st == "checked",
+  action HostFlowEnds(f: int): bool = {
     nondet msg = Set(true, false).oneOf()
+    HostFlowEndsMsg(f, msg)
+  }
+  action HostFlowEndsMsg(f: int, msg: bool): bool = all {
+    registered(flows.get(f).st) or flows.get(f).st == "checked",
     val sends = msg and attributed(flows.get(f).st)
     all {
       flows' = flows.set(f, { ...flows.get(f), st: "closed" }),
@@ -565,7 +613,6 @@ module owner_flows {
     sess' = sess, flows' = flows, badPaired' = badPaired, heldByOther' = heldByOther, keepX,
   }
   action keepCoreMsg = all { keepCore, crossMsg' = crossMsg }
-  def connLive(c: int): bool = CONNS.exists(x => x == c and sess.get(x).st == "live")
   // V_g is in the guest's accept queue: the host connected V_h to this VM, the guest has not accepted
   def queuedV(h: int): bool = and {
     gf.get(h).st.in(Set("none", "tomb")), hf.get(h).st != "none", hf.get(h).gen == vmGen, vmUp }
@@ -576,28 +623,31 @@ module owner_flows {
   action HostOpenAccept(h: int): bool = all {
     hf.get(h).st == "none", admissible, vmUp, vmGen == gen,
     hf' = hf.set(h, { st: "req", gen: gen }),
-    gf' = gf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
+    gf' = gf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     keepGhostsH, keepCoreMsg,
   }
   // step 3: the guest accepts V_g, reads the request (its own token), installs V_g.
   action GuestAcceptV(h: int): bool = all {
     hf.get(h).st != "none", hf.get(h).gen == vmGen, vmUp, gf.get(h).st.in(Set("none", "tomb")),
     gf' = gf.set(h, { st: if (gf.get(h).st == "tomb") "closed" else "acc", gen: vmGen, c: liveConn }),
-    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
+    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     keepGhostsH, keepCoreMsg,
   }
   // steps 4-5: connect C to the application; refused → Refused(ApplicationNotListening); otherwise
   // (the flow is not Closed — U-1) route V_g → C and send Paired. Messages need the live session.
-  action GuestPairOrRefuse(h: int): bool = all {
-    gf.get(h).st == "acc", vmUp, connLive(gf.get(h).c),
+  action GuestPairOrRefuse(h: int): bool = {
     nondet ok = Set(true, false).oneOf()
+    GuestPairOrRefuseOk(h, ok)
+  }
+  action GuestPairOrRefuseOk(h: int, ok: bool): bool = all {
+    gf.get(h).st == "acc", vmUp, connLive(gf.get(h).c),
     all {
       gf' = gf.set(h, { ...gf.get(h), st: if (ok) "routed" else "closed" }),
       toHostPaired' = if (ok) toHostPaired.union(Set(h)) else toHostPaired,
       toHostRefused' = if (ok) toHostRefused else toHostRefused.union(Set(h)),
       phantom' = (phantom or (ok and hf.get(h).st == "closed" and abortDiscarded.contains(h))),
     },
-    hf' = hf, toGuestAbort' = toGuestAbort, resurrected' = resurrected, abortDiscarded' = abortDiscarded,
+    hf' = hf, toGuestAbort' = toGuestAbort, resurrected' = resurrected, abortDiscarded' = abortDiscarded, toHostAbort' = toHostAbort,
     keepCoreMsg,
   }
   // host step 6: Paired for an open flow → route; for a closed / unknown flow → discarded (U-5)
@@ -612,7 +662,7 @@ module owner_flows {
     } else all {
       hf' = hf, resurrected' = resurrected, badPaired' = badPaired,
     },
-    gf' = gf, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
+    gf' = gf, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     abortDiscarded' = abortDiscarded, phantom' = phantom,
     alloc' = alloc, gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced, claim' = claim,
     sess' = sess, flows' = flows, crossMsg' = crossMsg, heldByOther' = heldByOther, keepX,
@@ -621,14 +671,14 @@ module owner_flows {
     toHostRefused.contains(h),
     toHostRefused' = toHostRefused.exclude(Set(h)),
     hf' = if (hf.get(h).st == "req") hf.set(h, { ...hf.get(h), st: "closed" }) else hf,
-    gf' = gf, toHostPaired' = toHostPaired, toGuestAbort' = toGuestAbort, keepGhostsH, keepCoreMsg,
+    gf' = gf, toHostPaired' = toHostPaired, toGuestAbort' = toGuestAbort, keepGhostsH, keepCoreMsg, toHostAbort' = toHostAbort,
   }
   // the host closes an open host-opened flow before or after Paired (pairing deadline, peer error):
   // V_h closed with reset; Abort sent while the session is live
   action HostAbortAccept(h: int): bool = all {
     hOpen(hf.get(h).st),
     hf' = hf.set(h, { ...hf.get(h), st: "closed" }),
-    toGuestAbort' = if (sessLive) toGuestAbort.union(Set(h)) else toGuestAbort,
+    toGuestAbort' = if (sessLive) toGuestAbort.union(Set(h)) else toGuestAbort, toHostAbort' = toHostAbort,
     crossMsg' = (crossMsg or (sessLive and crossFor(hf.get(h).gen))),
     gf' = gf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, keepGhostsH, keepCore,
   }
@@ -636,7 +686,7 @@ module owner_flows {
   // tombstone (ALT)
   action GuestRecvAbort(h: int): bool = all {
     toGuestAbort.contains(h),
-    toGuestAbort' = toGuestAbort.exclude(Set(h)),
+    toGuestAbort' = toGuestAbort.exclude(Set(h)), toHostAbort' = toHostAbort,
     val st = gf.get(h).st
     all {
       gf' = if (st.in(Set("acc", "routed"))) gf.set(h, { ...gf.get(h), st: "closed" })
@@ -647,29 +697,57 @@ module owner_flows {
     hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused,
     resurrected' = resurrected, phantom' = phantom, keepCoreMsg,
   }
-  // the guest observes the host's close of V_h (EOF / POLLRDHUP, TCPACCEPT-END) and ends its side (K-A4)
+  // the guest observes the host's close of V_h (EOF / POLLRDHUP, TCPACCEPT-END) and ends its side (K-A4).
+  // DG-5-E: the guest watches V_g from install, so this holds while gf(h) is `acc` (installed, unrouted:
+  // the flow ends with NO message; no C is created or an armed C is aborted) as well as once `routed`.
+  // The flow is then Closed: a later pairing step (GuestPairOrRefuse) finds it Closed (U-1).
   action GuestSeesHostClose(h: int): bool = all {
-    not(ENV_GUEST_MISSES_HOST_CLOSE), hf.get(h).st == "closed", gf.get(h).st.in(Set("acc", "routed")),
+    not(ENV_GUEST_MISSES_HOST_CLOSE), hf.get(h).st == "closed",
+    gf.get(h).st == "routed" or (gf.get(h).st == "acc" and not(BUG_NO_INSTALLED_WATCH)),
     gf' = gf.set(h, { ...gf.get(h), st: "closed" }),
+    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
+    keepGhostsH, keepCoreMsg,
+  }
+  // DG-5-E: an error or reset on the installed, unrouted V_g (`Hangup { Error }`): the flow ends, Closed,
+  // and the guest sends Abort while the flow's session is live (a later Paired / Connected finds it Closed:
+  // U-1, U-5)
+  action GuestInstalledError(h: int): bool = all {
+    not(BUG_NO_INSTALLED_WATCH), gf.get(h).st == "acc",
+    gf' = gf.set(h, { ...gf.get(h), st: "closed" }),
+    toHostAbort' = if (connLive(gf.get(h).c)) toHostAbort.union(Set(h)) else toHostAbort,
     hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
     keepGhostsH, keepCoreMsg,
   }
-  // the guest observes the loss of the session its flow belongs to and aborts every flow of it
-  action GuestLossAbort(h: int): bool = all {
-    gf.get(h).st.in(Set("acc", "routed")),
-    not(connLive(gf.get(h).c)),
-    gf' = gf.set(h, { ...gf.get(h), st: "closed" }),
-    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
+  // the host receives the guest's Abort: an open flow is aborted (no Abort echoed: the peer is gone); for
+  // a closed flow it is discarded (U-5)
+  action HostRecvAbort(h: int): bool = all {
+    toHostAbort.contains(h),
+    toHostAbort' = toHostAbort.exclude(Set(h)),
+    hf' = if (hOpen(hf.get(h).st)) hf.set(h, { ...hf.get(h), st: "closed" }) else hf,
+    gf' = gf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
+    keepGhostsH, keepCoreMsg,
+  }
+  // DG-5-F: the guest observes the loss of control session `c` and, in this ONE step, aborts every flow of
+  // it (before any reconnect: GuestOpenSession is disabled while one is open)
+  def ofSession(h: int, c: int): bool = gf.get(h).st.in(Set("acc", "routed")) and gf.get(h).c == c
+  action GuestSessionLossObserved(c: int): bool = all {
+    CONNS.contains(c), not(connLive(c)), HFLOWS.exists(h => ofSession(h, c)),
+    gf' = gf.keys().mapBy(h => if (ofSession(h, c)) { ...gf.get(h), st: "closed" } else gf.get(h)),
+    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     keepGhostsH, keepCoreMsg,
   }
   // K-A4: the host's close of V_h ends a V_g still in the guest's accept queue
   action GuestQueueReset(h: int): bool = all {
     not(ENV_GUEST_MISSES_HOST_CLOSE), hf.get(h).st == "closed", queuedV(h),
     gf' = gf.set(h, { st: "reset", gen: vmGen, c: 0 }),
-    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
+    hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     keepGhostsH, keepCoreMsg,
   }
-  action guestCleanup = { nondet h = HFLOWS.oneOf() any { GuestRecvAbort(h), GuestSeesHostClose(h), GuestLossAbort(h), GuestQueueReset(h) } }
+  action guestCleanup = {
+    nondet h = HFLOWS.oneOf()
+    nondet c = CONNS.oneOf()
+    any { GuestRecvAbort(h), GuestSeesHostClose(h), GuestSessionLossObserved(c), GuestQueueReset(h) }
+  }
 
   // ------------------------------------------------------------------ beacon (VM driver, port 1234; ADR-0157, ATTR-TOKEN, ATTR-LIVE-CLAIM)
   action keepAllButB = all {
@@ -736,9 +814,12 @@ module owner_flows {
   def hcEndVsock(x: HC, s: str): HC =
     if (x.vEndSent.get(s)) x else { ...x, vEnd: x.vEnd.set(s, true), vEndSent: x.vEndSent.set(s, true) }
   // abort at s with reset semantics (ADR-0160): remove the pair, reset the far end, Abort to the peer
-  // (when `msg` and the session lives), the vsock aborted (its end reaches the peer)
+  // (when `msg` and the session lives), the vsock aborted (its end reaches the peer); both drain waits of
+  // the flow are disarmed (DG-5-D: "any input that ends the flow disarms both timers")
   def hcAbort(x: HC, s: str, msg: bool): HC =
     val x1 = { ...x, open: x.open.set(s, false), held: x.held.set(s, false),
+               drainV: if (BUG_ABORT_KEEPS_DRAIN) x.drainV else x.drainV.set(s, false),
+               drainO: if (BUG_ABORT_KEEPS_DRAIN) x.drainO else x.drainO.set(s, false),
                far: if (x.far.get(s) == "none") x.far.set(s, "reset") else x.far }
     hcEndVsock(if (msg) hcSend(x1, s, "Abort") else x1, s)
   def hcAlive(s: str): bool = hc.open.get(s) and not(hc.dead.get(s))
@@ -746,19 +827,38 @@ module owner_flows {
   def hcShutOuter(x: HC, s: str): HC =
     { ...x, outShut: x.outShut.set(s, true), held: x.held.set(s, false),
       far: if (x.far.get(s) == "none") x.far.set(s, "eof") else x.far }
+  // DG-5-C: the clean close happens in the step that completes the second direction — both of s's
+  // directions half-closed through the handshake and drained — and in no later step
+  def hcClose(x: HC, s: str): HC =
+    if (not(BUG_SEPARATE_CLOSE) and x.ann.get(s) == "done" and x.outShut.get(s)) { ...x, open: x.open.set(s, false) } else x
   // s shuts its vsock down for writing: its announcement is done
-  def hcShutVsock(x: HC, s: str): HC = hcEndVsock({ ...x, ann: x.ann.set(s, "done") }, s)
+  def hcShutVsock(x: HC, s: str): HC = hcClose(hcEndVsock({ ...x, ann: x.ann.set(s, "done") }, s), s)
+  // DG-5-D: the drain wait toward the vsock starts when s's outer EOF is recorded and the flow is Paired
+  // (in the dispatch that observes the EOF, or that routes the pair for an EOF recorded before Paired)
+  // and ends in HcAnnounce. noDrainWaitVsock: HalfClose goes out at once, the drain still owed.
+  def hcStartDrainV(x: HC, s: str): HC =
+    if (not(x.open.get(s)) or x.ann.get(s) != "none") x
+    else if (BUG_NO_DRAIN_WAIT_VSOCK) hcSend({ ...x, drainV: x.drainV.set(s, true), ann: x.ann.set(s, "pending") }, s, "HalfClose")
+    else { ...x, drainV: x.drainV.set(s, true) }
+  // DG-5-D: the drain wait toward s's outer leg starts at the vsock end of an acknowledged direction and
+  // ends in HcOuterDrained. noDrainWaitOuter: the outer leg is shut at once, the drain still owed.
+  def hcStartDrainO(x: HC, s: str): HC =
+    if (BUG_NO_DRAIN_WAIT_OUTER) hcShutOuter({ ...x, drainO: x.drainO.set(s, true) }, s)
+    else { ...x, drainO: x.drainO.set(s, true) }
   action hcSet(n: HC): bool = all { hc' = n, keepB,
     alloc' = alloc, gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced, claim' = claim,
     sess' = sess, flows' = flows, badPaired' = badPaired, keepAttr, keepH,
   }
 
   // s's far end half-closes (writes, then EOF): s's outer leg reads EOF, recorded at once — before
-  // Paired only on the opener's side (the acceptor's outer leg exists from its Paired on)
+  // Paired only on the opener's side (the acceptor's outer leg exists from its Paired on). Once Paired the
+  // drain wait toward the vsock starts in this dispatch.
   action HcFarHalfClose(s: str): bool = all {
     HALF, hcAlive(s), not(hc.farHc.get(s)), hc.far.get(s) == "none", hc.paired.get(s) or s == hc.opener,
     val x1 = { ...hc, farHc: hc.farHc.set(s, true), outEof: hc.outEof.set(s, true) }
-    hcSet(if (BUG_EARLY_EOF_ABORTS and not(hc.paired.get(s))) hcAbort(x1, s, true) else x1),
+    hcSet(if (BUG_EARLY_EOF_ABORTS and not(hc.paired.get(s))) hcAbort(x1, s, true)
+          else if (hc.paired.get(s)) hcStartDrainV(x1, s)
+          else x1),
   }
   // the acceptor pairs (TcpConnect: host step 6; TcpAccept: guest step 5) and sends Paired
   action HcPair: bool = all {
@@ -769,28 +869,34 @@ module owner_flows {
       hcSet(hcSend({ ...hc, paired: hc.paired.set(a, true) }, a, "Paired")),
     },
   }
-  // the outer-leg-first path: EOF recorded and Paired → (drained) HalfClose; the vsock stays open
-  // for writing until HalfCloseAck (noAck / altPendingWait: shut down at once)
+  // the outer-leg-first path: the drain toward the vsock completed (the drained check returned true) →
+  // HalfClose; the vsock stays open for writing until HalfCloseAck (noAck / altPendingWait: shut down
+  // at once). Enabled only while the drain wait is open (DG-5-D); re-checks that find the direction not
+  // yet drained are stuttering and not modelled.
   action HcAnnounce(s: str): bool = all {
-    HALF, hcAlive(s), hc.paired.get(s), hc.outEof.get(s), hc.ann.get(s) == "none", not(hc.loss.get(s)),
-    val x1 = hcSend({ ...hc, ann: hc.ann.set(s, "pending") }, s, "HalfClose")
+    HALF, hcAlive(s), hc.drainV.get(s), hc.ann.get(s) == "none", not(hc.loss.get(s)),
+    val x0 = { ...hc, drainV: hc.drainV.set(s, false) }
+    val x1 = hcSend({ ...x0, ann: x0.ann.set(s, "pending") }, s, "HalfClose")
     hcSet(if (BUG_NO_ACK or ALT_PENDING_WAIT) { ...hcShutVsock(x1, s), earlyShut: true } else x1),
   }
   // HalfClose for a flow s holds: acknowledge at once and record the direction as announced (U-5:
   // discarded for a closed flow)
   def hcOnHalfClose(x: HC, s: str): HC =
-    if (ALT_PENDING_WAIT) (if (x.held.get(s)) hcShutOuter({ ...x, acked: x.acked.set(s, true) }, s)
+    if (ALT_PENDING_WAIT) (if (x.held.get(s)) hcStartDrainO({ ...x, acked: x.acked.set(s, true), held: x.held.set(s, false) }, s)
                            else { ...x, acked: x.acked.set(s, true) })
     else if (BUG_ACK_WAITS) { ...x, acked: x.acked.set(s, true), ackDue: x.ackDue.set(s, true) }
     else hcSend({ ...x, acked: x.acked.set(s, true) }, s, "Ack")
-  // the next control message from the other side is delivered at s (FIFO)
+  // the next control message from the other side is delivered at s (FIFO). Paired with an outer EOF
+  // recorded before it starts the drain wait toward the vsock; the Ack of s's HalfClose shuts the vsock
+  // (and closes the flow when the other direction is already done: DG-5-C).
   action HcRecv(s: str): bool = all {
     HALF, not(hc.dead.get(s)), hc.ch.get(other(s)).length() > 0,
     val m = hc.ch.get(other(s)).head()
     val x0 = { ...hc, ch: hc.ch.set(other(s), hc.ch.get(other(s)).tail()) }
     hcSet(
       if (not(x0.open.get(s))) x0                                    // U-5: closed flow, discarded
-      else if (m == "Paired") { ...x0, paired: x0.paired.set(s, true) }
+      else if (m == "Paired") (if (x0.outEof.get(s)) hcStartDrainV({ ...x0, paired: x0.paired.set(s, true) }, s)
+                               else { ...x0, paired: x0.paired.set(s, true) })
       else if (m == "HalfClose") hcOnHalfClose(x0, s)
       else if (m == "Ack") (if (x0.ann.get(s) == "pending") hcShutVsock(x0, s) else x0)
       else hcAbort(x0, s, false)                                     // Abort
@@ -801,13 +907,13 @@ module owner_flows {
     HALF, BUG_ACK_WAITS, hcAlive(s), hc.ackDue.get(s), hc.outEof.get(s),
     hcSet(hcSend({ ...hc, ackDue: hc.ackDue.set(s, false) }, s, "Ack")),
   }
-  // the other side's vsock end-of-stream reaches s: for an announced direction a half-close (shut the
-  // outer leg after the drain); otherwise the peer owner is lost — abort at once with reset
+  // the other side's vsock end-of-stream reaches s: for an announced direction a half-close (the drain
+  // wait toward the outer leg starts); otherwise the peer owner is lost — abort at once with reset
   // (UnannouncedVsockEnd)
   def hcOnVsockEnd(x: HC, s: str): HC =
     val x0 = { ...x, vEnd: x.vEnd.set(other(s), false) }
     if (not(x0.open.get(s))) x0
-    else if (x0.acked.get(s) or BUG_RDHUP_IS_HALFCLOSE) hcShutOuter(x0, s)
+    else if (x0.acked.get(s) or BUG_RDHUP_IS_HALFCLOSE) hcStartDrainO(x0, s)
     else if (ALT_PENDING_WAIT) { ...x0, held: x0.held.set(s, true) }
     else hcAbort(x0, s, true)
   // ... while the other owner is alive (a shutdown, an abort or a defect)
@@ -821,9 +927,16 @@ module owner_flows {
     HALF, not(hc.dead.get(s)), hc.vEnd.get(other(s)), hc.dead.get(other(s)),
     hcSet(hcOnVsockEnd(hc, s)),
   }
-  // clean close at s: both directions half-closed through the handshake
-  action HcCleanClose(s: str): bool = all {
-    HALF, hcAlive(s), hc.ann.get(s) == "done", hc.outShut.get(s),
+  // the drain toward s's outer leg completed (the drained check returned true): shut the outer leg down
+  // for writing; the clean close follows in this same step when s's own direction is already done
+  // (DG-5-C — there is no separate close action). Enabled only while the drain wait is open (DG-5-D).
+  action HcOuterDrained(s: str): bool = all {
+    HALF, hcAlive(s), hc.drainO.get(s),
+    hcSet(hcClose(hcShutOuter({ ...hc, drainO: hc.drainO.set(s, false) }, s), s)),
+  }
+  // separateClose only (DG-5-C off): the clean close as a step of its own
+  action HcLateClose(s: str): bool = all {
+    HALF, BUG_SEPARATE_CLOSE, hcAlive(s), hc.ann.get(s) == "done", hc.outShut.get(s),
     hcSet({ ...hc, open: hc.open.set(s, false) }),
   }
   // s observes the control session's end (after the dead peer's in-flight messages): every flow of
@@ -839,7 +952,8 @@ module owner_flows {
     HALF, hcAlive(s), hc.far.get(s) == "none",
     hcSet({ ...hcAbort(hc, s, true), faulted: true }),
   }
-  // teardown, quiescence, a flow error or the drain deadline at s: abort, Abort sent
+  // teardown, quiescence, a flow error or the drain deadline (FLOW_DRAIN_DEADLINE) at s: abort, Abort
+  // sent. A waiting drain direction (drainV / drainO) is disarmed with the flow.
   action HcFlowError(s: str): bool = all {
     HALF, hcAlive(s),
     hcSet({ ...hcAbort(hc, s, true), faulted: true }),
@@ -849,6 +963,7 @@ module owner_flows {
   action HcOwnerDies(s: str): bool = all {
     HALF, not(hc.dead.get(s)),
     val x1 = { ...hc, dead: hc.dead.set(s, true), open: hc.open.set(s, false), held: hc.held.set(s, false),
+               drainV: hc.drainV.set(s, false), drainO: hc.drainO.set(s, false),
                far: if (hc.far.get(s) == "none") hc.far.set(s, "reset") else hc.far,
                ctlDown: true, ch: hc.ch.set(other(s), List()), faulted: true }
     hcSet(hcEndVsock(x1, s)),
@@ -872,7 +987,8 @@ module owner_flows {
     nondet h = HFLOWS.oneOf()
     any {
       HostOpenAccept(h), GuestAcceptV(h), GuestPairOrRefuse(h), HostRecvPaired(h), HostRecvRefused(h),
-      HostAbortAccept(h), GuestRecvAbort(h), GuestSeesHostClose(h), GuestLossAbort(h), GuestQueueReset(h),
+      HostAbortAccept(h), GuestRecvAbort(h), GuestSeesHostClose(h), GuestInstalledError(h), HostRecvAbort(h),
+      GuestSessionLossObserved(c), GuestQueueReset(h),
       Quiesce, Restore,
       GuestOpenSession(c), HostAcceptSession(c), HostReadOpen(c), HostClaimSession(c),
       HostSessionLoss(c),
@@ -889,7 +1005,7 @@ module owner_flows {
     nondet s = SIDES.oneOf()
     any {
       HcFarHalfClose(s), HcPair, HcAnnounce(s), HcRecv(s), HcLateAck(s), VsockEndArrives(s),
-      VsockEndReachesSurvivor(s), HcCleanClose(s), HcLossObserved(s),
+      VsockEndReachesSurvivor(s), HcOuterDrained(s), HcLateClose(s), HcLossObserved(s),
       HcFarReset(s), HcFlowError(s), HcOwnerDies(s), HcSessionDrop, HcPeerDefectEnd(s),
     }
   }
@@ -929,9 +1045,14 @@ module owner_flows {
   val NoCrossLaunchSessionHeld: bool = not(heldByOther)
   // U-5 / § Flow end: Closed is terminal — a late Paired never revives a host-opened flow
   val ClosedIsTerminal: bool = not(resurrected)
+  // (DG-5-F) no flow of a lost control session outlives the dispatch that observes the loss: an open
+  // guest TcpAccept flow's session connection is never replaced by a new connection while the flow is open
+  val GuestFlowsDoNotOutliveSession: bool = HFLOWS.forall(h =>
+    (gf.get(h).st.in(Set("acc", "routed")) and gf.get(h).c != 0) implies
+      sess.get(gf.get(h).c).st.in(Set("live", "dead", "closed")))
   val Safety: bool = and {
     OneLiveSession, NoInstallBeforeRead, NoAdmitWhenClosed, CurrentGeneration, ClosedIsTerminal,
-    NoCrossLaunchMsg, NoCrossLaunchSessionHeld,
+    NoCrossLaunchMsg, NoCrossLaunchSessionHeld, GuestFlowsDoNotOutliveSession,
   }
 
   // ---- beacon (ATTR-TOKEN, ATTR-LIVE-CLAIM; CFG "beacon")
@@ -952,7 +1073,20 @@ module owner_flows {
   val NoEofOnPeerLoss: bool = SIDES.forall(s => hc.far.get(s) == "eof" implies hc.farHc.get(other(s)))
   // (13) no owner shuts its flow vsock down before the peer acknowledged that direction's HalfClose
   val FinOnlyAfterAck: bool = not(hc.earlyShut)
-  val HalfCloseSafety: bool = NoEofOnPeerLoss and FinOnlyAfterAck
+  // (DG-5-D) no owner shuts an outer leg down for writing while the drain toward it is still owed
+  val NoShutOuterWhileDraining: bool = SIDES.forall(s => not(hc.outShut.get(s) and hc.drainO.get(s)))
+  // (DG-5-D) no owner announces a direction (HalfClose) while the drain toward the vsock is still owed
+  val NoAnnounceWhileDraining: bool = SIDES.forall(s => hc.ann.get(s) != "none" implies not(hc.drainV.get(s)))
+  // (DG-5-D) a flow that ended has no drain wait armed
+  val DrainWaitOnlyWhileOpen: bool = SIDES.forall(s => (hc.drainV.get(s) or hc.drainO.get(s)) implies hc.open.get(s))
+  // (DG-5-C) a flow whose two directions are both half-closed through the handshake is closed in the
+  // step that completed the second direction
+  val NoCompletedFlowStaysOpen: bool = SIDES.forall(s =>
+    (hc.ann.get(s) == "done" and hc.outShut.get(s)) implies not(hc.open.get(s)))
+  val HalfCloseSafety: bool = and {
+    NoEofOnPeerLoss, FinOnlyAfterAck, NoShutOuterWhileDraining, NoAnnounceWhileDraining,
+    DrainWaitOnlyWhileOpen, NoCompletedFlowStaysOpen,
+  }
 
   // ------------------------------------------------------------------ liveness (TLC)
   // U-5 with K-A4: a guest-side TcpAccept connection whose host side is closed is eventually torn down
@@ -965,14 +1099,14 @@ module owner_flows {
   // session steps and of the guest's connect / write, per connection
   val allVars = (alloc, gen, vmGen, vmUp, quiesced, claim, sess, flows, badPaired, crossMsg,
                  heldByOther, hf, gf, toHostPaired, toHostRefused, toGuestAbort, resurrected,
-                 abortDiscarded, phantom, drvLive, bclaim, bcn, readyCross, bHeldByOther, hc)
+                 abortDiscarded, phantom, drvLive, bclaim, bcn, readyCross, bHeldByOther, hc, toHostAbort)
   val awaitingSession: bool = alloc == "Provisioned" and vmUp and vmGen == gen
   val launchLive: bool = CONNS.exists(c => sess.get(c).st == "live" and sess.get(c).gen == gen)
   temporal SessionBecomesLive =
     CONNS.forall(c => and {
       weakFair(GuestOpenSession(c), allVars), weakFair(HostAcceptSession(c), allVars),
       weakFair(HostReadOpen(c), allVars), weakFair(HostClaimSession(c), allVars),
-      weakFair(HostDeadSessionLoss(c), allVars),
+      weakFair(HostDeadSessionLoss(c), allVars), weakFair(GuestSessionLossObserved(c), allVars),
     }).implies(always(awaitingSession.implies(eventually(launchLive or not(awaitingSession)))))
 
   // (ATTR-LIVE-CLAIM, beacon) a live launch whose guest keeps reconnecting gets its READY released,
@@ -992,7 +1126,7 @@ module owner_flows {
     SIDES.forall(s => and {
       weakFair(HcRecv(s), allVars), weakFair(HcAnnounce(s), allVars), weakFair(HcLateAck(s), allVars),
       weakFair(VsockEndArrives(s), allVars), weakFair(VsockEndReachesSurvivor(s), allVars),
-      weakFair(HcLossObserved(s), allVars), weakFair(HcCleanClose(s), allVars),
+      weakFair(HcLossObserved(s), allVars), weakFair(HcOuterDrained(s), allVars),
     }),
   }
   def hcPending(s: str): bool = hc.open.get(s) and not(hc.dead.get(s)) and hc.ann.get(s) == "pending"
@@ -1012,6 +1146,331 @@ module owner_flows {
   // altPendingWait: a held bare vsock end is eventually decided (the receiver never waits forever)
   temporal ReceiverPendingEnds =
     hcFair.implies(SIDES.forall(s => always(hc.held.get(s).implies(eventually(not(hc.held.get(s)))))))
+
+  // ------------------------------------------------------------------ named runs (critical scenarios)
+  // Deterministic scenarios (`InitWith`, `HostReadReqN`, `HostFlowEndsMsg`, `GuestPairOrRefuseOk` fix the
+  // nondeterministic choices), each ending in an `expect` of its outcome with the instance's safety
+  // invariants checked along the way. Core runs belong to `flows_ok`, beacon runs to `flows_beacon`,
+  // half-close runs to `flows_half` (and the S-4 conformance instances `flows_half_host` /
+  // `flows_half_guest`, which differ by the enabled defect action only).
+  // ---- core: control session (D18a), launch attribution (ATTR-TOKEN, ATTR-LIVE-CLAIM), flow admission (U-1)
+  // happy path: lease, VM start, the guest opens the control session and the owner claims it on the live
+  // launch token; activation; a guest-opened flow is admitted, its request read in full, then installed,
+  // connected and paired
+  run ControlSessionOpensAndCidActivates = InitWith("g")
+    .then(Provision).expect(Safety and alloc == "Provisioned" and gen == 1)
+    .then(VmStart).expect(Safety and vmUp and vmGen == 1)
+    .then(GuestOpenSession(1)).then(HostAcceptSession(1)).expect(Safety and sess.get(1).st == "reading" and claim == 0)
+    .then(HostReadOpen(1)).expect(Safety and sess.get(1).st == "live" and claim == 1 and sessLive)
+    .then(Activate).expect(Safety and alloc == "Active" and admissible)
+  run GuestOpenedFlowIsAdmittedReadInstalledAndPaired = ControlSessionOpensAndCidActivates
+    .then(GuestOpenFlow(1)).then(HostAcceptFlow(1)).expect(Safety and flows.get(1).st == "accepted" and flows.get(1).req == 0)
+    .then(HostReadReqN(1, 2)).expect(Safety and flows.get(1).st == "read" and attributed(flows.get(1).st))
+    .then(HostInstall(1)).then(HostStartConnect(1)).expect(Safety and flows.get(1).st == "connecting" and flows.get(1).inFlight)
+    .then(HostConnectDone(1)).expect(Safety and flows.get(1).st == "paired" and not(badPaired) and not(crossMsg))
+  // H-1: the request arrives in two pieces; nothing is installed before the whole request is read
+  run RequestReadInPiecesInstallsOnlyAfterFullRead = ControlSessionOpensAndCidActivates
+    .then(GuestOpenFlow(1)).then(HostAcceptFlow(1)).then(HostReadReqN(1, 1))
+    .expect(Safety and flows.get(1).st == "accepted" and flows.get(1).req == 1)
+    .then(HostReadReqN(1, 1)).expect(Safety and flows.get(1).st == "read" and flows.get(1).req == 2)
+    .then(HostInstall(1)).expect(Safety and flows.get(1).st == "installed")
+  // L-3 / R5-18: two first connects race; exactly one takes the claim, the other is closed (SessionHeld,
+  // same launch); there is never more than one live session
+  run RacingFirstConnectsLeaveOneLiveSession = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenSession(1)).then(GuestOpenSession(2))
+    .then(HostAcceptSession(1)).then(HostAcceptSession(2))
+    .then(HostReadOpen(1)).expect(Safety and sess.get(1).st == "live" and claim == 1)
+    .then(HostReadOpen(2)).expect(Safety and sess.get(2).st == "closed" and claim == 1 and liveCount == 1 and not(heldByOther))
+  // session loss aborts every flow of the CID; a flow arriving while no session is live is closed with no
+  // message (boundary: gate unavailable); the guest reconnects and the CID serves again
+  run SessionLossAbortsFlowsAndReconnectRestores = GuestOpenedFlowIsAdmittedReadInstalledAndPaired
+    .then(HostSessionLoss(1)).expect(Safety and sess.get(1).st == "closed" and claim == 0 and flows.get(1).st == "closed" and not(sessLive))
+    .then(GuestOpenFlow(2)).then(HostAcceptFlow(2)).expect(Safety and flows.get(2).st == "closed" and not(crossMsg))
+    .then(GuestOpenSession(1)).then(HostAcceptSession(1)).then(HostReadOpen(1))
+    .expect(Safety and sess.get(1).st == "live" and claim == 1 and sessLive and alloc == "Active")
+  // quiescence aborts live flows; admission is refused while quiesced (QuiescenceLatched); restore reopens
+  run QuiesceAbortsFlowsAndRefusesAdmissionUntilRestore = GuestOpenedFlowIsAdmittedReadInstalledAndPaired
+    .then(Quiesce).expect(Safety and quiesced and flows.get(1).st == "closed" and not(admissible))
+    .then(GuestOpenFlow(2)).then(HostAcceptFlow(2)).expect(Safety and flows.get(2).st == "closed")
+    .then(Restore).expect(Safety and not(quiesced) and admissible and alloc == "Active")
+  // activation waits for quiescence to end: a Provisioned CID with a live session activates only after restore
+  run ActivationWaitsForQuiescenceToEnd = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenSession(1)).then(HostAcceptSession(1)).then(HostReadOpen(1))
+    .then(Quiesce).expect(Safety and alloc == "Provisioned" and quiesced)
+    .then(Restore).then(Activate).expect(Safety and alloc == "Active" and admissible)
+  // U-1: the connect of a flow aborted while in flight completes later; the completion is discarded and
+  // no Paired is sent
+  run InFlightConnectOfAbortedFlowIsDiscarded = ControlSessionOpensAndCidActivates
+    .then(GuestOpenFlow(1)).then(HostAcceptFlow(1)).then(HostReadReqN(1, 2)).then(HostInstall(1)).then(HostStartConnect(1))
+    .then(Quiesce).expect(Safety and flows.get(1).st == "closed" and flows.get(1).inFlight)
+    .then(HostConnectDiscard(1)).expect(Safety and flows.get(1).st == "closed" and not(flows.get(1).inFlight) and not(badPaired))
+  // an attributed flow ended by refusal / deadline / peer error is closed (a message may be sent on the
+  // live session); the CID keeps serving
+  run AttributedFlowEndsAndCidKeepsServing = GuestOpenedFlowIsAdmittedReadInstalledAndPaired
+    .then(HostFlowEndsMsg(1, true)).expect(Safety and flows.get(1).st == "closed" and not(crossMsg) and admissible)
+  // teardown (Retiring): closes the session and releases its claim, aborts every flow; the CID is released
+  // after the VM stopped and leased again; the new lease's launch gets its own session
+  run TeardownAbortsEverythingThenCidIsLeasedAgain = GuestOpenedFlowIsAdmittedReadInstalledAndPaired
+    .then(Teardown).expect(Safety and alloc == "Retiring" and sess.get(1).st == "closed" and claim == 0 and flows.get(1).st == "closed")
+    .then(GuestOpenFlow(2)).then(HostAcceptFlow(2)).expect(Safety and flows.get(2).st == "closed")
+    .then(VmStop).then(Release).expect(Safety and alloc == "Absent")
+    .then(Provision).then(VmStart).expect(Safety and alloc == "Provisioned" and gen == 2 and vmGen == 2)
+    .then(GuestOpenSession(1)).then(HostAcceptSession(1)).then(HostReadOpen(1)).then(Activate)
+    .expect(Safety and alloc == "Active" and claim == 1 and sess.get(1).gen == 2 and not(heldByOther))
+  // K-A2': a control connection of a dead launch stays queued, is accepted after the CID's next lease and
+  // launch exist, and is closed at its read on the stale token: no claim, nothing poisoned; the live
+  // launch's own session then takes the claim
+  run StaleLaunchSessionIsClosedAtReadAndDoesNotPoisonClaim = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenSession(1)).then(VmStop).then(Teardown).then(Release)
+    .then(Provision).then(VmStart).expect(Safety and gen == 2 and vmGen == 2 and sess.get(1).st == "pending" and sess.get(1).gen == 1)
+    .then(HostAcceptSession(1)).expect(Safety and sess.get(1).st == "reading")
+    .then(HostReadOpen(1)).expect(Safety and sess.get(1).st == "closed" and claim == 0 and not(heldByOther))
+    .then(GuestOpenSession(2)).then(HostAcceptSession(2)).then(HostReadOpen(2))
+    .expect(Safety and sess.get(2).st == "live" and claim == 2 and not(heldByOther))
+  // ATTR-LIVE-CLAIM (the round-9 first-run shape): a connection accepted while the CID was Provisioned is
+  // read after teardown: the live token has ended, it is closed with no claim; the next launch is not
+  // refused SessionHeld
+  run TeardownBetweenAcceptAndReadClosesWithoutClaim = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenSession(1)).then(HostAcceptSession(1))
+    .then(Teardown).expect(Safety and alloc == "Retiring" and sess.get(1).st == "reading")
+    .then(HostReadOpen(1)).expect(Safety and sess.get(1).st == "closed" and claim == 0 and not(heldByOther))
+    .then(VmStop).then(Release).then(Provision).then(VmStart)
+    .then(GuestOpenSession(2)).then(HostAcceptSession(2)).then(HostReadOpen(2))
+    .expect(Safety and sess.get(2).st == "live" and claim == 2 and not(heldByOther))
+  // ATTR-TOKEN on a flow: a flow of a dead launch queued across the next lease is accepted, its request
+  // token compared with the live token and mismatching: closed, unregistered, no control message
+  run StaleLaunchFlowIsClosedAtRequestReadWithNoMessage = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenFlow(1)).then(VmStop).then(Teardown).then(Release)
+    .then(Provision).then(VmStart).then(GuestOpenSession(1)).then(HostAcceptSession(1)).then(HostReadOpen(1)).then(Activate)
+    .then(HostAcceptFlow(1)).expect(Safety and flows.get(1).st == "accepted" and flows.get(1).gen == 1 and gen == 2)
+    .then(HostReadReqN(1, 2)).expect(Safety and flows.get(1).st == "closed" and not(crossMsg) and not(badPaired) and sessLive)
+  // VmStop: a session still being read when the VMM dies is closed with no effect; a live one becomes
+  // dead and the owner's processing of its loss releases the claim and aborts the flows
+  run VmDeathMakesLiveSessionDeadThenLossIsProcessed = GuestOpenedFlowIsAdmittedReadInstalledAndPaired
+    .then(VmStop).expect(Safety and sess.get(1).st == "dead" and claim == 1)
+    .then(HostDeadSessionLoss(1)).expect(Safety and sess.get(1).st == "closed" and claim == 0 and flows.get(1).st == "closed")
+  // ---- core: host-opened flows (TcpAccept), U-1 / U-5 / K-A4
+  // happy path: the host opens V_h to the guest, the guest accepts V_g, connects the application, routes and
+  // sends Paired; the host routes
+  run TcpAcceptPairsAndRoutes = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).expect(Safety and hf.get(1).st == "req")
+    .then(GuestAcceptV(1)).expect(Safety and gf.get(1).st == "acc" and gf.get(1).c == 1)
+    .then(GuestPairOrRefuseOk(1, true)).expect(Safety and gf.get(1).st == "routed" and toHostPaired == Set(1))
+    .then(HostRecvPaired(1)).expect(Safety and hf.get(1).st == "paired" and not(badPaired) and not(resurrected))
+  // the application is not listening: Refused(ApplicationNotListening); the host closes the flow
+  run TcpAcceptRefusedClosesHostFlow = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(GuestAcceptV(1)).then(GuestPairOrRefuseOk(1, false))
+    .expect(Safety and gf.get(1).st == "closed" and toHostRefused == Set(1))
+    .then(HostRecvRefused(1)).expect(Safety and hf.get(1).st == "closed")
+  // U-5: the host aborts before the guest accepted V_g; the guest discards the Abort for the unknown id,
+  // accepts V_g and its pairing is ended by the host's close of V_h (TCPACCEPT-END, K-A4): no phantom connect
+  run TcpAcceptAbortedBeforeGuestAcceptsEndsByHostClose = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(HostAbortAccept(1)).expect(Safety and hf.get(1).st == "closed" and toGuestAbort == Set(1))
+    .then(GuestRecvAbort(1)).expect(Safety and abortDiscarded == Set(1) and gf.get(1).st == "none")
+    .then(GuestAcceptV(1)).expect(Safety and gf.get(1).st == "acc")
+    .then(GuestSeesHostClose(1)).expect(Safety and gf.get(1).st == "closed" and not(phantom))
+  // K-A4: V_g still in the guest's accept queue when the host closes V_h is torn down
+  run TcpAcceptQueuedVgIsResetByHostClose = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(HostAbortAccept(1)).then(GuestQueueReset(1))
+    .expect(Safety and gf.get(1).st == "reset" and not(guestHalf(1)))
+  // U-5 / ClosedIsTerminal: a Paired for a flow the host closed is discarded; the late Abort closes the
+  // guest's routed half
+  run LatePairedForClosedHostFlowIsDiscarded = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(GuestAcceptV(1)).then(GuestPairOrRefuseOk(1, true)).then(HostAbortAccept(1))
+    .then(HostRecvPaired(1)).expect(Safety and hf.get(1).st == "closed" and not(resurrected))
+    .then(GuestRecvAbort(1)).expect(Safety and gf.get(1).st == "closed")
+  // session loss aborts the host-opened flow; the guest observes the session's loss and ends its half
+  run SessionLossAbortsTcpAcceptOnBothSides = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(GuestAcceptV(1)).then(HostSessionLoss(1))
+    .expect(Safety and hf.get(1).st == "closed" and toGuestAbort == Set())
+    .then(GuestSessionLossObserved(1)).expect(Safety and gf.get(1).st == "closed")
+  // quiescence aborts host-opened flows and sends Abort on the live session; admission is refused while quiesced
+  run QuiesceAbortsTcpAcceptAndSendsAbort = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(GuestAcceptV(1)).then(Quiesce)
+    .expect(Safety and hf.get(1).st == "closed" and toGuestAbort == Set(1))
+    .then(GuestRecvAbort(1)).expect(Safety and gf.get(1).st == "closed")
+  // DG-5-F: the session is lost; the guest owner aborts EVERY flow of it in the one dispatch that observes the
+  // loss. Until then `lostSessionFlowOpen` holds, which disables GuestOpenSession (no reconnect precedes the
+  // abort: GuestFlowsDoNotOutliveSession, with its teeth in the hazard reconnectBeforeLossAbort); then it reconnects
+  run SessionLossAbortsAllFlowsBeforeReconnect = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(GuestAcceptV(1)).then(GuestPairOrRefuseOk(1, true))
+    .then(HostOpenAccept(2)).then(GuestAcceptV(2))
+    .expect(Safety and gf.get(1).st == "routed" and gf.get(2).st == "acc" and gf.get(1).c == 1 and gf.get(2).c == 1)
+    .then(HostSessionLoss(1)).expect(Safety and sess.get(1).st == "closed" and not(sessLive) and lostSessionFlowOpen
+                                     and gf.get(1).st == "routed" and gf.get(2).st == "acc")
+    .then(GuestSessionLossObserved(1)).expect(Safety and gf.get(1).st == "closed" and gf.get(2).st == "closed" and not(lostSessionFlowOpen))
+    .then(GuestOpenSession(1)).then(HostAcceptSession(1)).then(HostReadOpen(1))
+    .expect(Safety and sess.get(1).st == "live" and claim == 1 and sessLive)
+  // DG-5-E: the host closes V_h while the guest's V_g is installed and unrouted (ReadHangup): the guest ends
+  // the flow with no message; the flow is Closed, so it can neither pair nor refuse afterwards (U-1)
+  run InstalledVgHostCloseEndsFlowSilently = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(GuestAcceptV(1)).expect(Safety and gf.get(1).st == "acc")
+    .then(HostAbortAccept(1)).expect(Safety and hf.get(1).st == "closed" and toGuestAbort == Set(1))
+    .then(GuestSeesHostClose(1)).expect(Safety and gf.get(1).st == "closed" and toHostAbort == Set() and toHostPaired == Set() and toHostRefused == Set())
+    .then(GuestRecvAbort(1)).expect(Safety and gf.get(1).st == "closed" and not(phantom) and toHostAbort == Set())
+  // DG-5-E: an error on the installed, unrouted V_g (Hangup { Error }): the flow ends and the guest sends
+  // Abort on the live session; the host aborts the flow; a pairing after the error finds the flow Closed (U-1, U-5)
+  run InstalledVgErrorAbortsWithAbort = ControlSessionOpensAndCidActivates
+    .then(HostOpenAccept(1)).then(GuestAcceptV(1))
+    .then(GuestInstalledError(1)).expect(Safety and gf.get(1).st == "closed" and toHostAbort == Set(1) and hf.get(1).st == "req")
+    .then(HostRecvAbort(1)).expect(Safety and hf.get(1).st == "closed" and toHostAbort == Set() and toGuestAbort == Set() and not(resurrected))
+  // ---- beacon (VM driver, port 1234; ADR-0157, ATTR-TOKEN, ATTR-LIVE-CLAIM), instance flows_beacon
+  // happy path: the driver's launch is live from driver.start; READY is read, compared with the live token
+  // and releases the beacon claim; driver.stop closes it and releases the claim; the CID is released
+  run BeaconReadyReleasedThenDriverStopReleasesClaim = InitWith("g")
+    .then(Provision).then(VmStart).expect(BeaconSafety and drvLive and vmGen == 1)
+    .then(GuestOpenBeacon(1)).then(HostAcceptBeacon(1)).expect(BeaconSafety and bcn.get(1).st == "reading")
+    .then(HostReadReady(1)).expect(BeaconSafety and bcn.get(1).st == "live" and bclaim == 1 and readyLive)
+    .then(DriverStop).expect(BeaconSafety and bcn.get(1).st == "closed" and bclaim == 0 and not(drvLive))
+    .then(VmStop).then(Teardown).then(Release).expect(BeaconSafety and alloc == "Absent")
+  // NoLiveLaunch: a beacon connection accepted after driver.stop is closed at accept
+  run BeaconAfterDriverStopIsRefusedAtAccept = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenBeacon(1)).then(DriverStop)
+    .then(HostAcceptBeacon(1)).expect(BeaconSafety and bcn.get(1).st == "closed" and bclaim == 0)
+  // ATTR-LIVE-CLAIM for the beacon (the round-9 first-run shape): driver.stop between accept and READY read
+  // closes it at the read with no claim; the next launch's READY is not refused SessionHeld
+  run DriverStopBetweenAcceptAndReadyClosesWithoutClaim = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenBeacon(1)).then(HostAcceptBeacon(1))
+    .then(DriverStop).expect(BeaconSafety and bcn.get(1).st == "reading")
+    .then(HostReadReady(1)).expect(BeaconSafety and bcn.get(1).st == "closed" and bclaim == 0)
+    .then(VmStop).then(Teardown).then(Release).then(Provision).then(VmStart)
+    .then(GuestOpenBeacon(2)).then(HostAcceptBeacon(2)).then(HostReadReady(2))
+    .expect(BeaconSafety and bcn.get(2).st == "live" and bclaim == 2 and not(bHeldByOther))
+  // K-A2': a beacon connection of a dead launch stays queued, is accepted while the next launch is live,
+  // and is closed at its READY read on the stale token; the live launch's own READY is released
+  run StaleLaunchBeaconIsClosedAtReadyAndDoesNotPoisonClaim = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenBeacon(1)).then(DriverStop).then(VmStop).then(Teardown).then(Release)
+    .then(Provision).then(VmStart).then(HostAcceptBeacon(1)).expect(BeaconSafety and bcn.get(1).st == "reading" and bcn.get(1).gen == 1 and vmGen == 2)
+    .then(HostReadReady(1)).expect(BeaconSafety and bcn.get(1).st == "closed" and bclaim == 0 and not(readyCross))
+    .then(GuestOpenBeacon(2)).then(HostAcceptBeacon(2)).then(HostReadReady(2))
+    .expect(BeaconSafety and bcn.get(2).st == "live" and bclaim == 2 and not(readyCross) and not(bHeldByOther))
+  // two beacon connections of the same launch: one takes the claim, the other is closed (SessionHeld)
+  run SecondBeaconConnectionOfSameLaunchIsHeld = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenBeacon(1)).then(GuestOpenBeacon(2))
+    .then(HostAcceptBeacon(1)).then(HostAcceptBeacon(2)).then(HostReadReady(1)).then(HostReadReady(2))
+    .expect(BeaconSafety and bcn.get(1).st == "live" and bcn.get(2).st == "closed" and bclaim == 1 and not(bHeldByOther))
+  // the VMM dies while a beacon connection is still being read: it is closed with no effect
+  run VmDeathClosesUnreadBeaconConnection = InitWith("g")
+    .then(Provision).then(VmStart).then(GuestOpenBeacon(1)).then(HostAcceptBeacon(1)).then(VmStop)
+    .expect(BeaconSafety and bcn.get(1).st == "closed" and bclaim == 0)
+  // ---- half-close (HALFCLOSE-SIGNAL, ADR-0180), instance flows_half (opener g = TcpConnect, h = TcpAccept)
+  // a half-close by one far end: the drain wait toward the vsock, then HalfClose is announced on the control
+  // session, the peer acknowledges at once, the announcer shuts its vsock only after the acknowledgement, the
+  // vsock end starts the drain wait toward the other outer leg, and the other far end reads EOF after it
+  run TcpConnectHalfCloseHandshakeDeliversEof = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).expect(HalfCloseSafety and hc.paired.get("g") and hc.paired.get("h"))
+    .then(HcFarHalfClose("g")).expect(HalfCloseSafety and hc.drainV.get("g") and hc.ann.get("g") == "none")
+    .then(HcAnnounce("g"))
+    .expect(HalfCloseSafety and hc.ann.get("g") == "pending" and not(hc.drainV.get("g")) and not(hc.vEndSent.get("g")))
+    .then(HcRecv("h")).expect(HalfCloseSafety and hc.acked.get("h") and not(hc.vEndSent.get("g")))
+    .then(HcRecv("g")).expect(HalfCloseSafety and hc.ann.get("g") == "done" and hc.vEndSent.get("g"))
+    .then(VsockEndArrives("h")).expect(HalfCloseSafety and hc.drainO.get("h") and not(hc.outShut.get("h")) and hc.far.get("h") == "none")
+    .then(HcOuterDrained("h")).expect(HalfCloseSafety and hc.far.get("h") == "eof" and hc.outShut.get("h") and not(hc.drainO.get("h")) and not(hc.faulted))
+  run TcpAcceptHalfCloseHandshakeDeliversEof = InitWith("h")
+    .then(HcPair).then(HcRecv("h")).then(HcFarHalfClose("h")).then(HcAnnounce("h"))
+    .then(HcRecv("g")).then(HcRecv("h"))
+    .expect(HalfCloseSafety and hc.ann.get("h") == "done")
+    .then(VsockEndArrives("g")).then(HcOuterDrained("g"))
+    .expect(HalfCloseSafety and hc.far.get("g") == "eof" and not(hc.faulted))
+  // both far ends half-close: the two handshakes interleave, each vsock shuts only after its acknowledgement,
+  // and the flow closes cleanly on both sides, in the step that completes the second direction at each (DG-5-C)
+  run SimultaneousHalfCloseClosesCleanly = InitWith("g")
+    .then(HcPair).then(HcRecv("g"))
+    .then(HcFarHalfClose("g")).then(HcFarHalfClose("h")).then(HcAnnounce("g")).then(HcAnnounce("h"))
+    .then(HcRecv("h")).then(HcRecv("g")).then(HcRecv("h")).then(HcRecv("g"))
+    .expect(HalfCloseSafety and hc.ann.get("g") == "done" and hc.ann.get("h") == "done" and hc.open.get("g") and hc.open.get("h"))
+    .then(VsockEndArrives("g")).then(VsockEndArrives("h"))
+    .expect(HalfCloseSafety and hc.drainO.get("g") and hc.drainO.get("h"))
+    .then(HcOuterDrained("g")).expect(HalfCloseSafety and not(hc.open.get("g")) and hc.open.get("h") and hc.far.get("g") == "eof")
+    .then(HcOuterDrained("h"))
+    .expect(HalfCloseSafety and not(hc.open.get("h")) and hc.far.get("g") == "eof" and hc.far.get("h") == "eof" and not(hc.faulted))
+  // DG-5-D: the owner whose outer leg read EOF waits for the drain toward the vsock; HalfClose is announced
+  // only when the drain completes, and the wait is gone from then on
+  run HalfCloseWaitsForDrainThenAnnounces = InitWith("g")
+    .then(HcPair).then(HcRecv("g"))
+    .then(HcFarHalfClose("g"))
+    .expect(HalfCloseSafety and hc.outEof.get("g") and hc.drainV.get("g") and hc.ann.get("g") == "none"
+            and hc.ch.get("g") == List() and not(hc.vEndSent.get("g")))
+    .then(HcAnnounce("g"))
+    .expect(HalfCloseSafety and not(hc.drainV.get("g")) and hc.ann.get("g") == "pending" and hc.ch.get("g") == List("HalfClose"))
+  // DG-5-D: a flow vsock end for an acknowledged direction starts the drain wait toward the outer leg; the
+  // outer leg is shut down for writing only when the drain completes. Both directions in turn: the second
+  // completion closes the flow in the acknowledgement's step at the announcing side (DG-5-C), and in the
+  // outer-drain step at the other
+  run VsockEndAwaitsOuterDrainThenShuts = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcFarHalfClose("g")).then(HcFarHalfClose("h"))
+    .then(HcAnnounce("g")).then(HcRecv("h")).then(HcRecv("g")).then(VsockEndArrives("h"))
+    .expect(HalfCloseSafety and hc.drainO.get("h") and not(hc.outShut.get("h")) and hc.far.get("h") == "none" and hc.open.get("h"))
+    .then(HcOuterDrained("h"))
+    .expect(HalfCloseSafety and not(hc.drainO.get("h")) and hc.outShut.get("h") and hc.far.get("h") == "eof" and hc.open.get("h"))
+    .then(HcAnnounce("h")).then(HcRecv("g")).then(HcRecv("h"))
+    .expect(HalfCloseSafety and hc.ann.get("h") == "done" and not(hc.open.get("h")) and hc.open.get("g"))
+    .then(VsockEndArrives("g"))
+    .expect(HalfCloseSafety and hc.drainO.get("g") and not(hc.outShut.get("g")) and hc.open.get("g"))
+    .then(HcOuterDrained("g"))
+    .expect(HalfCloseSafety and not(hc.open.get("g")) and hc.far.get("g") == "eof" and not(hc.faulted))
+  // DG-5-D: the drain deadline (FLOW_DRAIN_DEADLINE) of a wait toward the vsock expires: the flow aborts, Abort
+  // is sent, both drain waits are disarmed, and the peer aborts on the Abort (guest owner's deadline)
+  run DrainDeadlineAbortsAndSendsAbort = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcFarHalfClose("g")).expect(HalfCloseSafety and hc.drainV.get("g"))
+    .then(HcFlowError("g"))
+    .expect(HalfCloseSafety and not(hc.open.get("g")) and not(hc.drainV.get("g")) and hc.ch.get("g") == List("Abort") and hc.far.get("g") == "reset" and hc.faulted)
+    .then(HcRecv("h")).expect(HalfCloseSafety and not(hc.open.get("h")) and hc.far.get("h") == "reset")
+  // ... and a wait toward the outer leg (host owner's deadline)
+  run OuterDrainDeadlineAbortsAndSendsAbort = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcFarHalfClose("g")).then(HcAnnounce("g")).then(HcRecv("h")).then(HcRecv("g")).then(VsockEndArrives("h"))
+    .expect(HalfCloseSafety and hc.drainO.get("h"))
+    .then(HcFlowError("h"))
+    .expect(HalfCloseSafety and not(hc.open.get("h")) and not(hc.drainO.get("h")) and not(hc.outShut.get("h")) and hc.ch.get("h") == List("Abort") and hc.far.get("h") == "reset")
+    .then(HcRecv("g")).expect(HalfCloseSafety and not(hc.open.get("g")))
+  // an outer EOF before Paired is recorded and carried out after Paired (never turned into an abort): the drain
+  // wait toward the vsock starts in the dispatch that routes the pair at Paired
+  run EarlyOuterEofIsCarriedOutAfterPaired = InitWith("g")
+    .then(HcFarHalfClose("g")).expect(HalfCloseSafety and hc.outEof.get("g") and not(hc.paired.get("g")) and hc.open.get("g") and not(hc.drainV.get("g")))
+    .then(HcPair).expect(HalfCloseSafety and not(hc.drainV.get("g")))
+    .then(HcRecv("g")).expect(HalfCloseSafety and hc.paired.get("g") and hc.drainV.get("g") and hc.ann.get("g") == "none")
+    .then(HcAnnounce("g")).expect(HalfCloseSafety and hc.ann.get("g") == "pending")
+    .then(HcRecv("h")).then(HcRecv("g")).then(VsockEndArrives("h")).then(HcOuterDrained("h"))
+    .expect(HalfCloseSafety and hc.far.get("h") == "eof" and not(hc.faulted))
+  // UnannouncedVsockEnd: a flow vsock end for a direction nobody announced aborts the receiver at once with
+  // reset (guest defect: main flows_half / flows_half_host)
+  run UnannouncedGuestVsockEndAbortsHostWithReset = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcPeerDefectEnd("g")).then(VsockEndArrives("h"))
+    .expect(HalfCloseSafety and not(hc.open.get("h")) and hc.far.get("h") == "reset" and hc.far.get("h") != "eof")
+    .then(HcRecv("g")).expect(HalfCloseSafety and not(hc.open.get("g")) and hc.far.get("g") == "reset")
+  // ... and the host-side defect (main flows_half / flows_half_guest)
+  run UnannouncedHostVsockEndAbortsGuestWithReset = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcPeerDefectEnd("h")).then(VsockEndArrives("g"))
+    .expect(HalfCloseSafety and not(hc.open.get("g")) and hc.far.get("g") == "reset")
+    .then(HcRecv("h")).expect(HalfCloseSafety and not(hc.open.get("h")) and hc.far.get("h") == "reset")
+  // K-B4: an owner dies; the survivor sees the dead owner's vsock end before the session's loss, aborts with
+  // reset, and the far ends are reset, never given EOF
+  run OwnerDeathVsockEndBeforeSessionLossResetsBothFarEnds = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcOwnerDies("g"))
+    .expect(HalfCloseSafety and hc.dead.get("g") and hc.ctlDown and hc.far.get("g") == "reset")
+    .then(VsockEndReachesSurvivor("h")).expect(HalfCloseSafety and not(hc.open.get("h")) and hc.far.get("h") == "reset")
+    .then(HcLossObserved("h")).expect(HalfCloseSafety and hc.loss.get("h") and hc.far.get("h") == "reset")
+  // ... and the other order (the loss observed first)
+  run OwnerDeathSessionLossBeforeVsockEndResetsBothFarEnds = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcOwnerDies("h"))
+    .then(HcLossObserved("g")).expect(HalfCloseSafety and hc.loss.get("g") and not(hc.open.get("g")) and hc.far.get("g") == "reset")
+    .then(VsockEndReachesSurvivor("g")).expect(HalfCloseSafety and hc.far.get("g") == "reset" and hc.far.get("h") == "reset")
+  // the control session drops while both owners live: each observes the loss and aborts the flow with reset
+  run SessionDropAbortsFlowOnBothOwners = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcSessionDrop)
+    .then(HcLossObserved("g")).then(HcLossObserved("h"))
+    .expect(HalfCloseSafety and not(hc.open.get("g")) and not(hc.open.get("h")) and hc.far.get("g") == "reset" and hc.far.get("h") == "reset")
+  // a flow error / teardown / quiescence / drain deadline at one owner: abort, Abort sent, the peer aborts
+  run FlowErrorAbortsBothOwnersWithAbortMessage = InitWith("g")
+    .then(HcPair).then(HcRecv("g")).then(HcFlowError("h"))
+    .expect(HalfCloseSafety and not(hc.open.get("h")) and hc.far.get("h") == "reset" and hc.ch.get("h") == List("Abort"))
+    .then(HcRecv("g")).expect(HalfCloseSafety and not(hc.open.get("g")) and hc.far.get("g") == "reset")
+    .then(VsockEndArrives("g")).expect(HalfCloseSafety and not(hc.vEnd.get("h")))
+  // the far end resets after Paired (TcpAccept opener): the owner aborts, sends Abort; the peer aborts
+  run FarEndResetAfterPairedAbortsBothOwners = InitWith("h")
+    .then(HcPair).then(HcFarReset("g"))
+    .then(HcRecv("h")).expect(HalfCloseSafety and hc.paired.get("h") and hc.open.get("h"))
+    .then(HcRecv("h")).expect(HalfCloseSafety and not(hc.open.get("h")) and not(hc.open.get("g")) and hc.far.get("g") == "reset" and hc.far.get("h") == "reset")
 
   // ------------------------------------------------------------------ non-vacuity witnesses
   // Each is EXPECTED to be violated: the violation proves the behaviour is reachable.
@@ -1050,6 +1509,8 @@ module owner_flows {
 // ------------------------------------------------------------------ design instances
 // the design: one CID reused by 2 allocations, 2 control connections, 2 guest-opened flows, 1 host-opened flow
 module flows_ok { import owner_flows(OFF = Set(), CFG = "core").* from "./owner_flows" }
+// the design, core, two host-opened flows: the guest-side session loss aborts every flow of the session in one step (DG-5-F)
+module flows_two { import owner_flows(OFF = Set(), CFG = "core2").* from "./owner_flows" }
 // the design, beacon: one CID reused by 2 allocations, VM start / exit and driver.stop, 2 beacon connections
 module flows_beacon { import owner_flows(OFF = Set(), CFG = "beacon").* from "./owner_flows" }
 // the design, half-close: one paired TCP flow (TcpConnect or TcpAccept), both owners, faults per side

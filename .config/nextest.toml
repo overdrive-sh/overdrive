@@ -762,13 +762,10 @@ test-group = 'host-kernel-shared'
 # (`vmm_tap_queue_errors.rs`, `kvm-tests`) creates real persistent TAPs and
 # launches Cloud Hypervisor through the production `create` path on the metal
 # host. Keep the whole binary in the single-writer domain (DISTILL review M4).
-# The vsock-attachment replacement's `vsock_vmm_backend_probe.rs` (GH #295
-# P6-S7/S8/S9 — the CH-fork `backend=vhost-kernel` probe + `fd=` launch on
-# `/dev/kvm` + `/dev/vhost-vsock`) lives in this SAME binary and is therefore
-# ALREADY covered by this whole-binary entry — no separate module filter is
-# added for it. The binary-level membership also outlives the DELIVER roadmap
-# retirement of `vmm_tap_queue_errors.rs` (shared-infra §7), the module this
-# comment's original example names.
+# Any vsock-attachment cell later added to this binary (the GH #295 CID-claim
+# and CH-fork `fd=` launch cells on `/dev/vhost-vsock` + `/dev/kvm`) is covered
+# by this whole-binary entry, which also outlives the DELIVER retirement of
+# `vmm_tap_queue_errors.rs`.
 [[profile.default.overrides]]
 filter = 'package(overdrive-host) & binary(integration)'
 test-group = 'host-kernel-shared'
@@ -781,33 +778,15 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-system-conformance) & binary(shared_guest_network_fail_stop_recovery)'
 test-group = 'host-kernel-shared'
 
-# netns-density-295 (GH #295) — `overdrive-init`'s integration binary →
-# `host-kernel-shared`, WHOLE BINARY. `vsock_guest_ready_config.rs` (P6-S11)
-# carries a Tier-3 guest-config cell that boots a real guest through the
-# production VMM `fd=` path on `/dev/kvm` + `/dev/vhost-vsock` — node-global host
-# kernel state. Per `.claude/rules/testing.md` § "Node-global kernel state
-# requires a catch-all nextest group", the WHOLE `overdrive-init` integration
-# binary joins rather than a `test(vsock_guest_ready_config)` module filter: a
-# module filter goes stale the moment a new kernel-touching guest module lands
-# beside it, and the pure token-parse half of the module is cheap to serialize
-# (the rule's explicit trade). This is `overdrive-init`'s only
-# `host-kernel-shared` entry, so it is the sole (binary-level) assignment —
-# matching the whole-binary form of the B5 (`overdrive-control-plane` lib) and M4
-# (`overdrive-host` integration) netns-density DISTILL entries above, not the
-# narrower per-module form.
-#
-# Declared NOW (DISTILL scaffolds); `overdrive-init` has no committed
-# `tests/integration.rs` entrypoint yet — P3/P6 create it when a compiling body
-# co-arrives in DELIVER (shared-infra §6; P6 "Files P6 owns" note) — so the
-# `binary(integration)` filter matches nothing until then. `overdrive-init` is a
-# real workspace member (root `Cargo.toml` members + default-members), so
-# `package(overdrive-init)` resolves at config-parse time. NB `overdrive-init`'s
-# `acceptance` binary (`vsock_guest_udp_slots.rs`, a P3 file) is intentionally
-# NOT swept here — it is outside this piece's 6-module gap and is the P3 author's
-# call; a future whole-`acceptance`-binary entry is additive the day its Tier-3
-# cell needs it.
+# netns-density-295 QPROJ-8 — `prefix_landing` conformance boots the production
+# composition on the real kernel and reads and clears node-global guest-prefix
+# state (the `local` prefix route, the pinned `sk_lookup` steering link, the
+# `ip overdrive-mtls` table), binds wildcard sentinels on fixed ports, and
+# creates a fixed-name client namespace and veth. The whole binary joins the
+# single-writer group (`.claude/rules/testing.md` § "Node-global kernel state
+# requires a catch-all nextest group").
 [[profile.default.overrides]]
-filter = 'package(overdrive-init) & binary(integration)'
+filter = 'package(overdrive-system-conformance) & binary(vsock_prefix_landing_conformance)'
 test-group = 'host-kernel-shared'
 
 # The xtask metal-qualification binary drives the production

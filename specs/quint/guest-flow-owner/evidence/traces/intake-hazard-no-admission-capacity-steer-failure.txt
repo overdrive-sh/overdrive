@@ -25,20 +25,22 @@ State 3 [SessOpen]
 State 4 [OtherAdmit]
   oRes = 2
 
-State 5 [ListenState]
-  lastLS = {1}
-
-State 6 [ActivateBegin]
-  alloc = "Activating"
-
-State 7 [BindListen]
-  lis = {1}
-
-State 8 [Steer]
-  entries = {1}
-
-State 9 [OtherSteer]
+State 5 [OtherSteer]
   oEnt = 1
 
-State 10 [OtherSteer]
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> TRUE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
+State 6 [OtherSteer]
+  oEnt = 2
+
+State 7 [ListenState]
+  lastLS = {1}
+
+State 8 [ActivateBegin]
+  alloc = "Activating"
+
+State 9 [BindListen]
+  lis = {1}
+
+State 10 [SteerCapFail]
+  lis = {}
+  alloc = "Provisioned"
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> TRUE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]

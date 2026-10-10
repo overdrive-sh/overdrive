@@ -25,6 +25,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
+use crate::guest_transport::ClaimedGuestCid;
 use crate::traits::driver::{ConfinementControl, STDERR_TAIL_LINES};
 use crate::vm::config::VmConfig;
 
@@ -111,11 +112,18 @@ pub trait Vmm: Send + Sync + 'static {
     /// Stage this VM's per-launch rootfs clone and spawn ONE confined
     /// hypervisor process for it.
     ///
+    /// D16-CLAIM: a launch takes the claimed device. `config` carries no
+    /// vsock field; the `--vsock cid=` value is `vsock.cid()`. `Err` drops
+    /// (releases) the claim. On `Ok` the VMM process holds the device and
+    /// the adapter holds no copy.
+    ///
     /// # Preconditions
     /// - `config` is a fully-constructed [`VmConfig`] — every substrate
     ///   lie ADR-0082 §D2 discourages (image type, memory ceiling,
     ///   kernel format, seccomp mode) is already resolved by `config`'s
     ///   own construction; `create` does not re-validate them.
+    /// - `vsock` is the claim this launch's [`crate::guest_transport::GuestTransportAssignment`]
+    ///   carried; the kernel holds its CID for this device instance only.
     ///
     /// # Postconditions on Ok
     /// - Exactly one hypervisor process is running, confined per
@@ -145,7 +153,7 @@ pub trait Vmm: Send + Sync + 'static {
     /// the hypervisor process cannot be spawned. On any `Err`, no
     /// process is left running and no clone is left on disk (see the
     /// spawn-after-clone edge case above).
-    async fn create(&self, config: &VmConfig) -> Result<VmProcess>;
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> Result<VmProcess>;
 
     /// Terminate the hypervisor **process**: await its exit for
     /// `grace`, then kill it unconditionally.
@@ -420,59 +428,6 @@ pub enum VmmError {
     /// originating I/O error without reinterpretation.
     #[error("VMM I/O: {0}")]
     Io(#[from] std::io::Error),
-
-    /// Attaching the per-launch TAP queue for `tap` failed at `stage`
-    /// (D-295-R2, ADR-0128). Carries the originating I/O error.
-    ///
-    /// RED scaffold: constructed in DELIVER step 05-03.
-    #[error("VMM TAP queue attach for {tap} failed at {stage:?}")]
-    TapQueue {
-        /// The persistent TAP the queue was attached to.
-        tap: String,
-        /// The attach stage that failed.
-        stage: TapQueueStage,
-        /// The originating I/O error.
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// The attached TAP queue for `tap` violated a checked postcondition
-    /// (D-295-R2, ADR-0128).
-    ///
-    /// RED scaffold: constructed in DELIVER step 05-03.
-    #[error("VMM TAP queue postcondition for {tap} failed: {violation:?}")]
-    TapQueuePostcondition {
-        /// The persistent TAP the queue was attached to.
-        tap: String,
-        /// The postcondition the attached queue violated.
-        violation: TapQueueViolation,
-    },
-}
-
-/// The stage of a per-launch TAP queue attach that failed (D-295-R2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TapQueueStage {
-    /// Opening `/dev/net/tun`.
-    Open,
-    /// `TUNSETIFF` on the persistent TAP.
-    Attach,
-    /// Reading back the queue flags (`TUNGETIFF`).
-    FlagsReadBack,
-    /// Reading back the TAP's administrative state (`SIOCGIFFLAGS`).
-    AdminStateReadBack,
-}
-
-/// A checked postcondition an attached TAP queue violated (D-295-R2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TapQueueViolation {
-    /// The queue flags are not the persistent single-queue vnet-header TAP
-    /// flags.
-    Flags {
-        /// The observed `TUNGETIFF` flags.
-        observed: u16,
-    },
-    /// The TAP was administratively up at queue attach.
-    NotDown,
 }
 
 impl VmmError {

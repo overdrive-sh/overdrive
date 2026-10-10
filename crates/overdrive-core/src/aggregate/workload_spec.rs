@@ -122,6 +122,22 @@ pub enum ParseError {
     #[error("listener port must be in 1..=65535")]
     ListenerPortZero,
 
+    /// A `[[listener]]` declared a port the guest reserves for its intakes
+    /// (GH #295 D25). `first` / `last` are `guest_reserved_ports()`'s bounds.
+    // SCAFFOLD: true — netns-density-295 DISTILL; the ingress check that
+    // produces this variant lands with DELIVER vsock new-step 9.
+    #[error(
+        "listener port {port} is reserved for the guest transport ({first}..={last}); choose a port outside this range"
+    )]
+    ListenerPortReserved { port: u16, first: u16, last: u16 },
+
+    /// INTAKE-PORTS (GH #295, ADR-0179): more distinct TCP `[[listener]]`
+    /// ports than the intake host-port block holds.
+    // SCAFFOLD: true — netns-density-295 DISTILL; the ingress check that
+    // produces this variant lands with DELIVER vsock new-step 9.
+    #[error("{declared} TCP listener ports declared; a workload may declare at most {max}")]
+    TooManyTcpListenerPorts { declared: u32, max: u16 },
+
     /// A TOML section carried a field the parser does not accept.
     ///
     /// Per `service-vip-allocator` step 02-01 / ADR-0049 § 5 — the

@@ -145,15 +145,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use overdrive_core::guest_transport::{
+    GUEST_CID_BASE, GuestCid, GuestCidClaim as _, GuestTransportAssignment, LaunchToken,
+};
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
-use overdrive_core::traits::driver::{AllocationSpec, GuestNetworkAssignment, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, Resources};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 use overdrive_netlink::nft::{SharedIpInterceptIdentity, SharedIpInterceptState};
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
 use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept::{InterceptPostcondition, Result as InterceptResult};
 use overdrive_worker::mtls_intercept_port::{
@@ -668,7 +672,7 @@ fn build_client_spec(pki: &TestPki, _host_veth: Option<String>) -> AllocationSpe
         ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: None,
+        transport: None,
         service_ports: Vec::new(),
     }
 }
@@ -1801,18 +1805,16 @@ fn shared_metal_spec(
     pki: &TestPki,
     allocation: AllocationId,
     address: std::net::Ipv4Addr,
-    tap: &str,
 ) -> AllocationSpec {
     let mut spec = build_client_spec(pki, None);
     spec.alloc = allocation;
-    spec.network = Some(GuestNetworkAssignment {
-        address,
-        tap: tap.to_owned(),
-        mac: [0x02, 0, 10, 95, 0, address.octets()[3]],
-        gateway: std::net::Ipv4Addr::LOCALHOST,
-        prefix: 8,
-        dns: std::net::Ipv4Addr::LOCALHOST,
-    });
+    let [_, _, high, low] = address.octets();
+    let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
+        .expect("an in-range guest CID");
+    let claim = SimGuestCidClaim::new().claim(cid).expect("claim the allocation's guest CID");
+    let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
+    spec.transport =
+        Some(GuestTransportAssignment::new(address, std::net::Ipv4Addr::LOCALHOST, launch, claim));
     spec.service_ports = vec![std::num::NonZeroU16::new(8443).expect("non-zero port")];
     spec
 }
@@ -1984,12 +1986,13 @@ fn assert_shared_intercept_state(
 ) {
     let managed = specs
         .iter()
-        .map(|spec| spec.network.as_ref().expect("shared allocation network").address)
+        .map(|spec| spec.transport.as_ref().expect("shared allocation transport").workload_addr())
         .collect::<BTreeSet<_>>();
     let inbound = specs
         .iter()
         .flat_map(|spec| {
-            let address = spec.network.as_ref().expect("shared allocation network").address;
+            let address =
+                spec.transport.as_ref().expect("shared allocation transport").workload_addr();
             spec.service_ports.iter().map(move |port| SocketAddrV4::new(address, port.get()))
         })
         .collect::<BTreeSet<_>>();
@@ -2057,10 +2060,8 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
     )
     .expect("non-zero shared listener ports form the exact constant program");
     assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
-    let first_spec =
-        shared_metal_spec(&pki, first.clone(), "127.0.0.2".parse().unwrap(), "m25tap-a");
-    let second_spec =
-        shared_metal_spec(&pki, second.clone(), "127.0.0.3".parse().unwrap(), "m25tap-b");
+    let first_spec = shared_metal_spec(&pki, first.clone(), "127.0.0.2".parse().unwrap());
+    let second_spec = shared_metal_spec(&pki, second.clone(), "127.0.0.3".parse().unwrap());
     worker.start_alloc(&first_spec).await.expect("publish first real capability");
     worker.start_alloc(&second_spec).await.expect("publish second real capability");
     assert_shared_intercept_state(
@@ -2136,8 +2137,8 @@ async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_s
         SharedIpInterceptIdentity::for_listener_ports(addresses[0].port(), addresses[1].port())
             .expect("non-zero shared listener ports form the exact constant program");
     assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
-    let first_spec = shared_metal_spec(&pki, first, "127.0.0.4".parse().unwrap(), "m26tap-a");
-    let second_spec = shared_metal_spec(&pki, second, "127.0.0.5".parse().unwrap(), "m26tap-b");
+    let first_spec = shared_metal_spec(&pki, first, "127.0.0.4".parse().unwrap());
+    let second_spec = shared_metal_spec(&pki, second, "127.0.0.5".parse().unwrap());
     worker.start_alloc(&first_spec).await.expect("publish first capability");
     worker.start_alloc(&second_spec).await.expect("publish second capability");
     assert_shared_intercept_state(

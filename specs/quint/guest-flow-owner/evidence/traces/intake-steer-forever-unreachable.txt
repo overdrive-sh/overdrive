@@ -1,4 +1,4 @@
-# intake-steer-forever-unreachable: counterexample, 20 state(s) (from the TLC trace)
+# intake-steer-forever-unreachable: counterexample, 18 state(s) (from the TLC trace)
 
 State 1
   bindLeft = 1
@@ -19,63 +19,57 @@ State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [Crash]
-  alloc = "Absent"
-  up = FALSE
-
-State 4 [Restart]
-  up = TRUE
-
-State 5 [Provision]
-  alloc = "Provisioned"
-  gen = 2
-
-State 6 [SessOpen]
+State 3 [SessOpen]
   sess = TRUE
 
-State 7 [ListenState]
+State 4 [ListenState]
   lastLS = {1}
 
-State 8 [ActivateBegin]
+State 5 [OtherAdmit]
+  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> FALSE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
+
+State 6 [ActivateBegin]
   alloc = "Activating"
 
-State 9 [BindFail]
-  bindLeft = 0
-  alloc = "Provisioned"
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> FALSE, retiringRefused |-> FALSE, defected |-> FALSE ]
-
-State 10 [ListenState]
-  lastLS = {}
-
-State 11 [ActivateBegin]
-  alloc = "Activating"
-
-State 12 [ActivateOk]
-  alloc = "Active"
-
-State 13 [OtherAdmit]
-  g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> FALSE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
-
-State 14 [ListenState]
-  lastLS = {1}
-
-State 15 [BindListen]
+State 7 [BindListen]
   lis = {1}
 
-State 16 [SteerMemFail]
+State 8 [SteerMemFail]
+  alloc = "Provisioned"
   g = [ actPartial |-> FALSE, actResidue |-> FALSE, actErr |-> TRUE, relListener |-> FALSE, steerFailed |-> TRUE, resteered |-> FALSE, revokeKept |-> FALSE, capFail |-> FALSE, capRefused |-> TRUE, retiringRefused |-> FALSE, defected |-> FALSE ]
   lis = {}
 
-State 17 [BindListen]
-  lis = {1}
+State 9 [Teardown]
+  alloc = "Retiring"
+  sess = FALSE
 
-State 18 [ListenState]
+State 10 [Release]
+  alloc = "Absent"
+  lastLS = {}
+
+State 11 [Provision]
+  alloc = "Provisioned"
+  gen = 2
+
+State 12 [SessOpen]
+  sess = TRUE
+
+State 13 [ActivateBegin]
+  alloc = "Activating"
+
+State 14 [ActivateOk]
+  alloc = "Active"
+
+State 15 [ListenState]
+  lastLS = {1}
+
+State 16 [BindFail]
+  bindLeft = 0
+
+State 17 [ListenState]
   lastLS = {1, 2}
 
-State 19 [SteerMemFail]
-  lis = {}
-
-State 20 [BindListen]
+State 18 [BindListen]
   lis = {1}
 
 -> loops back to State 17

@@ -1,8 +1,8 @@
 //! `VmDriver` — `Driver` over `Arc<dyn Vmm>` (ADR-0082 §§D3-D4, GH #42).
 //!
 //! Owns everything `Vmm` deliberately does not: cgroup/netns placement,
-//! the per-VM run directory, the host-side beacon `UnixListener` +
-//! accepted session, the three-way boot race (guest beacon vs. VMM exit
+//! the per-VM run directory, the launch's READY session from the node
+//! beacon intake (D17, DG-4), the three-way boot race (guest beacon vs. VMM exit
 //! vs. boot deadline), the guest-shutdown-then-terminate split in
 //! `stop`, and the authorship-claim lifecycle (brief §105a.3) that a
 //! future reclamation-shaped consumer reads through the two defaulted
@@ -17,8 +17,8 @@
 //! drives the `Vmm` port only and structurally cannot reach the
 //! relocated guest half of `stop`.
 
-use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::guest_network::GuestNetworkExecGate;
+use overdrive_core::guest_transport::{GuestCid, GuestTransportAssignment, LaunchToken};
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::CgroupFs;
@@ -33,25 +34,25 @@ use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, GuestNetworkAssignment,
-    OomFacts, Resources, STDERR_TAIL_LINES, VmStartFailure,
+    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
+    STDERR_TAIL_LINES, VmStartFailure,
 };
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
 };
-use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
+use overdrive_core::vm::beacon::{BeaconConnKey, BeaconMessage};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
-    VmConfinement, VmNetworkAttachment, VmRunDir, vcpus_for,
+    VmConfinement, VmRunDir, vcpus_for,
 };
 use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixListener;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::warn;
 
+use crate::beacon_intake::BeaconIntake;
 use crate::cgroup_manager::{CgroupManager, CgroupPath};
 use crate::probe_runner::ProbeRunner;
 
@@ -120,54 +121,18 @@ impl GuestConsoleTailReader for FsGuestConsoleTailReader {
     }
 }
 
-#[derive(Clone, Copy)]
-struct VmNetworkInputs<'a> {
-    assignment: Option<&'a GuestNetworkAssignment>,
-}
-
-impl<'a> From<&'a AllocationSpec> for VmNetworkInputs<'a> {
-    fn from(spec: &'a AllocationSpec) -> Self {
-        Self { assignment: spec.network.as_ref() }
-    }
-}
-
-struct ComposedVmNetwork {
-    cmdline: KernelCmdline,
-    attachment: Option<VmNetworkAttachment>,
-}
-
-fn compose_vm_network(
-    arch: HostArch,
-    inputs: VmNetworkInputs<'_>,
-) -> Result<ComposedVmNetwork, DriverError> {
-    match inputs.assignment {
-        None => Err(start_rejected_unclassified("VM guest network assignment is required")),
-        Some(assignment) => {
-            if assignment.prefix > 32 {
-                return Err(start_rejected_unclassified(format!(
-                    "VM guest network prefix length {} exceeds 32",
-                    assignment.prefix
-                )));
-            }
-            let token = format!(
-                "overdrive.net={}/{},gw={},dns={}",
-                assignment.address, assignment.prefix, assignment.gateway, assignment.dns
-            );
-            let mut cmdline = KernelCmdline::platform_default(arch);
-            if !cmdline.append_platform_token(&token) {
-                return Err(start_rejected_unclassified(
-                    "generated VM guest network kernel token was not space-free",
-                ));
-            }
-            Ok(ComposedVmNetwork {
-                cmdline,
-                attachment: Some(VmNetworkAttachment {
-                    tap: assignment.tap.clone(),
-                    mac: assignment.mac,
-                }),
-            })
-        }
-    }
+/// The launch's platform kernel command line: the platform default plus the
+/// one `overdrive.transport=vsock2,addr=<workload_addr>,dns=<gateway>,launch=<LaunchToken>`
+/// token (§ *Guest adaptation contract*, replaces `overdrive.net=`).
+///
+/// RED scaffold (DISTILL): DG-2 rows 4 / 16 — the transport token lands in the
+/// attachment cut.
+// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 rows 4 and 16, attachment cut).
+fn compose_vm_transport(
+    _arch: HostArch,
+    _transport: &GuestTransportAssignment,
+) -> Result<KernelCmdline, DriverError> {
+    panic!("Not yet implemented -- RED scaffold")
 }
 
 /// Construct a `DriverError::StartRejected` carrying a typed VM cause plus
@@ -221,12 +186,6 @@ fn classify_vmm_error(err: &VmmError, rootfs: &RootfsPlan) -> DriverError {
         // reaches the explicit unknown fallback rather than being guessed
         // into an absence class.
         VmmError::Create { detail } => start_rejected_unclassified(detail.clone()),
-        // A TAP-queue handoff failure (D-295-R4) routes through the same
-        // create-failure start rejection; no class is minted for it. The
-        // detail is the whole adapter `Display` (tap, stage or violation).
-        VmmError::TapQueue { .. } | VmmError::TapQueuePostcondition { .. } => {
-            start_rejected_unclassified(err.to_string())
-        }
         // `create`'s ONLY `Io` source is `ficlone_rootfs` — the per-launch
         // rootfs clone (host adapter: "Every other staging failure stays
         // Io / Create", whose sole `Io` producer there is the clone). After
@@ -967,6 +926,23 @@ impl Drop for ClaimGuard {
 }
 
 // ---------------------------------------------------------------------
+// Beacon observation (QPROJ-4)
+// ---------------------------------------------------------------------
+
+/// The VM driver's beacon state, as [`VmDriver::beacon_observation`] reports
+/// it (QPROJ-4). `BeaconConnKey` is `overdrive_core::vm::beacon::BeaconConnKey`
+/// (DG-4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BeaconObservation {
+    /// CIDs with a live launch (started, not stopped) and its token.
+    pub live: BTreeMap<GuestCid, LaunchToken>,
+    /// Holder of each CID's beacon claim (READY released).
+    pub claims: BTreeMap<GuestCid, BeaconConnKey>,
+    /// Accepted beacon connections whose first line is not yet read.
+    pub unread: BTreeSet<BeaconConnKey>,
+}
+
+// ---------------------------------------------------------------------
 // VmDriver
 // ---------------------------------------------------------------------
 
@@ -980,6 +956,9 @@ pub struct VmDriver {
     probe_runner: Arc<ProbeRunner>,
     guest_network_exec: Arc<GuestNetworkExecGate>,
     layout: VmHostLayout,
+    /// The node's bound beacon listener (D17, DG-4): every launch's READY
+    /// session arrives through it.
+    beacon: Arc<BeaconIntake>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
@@ -991,8 +970,14 @@ impl VmDriver {
     /// `with_vmm`-style builder override
     /// (`.claude/rules/development.md` § "Port-trait dependencies").
     /// Arity and parameter order are pinned by ADR-0090: the trusted
-    /// `probe_runner` is the mandatory fifth constructor argument.
+    /// `probe_runner` is the mandatory fifth constructor argument. The bound
+    /// beacon intake is the last (DG-4, DG-2 row 15): a driver without a
+    /// bound beacon listener is unrepresentable.
     #[must_use]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "DG-4 pins the constructor's eight parameters; every port is mandatory"
+    )]
     pub fn new(
         vmm: Arc<dyn Vmm>,
         clock: Arc<dyn Clock>,
@@ -1001,6 +986,7 @@ impl VmDriver {
         probe_runner: Arc<ProbeRunner>,
         guest_network_exec: Arc<GuestNetworkExecGate>,
         layout: VmHostLayout,
+        beacon: BeaconIntake,
     ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
         let cgroup_manager = CgroupManager::new(layout.cgroup_root.clone(), fs);
@@ -1012,11 +998,40 @@ impl VmDriver {
             probe_runner,
             guest_network_exec,
             layout,
+            beacon: Arc::new(beacon),
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
             guest_console_reader: Arc::new(FsGuestConsoleTailReader),
         }
+    }
+
+    /// QPROJ-4: an owned copy of the driver's live-launch table and
+    /// beacon-claim state.
+    ///
+    /// - **Preconditions:** none. Infallible; callable at any time on a
+    ///   constructed driver, including before any `start`.
+    /// - **Postconditions:** taken without holding a lock on return; no beacon
+    ///   connection is accepted, read, claimed or closed by the call, and no
+    ///   state changes.
+    /// - **Consistency point:** between two per-CID beacon steps
+    ///   (ATTR-LIVE-CLAIM): a connection's live-launch recheck and its claim
+    ///   are one step, so a claim is never reported as taken on a connection
+    ///   whose recheck is still pending.
+    /// - **Edge cases:** a driver that has started nothing returns three empty
+    ///   collections. A CID stopped by `VmDriver::stop` or whose VMM exited is
+    ///   absent from `live`. A connection whose READY line was read and whose
+    ///   claim was refused is in neither `unread` nor `claims`.
+    /// - **Observable invariants:** each `BeaconConnKey` appears at most once
+    ///   across `claims` values and `unread`; a repeated call with no
+    ///   intervening beacon step returns an equal value.
+    // SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 6).
+    #[expect(
+        clippy::unused_self,
+        reason = "RED scaffold body panics before reading the driver; the lint self-trips when DELIVER lands the body"
+    )]
+    pub fn beacon_observation(&self) -> BeaconObservation {
+        panic!("Not yet implemented -- RED scaffold")
     }
 
     #[cfg(test)]
@@ -1076,8 +1091,7 @@ impl VmDriver {
     /// Cleanup shared by every non-`Ok` arm of `start`'s boot sequence:
     /// SIGKILL the VMM (if one was ever spawned), remove the rootfs clone
     /// then its index link, `cgroup.kill` + remove the workload scope,
-    /// remove the run directory (which also removes the beacon socket
-    /// file). Every stage is
+    /// remove the run directory. Every stage is
     /// attempted and every non-benign failure is retained in the authoritative
     /// unclassified start rejection. The complete cleanup attempt finishes
     /// before `start` returns; the supervision claim remains the action shim's
@@ -1113,7 +1127,7 @@ impl VmDriver {
 
     /// Steps 0 through `Vmm::create` of `start`'s boot sequence
     /// (ADR-0082 §D3) — claim the supervision slot, create the run
-    /// directory and beacon listener, provision the cgroup scope and
+    /// directory, provision the cgroup scope and
     /// resource limits, stage the rootfs plan, build the [`VmConfig`],
     /// and spawn the confined hypervisor process. Split out of `start`
     /// itself purely to stay under the file's line-count budget; every
@@ -1133,7 +1147,12 @@ impl VmDriver {
         // same breath — no accessor is added to `DriverPayload`.
         //
         let DriverPayload::Vm(payload) = &spec.driver;
-        let composed_network = compose_vm_network(self.layout.arch, spec.into())?;
+        // D16-CLAIM: a VM start with no transport is a composition defect,
+        // never a placement path.
+        let Some(transport) = spec.transport.as_ref() else {
+            return Err(DriverError::VsockClaimUnavailable { alloc: spec.alloc.clone() });
+        };
+        let cmdline = compose_vm_transport(self.layout.arch, transport)?;
 
         // Step 0 (brief §105a.3, transition 1): take the supervision
         // claim BEFORE the run directory exists. The ordinal is
@@ -1192,27 +1211,7 @@ impl VmDriver {
             }
         };
 
-        // The listener must exist before the guest can dial (SD-1
-        // handoff item 6's pinned start-path ordering).
-        let listener = match UnixListener::bind(run_dir.beacon_socket(BEACON_VSOCK_PORT)) {
-            Ok(listener) => listener,
-            Err(err) => {
-                let primary = start_rejected_unclassified(format!("bind beacon listener: {err}"));
-                return Err(self
-                    .cleanup_after_start_failure(
-                        &spec.alloc,
-                        &run_dir,
-                        Some(&scope),
-                        None,
-                        None,
-                        primary,
-                    )
-                    .await);
-            }
-        };
-
         if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
-            drop(listener);
             let primary = start_rejected_unclassified(format!("create workload scope: {err}"));
             return Err(self
                 .cleanup_after_start_failure(
@@ -1286,7 +1285,7 @@ impl VmDriver {
             alloc: spec.alloc.clone(),
             kernel,
             rootfs: rootfs.clone(),
-            cmdline: composed_network.cmdline,
+            cmdline,
             memory,
             // vCPUs are DERIVED per-allocation from this allocation's own
             // `[resources] cpu_milli` — `max(1, round_up(cpu_milli/1000))`,
@@ -1296,7 +1295,6 @@ impl VmDriver {
             vcpus: vcpus_for(spec.resources.cpu_milli),
             run_dir: run_dir.clone(),
             confinement: self.layout.confinement.clone(),
-            network: composed_network.attachment,
             cgroup_scope: scope.clone(),
         };
 
@@ -1322,8 +1320,24 @@ impl VmDriver {
                 .await);
         }
 
+        // D16-CLAIM: the launch takes the claimed device; a claim already
+        // taken (a second start of the same allocation) has none to hand.
+        let Some(vsock) = transport.take_claim() else {
+            let primary = DriverError::VsockClaimUnavailable { alloc: spec.alloc.clone() };
+            return Err(self
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    None,
+                    Some(&rootfs),
+                    primary,
+                )
+                .await);
+        };
+
         tracing::info!(name: "vm.lifecycle.create_enter", alloc = %spec.alloc, "creating VMM");
-        let (control, exit, diagnostics) = match self.vmm.create(&config).await {
+        let (control, exit, diagnostics) = match self.vmm.create(&config, vsock).await {
             Ok(process) => (process.control, process.exit, process.diagnostics),
             Err(err) => {
                 // §D6: `Vmm::create`'s own Err contract guarantees no
@@ -1352,7 +1366,7 @@ impl VmDriver {
             "VMM created"
         );
 
-        Ok(ProvisionedVmm { run_dir, listener, scope, control, exit, diagnostics, rootfs, memory })
+        Ok(ProvisionedVmm { run_dir, scope, control, exit, diagnostics, rootfs, memory })
     }
 
     /// Clone every handle [`run_exit_watcher`] needs off `self` and spawn
@@ -1423,7 +1437,6 @@ enum BootRaceOutcome {
 /// handle `start`'s non-`Ok` race arms clean up (ADR-0082 §D3).
 struct ProvisionedVmm {
     run_dir: VmRunDir,
-    listener: UnixListener,
     scope: CgroupPath,
     control: VmControl,
     exit: VmExitWatch,
@@ -1458,7 +1471,6 @@ impl Driver for VmDriver {
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         let ProvisionedVmm {
             run_dir,
-            listener,
             scope,
             control,
             mut exit,
@@ -1507,7 +1519,7 @@ impl Driver for VmDriver {
         // whose ending belongs to the exit watcher, not to `start`.
         let outcome = tokio::select! {
             biased;
-            accepted = accept_ready(&listener) => BootRaceOutcome::Beacon(accepted),
+            accepted = accept_ready(&self.beacon, spec) => BootRaceOutcome::Beacon(accepted),
             ended = exit.recv() => BootRaceOutcome::VmmExited(ended),
             () = self.clock.sleep(VM_BOOT_DEADLINE) => BootRaceOutcome::Deadline,
         };
@@ -1515,25 +1527,6 @@ impl Driver for VmDriver {
         match outcome {
             BootRaceOutcome::Beacon(Ok((reader, write_half))) => {
                 tracing::info!(name: "vm.lifecycle.ready", alloc = %spec.alloc, "VM READY accepted");
-                if let Some(network) = spec.network.as_ref()
-                    && let Err(error) =
-                        overdrive_netlink::ethtool::disable_tx_offload(&network.tap).await
-                {
-                    let primary = start_rejected_unclassified(format!(
-                        "disable direct-host TAP TX checksum offload on {}: {error}",
-                        network.tap
-                    ));
-                    return Err(self
-                        .cleanup_after_start_failure(
-                            &spec.alloc,
-                            &run_dir,
-                            Some(&scope),
-                            Some(&control),
-                            Some(&rootfs),
-                            primary,
-                        )
-                        .await);
-                }
                 // ADR-0089 §1 / Q9: retain the existing EXEC reply on the
                 // guest-initiated session, but do NOT write it here. `start`
                 // returns once READY is accepted; the action shim installs
@@ -2011,29 +2004,27 @@ fn guest_exit_unreported_failure(
     start_rejected(VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal }, detail)
 }
 
-/// The beacon arm of the three-way race: accept one connection and
-/// confirm its first line is `READY ...`. A cancelled call (the exit or
-/// deadline arm wins instead) abandons the connection entirely — the
-/// caller tears down the whole run directory in that case, so losing
-/// any bytes buffered mid-read is inconsequential (nothing reads this
-/// SAME connection again).
+/// The beacon arm of the three-way race: this launch's READY session from the
+/// node beacon intake (D17, ATTR-LIVE-CLAIM). A connection is attributed by its
+/// kernel-reported peer CID together with the launch token its READY carries,
+/// both equal to `spec.transport`'s; the CID's beacon claim is taken in one
+/// per-CID step. Any other connection closes without effect (`StaleLaunch`,
+/// `NoLiveLaunch`, `SessionHeld`). A cancelled call (the exit or deadline arm
+/// wins instead) takes nothing.
+///
+/// RED scaffold (DISTILL): DG-2 row 15 — the node beacon intake replaces the
+/// per-VM Unix listener in the attachment cut; DELIVER also reshapes the
+/// session halves onto the intake's `BeaconSocket` (internal structure).
+// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 15, attachment cut).
+#[allow(
+    clippy::unused_async,
+    reason = "RED scaffold body panics before awaiting; DELIVER lands the awaiting body"
+)]
 async fn accept_ready(
-    listener: &UnixListener,
+    _intake: &BeaconIntake,
+    _spec: &AllocationSpec,
 ) -> std::io::Result<(BufReader<OwnedReadHalf>, OwnedWriteHalf)> {
-    let (stream, _addr) = listener.accept().await?;
-    let (read_half, write_half) = stream.into_split();
-    let mut reader = BufReader::new(read_half);
-    let mut line = String::new();
-    reader.read_line(&mut line).await?;
-    match line.parse::<BeaconMessage>() {
-        Ok(BeaconMessage::Ready { .. }) => Ok((reader, write_half)),
-        Ok(other) => {
-            Err(std::io::Error::other(format!("beacon accept: expected READY, got {other:?}")))
-        }
-        Err(parse_err) => Err(std::io::Error::other(format!(
-            "beacon accept: unparseable first line: {parse_err}"
-        ))),
-    }
+    panic!("Not yet implemented -- RED scaffold")
 }
 
 /// ADR-0082 §D3 / brief §103's exit-classification join. The guest's
@@ -2250,6 +2241,9 @@ mod tests {
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
+    use overdrive_core::guest_transport::{ClaimedGuestCid, GUEST_CID_BASE, GuestCidClaim};
+    use overdrive_sim::adapters::beacon_io::SimBeaconIo;
+    use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
     use overdrive_sim::{SimCgroupFs, SimOp, SimVmm};
     use tokio::net::UnixStream;
 
@@ -2399,6 +2393,26 @@ mod tests {
         terminate_calls: Arc<AtomicUsize>,
     }
 
+    /// The node beacon intake over a simulated beacon listener (DG-4).
+    async fn test_beacon_intake() -> BeaconIntake {
+        BeaconIntake::bind(Arc::new(SimBeaconIo::new(SimVmm::new())))
+            .await
+            .expect("bind the simulated beacon listener")
+    }
+
+    /// A guest transport handoff over a simulated CID claim (D16-CLAIM).
+    fn test_transport() -> GuestTransportAssignment {
+        let cid = GuestCid::new(GUEST_CID_BASE).expect("an in-range guest CID");
+        let claim = SimGuestCidClaim::new().claim(cid).expect("claim the launch's guest CID");
+        let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
+        GuestTransportAssignment::new(
+            "100.95.0.6".parse().expect("valid workload address"),
+            "100.95.0.1".parse().expect("valid gateway"),
+            launch,
+            claim,
+        )
+    }
+
     struct CleanupTerminateFails {
         attempts: AtomicUsize,
     }
@@ -2416,6 +2430,7 @@ mod tests {
         async fn create(
             &self,
             _config: &VmConfig,
+            _vsock: ClaimedGuestCid,
         ) -> overdrive_core::traits::vmm::Result<VmProcess> {
             Err(VmmError::Create { detail: "unused create".to_owned() })
         }
@@ -2446,6 +2461,7 @@ mod tests {
         async fn create(
             &self,
             config: &VmConfig,
+            _vsock: ClaimedGuestCid,
         ) -> overdrive_core::traits::vmm::Result<VmProcess> {
             std::fs::create_dir_all(config.rootfs.clone_dest().parent().expect("clone has parent"))
                 .expect("create clone parent");
@@ -2477,7 +2493,7 @@ mod tests {
         }
     }
 
-    fn diagnostic_start_fixture(
+    async fn diagnostic_start_fixture(
         temp: &tempfile::TempDir,
         outcome: ConsoleOutcome,
     ) -> (
@@ -2528,14 +2544,7 @@ mod tests {
             }),
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             probe_descriptors: vec![],
-            network: Some(overdrive_core::traits::driver::GuestNetworkAssignment {
-                address: "100.96.0.6".parse().expect("valid guest address"),
-                tap: "ovd-tap-0001".to_owned(),
-                mac: [0x02, 0, 0, 0, 0, 1],
-                gateway: "100.96.0.5".parse().expect("valid gateway"),
-                prefix: 30,
-                dns: "100.96.0.5".parse().expect("valid DNS"),
-            }),
+            transport: Some(test_transport()),
             service_ports: vec![],
         };
         let terminate_calls = Arc::new(AtomicUsize::new(0));
@@ -2555,6 +2564,7 @@ mod tests {
             test_probe_runner(),
             wiring.gate(),
             layout,
+            test_beacon_intake().await,
         )
         .with_guest_console_reader(reader.clone());
         (driver, spec, reader, terminate_calls, rootfs, run_dir)
@@ -2579,7 +2589,7 @@ mod tests {
         for (outcome, expected_detail) in cases {
             let temp = tempfile::TempDir::new().expect("diagnostic start fixture");
             let (driver, spec, reader, terminate_calls, rootfs, run_dir) =
-                diagnostic_start_fixture(&temp, outcome);
+                diagnostic_start_fixture(&temp, outcome).await;
             let error = driver.start(&spec).await.expect_err("pre-READY exit rejects start");
             let DriverError::StartRejected { failure } = error else {
                 panic!("diagnostic failure must not change the typed rejection");
@@ -2640,6 +2650,7 @@ mod tests {
             test_probe_runner(),
             wiring.gate(),
             layout.clone(),
+            test_beacon_intake().await,
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
         driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);
@@ -2723,72 +2734,6 @@ mod tests {
         );
         driver.release_supervision(&alloc);
         assert_eq!(driver.live_allocations(), Some(Vec::new()));
-    }
-
-    /// CONTRACT_SHAPE: pure-function.
-    #[allow(
-        clippy::doc_markdown,
-        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-    )]
-    #[test]
-    fn complete_mesh_network_inputs_become_one_attachment_and_one_guest_addressing_token() {
-        let assignment = GuestNetworkAssignment {
-            address: "100.96.0.166".parse().unwrap(),
-            tap: "ovd-tap-002a".to_owned(),
-            mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
-            gateway: "100.96.0.165".parse().unwrap(),
-            prefix: 30,
-            dns: "100.96.0.165".parse().unwrap(),
-        };
-        let composed =
-            compose_vm_network(HostArch::X86_64, VmNetworkInputs { assignment: Some(&assignment) })
-                .expect("a complete mesh network channel composes");
-
-        assert_eq!(
-            composed.attachment,
-            Some(VmNetworkAttachment {
-                tap: "ovd-tap-002a".to_owned(),
-                mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
-            }),
-        );
-        let network_tokens: Vec<_> = composed
-            .cmdline
-            .as_str()
-            .split_whitespace()
-            .filter(|token| token.starts_with("overdrive.net="))
-            .collect();
-        assert_eq!(
-            network_tokens,
-            ["overdrive.net=100.96.0.166/30,gw=100.96.0.165,dns=100.96.0.165"],
-            "the guest receives exactly one space-free platform addressing token",
-        );
-    }
-
-    /// CONTRACT_SHAPE: pure-function.
-    #[allow(
-        clippy::doc_markdown,
-        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-    )]
-    #[test]
-    fn incomplete_mesh_network_inputs_are_rejected_before_vm_provisioning() {
-        let result = compose_vm_network(HostArch::X86_64, VmNetworkInputs { assignment: None });
-
-        assert!(result.is_err(), "a VM netns without its NIC/addressing tuple must fail closed");
-    }
-
-    /// CONTRACT_SHAPE: pure-function.
-    #[allow(
-        clippy::doc_markdown,
-        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-    )]
-    #[test]
-    fn absent_vm_network_assignment_is_rejected_before_vm_provisioning() {
-        let result = compose_vm_network(HostArch::X86_64, VmNetworkInputs { assignment: None });
-
-        let Err(DriverError::StartRejected { failure }) = result else {
-            panic!("an unassigned VM network must fail closed with a typed rejection");
-        };
-        assert_eq!(failure.detail, "VM guest network assignment is required");
     }
 
     /// The Running-gate ORPHAN path (greptile PR #268 P1). The happy

@@ -44,7 +44,7 @@ State 1: <Initial predicate>
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 2: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 46 of module flows_half_guest>
+State 2: <flows_half_guest_owner_flows_step line 3249, col 9 to line 3250, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -90,7 +90,7 @@ State 2: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 3: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 46 of module flows_half_guest>
+State 3: <flows_half_guest_owner_flows_step line 3249, col 9 to line 3250, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -136,7 +136,7 @@ State 3: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 4: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 46 of module flows_half_guest>
+State 4: <flows_half_guest_owner_flows_step line 3249, col 9 to line 3250, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -182,7 +182,7 @@ State 4: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 5: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 46 of module flows_half_guest>
+State 5: <flows_half_guest_owner_flows_step line 3249, col 9 to line 3250, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -215,10 +215,10 @@ State 5: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
   outShut |-> [g |-> FALSE, h |-> FALSE],
   open |-> [g |-> FALSE, h |-> TRUE],
   far |-> [g |-> "reset", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
+  dead |-> [g |-> TRUE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<"Paired", "HalfClose", "Abort">>, h |-> <<>>],
+  ctlDown |-> TRUE,
+  ch |-> [g |-> <<"Paired", "HalfClose">>, h |-> <<>>],
   vEnd |-> [g |-> TRUE, h |-> FALSE],
   vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
@@ -228,7 +228,7 @@ State 5: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 6: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 46 of module flows_half_guest>
+State 6: <flows_half_guest_owner_flows_step line 3249, col 9 to line 3250, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -261,10 +261,10 @@ State 6: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
   outShut |-> [g |-> FALSE, h |-> FALSE],
   open |-> [g |-> FALSE, h |-> TRUE],
   far |-> [g |-> "reset", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
+  dead |-> [g |-> TRUE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<"HalfClose", "Abort">>, h |-> <<>>],
+  ctlDown |-> TRUE,
+  ch |-> [g |-> <<"HalfClose">>, h |-> <<>>],
   vEnd |-> [g |-> TRUE, h |-> FALSE],
   vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
@@ -274,7 +274,7 @@ State 6: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 7: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 46 of module flows_half_guest>
+State 7: <flows_half_guest_owner_flows_step line 3249, col 9 to line 3250, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -307,10 +307,10 @@ State 7: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
   outShut |-> [g |-> FALSE, h |-> FALSE],
   open |-> [g |-> FALSE, h |-> TRUE],
   far |-> [g |-> "reset", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
+  dead |-> [g |-> TRUE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<"Abort">>, h |-> <<"Ack">>],
+  ctlDown |-> TRUE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
   vEnd |-> [g |-> TRUE, h |-> FALSE],
   vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
@@ -320,7 +320,7 @@ State 7: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_half_guest_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 
-State 8: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 46 of module flows_half_guest>
+State 8: <flows_half_guest_owner_flows_step line 3249, col 9 to line 3250, col 46 of module flows_half_guest>
 /\ flows_half_guest_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_half_guest_owner_flows_vmGen = 0
 /\ flows_half_guest_owner_flows_bHeldByOther = FALSE
@@ -353,10 +353,10 @@ State 8: <flows_half_guest_owner_flows_step line 3220, col 9 to line 3221, col 4
   outShut |-> [g |-> FALSE, h |-> TRUE],
   open |-> [g |-> FALSE, h |-> TRUE],
   far |-> [g |-> "reset", h |-> "eof"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
+  dead |-> [g |-> TRUE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<"Abort">>, h |-> <<"Ack">>],
+  ctlDown |-> TRUE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
   vEnd |-> [g |-> FALSE, h |-> FALSE],
   vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],

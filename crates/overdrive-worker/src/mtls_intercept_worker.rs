@@ -32,7 +32,7 @@ use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
     MtlsEnforcementError, Routed,
 };
-use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
 use overdrive_core::{AllocationId, SpiffeId};
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::{Notify, mpsc, oneshot, watch};
@@ -124,6 +124,44 @@ pub enum MtlsInterceptInstallError {
         #[source]
         source: std::io::Error,
     },
+
+    // SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 8).
+    /// `register_forwarded_outbound` was asked to register a forwarded flow for
+    /// an allocation that holds no active capability (D9).
+    #[error("allocation {alloc} is not intercept-live; forwarded outbound refused")]
+    NotInterceptLive { alloc: AllocationId },
+
+    // SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 8).
+    /// A forwarded-outbound registration for this forwarder-side address
+    /// already exists (D9).
+    #[error("a forwarded-outbound registration for {forwarder_local} already exists")]
+    DuplicateForwardedRegistration { forwarder_local: SocketAddrV4 },
+}
+
+// SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 8).
+/// One forwarded-outbound registration, held by the owner for the whole life
+/// of the flow.
+///
+/// Dropping it releases the registration whether or not leg-F has claimed it;
+/// a claimed flow's leg-F sockets then close clean only if the loopback leg
+/// ended cleanly in both directions, else with reset (DG-10). The
+/// registration survives until leg-F claims it at accept; time does not
+/// remove it.
+///
+/// DG-10 (2): dropping an **unclaimed** registration removes it; a later
+/// accept from that peer finds none and is closed. Dropping a **claimed**
+/// one releases it, and leg-F's sockets for the flow close as the loopback
+/// leg dictates: a loopback leg that ended with FIN in both directions closes
+/// the remote socket cleanly (linger cleared, FIN); otherwise — the owner
+/// aborted the loopback leg, or it is still open (or half-ended) at the drop —
+/// leg-F aborts both (`SO_LINGER{1,0}`: the remote peer sees a reset).
+///
+/// RED scaffold (DISTILL, Mandate 7): the shape the design pins
+/// (feature-delta § "[REF] mTLS forwarded-outbound port"); the private state
+/// lands in DELIVER (vsock new-step 8).
+#[must_use]
+pub struct ForwardedOutbound {
+    _scaffold: (),
 }
 
 /// One allocation's retirement attempt did not converge (D-295-R10).
@@ -769,6 +807,14 @@ impl MtlsInterceptInstallError {
             // on the per-connection accept loop, never on `start_alloc`'s
             // install path, so they cannot reach here.
             Self::Inbound(_) => "inbound_tproxy",
+            // SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 8).
+            // DG-10 reading 1 pins the labels: `NotInterceptLive` →
+            // `"not_intercept_live"`, `DuplicateForwardedRegistration` →
+            // `"duplicate_forwarded_registration"`. DELIVER (new-step 8) lands
+            // them with the forwarded-outbound registration.
+            Self::NotInterceptLive { .. } | Self::DuplicateForwardedRegistration { .. } => {
+                panic!("Not yet implemented -- RED scaffold")
+            }
         }
     }
 }
@@ -2539,7 +2585,7 @@ impl MtlsInterceptWorker {
             }
         }
 
-        if spec.network.is_none() {
+        if spec.transport.is_none() {
             return Ok(());
         }
         self.start_shared_allocation(spec).await
@@ -2564,7 +2610,7 @@ impl MtlsInterceptWorker {
             (owner.leg_f_addr, owner.leg_c_addr)
         };
         let allowed_ports = spec.service_ports.iter().copied().collect::<BTreeSet<_>>();
-        let Some(network) = spec.network.as_ref() else {
+        let Some(transport) = spec.transport.as_ref() else {
             return Err(MtlsInterceptInstallError::SharedOwner {
                 source: MtlsSharedOwnerError::NotStarted,
             });
@@ -2576,7 +2622,7 @@ impl MtlsInterceptWorker {
             }
             let pending = self.capabilities.begin_registration(
                 spec.alloc.clone(),
-                network.address,
+                transport.workload_addr(),
                 spec.identity.clone(),
                 allowed_ports,
             )?;
@@ -2593,12 +2639,12 @@ impl MtlsInterceptWorker {
             // and create one nft rule per allocation.
             let outbound = self
                 .intercept
-                .install_outbound(network.address, leg_f_addr.port())
+                .install_outbound(transport.workload_addr(), leg_f_addr.port())
                 .map_err(MtlsInterceptInstallError::outbound_tproxy_install)?;
             pending.retain_outbound(outbound);
             for port in &spec.service_ports {
                 let inbound = self.intercept.install_inbound(
-                    SocketAddrV4::new(network.address, port.get()),
+                    SocketAddrV4::new(transport.workload_addr(), port.get()),
                     leg_c_addr.port(),
                 )?;
                 pending.retain_inbound(inbound);
@@ -3044,6 +3090,44 @@ impl MtlsInterceptWorker {
     pub fn leg_c_addr(&self, alloc: &AllocationId) -> Option<SocketAddrV4> {
         self.intercepts.lock().get(alloc).map(|i| i.leg_c_addr)
     }
+
+    // SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 8).
+    /// Registers that the next connection accepted on leg-F whose peer is
+    /// `forwarder_local` belongs to `alloc`'s current capability (resolved
+    /// internally, ADR-0123), was dialled to `original_destination`, and must
+    /// be enforced to `backend` — the owner's single resolution. Leg-F does
+    /// not resolve it again.
+    ///
+    /// # Errors
+    ///
+    /// [`MtlsInterceptInstallError::NotInterceptLive`] when `alloc` holds no
+    /// active capability;
+    /// [`MtlsInterceptInstallError::DuplicateForwardedRegistration`] when a
+    /// registration for `forwarder_local` already exists.
+    #[expect(
+        clippy::unused_self,
+        reason = "RED scaffold body panics before reading its inputs; DELIVER (vsock new-step 8) lands the body"
+    )]
+    pub fn register_forwarded_outbound(
+        &self,
+        _alloc: &AllocationId,
+        _forwarder_local: SocketAddrV4,
+        _original_destination: SocketAddrV4,
+        _backend: ResolvedBackend,
+    ) -> Result<ForwardedOutbound, MtlsInterceptInstallError> {
+        panic!("Not yet implemented -- RED scaffold")
+    }
+
+    // SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 8).
+    /// Leg-F's loopback address for forwarded mesh flows.
+    #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "RED scaffold body panics before reading the shared owner; DELIVER (vsock new-step 8) lands the body"
+    )]
+    pub fn leg_f_addr(&self) -> Option<SocketAddrV4> {
+        panic!("Not yet implemented -- RED scaffold")
+    }
 }
 
 fn start_capability_retirement(
@@ -3380,9 +3464,11 @@ mod tests {
     use std::time::Duration;
 
     use async_trait::async_trait;
-    use overdrive_core::traits::driver::{
-        AllocationSpec, DriverPayload, GuestNetworkAssignment, Resources, VmPayload,
+    use overdrive_core::guest_transport::{
+        GUEST_CID_BASE, GuestCid, GuestCidClaim, GuestTransportAssignment, LaunchToken,
     };
+    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
+    use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
     use overdrive_core::traits::mtls_enforcement::{
         EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
         MtlsEnforcementError, PumpLiveness,
@@ -4026,21 +4112,24 @@ mod tests {
             }),
             resources: Resources { cpu_milli: 1, memory_bytes: 1 },
             probe_descriptors: Vec::new(),
-            network: None,
+            transport: None,
             service_ports: Vec::new(),
         }
     }
 
     fn shared_spec(alloc: AllocationId, address: Ipv4Addr) -> AllocationSpec {
         let mut spec = minimal_spec(alloc);
-        spec.network = Some(GuestNetworkAssignment {
+        let [_, _, high, low] = address.octets();
+        let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
+            .expect("an in-range guest CID");
+        let claim = SimGuestCidClaim::new().claim(cid).expect("claim the allocation's guest CID");
+        let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
+        spec.transport = Some(GuestTransportAssignment::new(
             address,
-            tap: format!("ovd-tp-{}", address.octets()[3]),
-            mac: [0x02, 0x00, 100, 95, 0, address.octets()[3]],
-            gateway: Ipv4Addr::new(100, 95, 0, 1),
-            prefix: 16,
-            dns: Ipv4Addr::new(100, 95, 0, 1),
-        });
+            Ipv4Addr::new(100, 95, 0, 1),
+            launch,
+            claim,
+        ));
         spec.service_ports = vec![NonZeroU16::new(8443).expect("non-zero port")];
         spec
     }
@@ -4072,6 +4161,7 @@ mod tests {
     /// → `FailClosed`. Each arm is asserted DISTINCTLY so an arm-match mutation
     /// (the canonical bug shape — a collapsed `FailClosed`→`PassThrough` is
     /// silent cleartext) is independently killed.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn decide_outbound_maps_each_resolution_arm_to_its_distinct_action() {
         let backend_addr = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 7), 8443);
@@ -4112,6 +4202,7 @@ mod tests {
     /// stage for the leg-F IP_TRANSPARENT bind whose error type this change
     /// migrated to `InterceptError`) alongside its three siblings; replacing any
     /// label string turns this RED.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn stage_label_is_pinned_per_install_error_variant() {
         use super::{InterceptError, MtlsInterceptInstallError};
@@ -4153,6 +4244,24 @@ mod tests {
                 "{err:?} must map to stage label {expected_stage:?}"
             );
         }
+    }
+
+    /// DG-10 reading 1: the forwarded-outbound refusals carry their pinned
+    /// install-stage labels.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+    fn forwarded_outbound_refusals_have_pinned_stage_labels() {
+        use super::MtlsInterceptInstallError;
+
+        let not_live = MtlsInterceptInstallError::NotInterceptLive {
+            alloc: AllocationId::new("dg10-not-live").expect("valid allocation id"),
+        };
+        assert_eq!(not_live.stage(), "not_intercept_live");
+        let duplicate = MtlsInterceptInstallError::DuplicateForwardedRegistration {
+            forwarder_local: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_000),
+        };
+        assert_eq!(duplicate.stage(), "duplicate_forwarded_registration");
     }
 
     // ---- shared capability drain behavior ---------------------------------

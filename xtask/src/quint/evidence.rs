@@ -741,22 +741,29 @@ fn stage_trace(
         file: path.display().to_string(),
         error: e.to_string(),
     };
-    let (raw_name, raw, parsed, source) = match c.backend {
+    let (raw_name, raw, condensed) = match c.backend {
         Backend::Apalache => {
             let itf = job.out_dir.join("trace.itf.json");
             let body = read(&itf)?;
             let parsed = trace::parse_itf(&body).map_err(|e| unparsable(&itf, e))?;
-            (format!("traces/{}.itf.json", c.name), body, parsed, "ITF")
+            let condensed = trace::condense(&c.name, "ITF", &parsed);
+            (format!("traces/{}.itf.json", c.name), body, condensed)
         }
         Backend::Tlc => {
             let log = read(&rec.log)?;
             let text = trace::extract_tlc_trace(&log).map_err(|e| unparsable(&rec.log, e))?;
             let parsed = trace::parse_tlc(&text).map_err(|e| unparsable(&rec.log, e))?;
-            (format!("traces/{}.tlc.txt", c.name), text, parsed, "TLC")
+            let condensed = trace::condense(&c.name, "TLC", &parsed);
+            (format!("traces/{}.tlc.txt", c.name), text, condensed)
+        }
+        // A failed run's evidence is Quint's own failure report: which
+        // `expect` failed, where, and the seed that repeats it.
+        Backend::Evaluator => {
+            let log = read(&rec.log)?;
+            (format!("traces/{}.test.txt", c.name), log.clone(), log)
         }
     };
     let condensed_name = format!("traces/{}.txt", c.name);
-    let condensed = trace::condense(&c.name, source, &parsed);
     for (rel, bytes) in [(&condensed_name, condensed.as_bytes()), (&raw_name, raw.as_bytes())] {
         if let Err(e) = stage.write(rel, bytes) {
             let mut error = e.to_string();
@@ -782,11 +789,13 @@ fn check_evidence(job: &Job, rec: &CheckRecord, stage: &Stage) -> Result<CheckEv
     let (property_kind, property) = match &c.property {
         Property::Invariant(p) => ("invariant", p.clone()),
         Property::Temporal(p) => ("temporal", p.clone()),
+        Property::Run(p) => ("run", p.clone()),
     };
     let bound = match (c.backend, c.max_steps) {
         (Backend::Tlc, _) => "exhaustive".to_owned(),
         (Backend::Apalache, Some(n)) => format!("max_steps={n}"),
         (Backend::Apalache, None) => "max_steps=quint-default".to_owned(),
+        (Backend::Evaluator, _) => "run".to_owned(),
     };
     let mut ev = CheckEvidence {
         name: c.name.clone(),

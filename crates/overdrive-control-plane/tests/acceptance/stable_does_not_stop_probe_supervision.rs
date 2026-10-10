@@ -108,7 +108,7 @@ fn spec_with(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> A
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors,
-        network: None,
+        transport: None,
         service_ports: Vec::new(),
     }
 }

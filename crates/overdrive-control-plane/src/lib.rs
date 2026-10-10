@@ -160,6 +160,7 @@ use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
 use futures::stream::{FuturesUnordered, StreamExt};
+use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
@@ -1012,36 +1013,34 @@ pub struct ServerConfig {
     #[cfg(feature = "integration-tests")]
     pub mtls_identity_override: Option<Arc<dyn overdrive_core::traits::IdentityRead>>,
 
-    /// Test-only adapter-substitution seam for the `Vmm` port (ADR-0083
-    /// §D8, GH #42, step 01-09). When `Some(v)`, `compose_vm_driver` uses
-    /// THIS adapter in place of discovering/constructing
-    /// `CloudHypervisorVmm`, so a real in-process `overdrive serve` runs
-    /// the SAME discover → probe → insert sequence against an adapter
-    /// carrying an injected fault (a `SimVmm`), or against a REAL
-    /// `CloudHypervisorVmm` constructed with a test-only builder override
-    /// (e.g. `.with_image_dir(tmpfs_path)` — a genuinely non-reflink real
-    /// substrate, no injection), rather than against the production
-    /// discovery path. `None` in production; the field does not exist in
-    /// a production binary.
-    ///
-    /// Shaped after `mtls_identity_override` above (a whole-**port**-
-    /// implementation swap, `Arc<dyn Trait>`) — deliberately NOT after
-    /// `dataplane_override`'s whole-**subsystem** gate (ADR-0083 §A10
-    /// considers and rejects that shape by name). Every downstream
-    /// consumer (`DriverRegistry`, the exit-observer loop, `VmDriver`)
-    /// sees `Arc<dyn Vmm>` and is unaware the seam exists.
-    /// `Vmm::probe()` (and `CgroupAccounting::probe()`) run
-    /// UNCONDITIONALLY against whichever adapter is bound — Earned Trust
+    /// Test-only adapter-substitution seam for the VM driver's two driven
+    /// ports, `Vmm` and `BeaconIo` (ADR-0083 §D8; DG-4). A simulated VMM
+    /// without a simulated beacon is the wrong state (a `SimVmm` guest cannot
+    /// reach a real vsock listener), so the two travel together. When
+    /// `Some(o)`, `compose_vm_driver` uses `o.vmm` in place of discovering
+    /// `CloudHypervisorVmm` and binds the node beacon intake through
+    /// `o.beacon` in place of `VsockBeaconIo`; `None` composes both
+    /// production adapters. `Vmm::probe()` (and `CgroupAccounting::probe()`)
+    /// run UNCONDITIONALLY against whichever adapter is bound — Earned Trust
     /// is never skipped for the injected case.
     ///
     /// Gated behind `#[cfg(feature = "integration-tests")]` on both this
-    /// field declaration and its one use site in `compose_vm_driver`,
-    /// mirroring `mtls_identity_override`'s discipline.
+    /// field declaration and its one use site, mirroring
+    /// `mtls_identity_override`'s discipline.
     ///
-    /// Excluded from [`Debug`] (beyond the adapter-presence marker) —
-    /// `Arc<dyn Vmm>` is neither `Debug` nor `Default`.
+    /// Excluded from [`Debug`] (beyond the adapter-presence marker).
     #[cfg(feature = "integration-tests")]
-    pub vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
+    pub vm_override: Option<VmOverride>,
+}
+
+/// The VM driver's injected driven ports (DG-4): a simulated VMM and the
+/// simulated beacon its guests reach. `ServerConfig.vm_override = None`
+/// composes `CloudHypervisorVmm` and `VsockBeaconIo`.
+pub struct VmOverride {
+    /// Replaces the discovered `CloudHypervisorVmm`.
+    pub vmm: Arc<dyn overdrive_core::traits::vmm::Vmm>,
+    /// Replaces `VsockBeaconIo` as the node beacon intake's port.
+    pub beacon: Arc<dyn overdrive_core::vm::beacon::BeaconIo>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -1077,7 +1076,7 @@ impl std::fmt::Debug for ServerConfig {
             &self.mtls_identity_override.as_ref().map(|_| "<dyn IdentityRead>"),
         );
         #[cfg(feature = "integration-tests")]
-        dbg.field("vmm_override", &self.vmm_override.as_ref().map(|_| "<dyn Vmm>"));
+        dbg.field("vm_override", &self.vm_override.as_ref().map(|_| "<VmOverride>"));
         dbg.finish()
     }
 }
@@ -1179,7 +1178,7 @@ impl ServerConfig {
             // `CloudHypervisorVmm`. S-VM-13/S-VM-75 set `Some(..)` to
             // exercise the probe-refusal fail-closed branch.
             #[cfg(feature = "integration-tests")]
-            vmm_override: None,
+            vm_override: None,
         }
     }
 }
@@ -1408,6 +1407,28 @@ mod vm_kill {
     }
 }
 
+/// QPROJ-6: one holder's recovery episode at the runtime shared-network
+/// supervisor (RUN-295-B).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecoveryEpisode {
+    /// Held: quiesced under its holder, repair not yet clean; Repaired: the
+    /// repair returned and the post-repair audit is pending.
+    pub phase: RecoveryPhase,
+    /// Failed attempts of this holder: a failed repair, or a failed
+    /// post-repair audit (D-295-R13, UP-7). Equals the `attempts` the EXEC
+    /// gate's `recovery_progress()` reports for the same component.
+    pub failed_attempts: u32,
+}
+
+/// QPROJ-6: where a holder's recovery episode stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryPhase {
+    /// Quiesced under its holder; the repair is not yet clean.
+    Held,
+    /// The repair returned; the post-repair audit is pending.
+    Repaired,
+}
+
 struct SharedNetworkSupervisorHandle {
     request_rx: tokio::sync::mpsc::Receiver<overdrive_core::guest_network::ServeShutdownRequest>,
     task: Option<tokio::task::JoinHandle<std::result::Result<(), SharedNetworkSupervisorError>>>,
@@ -1425,6 +1446,40 @@ impl SharedNetworkSupervisorHandle {
         shutdown: CancellationToken,
     ) -> Self {
         Self { request_rx, task: Some(task), exec, shutdown }
+    }
+
+    /// QPROJ-6: an owned copy of the supervisor's per-holder episodes.
+    ///
+    /// - **Preconditions:** none. Infallible; callable at any time on a
+    ///   spawned supervisor.
+    /// - **Postconditions:** an owned copy of the supervisor's per-holder
+    ///   episodes, taken under the same gate lock that linearizes
+    ///   `recovery_progress()`; no lock is held on return; nothing is
+    ///   quiesced, repaired, audited or restored by the call.
+    /// - **Consistency point:** between two supervisor steps (one quiesce,
+    ///   one repair, one audit, one restore, one `complete_attempt`).
+    /// - **Edge cases:** a component with no recovery in progress is absent;
+    ///   the map is empty while the gate is Open, BootClosed or FailStop.
+    /// - **Observable invariants:** the key set equals the set of components
+    ///   `recovery_progress()` reports (the EXEC gate contract), and contains
+    ///   every component of the host owner's `Recovery(c)` holders (QPROJ-3);
+    ///   a holder's `failed_attempts` equals the `attempts` of its
+    ///   `recovery_progress()` entry; a repeated call with no intervening
+    ///   supervisor step returns an equal value.
+    ///
+    /// RED scaffold: DELIVER lands it with the supervisor rework (09-01,
+    /// attachment cut), which keeps each holder's episode beside the EXEC
+    /// gate's per-holder snapshots.
+    #[expect(
+        dead_code,
+        reason = "RED scaffold — consumed by the quiescence conformance driver at the attachment cut"
+    )]
+    #[expect(
+        clippy::unused_self,
+        reason = "RED scaffold body panics; DELIVER 09-01 rework lands the episodes"
+    )]
+    pub fn recovery_observation(&self) -> BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode> {
+        panic!("Not yet implemented -- RED scaffold")
     }
 
     async fn shutdown_requested(&mut self) -> overdrive_core::guest_network::ServeShutdownRequest {
@@ -1583,12 +1638,18 @@ impl SharedNetworkSupervisorHandle {
                     Err(source) => return Err(source.into()),
                 }
             }
-            let mut quiesced = if requires_quiescence(component) {
-                shared_guest_network.quiesce_managed_taps().await?;
-                true
-            } else {
-                false
-            };
+            // D8a-HOLD: this recovery's hold. Kept for the life of the
+            // recovery; dropping it unrestored leaves the holder registered
+            // (forwarding stays quiesced), as the latch did before.
+            let mut quiesced: Option<guest_network::QuiescenceHold> =
+                if requires_quiescence(component) {
+                    let (hold, _quiescence) = shared_guest_network
+                        .quiesce_forwarding(guest_network::QuiescenceHolder::Recovery(component))
+                        .await?;
+                    Some(hold)
+                } else {
+                    None
+                };
 
             loop {
                 let retry_deadline = clock.now() + Duration::from_millis(250);
@@ -1650,11 +1711,13 @@ impl SharedNetworkSupervisorHandle {
                 if !exec.complete_attempt(Some(component)) {
                     return Ok(());
                 }
-                if !quiesced && requires_quiescence(component) {
-                    shared_guest_network.quiesce_managed_taps().await?;
-                    quiesced = true;
+                if quiesced.is_none() && requires_quiescence(component) {
+                    let (hold, _quiescence) = shared_guest_network
+                        .quiesce_forwarding(guest_network::QuiescenceHolder::Recovery(component))
+                        .await?;
+                    quiesced = Some(hold);
                 }
-                let Some(progress) = exec.recovery_progress() else {
+                let Some(progress) = exec.recovery_progress().into_iter().next() else {
                     return Ok(());
                 };
                 tracing::warn!(
@@ -3537,6 +3600,7 @@ mod shared_network_task_owner_acceptance {
             Arc::new(crate::mtls_resolve_adapter::ServiceBackendsResolve::new(
                 sim_store,
                 crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
+                VipRange::default(),
             ));
         ServerHandle {
             inner: AxumHandle::new(),
@@ -6838,9 +6902,12 @@ pub async fn run_server(
             dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
         > = Arc::new(overdrive_host::RealCgroupAccounting::new());
         #[cfg(feature = "integration-tests")]
-        let vmm_override = config.vmm_override.clone();
+        let vm_override = config.vm_override.as_ref().map(|vm| VmOverride {
+            vmm: Arc::clone(&vm.vmm),
+            beacon: Arc::clone(&vm.beacon),
+        });
         #[cfg(not(feature = "integration-tests"))]
-        let vmm_override = None;
+        let vm_override = None;
         match compose_vm_driver(
             cgroup_root_path.clone(),
             overdrive_core::vm::config::clone_index_dir(&config.data_dir),
@@ -6850,7 +6917,7 @@ pub async fn run_server(
             cgroup_accounting,
             Arc::clone(&probe_runner),
             guest_network_exec.gate(),
-            vmm_override,
+            vm_override,
         )
         .await
         {
@@ -6887,7 +6954,7 @@ pub async fn run_server(
         obs,
         Arc::new(registry),
         vm_host_state,
-        Arc::new(guest_network::HostSharedGuestNetworkOwner::new()),
+        compose_guest_flow_owner(),
         guest_network_exec,
         bootstrap_manager,
     )
@@ -6990,7 +7057,7 @@ async fn compose_vm_driver(
     cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
     probe_runner: Arc<overdrive_worker::probe_runner::ProbeRunner>,
     guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
-    vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
+    vm_override: Option<VmOverride>,
 ) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, VmComposeError> {
     use overdrive_core::traits::vmm::Vmm;
     use overdrive_core::vm::config::{HostArch, VmConfinement, VmmIdentity};
@@ -7000,11 +7067,12 @@ async fn compose_vm_driver(
     // entirely. `injected` records WHICH branch was taken so a
     // subsequent probe failure is classified correctly — see
     // `VmComposeError`'s own docs.
-    let injected = vmm_override.is_some();
-    let vmm: Arc<dyn Vmm> = match vmm_override {
-        Some(injected_vmm) => injected_vmm,
-        None => Arc::new(overdrive_host::CloudHypervisorVmm::new()),
-    };
+    let injected = vm_override.is_some();
+    let (vmm, beacon_io): (Arc<dyn Vmm>, Option<Arc<dyn overdrive_core::vm::beacon::BeaconIo>>) =
+        match vm_override {
+            Some(VmOverride { vmm, beacon }) => (vmm, Some(beacon)),
+            None => (Arc::new(overdrive_host::CloudHypervisorVmm::new()), None),
+        };
     // Earned Trust is UNCONDITIONAL here: `.probe()` runs against
     // WHATEVER adapter is bound, production or injected — there is no
     // `if injected { skip probe }` branch anywhere in this function.
@@ -7118,6 +7186,18 @@ async fn compose_vm_driver(
         ),
     };
 
+    // DG-4 boot step 2: after `Vmm::probe`, bind the node beacon intake
+    // (`BeaconIntake::bind`) and pass it to `VmDriver::new`.
+    let beacon_io = beacon_io.unwrap_or_else(production_beacon_io);
+    let beacon = match overdrive_worker::BeaconIntake::bind(beacon_io).await {
+        Ok(beacon) => beacon,
+        // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6):
+        // the `vm_driver.beacon_bind` startup refusal is new behaviour, and no
+        // `VmmBootError` / `ControlPlaneError` variant carrying
+        // `BeaconIntakeError` is pinned (DG-4) — surfaced as a DISTILL blocker.
+        Err(_source) => panic!("Not yet implemented -- RED scaffold"),
+    };
+
     Ok(overdrive_worker::vm_driver::VmDriver::new(
         vmm,
         clock,
@@ -7126,7 +7206,30 @@ async fn compose_vm_driver(
         probe_runner,
         guest_network_exec,
         layout,
+        beacon,
     ))
+}
+
+/// The production beacon port (`VsockBeaconIo`) for the node beacon intake.
+///
+/// SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6): DG-4
+/// pins no `VsockBeaconIo` constructor (upstream issue UI-R2-2), so the
+/// production composition cannot build one yet.
+fn production_beacon_io() -> Arc<dyn overdrive_core::vm::beacon::BeaconIo> {
+    panic!("Not yet implemented -- RED scaffold")
+}
+
+/// The production host guest-flow owner (`HostSharedGuestNetworkOwner::new`,
+/// DG-3) for `run_server`.
+///
+/// SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 7): its
+/// `GuestFlowOwnerPorts` need the `MtlsResolve` and `MtlsInterceptWorker`
+/// that `run_server_with_obs_and_drivers` builds (boot step 5), after the
+/// owner it receives as an argument runs `probe_startup` (boot step 1); the
+/// composition order that supplies them is not pinned — surfaced as a
+/// DISTILL blocker.
+fn compose_guest_flow_owner() -> Arc<dyn guest_network::SharedGuestNetworkOwner> {
+    panic!("Not yet implemented -- RED scaffold")
 }
 
 /// Node-setup (once, idempotent) for the platform-owned VM clone-staging root:
@@ -7663,10 +7766,10 @@ pub async fn run_server_with_obs_and_drivers(
     let frontend_addr_allocator =
         crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new();
     let guest_pool = Arc::new(guest_network::GuestAddressPool::new(
-        ipnet::Ipv4Net::new_assert(std::net::Ipv4Addr::new(100, 95, 0, 0), 16),
-        "ovd-gbr0".to_owned(),
-        std::net::Ipv4Addr::new(100, 95, 0, 1),
-        std::net::Ipv4Addr::new(100, 95, 0, 1),
+        overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+        overdrive_core::guest_transport::GUEST_NODE_GATEWAY,
+        Arc::new(overdrive_host::VhostVsockCidClaim::new()),
+        Arc::new(overdrive_host::OsEntropy),
     ));
 
     // Retain the probed resolver through the later converge-on-boot frontend
@@ -7755,6 +7858,9 @@ pub async fn run_server_with_obs_and_drivers(
                 // single-owner drain projects `by_frontend` as a pure reader
                 // of this allocator's snapshot (REV-3 — never `assign`).
                 frontend_addr_allocator.clone(),
+                // The configured service VIP range — the same value the VIP
+                // allocator is built from (D24a); unconsulted until step 11.
+                config.vip_range.clone(),
             ));
         let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
             service_backends_resolve.clone();

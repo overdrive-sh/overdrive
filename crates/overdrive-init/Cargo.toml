@@ -66,8 +66,18 @@ thiserror.workspace      = true
 # `std::process::Command` (not nix's raw `fork`/`exec`) spawns the
 # operator's command — see `main.rs`'s module doc for why.
 nix = { workspace = true, features = ["reboot", "kmod", "mount", "poll", "process", "signal"] }
+# `aya` — the guest programs (`GuestProgram`) and the error types of
+# `GuestTransportOps::{load_program, attach_program}` (DG-5, step 5).
+aya.workspace = true
 
 [dev-dependencies]
+# quint-connect conformance drivers (netns-density-295, QPROJ-1): source-local
+# `#[cfg(all(test, feature = "integration-tests"))]` modules replaying
+# `specs/quint/guest-flow-owner/*.qnt` against the production owner.
+quint-connect.workspace = true
+itf.workspace           = true
+anyhow.workspace        = true
+serde.workspace         = true
 proptest.workspace = true
 
 [lints]

@@ -23,7 +23,7 @@ State 3 [SessOpen]
   sess = TRUE
 
 State 4 [ListenState]
-  lastLS = {2}
+  lastLS = {1}
 
 State 5 [ActivateBegin]
   alloc = "Activating"

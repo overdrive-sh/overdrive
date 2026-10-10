@@ -398,7 +398,7 @@ ci = true
 # connection accepted while the launch was live and read after driver.stop takes the claim
 [[check]]
 name = "owner-flows-hazard-beacon-no-live-recheck"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugBeaconNoLiveRecheck"
 invariant = "BeaconCurrentLaunch"
 backend = "tlc"
@@ -407,7 +407,7 @@ ci = true
 
 [[check]]
 name = "owner-flows-hazard-beacon-no-live-recheck-held"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugBeaconNoLiveRecheck"
 invariant = "BeaconNoCrossLaunchHeld"
 backend = "tlc"
@@ -418,7 +418,7 @@ ci = true
 # released as the next launch's
 [[check]]
 name = "owner-flows-hazard-beacon-peer-cid-only"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugBeaconPeerCidOnly"
 invariant = "BeaconNoCrossLaunchReady"
 backend = "tlc"
@@ -427,7 +427,7 @@ ci = true
 
 [[check]]
 name = "owner-flows-hazard-beacon-peer-cid-only-current"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugBeaconPeerCidOnly"
 invariant = "BeaconCurrentLaunch"
 backend = "tlc"
@@ -519,7 +519,7 @@ ci = true
 # Teeth: the round-8 rule (a vsock end is a half-close) — the survivor of an owner death sends a FIN
 [[check]]
 name = "owner-flows-hazard-rdhup-is-halfclose"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugRdhupIsHalfClose"
 invariant = "NoEofOnPeerLoss"
 backend = "tlc"
@@ -530,7 +530,7 @@ ci = true
 # bare vsock end: a clean half-close whose end-of-stream overtakes the message is aborted
 [[check]]
 name = "owner-flows-hazard-no-ack"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugNoAck"
 temporal = "HalfCloseCompletes"
 backend = "tlc"
@@ -539,7 +539,7 @@ ci = true
 
 [[check]]
 name = "owner-flows-hazard-no-ack-fin"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugNoAck"
 invariant = "FinOnlyAfterAck"
 backend = "tlc"
@@ -549,7 +549,7 @@ ci = true
 # Teeth: the acknowledging side waits (acks only after its own outer EOF) — the announcer waits forever
 [[check]]
 name = "owner-flows-hazard-ack-waits"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugAckWaits"
 temporal = "AnnounceEnds"
 backend = "tlc"
@@ -559,7 +559,7 @@ ci = true
 # Teeth: an outer EOF before Paired aborts the flow (the early half-close is lost)
 [[check]]
 name = "owner-flows-hazard-early-eof-aborts"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_bugEarlyEofAborts"
 temporal = "EarlyEofCarried"
 backend = "tlc"
@@ -572,7 +572,7 @@ ci = true
 # session lives holds the end forever (ReceiverPendingEnds violated)
 [[check]]
 name = "owner-flows-alt-pending-wait-no-eof"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_altPendingWait"
 invariant = "NoEofOnPeerLoss"
 backend = "tlc"
@@ -581,7 +581,7 @@ ci = true
 
 [[check]]
 name = "owner-flows-alt-pending-wait-receiver"
-spec = "hazard/owner_flows_hazards.qnt"
+spec = "hazard/owner_flows_half_hazards.qnt"
 main = "flows_altPendingWait"
 temporal = "ReceiverPendingEnds"
 backend = "tlc"
@@ -1766,7 +1766,7 @@ backend = "apalache"
 max_steps = 14
 expect = "holds"
 ci = false
-timeout_secs = 1800
+timeout_secs = 3600
 
 
 # S-2 (conformance instances): `lease_conf_ok` / `lease_conf_live` are `lease_ok` / `lease_live` on the
@@ -1973,4 +1973,1897 @@ main = "flows_half_guest"
 invariant = "WitnessNoEarlyEof"
 backend = "tlc"
 expect = "violation"
+ci = true
+
+
+# ------------------------------------------------------------------------------------------------
+# Named runs (critical scenarios) — executed by `quint test` on the evaluator. DISTILL's conformance
+# drivers pin these with `#[quint_test]`; the README maps each scenario to its run and decision id.
+# Each run ends in an `expect` of its scenario's outcome and checks the module's safety invariants
+# along the way. All are fast (ci = true).
+
+[[check]]
+name = "shared-table-run-ok-happy-path-boot-and-bring-up"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "HappyPathBootAndBringUp"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-ok-table-absent-at-boot-keeps-route-and-steering"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "TableAbsentAtBootKeepsRouteAndSteering"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-ok-ip-rules-recovery-repairs-absent-table"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "IpRulesRecoveryRepairsAbsentTable"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-ok-absent-table-persists-while-down-then-boot-converges"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "AbsentTablePersistsWhileDownThenBootConverges"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-ok-crash-at-each-boot-step-then-restart"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "CrashAtEachBootStepThenRestart"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-ok-runtime-replacement-failure-leaves-table-as-was"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "RuntimeReplacementFailureLeavesTableAsWas"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-ok-flow-listeners-recovery-after-task-exit"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "FlowListenersRecoveryAfterTaskExit"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-ok-second-holder-keeps-forwarding-closed"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "SecondHolderKeepsForwardingClosed"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-ok-repair-failure-retries-under-hold"
+spec = "shared_table.qnt"
+main = "table_ok"
+run = "RepairFailureRetriesUnderHold"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "shared-table-run-live-repair-fails-forever-fail-stops-then-boot-converges"
+spec = "shared_table.qnt"
+main = "table_live"
+run = "RepairFailsForeverFailStopsThenBootConverges"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-first-boot-converges-link-then-route"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "FirstBootConvergesLinkThenRoute"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-steering-and-route-persist-while-serve-down"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "SteeringAndRoutePersistWhileServeDown"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-new-binary-updates-adopted-link-atomically"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "NewBinaryUpdatesAdoptedLinkAtomically"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-load-rejection-refuses-and-keeps-earlier-program"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "LoadRejectionRefusesAndKeepsEarlierProgram"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-first-boot-load-rejection-leaves-nothing-attached"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "FirstBootLoadRejectionLeavesNothingAttached"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-swap-failure-keeps-earlier-program"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "SwapFailureKeepsEarlierProgram"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-pin-failure-leaves-no-link-and-no-route"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "PinFailureLeavesNoLinkAndNoRoute"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-route-write-failure-keeps-pinned-link-then-next-boot-adopts"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "RouteWriteFailureKeepsPinnedLinkThenNextBootAdopts"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-crash-between-attach-and-pin-recovers-on-next-boot"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "CrashBetweenAttachAndPinRecoversOnNextBoot"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-ok-crash-after-swap-before-route-converges-on-restart"
+spec = "prefix_boot.qnt"
+main = "boot_ok"
+run = "CrashAfterSwapBeforeRouteConvergesOnRestart"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-boot-run-faulty-repeated-refusals-then-boot-converges"
+spec = "prefix_boot.qnt"
+main = "boot_faulty"
+run = "RepeatedRefusalsThenBootConverges"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-assign-skips-survivor-claims-launches-and-releases"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "AssignSkipsSurvivorClaimsLaunchesAndReleases"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-survivor-exit-frees-its-cid-for-later-assigns"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "SurvivorExitFreesItsCidForLaterAssigns"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-untaken-claim-released-at-pool-release"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "UntakenClaimReleasedAtPoolRelease"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-create-err-drops-claim-and-placement-retries"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "CreateErrDropsClaimAndPlacementRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-vmm-exits-before-ready-releases-cid-and-retries"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "VmmExitsBeforeReadyReleasesCidAndRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-claim-error-leaves-no-state-change"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ClaimErrorLeavesNoStateChange"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-serve-crash-with-running-vmm-survives-and-replace-skips-it"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ServeCrashWithRunningVmmSurvivesAndReplaceSkipsIt"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-serve-crash-claim-in-transit-inherited-survives"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ServeCrashClaimInTransitInheritedSurvives"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-serve-crash-claim-in-transit-not-inherited-is-released"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ServeCrashClaimInTransitNotInheritedIsReleased"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-serve-crash-releases-untaken-claim"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ServeCrashReleasesUntakenClaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-all-offsets-held-elsewhere-refuses-then-places-after-exit"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "AllOffsetsHeldElsewhereRefusesThenPlacesAfterExit"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-assign-skips-survivor-claims-launches-and-releases"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "AssignSkipsSurvivorClaimsLaunchesAndReleases"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-survivor-exit-frees-its-cid-for-later-assigns"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "SurvivorExitFreesItsCidForLaterAssigns"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-untaken-claim-released-at-pool-release"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "UntakenClaimReleasedAtPoolRelease"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-create-err-drops-claim-and-placement-retries"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "CreateErrDropsClaimAndPlacementRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-vmm-exits-before-ready-releases-cid-and-retries"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "VmmExitsBeforeReadyReleasesCidAndRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-claim-error-leaves-no-state-change"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ClaimErrorLeavesNoStateChange"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-serve-crash-with-running-vmm-survives-and-replace-skips-it"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ServeCrashWithRunningVmmSurvivesAndReplaceSkipsIt"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-serve-crash-claim-in-transit-inherited-survives"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ServeCrashClaimInTransitInheritedSurvives"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-serve-crash-claim-in-transit-not-inherited-is-released"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ServeCrashClaimInTransitNotInheritedIsReleased"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-serve-crash-releases-untaken-claim"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ServeCrashReleasesUntakenClaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-assign-skips-survivor-claims-launches-and-releases"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "AssignSkipsSurvivorClaimsLaunchesAndReleases"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-survivor-exit-frees-its-cid-for-later-assigns"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "SurvivorExitFreesItsCidForLaterAssigns"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-untaken-claim-released-at-pool-release"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "UntakenClaimReleasedAtPoolRelease"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-create-err-drops-claim-and-placement-retries"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "CreateErrDropsClaimAndPlacementRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-vmm-exits-before-ready-releases-cid-and-retries"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "VmmExitsBeforeReadyReleasesCidAndRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-claim-error-leaves-no-state-change"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "ClaimErrorLeavesNoStateChange"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-serve-crash-with-running-vmm-survives-and-replace-skips-it"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "ServeCrashWithRunningVmmSurvivesAndReplaceSkipsIt"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-serve-crash-claim-in-transit-inherited-survives"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "ServeCrashClaimInTransitInheritedSurvives"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-serve-crash-claim-in-transit-not-inherited-is-released"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "ServeCrashClaimInTransitNotInheritedIsReleased"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-live-serve-crash-releases-untaken-claim"
+spec = "cid_lease.qnt"
+main = "lease_conf_live"
+run = "ServeCrashReleasesUntakenClaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-ip-rules-recovery-quiesces-repairs-restores"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "IpRulesRecoveryQuiescesRepairsRestores"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-flow-listeners-recovery-after-listener-task-exit"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "FlowListenersRecoveryAfterListenerTaskExit"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-two-holders-restore-one-keeps-forwarding-quiesced"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "TwoHoldersRestoreOneKeepsForwardingQuiesced"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-repair-failure-counts-attempt-then-repairs"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "RepairFailureCountsAttemptThenRepairs"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-post-repair-audit-failure-counts-attempt"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "PostRepairAuditFailureCountsAttempt"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-crash-during-recovery-then-restart-recovers"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "CrashDuringRecoveryThenRestartRecovers"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-live-spent-budget-fail-stops-and-restart-converges"
+spec = "quiescence.qnt"
+main = "quiesce_live"
+run = "SpentBudgetFailStopsAndRestartConverges"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-activation-steers-declared-port-and-serves"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "ActivationSteersDeclaredPortAndServes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-session-loss-closes-listener-and-entry-then-recovers"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "SessionLossClosesListenerAndEntryThenRecovers"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-listen-state-not-listening-closes-listener"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "ListenStateNotListeningClosesListener"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-teardown-closes-listeners-then-release-then-reuse"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "TeardownClosesListenersThenReleaseThenReuse"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-quiescence-closes-listeners-restore-reopens"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "QuiescenceClosesListenersRestoreReopens"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-serve-crash-closes-every-listener-then-restart"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "ServeCrashClosesEveryListenerThenRestart"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-crash-during-activation-leaves-nothing"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "CrashDuringActivationLeavesNothing"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-activation-bind-failure-rolls-back-then-retries"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "ActivationBindFailureRollsBackThenRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-runtime-bind-failure-is-retried"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "RuntimeBindFailureIsRetried"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-steer-kernel-memory-failure-closes-listener-and-retries"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "SteerKernelMemoryFailureClosesListenerAndRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-steer-defect-parks-port-until-wanted-anew"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "SteerDefectParksPortUntilWantedAnew"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-admission-refused-at-capacity-then-admitted-after-release"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "AdmissionRefusedAtCapacityThenAdmittedAfterRelease"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-retiring-lease-keeps-reservation-until-release"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "RetiringLeaseKeepsReservationUntilRelease"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-ok-other-allocation-shares-capacity-and-is-quiesced"
+spec = "intake.qnt"
+main = "intake_ok"
+run = "OtherAllocationSharesCapacityAndIsQuiesced"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "intake-run-two-two-port-activation-rolls-back-every-listener"
+spec = "intake.qnt"
+main = "intake_two"
+run = "TwoPortActivationRollsBackEveryListener"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-datagram-association-claims-pairs-and-routes"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "DatagramAssociationClaimsPairsAndRoutes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-two-sockets-claim-distinct-slots"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "TwoSocketsClaimDistinctSlots"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-refused-discards-parked-frames-and-only-new-datagram-reassociates"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "RefusedDiscardsParkedFramesAndOnlyNewDatagramReassociates"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-host-abort-of-live-association-ends-it-and-keeps-slot-owned"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-stale-generation-readiness-event-is-discarded"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "StaleGenerationReadinessEventIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-late-paired-for-released-slot-is-answered-with-abort"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "LatePairedForReleasedSlotIsAnsweredWithAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-lost-release-report-is-found-by-audit"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "LostReleaseReportIsFoundByAudit"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-socket-close-releases-every-slot-it-owns"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "SocketCloseReleasesEverySlotItOwns"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-idle-slot-release-ends-association"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "IdleSlotReleaseEndsAssociation"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-pairing-deadline-aborts-and-late-paired-is-discarded"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "PairingDeadlineAbortsAndLatePairedIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-recycled-slot-never-delivers-previous-owners-frames"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "RecycledSlotNeverDeliversPreviousOwnersFrames"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-control-session-opens-and-cid-activates"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "ControlSessionOpensAndCidActivates"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-guest-opened-flow-is-admitted-read-installed-and-paired"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "GuestOpenedFlowIsAdmittedReadInstalledAndPaired"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-request-read-in-pieces-installs-only-after-full-read"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "RequestReadInPiecesInstallsOnlyAfterFullRead"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-racing-first-connects-leave-one-live-session"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "RacingFirstConnectsLeaveOneLiveSession"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-session-loss-aborts-flows-and-reconnect-restores"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "SessionLossAbortsFlowsAndReconnectRestores"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-quiesce-aborts-flows-and-refuses-admission-until-restore"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "QuiesceAbortsFlowsAndRefusesAdmissionUntilRestore"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-activation-waits-for-quiescence-to-end"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "ActivationWaitsForQuiescenceToEnd"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-in-flight-connect-of-aborted-flow-is-discarded"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "InFlightConnectOfAbortedFlowIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-attributed-flow-ends-and-cid-keeps-serving"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "AttributedFlowEndsAndCidKeepsServing"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-teardown-aborts-everything-then-cid-is-leased-again"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "TeardownAbortsEverythingThenCidIsLeasedAgain"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-stale-launch-session-is-closed-at-read-and-does-not-poison-claim"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "StaleLaunchSessionIsClosedAtReadAndDoesNotPoisonClaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-teardown-between-accept-and-read-closes-without-claim"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "TeardownBetweenAcceptAndReadClosesWithoutClaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-stale-launch-flow-is-closed-at-request-read-with-no-message"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "StaleLaunchFlowIsClosedAtRequestReadWithNoMessage"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-vm-death-makes-live-session-dead-then-loss-is-processed"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "VmDeathMakesLiveSessionDeadThenLossIsProcessed"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-tcp-accept-pairs-and-routes"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "TcpAcceptPairsAndRoutes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-tcp-accept-refused-closes-host-flow"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "TcpAcceptRefusedClosesHostFlow"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-tcp-accept-aborted-before-guest-accepts-ends-by-host-close"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "TcpAcceptAbortedBeforeGuestAcceptsEndsByHostClose"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-tcp-accept-queued-vg-is-reset-by-host-close"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "TcpAcceptQueuedVgIsResetByHostClose"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-late-paired-for-closed-host-flow-is-discarded"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "LatePairedForClosedHostFlowIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-session-loss-aborts-tcp-accept-on-both-sides"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "SessionLossAbortsTcpAcceptOnBothSides"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-quiesce-aborts-tcp-accept-and-sends-abort"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "QuiesceAbortsTcpAcceptAndSendsAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-beacon-beacon-ready-released-then-driver-stop-releases-claim"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+run = "BeaconReadyReleasedThenDriverStopReleasesClaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-beacon-beacon-after-driver-stop-is-refused-at-accept"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+run = "BeaconAfterDriverStopIsRefusedAtAccept"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-beacon-driver-stop-between-accept-and-ready-closes-without-claim"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+run = "DriverStopBetweenAcceptAndReadyClosesWithoutClaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-beacon-stale-launch-beacon-is-closed-at-ready-and-does-not-poison-claim"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+run = "StaleLaunchBeaconIsClosedAtReadyAndDoesNotPoisonClaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-beacon-second-beacon-connection-of-same-launch-is-held"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+run = "SecondBeaconConnectionOfSameLaunchIsHeld"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-beacon-vm-death-closes-unread-beacon-connection"
+spec = "owner_flows.qnt"
+main = "flows_beacon"
+run = "VmDeathClosesUnreadBeaconConnection"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-tcp-connect-half-close-handshake-delivers-eof"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "TcpConnectHalfCloseHandshakeDeliversEof"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-tcp-accept-half-close-handshake-delivers-eof"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "TcpAcceptHalfCloseHandshakeDeliversEof"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-simultaneous-half-close-closes-cleanly"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "SimultaneousHalfCloseClosesCleanly"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-early-outer-eof-is-carried-out-after-paired"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "EarlyOuterEofIsCarriedOutAfterPaired"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-owner-death-vsock-end-before-session-loss-resets-both-far-ends"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "OwnerDeathVsockEndBeforeSessionLossResetsBothFarEnds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-owner-death-session-loss-before-vsock-end-resets-both-far-ends"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "OwnerDeathSessionLossBeforeVsockEndResetsBothFarEnds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-session-drop-aborts-flow-on-both-owners"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "SessionDropAbortsFlowOnBothOwners"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-flow-error-aborts-both-owners-with-abort-message"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "FlowErrorAbortsBothOwnersWithAbortMessage"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-far-end-reset-after-paired-aborts-both-owners"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "FarEndResetAfterPairedAbortsBothOwners"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-unannounced-guest-vsock-end-aborts-host-with-reset"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "UnannouncedGuestVsockEndAbortsHostWithReset"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-unannounced-host-vsock-end-aborts-guest-with-reset"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "UnannouncedHostVsockEndAbortsGuestWithReset"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-tcp-connect-half-close-handshake-delivers-eof"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "TcpConnectHalfCloseHandshakeDeliversEof"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-tcp-accept-half-close-handshake-delivers-eof"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "TcpAcceptHalfCloseHandshakeDeliversEof"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-simultaneous-half-close-closes-cleanly"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "SimultaneousHalfCloseClosesCleanly"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-early-outer-eof-is-carried-out-after-paired"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "EarlyOuterEofIsCarriedOutAfterPaired"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-owner-death-vsock-end-before-session-loss-resets-both-far-ends"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "OwnerDeathVsockEndBeforeSessionLossResetsBothFarEnds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-owner-death-session-loss-before-vsock-end-resets-both-far-ends"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "OwnerDeathSessionLossBeforeVsockEndResetsBothFarEnds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-session-drop-aborts-flow-on-both-owners"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "SessionDropAbortsFlowOnBothOwners"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-flow-error-aborts-both-owners-with-abort-message"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "FlowErrorAbortsBothOwnersWithAbortMessage"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-far-end-reset-after-paired-aborts-both-owners"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "FarEndResetAfterPairedAbortsBothOwners"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-unannounced-guest-vsock-end-aborts-host-with-reset"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "UnannouncedGuestVsockEndAbortsHostWithReset"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-tcp-connect-half-close-handshake-delivers-eof"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "TcpConnectHalfCloseHandshakeDeliversEof"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-tcp-accept-half-close-handshake-delivers-eof"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "TcpAcceptHalfCloseHandshakeDeliversEof"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-simultaneous-half-close-closes-cleanly"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "SimultaneousHalfCloseClosesCleanly"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-early-outer-eof-is-carried-out-after-paired"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "EarlyOuterEofIsCarriedOutAfterPaired"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-owner-death-vsock-end-before-session-loss-resets-both-far-ends"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "OwnerDeathVsockEndBeforeSessionLossResetsBothFarEnds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-owner-death-session-loss-before-vsock-end-resets-both-far-ends"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "OwnerDeathSessionLossBeforeVsockEndResetsBothFarEnds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-session-drop-aborts-flow-on-both-owners"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "SessionDropAbortsFlowOnBothOwners"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-flow-error-aborts-both-owners-with-abort-message"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "FlowErrorAbortsBothOwnersWithAbortMessage"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-far-end-reset-after-paired-aborts-both-owners"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "FarEndResetAfterPairedAbortsBothOwners"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-unannounced-host-vsock-end-aborts-guest-with-reset"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "UnannouncedHostVsockEndAbortsGuestWithReset"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+
+# ------------------------------------------------------------------------------------------------
+# prefix_landing state machine (module landing_machine, QPROJ-8): safety, teeth, named runs.
+
+[[check]]
+name = "prefix-landing-safety"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-landing-no-wildcard-reached"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+invariant = "NoWildcardReached"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-landing-seen-is-lands"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+invariant = "SeenIsLands"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-landing-nothing-delivered-while-down"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+invariant = "NothingDeliveredWhileDown"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-landing-intake-only-through-entry-for-marked"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+invariant = "IntakeOnlyThroughEntryForMarked"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-landing-elsewhere-only-before-first-boot"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+invariant = "ElsewhereOnlyBeforeFirstBoot"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-landing-entries-are-open-listeners"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+invariant = "EntriesAreOpenListeners"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "prefix-landing-hazard-route-first"
+spec = "hazard/prefix_landing_hazards.qnt"
+main = "landing_bugRouteFirst"
+invariant = "NoWildcardReached"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "prefix-landing-hazard-volatile"
+spec = "hazard/prefix_landing_hazards.qnt"
+main = "landing_bugVolatile"
+invariant = "ElsewhereOnlyBeforeFirstBoot"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "prefix-landing-hazard-no-rules"
+spec = "hazard/prefix_landing_hazards.qnt"
+main = "landing_bugNoRules"
+invariant = "IntakeOnlyThroughEntryForMarked"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "landing-run-ok-never-booted"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+run = "NeverBooted"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "landing-run-ok-serving-guest-listening"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+run = "ServingGuestListening"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "landing-run-ok-serving-guest-not-listening"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+run = "ServingGuestNotListening"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "landing-run-ok-serve-killed-refuses-everything"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+run = "ServeKilledRefusesEverything"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "landing-run-ok-serve-restarted-after-kill"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+run = "ServeRestartedAfterKill"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "landing-run-ok-serve-stopped-gracefully"
+spec = "prefix_landing.qnt"
+main = "landing_ok"
+run = "ServeStoppedGracefully"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+
+# ---- Round 2 of the DG-5 remediation (2026-10-10, DG-5-A to DG-5-F)
+# Predictions (written before the run): every design check keeps its verdict; the new invariants hold on
+# their instances; each new hazard violates exactly the property named on its check; the new runs hold.
+
+# DG-5-D drain wait / DG-5-C merged clean close (instance flows_half and the per-side conformance instances)
+[[check]]
+name = "owner-flows-half-no-shut-outer-while-draining"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "NoShutOuterWhileDraining"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-no-announce-while-draining"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "NoAnnounceWhileDraining"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-drain-wait-only-while-open"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "DrainWaitOnlyWhileOpen"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-no-completed-flow-stays-open"
+spec = "owner_flows.qnt"
+main = "flows_half"
+invariant = "NoCompletedFlowStaysOpen"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-no-shut-outer-while-draining"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "NoShutOuterWhileDraining"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-no-announce-while-draining"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "NoAnnounceWhileDraining"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-drain-wait-only-while-open"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "DrainWaitOnlyWhileOpen"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-host-no-completed-flow-stays-open"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+invariant = "NoCompletedFlowStaysOpen"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-no-shut-outer-while-draining"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "NoShutOuterWhileDraining"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-no-announce-while-draining"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "NoAnnounceWhileDraining"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-drain-wait-only-while-open"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "DrainWaitOnlyWhileOpen"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-half-guest-no-completed-flow-stays-open"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+invariant = "NoCompletedFlowStaysOpen"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+# Teeth (DG-5-D, DG-5-C): each rule removed, the property it defends is violated
+# the vsock end shuts the outer leg without the drain wait
+[[check]]
+name = "owner-flows-hazard-no-drain-wait-outer"
+spec = "hazard/owner_flows_half_hazards.qnt"
+main = "flows_bugNoDrainWaitOuter"
+invariant = "NoShutOuterWhileDraining"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# HalfClose is sent without the drain wait
+[[check]]
+name = "owner-flows-hazard-no-drain-wait-vsock"
+spec = "hazard/owner_flows_half_hazards.qnt"
+main = "flows_bugNoDrainWaitVsock"
+invariant = "NoAnnounceWhileDraining"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# an abort leaves the drain wait armed
+[[check]]
+name = "owner-flows-hazard-abort-keeps-drain"
+spec = "hazard/owner_flows_half_hazards.qnt"
+main = "flows_bugAbortKeepsDrain"
+invariant = "DrainWaitOnlyWhileOpen"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# the clean close is a later step
+[[check]]
+name = "owner-flows-hazard-separate-close"
+spec = "hazard/owner_flows_half_hazards.qnt"
+main = "flows_bugSeparateClose"
+invariant = "NoCompletedFlowStaysOpen"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# DG-5-F: no flow of a lost control session outlives the dispatch that observes the loss; DG-5-E: an
+# installed, unrouted V_g is watched. Teeth: the reconnect barrier removed; the watch removed
+[[check]]
+name = "owner-flows-guest-flows-do-not-outlive-session-tlc"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "GuestFlowsDoNotOutliveSession"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-reconnect-before-loss-abort"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugReconnectBeforeLossAbort"
+invariant = "GuestFlowsDoNotOutliveSession"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-no-installed-watch"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugNoInstalledWatch"
+temporal = "GuestHalfEnds"
+backend = "tlc"
+expect = "violation"
+ci = false
+
+# Two host-opened flows (instance flows_two, used by the all-flows session-loss run): the safety invariants,
+# bounded (the exhaustive TLC check of this instance does not finish in 900 s; flows_ok checks the same
+# invariants exhaustively with one host-opened flow, and every one of them is a per-flow predicate)
+[[check]]
+name = "owner-flows-two-safety-apalache"
+spec = "owner_flows.qnt"
+main = "flows_two"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 10
+expect = "holds"
+ci = false
+
+# Named runs added or updated in this round
+[[check]]
+name = "owner-flows-run-ok-installed-vg-host-close-ends-flow-silently"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "InstalledVgHostCloseEndsFlowSilently"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-installed-vg-error-aborts-with-abort"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "InstalledVgErrorAbortsWithAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-two-session-loss-aborts-all-flows-before-reconnect"
+spec = "owner_flows.qnt"
+main = "flows_two"
+run = "SessionLossAbortsAllFlowsBeforeReconnect"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-half-close-waits-for-drain-then-announces"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "HalfCloseWaitsForDrainThenAnnounces"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-vsock-end-awaits-outer-drain-then-shuts"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "VsockEndAwaitsOuterDrainThenShuts"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-drain-deadline-aborts-and-sends-abort"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "DrainDeadlineAbortsAndSendsAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-outer-drain-deadline-aborts-and-sends-abort"
+spec = "owner_flows.qnt"
+main = "flows_half"
+run = "OuterDrainDeadlineAbortsAndSendsAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-half-close-waits-for-drain-then-announces"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "HalfCloseWaitsForDrainThenAnnounces"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-vsock-end-awaits-outer-drain-then-shuts"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "VsockEndAwaitsOuterDrainThenShuts"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-drain-deadline-aborts-and-sends-abort"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "DrainDeadlineAbortsAndSendsAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-host-outer-drain-deadline-aborts-and-sends-abort"
+spec = "owner_flows.qnt"
+main = "flows_half_host"
+run = "OuterDrainDeadlineAbortsAndSendsAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-half-close-waits-for-drain-then-announces"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "HalfCloseWaitsForDrainThenAnnounces"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-vsock-end-awaits-outer-drain-then-shuts"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "VsockEndAwaitsOuterDrainThenShuts"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-drain-deadline-aborts-and-sends-abort"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "DrainDeadlineAbortsAndSendsAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "owner-flows-run-half-guest-outer-drain-deadline-aborts-and-sends-abort"
+spec = "owner_flows.qnt"
+main = "flows_half_guest"
+run = "OuterDrainDeadlineAbortsAndSendsAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# udp_slots conformance instance (DG-5-B: MAXFID above any driver trace): every named run of the module
+[[check]]
+name = "udp-slots-run-conf-datagram-association-claims-pairs-and-routes"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "DatagramAssociationClaimsPairsAndRoutes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-two-sockets-claim-distinct-slots"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "TwoSocketsClaimDistinctSlots"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-refused-discards-parked-frames-and-only-new-datagram-reassociates"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "RefusedDiscardsParkedFramesAndOnlyNewDatagramReassociates"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-host-abort-of-live-association-ends-it-and-keeps-slot-owned"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-stale-generation-readiness-event-is-discarded"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "StaleGenerationReadinessEventIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-late-paired-for-released-slot-is-answered-with-abort"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "LatePairedForReleasedSlotIsAnsweredWithAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-lost-release-report-is-found-by-audit"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "LostReleaseReportIsFoundByAudit"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-socket-close-releases-every-slot-it-owns"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "SocketCloseReleasesEverySlotItOwns"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-idle-slot-release-ends-association"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "IdleSlotReleaseEndsAssociation"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-audit-tick-releases-orphans-and-idle-slots-in-one-step"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "AuditTickReleasesOrphansAndIdleSlotsInOneStep"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-pairing-deadline-aborts-and-late-paired-is-discarded"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "PairingDeadlineAbortsAndLatePairedIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-conf-recycled-slot-never-delivers-previous-owners-frames"
+spec = "udp_slots.qnt"
+main = "slots_conf"
+run = "RecycledSlotNeverDeliversPreviousOwnersFrames"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-audit-tick-releases-orphans-and-idle-slots-in-one-step"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "AuditTickReleasesOrphansAndIdleSlotsInOneStep"
+backend = "evaluator"
+expect = "holds"
 ci = true

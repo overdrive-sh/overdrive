@@ -441,7 +441,7 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
             memory_bytes: 32 * 1024 * 1024,
         },
         probe_descriptors: Vec::new(),
-        network: None,
+        transport: None,
         service_ports: Vec::new(),
     };
     let handle = h.driver.start(&spec).await.expect("SimDriver::start succeeds");

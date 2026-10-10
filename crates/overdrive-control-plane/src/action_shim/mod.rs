@@ -45,7 +45,8 @@ use crate::guest_network::GuestNetworkProvisioner;
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
 #[cfg(any(test, feature = "integration-tests"))]
-use overdrive_core::traits::driver::GuestNetworkAssignment;
+use overdrive_core::guest_transport::GuestTransportAssignment;
+use overdrive_core::net::ListenPort;
 // transparent-mtls-enrollment (D-TME-12 G1/G2/G3 + JOIN; step 04-01) — the C3
 // lifecycle wiring: per-host slot allocator, slot→plan derivation, the
 // gateway-as-responder helper, and the netns provision/teardown executors.
@@ -1467,16 +1468,16 @@ async fn provision_and_inject_netns(
     guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<Option<crate::guest_network::GuestNetworkPlan>, ShimError> {
     if let Some((guest_provisioner, guest_pool)) = guest_network {
-        let plan = guest_pool.assign(spec.alloc.clone())?;
+        let plan = guest_pool.assign(spec.alloc.clone(), &declared_tcp_listen_ports(spec))?;
         guest_provisioner.provision(&plan).await?;
-        spec.network = Some(plan.assignment().clone());
+        spec.transport = Some(plan.assignment().clone());
         return Ok(Some(plan));
     }
     #[cfg(not(any(test, feature = "integration-tests")))]
     {
         let _ = (net_slot_allocator, network_provisioner);
         return Err(ShimError::GuestNetwork(crate::guest_network::GuestNetworkError::Io {
-            operation: crate::guest_network::GuestNetworkOperation::TapCreate,
+            operation: crate::guest_network::GuestNetworkOperation::PoolAssign,
             source: std::io::Error::other(
                 "production dispatch requires the shared guest-network owner",
             ),
@@ -1497,97 +1498,28 @@ async fn provision_and_inject_netns(
         // provision failure aborts the start (the `?` surfaces
         // ShimError::WorkloadNetnsProvision). Idempotent converge-on-boot: a
         // re-provision under the same slot (Restart) is a no-op.
-        // ADR-0089 C3 VM path: reuse the SAME slot as the transit plan, derive
-        // and converge the guest-half TAP wire, then inject the guest address and
-        // guest-net inputs.
+        // ADR-0089 C3 VM path: reuse the SAME slot as the transit plan and
+        // converge the guest-half wire. No guest transport is handed off on
+        // this lane: only the pool's `assign` constructs a
+        // `GuestTransportAssignment` (D16-CLAIM), so `spec.transport` stays
+        // `None` (sim-driver fixtures only).
         let vm_tap = derive_vm_tap_plan(slot, plan.responder_addr);
         network_provisioner.provision(&plan, &vm_tap)?;
-        inject_workload_network(spec, &plan, &vm_tap);
         Ok(None)
     }
 }
 
-/// Pure C3 handoff from converged network plans into the transient driver
-/// spec. The VM arm replaces the transit forwarding hop with the guest address
-/// as the canonical workload address and fills the complete guest-net channel.
-#[cfg(any(test, feature = "integration-tests"))]
-fn inject_workload_network(
-    spec: &mut AllocationSpec,
-    _workload: &WorkloadNetnsPlan,
-    vm_tap: &VmTapPlan,
-) {
-    spec.network = Some(GuestNetworkAssignment {
-        address: vm_tap.guest_addr,
-        tap: vm_tap.tap.clone(),
-        mac: vm_tap.mac,
-        gateway: vm_tap.tap_gateway,
-        prefix: vm_tap.guest_network.prefix_len(),
-        dns: vm_tap.responder_addr,
-    });
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used, reason = "test fixtures fail immediately on invalid static ids")]
-mod vm_tap_spec_injection_tests {
-    use std::path::PathBuf;
-
-    use overdrive_core::SpiffeId;
-    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
-
-    use super::{
-        derive_vm_tap_plan, derive_workload_netns_plan, inject_workload_network,
-        responder_addr_for_slot,
-    };
-    use crate::veth_provisioner::NetSlot;
-
-    fn spec(driver: DriverPayload) -> AllocationSpec {
-        AllocationSpec {
-            alloc: overdrive_core::AllocationId::new("vm-tap-inject").expect("valid alloc id"),
-            identity: SpiffeId::new("spiffe://overdrive.local/workload/test/alloc/01")
-                .expect("valid identity"),
-            driver,
-            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            probe_descriptors: Vec::new(),
-            network: None,
-            service_ports: Vec::new(),
-        }
-    }
-
-    /// VM C3 injection uses the guest address and carries every guest-net
-    /// input from the same slot-derived tap plan.
-    /// CONTRACT_SHAPE: bounded-change (grouped `network` assignment only).
-    #[test]
-    fn vm_injection_uses_guest_address_and_complete_guest_net_channel() {
-        let slot = NetSlot::new(7).expect("valid slot");
-        let responder = responder_addr_for_slot(slot);
-        let workload = derive_workload_netns_plan(slot, responder);
-        let tap = derive_vm_tap_plan(slot, responder);
-        let mut spec = spec(DriverPayload::Vm(VmPayload {
-            command: "/bin/true".to_owned(),
-            args: Vec::new(),
-            kernel: PathBuf::from("/kernel"),
-            rootfs: PathBuf::from("/rootfs"),
-        }));
-
-        let before = spec.clone();
-
-        inject_workload_network(&mut spec, &workload, &tap);
-
-        let network = spec.network.as_ref().expect("complete network assignment");
-        assert_eq!(network.address, tap.guest_addr);
-        assert_eq!(network.tap, tap.tap);
-        assert_eq!(network.mac, tap.mac);
-        assert_eq!(network.gateway, tap.tap_gateway);
-        assert_eq!(network.prefix, tap.guest_network.prefix_len());
-        assert_eq!(network.dns, tap.responder_addr);
-
-        let mut expected = before;
-        expected.network = spec.network.clone();
-        assert_eq!(
-            spec, expected,
-            "VM injection may change only its declared network handoff fields",
-        );
-    }
+/// The allocation's declared TCP listener ports as the pool's `ListenPort`s:
+/// `spec.service_ports` is already the PORT-295-C TCP projection, distinct
+/// (`ServiceV1::listen_ports`).
+fn declared_tcp_listen_ports(spec: &AllocationSpec) -> Vec<ListenPort> {
+    spec.service_ports
+        .iter()
+        .map(|port| {
+            ListenPort::new(port.get())
+                .unwrap_or_else(|_| unreachable!("a NonZeroU16 listener port is a valid ListenPort"))
+        })
+        .collect()
 }
 
 /// C3 TEARDOWN SEAM (transparent-mtls-enrollment D-TME-12 G2, step 04-01). At
@@ -1725,7 +1657,7 @@ async fn activate_guest_network(
 ) -> Result<bool, ShimError> {
     let Some(guest_network_exec) = guest_network_exec else {
         return Err(ShimError::GuestNetwork(crate::guest_network::GuestNetworkError::Io {
-            operation: crate::guest_network::GuestNetworkOperation::TapSetUp,
+            operation: crate::guest_network::GuestNetworkOperation::ForwardingActivate,
             source: std::io::Error::other("guest network EXEC gate is not wired"),
         }));
     };
@@ -1742,8 +1674,9 @@ async fn activate_guest_network(
         let activation = guest_provisioner.activate(plan).await;
         drop(claim);
         match activation.map_err(ShimError::from)? {
-            crate::guest_network::TapActivation::Raised => return Ok(true),
-            crate::guest_network::TapActivation::QuiescenceLatched => {}
+            crate::guest_network::ForwardingActivation::Activated => return Ok(true),
+            crate::guest_network::ForwardingActivation::QuiescenceLatched
+            | crate::guest_network::ForwardingActivation::ControlSessionPending => {}
         }
     }
 }
@@ -1762,7 +1695,7 @@ async fn teardown_for_dispatch(
     {
         let _ = (alloc_id, prior_workload_addr, net_slot_allocator, network_provisioner);
         Err(ShimError::GuestNetwork(crate::guest_network::GuestNetworkError::Io {
-            operation: crate::guest_network::GuestNetworkOperation::TapDelete,
+            operation: crate::guest_network::GuestNetworkOperation::PairRemove,
             source: std::io::Error::other(
                 "production teardown requires the shared guest-network owner",
             ),
@@ -2516,7 +2449,7 @@ async fn dispatch_single(
             // netns, so it carries `None`. Successor / terminal writers (exit
             // observer, FinalizeFailed) forward-carry `prior.workload_addr`.
             let workload_addr = if state == AllocState::Running {
-                spec.network.as_ref().map(|network| network.address)
+                spec.transport.as_ref().map(GuestTransportAssignment::workload_addr)
             } else {
                 None
             };
@@ -3024,7 +2957,7 @@ async fn dispatch_single(
                     // history. A failed launch never reached Running.
                     let started_at = (state == AllocState::Running).then_some(tick.now_unix);
                     let workload_addr = (state == AllocState::Running)
-                        .then_some(spec.network.as_ref().map(|network| network.address))
+                        .then_some(spec.transport.as_ref().map(GuestTransportAssignment::workload_addr))
                         .flatten();
                     let row = build_alloc_status_row(
                         successor_alloc_id.clone(),
@@ -5015,7 +4948,7 @@ mod admission_refusal_acceptance {
             }),
             resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
-            network: None,
+            transport: None,
             service_ports: vec![NonZeroU16::new(8080).expect("non-zero listener port")],
         }
     }

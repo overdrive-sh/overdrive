@@ -11,7 +11,7 @@
 //! P2: `separate_reads=2`) — the wire is never parsed out of one blob.
 //!
 //! ```text
-//! guest -> host   "READY pid=<u32> port=<u32>"   exactly once, before exec
+//! guest -> host   "READY pid=<u32> port=<u32> launch=<token>"   exactly once, before exec
 //! host  -> guest  "EXEC <json-argv>"             exactly once, after READY, before exec
 //! guest -> host   "EXIT <i32>"                   exactly once, after waitpid
 //! host  -> guest  "SHUTDOWN"                     at most once (§D4)
@@ -38,11 +38,11 @@ use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
+use crate::guest_transport::{GuestCid, LaunchToken, LaunchTokenError};
 use crate::vm::config::VsockPort;
 
-/// The fixed vsock port every VM's beacon connection dials — the value
-/// [`crate::vm::config::VmRunDir::beacon_socket`] is called with. A
-/// platform-wide policy constant, not a per-launch derivation: mirrors
+/// The fixed vsock port every VM's beacon connection dials — the port the
+/// node beacon listener binds (D17, DG-4). A platform-wide policy constant, not a per-launch derivation: mirrors
 /// `VM_BOOT_DEADLINE`'s policy-constant shape (ADR-0082 §D3) — there is
 /// no per-workload input to persist. Matches the spike's measured probe
 /// port (`spike/findings.md`, P2). Defined here — not in
@@ -157,6 +157,19 @@ pub enum BeaconParseError {
         /// The underlying JSON-parse failure's `Display` text.
         detail: String,
     },
+    /// READY's `launch=<v>` field carried a value that is not a valid
+    /// [`crate::guest_transport::LaunchToken`] (DG-7, ATTR-TOKEN): `v` failed
+    /// `LaunchToken::from_str`.
+    #[error("{kind} field launch is not a valid launch token: {source} in line {raw:?}")]
+    InvalidLaunchToken {
+        /// The message kind (`"READY"`).
+        kind: &'static str,
+        /// The full line that failed to parse.
+        raw: String,
+        /// The launch-token parse failure.
+        #[source]
+        source: LaunchTokenError,
+    },
 }
 
 /// One message on the beacon wire. Both directions share this one type
@@ -173,12 +186,16 @@ pub enum BeaconMessage {
     /// Sent exactly once, guest → host, before the guest execs the
     /// operator's command. `pid` is the guest agent's own process id
     /// (`1`, since the agent IS PID 1); `port` echoes the vsock port the
-    /// guest dialed to reach this connection.
+    /// guest dialed to reach this connection; `launch` is the launch token
+    /// the guest read from its `overdrive.transport=` kernel token
+    /// (ATTR-TOKEN, DG-7). Wire: `READY pid=<u32> port=<u32> launch=<token>`.
     Ready {
         /// The guest agent's own process id.
         pid: u32,
         /// The vsock port the guest dialed.
         port: VsockPort,
+        /// This launch's token (ATTR-TOKEN).
+        launch: LaunchToken,
     },
     /// Sent at most once, host → guest, immediately after `READY` is
     /// accepted and before the guest execs anything (ADR-0082 §D7
@@ -209,7 +226,7 @@ pub enum BeaconMessage {
 impl fmt::Display for BeaconMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Ready { pid, port } => write!(f, "READY pid={pid} port={port}"),
+            Self::Ready { .. } => fmt_ready(self, f),
             Self::Exec { argv } => {
                 // `Vec<String>` serialisation is total; the `fmt::Error`
                 // arm is the unreachable sentinel — never `.expect()`
@@ -287,6 +304,10 @@ fn strip_key<'a>(
 }
 
 /// Parses a `key=<u32>` field into its integer value.
+#[expect(
+    dead_code,
+    reason = "RED scaffold: `parse_ready` (DG-2 row 13) uses it again when the attachment cut lands"
+)]
 fn parse_u32_field(
     kind: &'static str,
     field: &'static str,
@@ -302,12 +323,25 @@ fn parse_u32_field(
     })
 }
 
-fn parse_ready(raw: &str, rest: &[&str]) -> Result<BeaconMessage, BeaconParseError> {
-    const KIND: &str = "READY";
-    check_field_count(KIND, 2, rest, raw)?;
-    let pid = parse_u32_field(KIND, "pid", rest[0], raw)?;
-    let port = parse_u32_field(KIND, "port", rest[1], raw)?;
-    Ok(BeaconMessage::Ready { pid, port: VsockPort::new(port) })
+/// READY's wire form, `READY pid=<pid> port=<port> launch=<token>` (DG-7).
+///
+/// RED scaffold (DISTILL): DG-2 row 13 — the READY `launch=` field lands in
+/// the attachment cut.
+// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 13, attachment cut).
+fn fmt_ready(_message: &BeaconMessage, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    panic!("Not yet implemented -- RED scaffold")
+}
+
+/// Parses READY's three fields (DG-7): two or four fields →
+/// `FieldCount { expected: 3 }`; a third field not shaped `launch=<v>` →
+/// `MissingKey { field: "launch" }`; `v` failing `LaunchToken::from_str` →
+/// `InvalidLaunchToken`.
+///
+/// RED scaffold (DISTILL): DG-2 row 13 — the READY `launch=` field lands in
+/// the attachment cut.
+// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 13, attachment cut).
+fn parse_ready(_raw: &str, _rest: &[&str]) -> Result<BeaconMessage, BeaconParseError> {
+    panic!("Not yet implemented -- RED scaffold")
 }
 
 fn parse_exit(raw: &str, rest: &[&str]) -> Result<BeaconMessage, BeaconParseError> {
@@ -339,4 +373,74 @@ fn parse_exec(raw: &str, json: &str) -> Result<BeaconMessage, BeaconParseError> 
         return Err(BeaconParseError::EmptyArgv { raw: raw.to_string() });
     }
     Ok(BeaconMessage::Exec { argv })
+}
+
+// ---------------------------------------------------------------------------
+// The node beacon listener port (DG-4, D17)
+// ---------------------------------------------------------------------------
+
+/// Kernel-reported identity of an accepted beacon connection (moved here
+/// from `overdrive-worker`; QPROJ-4 uses it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BeaconConnKey {
+    /// The connecting guest's CID, as the kernel reports it.
+    pub peer_cid: GuestCid,
+    /// The connecting guest's source vsock port, as the kernel reports it.
+    pub peer_port: VsockPort,
+}
+
+/// A beacon connection held by a [`BeaconIo`] adapter. Move-only,
+/// `#[must_use]`, ended only by [`BeaconIo::close`]. `from_raw` is for
+/// adapters only: a handle means something only to the adapter that issued
+/// it.
+#[must_use]
+#[derive(Debug)]
+pub struct BeaconSocket(u64);
+
+impl BeaconSocket {
+    /// Wraps an adapter-issued connection id. For [`BeaconIo`] adapters only.
+    pub const fn from_raw(id: u64) -> Self {
+        Self(id)
+    }
+
+    /// The adapter-issued connection id this handle carries.
+    #[must_use]
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+/// The node beacon listener (D17, DG-4): a driven port whose production
+/// adapter is `overdrive-host::VsockBeaconIo` (real `AF_VSOCK`) and whose
+/// simulation adapter is `overdrive-sim::SimBeaconIo`.
+///
+/// Contract: a stale handle cannot be passed ([`BeaconSocket`] is move-only
+/// and consumed by [`close`](Self::close)); a handle another adapter issued is
+/// unreachable (`unreachable!`). `accept`, `read_line` and `write_line`
+/// effects have happened when their futures complete; `read_line` / `accept`
+/// are cancellation-safe. `read_line` returns `Err(InvalidData)` for a line
+/// over 4,096 bytes and leaves the connection for the driver to `close`.
+/// `bind` precedes `accept` structurally (`BeaconIntake::bind` calls it
+/// first).
+#[async_trait::async_trait]
+pub trait BeaconIo: Send + Sync + 'static {
+    /// Binds and listens (`VMADDR_CID_ANY`, `BEACON_VSOCK_PORT`), once per
+    /// driver. A second call is Ok and changes nothing. Err: nothing bound.
+    async fn bind(&self) -> Result<(), std::io::Error>;
+
+    /// Next accepted connection and its kernel-reported key. Precondition:
+    /// `bind` returned Ok. Cancellation-safe.
+    async fn accept(&self) -> Result<(BeaconSocket, BeaconConnKey), std::io::Error>;
+
+    /// Next `\n`-terminated line without the terminator, at most 4,096 bytes
+    /// (longer → `InvalidData`). `Ok(None)`: end of stream. A queued
+    /// connection whose VM died delivers its buffered line (P-37).
+    /// Cancellation-safe: a dropped call loses no buffered byte.
+    async fn read_line(&self, socket: &BeaconSocket) -> Result<Option<String>, std::io::Error>;
+
+    /// Writes `line` and `\n` (EXEC, SHUTDOWN) whole, or fails.
+    async fn write_line(&self, socket: &BeaconSocket, line: &str) -> Result<(), std::io::Error>;
+
+    /// Closes. Consumes the handle.
+    async fn close(&self, socket: BeaconSocket);
 }

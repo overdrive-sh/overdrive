@@ -151,24 +151,10 @@ mod integration {
     // `host-kernel-shared`. See the module doc + `distill/test-scenarios.md`.
     mod guest_stack_mtls_egress;
 
-    // netns-density-295 correctness-recovery proofs over the `serve` lifetime
+    // netns-density-295 correctness-recovery proof over the `serve` lifetime
     // port (`commands::serve_lifetime`), in-process, native metal only:
     //   * §3.6 — the lifetime owner consumes the typed shared-network
-    //     fail-stop request (selection, ten-second outer bound, status 1);
-    //   * §3.5 — boot clear after the owner is abandoned through killed mode.
-    mod serve_killed_restart_boot_clear;
+    //     fail-stop request (selection, ten-second outer bound, status 1).
     mod serve_lifetime_fail_stop;
     mod serve_lifetime_support;
-
-    // netns-density-295 native-metal fault evidence (real guests through
-    // `serve` + `deploy`, `kvm-tests`):
-    //   * S-ND295-30B / 66 / 67 / 69 — per-VM kill scope, absent-part
-    //     teardown, host-side MAC hijack, and in-place program repair;
-    //   * S-ND295-62 / 63 / 64 — intercept-marked and absent-listener guest
-    //     TCP fails closed, and the TIME_WAIT side door with both controls.
-    // `delayed_ready_guest` is their test-support guest image whose holding
-    // init delays READY (S-ND295-30B (f)) or powers off before it (S-ND295-66).
-    mod delayed_ready_guest;
-    mod intercept_mark_fail_closed;
-    mod shared_network_native_faults;
 }

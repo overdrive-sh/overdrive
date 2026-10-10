@@ -674,7 +674,7 @@ impl Fixture {
             }),
             resources: Resources { cpu_milli: 0, memory_bytes: 256 * 1024 },
             probe_descriptors: Vec::new(),
-            network: None,
+            transport: None,
             service_ports: vec![NonZeroU16::new(8080).expect("non-zero listener port")],
         };
         Action::StartAllocation {

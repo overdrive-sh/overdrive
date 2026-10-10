@@ -65,7 +65,7 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
             probe_descriptors: Vec::new(),
             // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the
             // mTLS-composed boot gate — no provisioned netns/veth.
-            network: None,
+            transport: None,
             service_ports: Vec::new(),
         };
 

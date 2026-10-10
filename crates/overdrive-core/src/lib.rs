@@ -79,6 +79,9 @@ pub mod dataplane;
 pub mod error;
 /// Paired shared guest-network EXEC admission capabilities (GH #295).
 pub mod guest_network;
+/// Guest transport vocabulary and wire codec (vsock attachment
+/// replacement, GH #295). RED scaffold; see the module docs.
+pub mod guest_transport;
 pub mod id;
 // `maglev::{permutation, table}` — pure userspace consistent-hashing
 // primitives over `BackendId` + `MaglevTableSize`. Lives here (rather
@@ -92,6 +95,8 @@ pub mod id;
 // compile chain. See § "xtask is build / test / dev orchestration"
 // in `.claude/rules/development.md` for the layering rule.
 pub mod maglev;
+/// Network newtypes (`InterfaceIndex`, `ListenPort`; GH #295 M-5).
+pub mod net;
 // SCAFFOLD: true — service-health-check-probes feature.
 // `ProbeResultRow` observation row + envelope per ADR-0054 §5.
 // Lands GREEN in slice 01.

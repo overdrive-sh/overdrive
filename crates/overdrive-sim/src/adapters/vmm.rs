@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
     Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics, VmmError,
@@ -41,6 +42,9 @@ use tokio::sync::oneshot;
 /// real reaper task (there is nothing to reap).
 struct SimProcessEntry {
     terminated: bool,
+    /// D16-CLAIM: the launch's claimed guest CID, held until the simulated
+    /// VMM exits (`terminate`), as the real VMM process holds its device.
+    claim: Option<ClaimedGuestCid>,
     /// Consumed exactly once, on the first `terminate` call (mirrors the
     /// host adapter's `VmExitWatch` fill-once contract).
     exit_tx: Option<oneshot::Sender<VmmExit>>,
@@ -313,6 +317,21 @@ impl SimVmm {
     pub fn is_live(&self, pid: u32) -> bool {
         self.state.lock().processes.get(&pid).is_some_and(|entry| !entry.terminated)
     }
+
+    /// **TEST-HOOK-ONLY.** Tracks a new live process without a rootfs clone
+    /// and returns its control handle — for exercising a port double coupled
+    /// to this VMM (`SimBeaconIo`, K-A2′) without staging an image on disk.
+    /// [`Vmm::terminate`] ends it exactly as it ends a `create`d process.
+    #[must_use]
+    pub fn spawn_bare_process(&self) -> VmControl {
+        let pid = self.next_pid.fetch_add(1, Ordering::SeqCst);
+        let (diagnostics, _writer) = VmmDiagnostics::new();
+        self.state.lock().processes.insert(
+            pid,
+            SimProcessEntry { terminated: false, exit_tx: None, diagnostics, scripted_exit: None },
+        );
+        VmControl { pid, api_socket: std::path::PathBuf::from(format!("/sim/vm-{pid}/api.sock")) }
+    }
 }
 
 #[async_trait]
@@ -350,7 +369,7 @@ impl Vmm for SimVmm {
         Ok(())
     }
 
-    async fn create(&self, config: &VmConfig) -> Result<VmProcess> {
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> Result<VmProcess> {
         let master = config.rootfs.master().to_path_buf();
         let clone_dest = config.rootfs.clone_dest().to_path_buf();
 
@@ -394,6 +413,7 @@ impl Vmm for SimVmm {
             pid,
             SimProcessEntry {
                 terminated: false,
+                claim: Some(vsock),
                 exit_tx: Some(exit_tx),
                 diagnostics: diagnostics.clone(),
                 scripted_exit,
@@ -423,6 +443,8 @@ impl Vmm for SimVmm {
                 return Ok(VmTermination::Killed);
             }
             entry.terminated = true;
+            // The simulated VMM exits: its claim is released with it.
+            drop(entry.claim.take());
             let taken = (entry.exit_tx.take(), entry.diagnostics.clone(), entry.scripted_exit);
             drop(state);
             taken

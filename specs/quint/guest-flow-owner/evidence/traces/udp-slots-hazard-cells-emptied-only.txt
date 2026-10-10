@@ -32,19 +32,17 @@ State 3
   ready = Set()
 
 State 4
+  ready = Set((0, true))
+
+State 5
   slots = Map(0 -> { dest: 2, fid: 0, holders: 1, owned: true, parked: Set(), routed: false, sock: 2 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
   toHostAbort = Set(1)
   endedNoNew = Set(0)
   guestEnded = Set(1)
   residue = Map(0 -> Set((2, 2)), 1 -> Set())
 
-State 5
-  slots = Map(0 -> { dest: 2, fid: 0, holders: 1, owned: true, parked: Set((2, 2)), routed: false, sock: 2 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
-  ready = Set((0, true))
-  residue = Map(0 -> Set(), 1 -> Set())
-
 State 6
-  slots = Map(0 -> { dest: 2, fid: 2, holders: 1, owned: true, parked: Set((2, 2)), routed: false, sock: 2 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
+  slots = Map(0 -> { dest: 2, fid: 2, holders: 1, owned: true, parked: Set(), routed: false, sock: 2 }, 1 -> { dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), routed: false, sock: 0 })
   nextFid = 3
   host = Map(1 -> { dest: 2, slot: 0, sock: 2, st: "req" }, 2 -> { dest: 2, slot: 0, sock: 2, st: "req" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
   endedNoNew = Set()

@@ -32,7 +32,7 @@ use overdrive_netlink::{
     create_persistent_tap,
 };
 
-use super::tap_queue_attach::{AbsentNameGuard, require_root, scratch_name};
+use super::scratch_tap::{AbsentNameGuard, require_root, scratch_name};
 
 /// The address the created bridge must carry from creation: the production
 /// node bridge address (`GUEST_BRIDGE_MAC`), a locally administered unicast.

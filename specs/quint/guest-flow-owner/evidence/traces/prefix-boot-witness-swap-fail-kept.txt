@@ -16,9 +16,9 @@ State 1
   adopted = FALSE
   link = "none"
 
-State 2 [Restart]
+State 2 [RestartWith]
   stop = "none"
-  bin = "v1"
+  bin = "v2"
   up = TRUE
 
 State 3 [BootStep]
@@ -31,7 +31,7 @@ State 4 [BootStep]
 State 5 [BootStep]
   phase = "pin"
   swapOk = TRUE
-  prog = "v1"
+  prog = "v2"
   link = "attached"
 
 State 6 [BootStep]
@@ -51,8 +51,9 @@ State 8 [Crash]
   g = [ refused |-> FALSE, loadRefused |-> FALSE, updated |-> FALSE, detached |-> FALSE, routeUnswapped |-> FALSE, crashLocal |-> TRUE, crashAfterSwap |-> FALSE, crashMidAttach |-> FALSE, swapFailKept |-> FALSE ]
   up = FALSE
 
-State 9 [Restart]
+State 9 [RestartWith]
   stop = "none"
+  bin = "v1"
   up = TRUE
 
 State 10 [BootStep]

@@ -13,12 +13,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+use overdrive_core::guest_transport::GUEST_NODE_GATEWAY;
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, GuestNetworkAssignment, Resources, VmPayload,
-};
+use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverPayload, Resources, VmPayload};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome};
 use overdrive_sim::adapters::clock::SimClock;
@@ -113,21 +112,8 @@ fn allocation_spec(
         driver,
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors,
-        network: workload_addr.map(|address| GuestNetworkAssignment {
-            address,
-            tap: "ovd-tp-test".to_owned(),
-            mac: [
-                0x02,
-                0x00,
-                address.octets()[0],
-                address.octets()[1],
-                address.octets()[2],
-                address.octets()[3],
-            ],
-            gateway: address,
-            prefix: 16,
-            dns: address,
-        }),
+        transport: workload_addr
+            .map(|address| super::support::transport(address, GUEST_NODE_GATEWAY, 0)),
         service_ports: Vec::new(),
     }
 }
@@ -141,7 +127,7 @@ fn vm_payload() -> DriverPayload {
     })
 }
 
-fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
+async fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
     let clock: Arc<dyn Clock> = Arc::new(SimClock::default());
     let observation_store: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
         NodeId::new("svm-hook-driver").expect("valid node ID"),
@@ -170,14 +156,18 @@ fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
     };
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     assert!(wiring.supervisor().open_after_boot());
+    let sim = SimVmm::new();
+    let beacon = super::support::BeaconHarness::new(&sim);
+    let intake = beacon.intake().await;
     let driver = VmDriver::new(
-        Arc::new(SimVmm::new()),
+        Arc::new(sim),
         Arc::clone(&clock),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
         Arc::clone(&probe_runner),
         wiring.gate(),
         layout,
+        intake,
     );
     (driver, probe_runner)
 }
@@ -452,7 +442,7 @@ async fn vm_http_probe_preserves_status_policy_and_bounded_body_handling() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner() {
-    let (driver, runner) = shared_vm_driver();
+    let (driver, runner) = shared_vm_driver().await;
     let mut readiness = tcp_descriptor("0.0.0.0");
     readiness.role = ProbeRole::Readiness;
     let mut liveness = tcp_descriptor("0.0.0.0");
@@ -485,7 +475,7 @@ async fn vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn vm_restart_reregistration_is_idempotent_and_does_not_duplicate_probe_tasks() {
-    let (driver, runner) = shared_vm_driver();
+    let (driver, runner) = shared_vm_driver().await;
     let initial = allocation_spec(
         "svm-16-restart",
         vm_payload(),

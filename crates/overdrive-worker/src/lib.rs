@@ -17,6 +17,9 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
+// netns-density-295 DG-4 (D17) — `BeaconIntake`, the node's bound beacon
+// listener over the core `BeaconIo` port.
+pub mod beacon_intake;
 pub mod cgroup_manager;
 // transparent-mtls-host-socket (D-MTLS-14, GH #26; step 06-02, SD-1(a)) —
 // the worker's intercept-install + leg-acquire role: the IP_TRANSPARENT
@@ -44,9 +47,10 @@ pub mod probe_runner;
 // the `Driver` implementation over `Arc<dyn Vmm>` (ADR-0082 §§D3-D4).
 pub mod vm_driver;
 
+pub use beacon_intake::{BeaconIntake, BeaconIntakeError};
 pub use cgroup_manager::{CgroupManager, CgroupPath};
 pub use node_health::{NodeConfig, NodeHealthWriteError};
-pub use vm_driver::{VmDriver, VmHostLayout};
+pub use vm_driver::{BeaconObservation, VmDriver, VmHostLayout};
 
 use std::sync::Arc;
 

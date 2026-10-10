@@ -355,4 +355,14 @@ mod acceptance {
     // netns-density-295 S-ND295-58 (D-295-R20) — the cleanup-pending
     // projection over the lease × row-state table.
     mod netns_density_cleanup_pending;
+
+    // netns-density-295 vsock attachment replacement (DISTILL, GH #295) —
+    // the guest-transport vocabulary, the wire codec and the deploy-ingress
+    // listener bounds (feature-delta § "[REF] Core vocabulary", § "[REF] Wire
+    // contracts"). RED: the pinned surface is scaffolded and every body is
+    // `#[ignore = "pending DELIVER vsock new-step N …"]`.
+    mod vsock_datagram_frame;
+    mod vsock_deploy_validation;
+    mod vsock_guest_transport_vocabulary;
+    mod vsock_wire_codec;
 }

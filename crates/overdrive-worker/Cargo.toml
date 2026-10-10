@@ -81,6 +81,12 @@ tokio-util.workspace = true
 tower-service.workspace = true
 
 [dev-dependencies]
+# quint-connect conformance drivers (netns-density-295, QPROJ-1): source-local
+# `#[cfg(all(test, feature = "integration-tests"))]` modules replaying
+# `specs/quint/guest-flow-owner/*.qnt` against the production owner.
+quint-connect.workspace = true
+itf.workspace           = true
+anyhow.workspace        = true
 overdrive-sim.path  = "../overdrive-sim"
 # Shared real-OS fixtures, including the cross-process CIDR lease used by the
 # hand-built worker mTLS topologies. Dev-dependency only.

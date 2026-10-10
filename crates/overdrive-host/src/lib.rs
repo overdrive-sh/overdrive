@@ -24,6 +24,9 @@
 #![deny(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
+// netns-density-295 DG-4 (D17) — `VsockBeaconIo`, the production
+// `overdrive_core::vm::beacon::BeaconIo` binding (real `AF_VSOCK`).
+pub mod beacon_io;
 pub mod ca;
 // microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42) —
 // `RealCgroupAccounting`, the production
@@ -31,6 +34,10 @@ pub mod ca;
 // a real `tokio::fs::read` over `memory.events`.
 pub mod cgroup_accounting;
 pub mod cgroup_fs;
+// netns-density-295 DG-6 (D16-CLAIM) — `VhostVsockCidClaim`, the production
+// `overdrive_core::guest_transport::GuestCidClaim` binding over
+// `/dev/vhost-vsock`.
+pub mod cid_claim;
 pub mod clock;
 pub mod entropy;
 pub mod transport;
@@ -47,9 +54,11 @@ pub mod vmm;
 // rootfs-clone staging directory.
 pub mod vm_host_state;
 
+pub use beacon_io::VsockBeaconIo;
 pub use ca::RcgenCa;
 pub use cgroup_accounting::RealCgroupAccounting;
 pub use cgroup_fs::RealCgroupFs;
+pub use cid_claim::{VHOST_VSOCK_DEVICE, VhostVsockCidClaim};
 pub use clock::SystemClock;
 pub use entropy::{CountingOsEntropy, OsEntropy};
 pub use transport::TcpTransport;

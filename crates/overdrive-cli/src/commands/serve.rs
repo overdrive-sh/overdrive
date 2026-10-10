@@ -18,6 +18,8 @@ use std::time::Duration;
 
 use overdrive_control_plane::dns_responder::HostGuestDnsFactory;
 use overdrive_control_plane::error::ControlPlaneError;
+#[cfg(feature = "integration-tests")]
+use overdrive_control_plane::VmOverride;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::guest_network::ServeShutdownRequest;
 use overdrive_core::traits::cgroup_fs::CgroupFs;
@@ -198,44 +200,44 @@ pub async fn run_with_kek(
 }
 
 /// Test-only sibling of [`run_with_kek`] that preserves the production mTLS
-/// composition root while decorating the real [`Vmm`] port.
+/// composition root while decorating the real VM driver ports.
 ///
-/// Unlike [`run_with_dataplane_and_vmm_override`], this leaves
+/// Unlike [`run_with_dataplane_and_vm_override`], this leaves
 /// `dataplane_override` unset. The server therefore composes the real eBPF and
-/// transparent-mTLS subsystems; only the VMM adapter is supplied by the caller,
-/// which lets native acceptance tests put a read-only observation barrier in
-/// front of a real `CloudHypervisorVmm` without substituting any functional
-/// network path.
+/// transparent-mTLS subsystems; only the VM driver's driven ports (the VMM and
+/// the beacon it pairs with, DG-4) are supplied by the caller, which lets
+/// native acceptance tests put a read-only observation barrier in front of a
+/// real `CloudHypervisorVmm` without substituting any functional network path.
 #[cfg(feature = "integration-tests")]
-pub async fn run_with_kek_and_vmm_override(
+pub async fn run_with_kek_and_vm_override(
     args: ServeArgs,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
+    vm_override: VmOverride,
 ) -> Result<ServeHandle, CliError> {
-    run_inner(args, None, kek, move |c| ServerConfig { vmm_override: Some(vmm_override), ..c })
-        .await
+    run_inner(args, None, kek, move |c| ServerConfig { vm_override: Some(vm_override), ..c }).await
 }
 
 /// Test-only sibling of [`run_with_dataplane`] that ALSO
-/// injects a `ServerConfig.vmm_override` (ADR-0083 §D8, GH #42, step 01-09).
+/// injects a `ServerConfig.vm_override` (ADR-0083 §D8, GH #42, step 01-09;
+/// DG-4).
 ///
 /// A real in-process `overdrive serve` runs the SAME discover → probe →
-/// insert sequence against a substituted `Arc<dyn Vmm>` — a `SimVmm`
+/// insert sequence against a substituted VMM and its beacon — a `SimVmm`
 /// carrying an injected capability-flag fault (S-VM-13), or a REAL
 /// `CloudHypervisorVmm` constructed with a test-only builder override
 /// pointed at a genuinely non-reflink directory (S-VM-75) — rather than
 /// against the production discovery path. `Vmm::probe()` still runs
 /// unconditionally against whichever adapter is bound. Gated behind
-/// `integration-tests`, mirroring `vmm_override`'s own gate.
+/// `integration-tests`, mirroring `vm_override`'s own gate.
 #[cfg(feature = "integration-tests")]
-pub async fn run_with_dataplane_and_vmm_override(
+pub async fn run_with_dataplane_and_vm_override(
     args: ServeArgs,
     dataplane: Arc<dyn Dataplane>,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
+    vm_override: VmOverride,
 ) -> Result<ServeHandle, CliError> {
     run_inner(args, Some(dataplane), kek, move |c| ServerConfig {
-        vmm_override: Some(vmm_override),
+        vm_override: Some(vm_override),
         ..c
     })
     .await

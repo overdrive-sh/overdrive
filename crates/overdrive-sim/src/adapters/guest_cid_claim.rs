@@ -20,16 +20,14 @@
 //! "test doubles must validate inputs"); this one refuses an already-held CID
 //! exactly as `VHOST_VSOCK_SET_GUEST_CID` does with `EADDRINUSE`.
 //!
-//! RED / gating: `overdrive_core::guest_transport` does not exist yet (it is
-//! created by the DELIVER roadmap reconciliation + the admission step). This
-//! module is therefore intentionally NOT registered with `pub mod
-//! guest_cid_claim;` in `adapters/mod.rs`: adding that line before the trait
-//! exists would break `cargo check -p overdrive-sim` for the whole workspace
-//! (the premature-churn hazard the DISTILL planner avoided, shared-infra §6).
-//! The crafter adds the registration line when this body co-arrives with the
-//! production trait. No production API is invented here.
-
-#![allow(dead_code, clippy::missing_errors_doc, clippy::missing_panics_doc)]
+//! Test support (DISTILL): the scripting methods (`survivor_hold`,
+//! `script_claim_error`, `script_probe_deviation`) are this sim's own surface;
+//! the arbiter read accessor `held_cids` is pinned by QPROJ-7 (feature-delta
+//! § "Conformance observation surface and action map"). Its Tier-3 pairing
+//! (R5-19 (a), (b), (e) on the real `VhostVsockCidClaim`) is not authored yet:
+//! the host adapter's constructor is not pinned
+//! (`docs/feature/netns-density-295/distill/upstream-issues.md` UI-HOST-1), so
+//! no conformance projection may read `held_cids` until that pairing exists.
 
 use overdrive_core::claim_set::ClaimSet;
 use overdrive_core::guest_transport::{
@@ -79,15 +77,11 @@ impl SimGuestCidClaim {
     /// A VMM that survived a `serve` crash holds `cid` outside any pool lease
     /// (K-C2). The returned device releases the CID when dropped — the test
     /// drops it to model that VMM exiting "at any time". While held, the pool's
-    /// `assign` must skip `cid`'s offset (R5-19a/e).
-    #[must_use]
-    pub fn survivor_hold(&self, cid: GuestCid) -> ClaimedGuestCid {
-        // A survivor only exists because the CID was unheld at boot; a sim that
-        // scripted an impossible double-hold would lie, so this panics rather
-        // than silently returning an unheld device.
-        let guard =
-            self.kern.try_claim(cid).expect("survivor_hold requires the CID be unheld at boot");
-        ClaimedGuestCid::new(cid, Box::new(SimClaimedVsockDevice { _guard: guard }))
+    /// `assign` must skip `cid`'s offset (R5-19a/e). `Err(InUse)` if `cid` is
+    /// already held: a survivor exists only for a CID it could claim.
+    pub fn survivor_hold(&self, cid: GuestCid) -> Result<ClaimedGuestCid, GuestCidClaimError> {
+        let guard = self.kern.try_claim(cid).ok_or(GuestCidClaimError::InUse { cid })?;
+        Ok(ClaimedGuestCid::new(cid, Box::new(SimClaimedVsockDevice { _guard: guard })))
     }
 
     /// Observable surface for the conformance driver's `State::from_driver`:
@@ -100,24 +94,28 @@ impl SimGuestCidClaim {
 
 impl GuestCidClaim for SimGuestCidClaim {
     fn claim(&self, cid: GuestCid) -> Result<ClaimedGuestCid, GuestCidClaimError> {
-        // A scripted non-InUse failure takes precedence and is consumed.
+        // Atomic check-and-act: `try_claim` returns None iff already held. A
+        // held CID answers `InUse` whatever is scripted, as the kernel's
+        // `EADDRINUSE` does, so `held_cids` is exactly the set a claim would
+        // refuse `InUse` (QPROJ-7).
+        let Some(guard) = self.kern.try_claim(cid) else {
+            return Err(GuestCidClaimError::InUse { cid });
+        };
+        // A scripted non-`InUse` failure of an unheld CID is consumed; the
+        // guard drops, so nothing is held.
         if self.scripted_claim_errors.lock().remove(&cid) {
+            drop(guard);
             return Err(GuestCidClaimError::Kernel {
                 cid,
                 source: std::io::Error::other("sim-scripted non-InUse claim failure"),
             });
         }
-        // Atomic check-and-act: `try_claim` returns None iff already held.
-        match self.kern.try_claim(cid) {
-            Some(guard) => {
-                Ok(ClaimedGuestCid::new(cid, Box::new(SimClaimedVsockDevice { _guard: guard })))
-            }
-            None => Err(GuestCidClaimError::InUse { cid }),
-        }
+        Ok(ClaimedGuestCid::new(cid, Box::new(SimClaimedVsockDevice { _guard: guard })))
     }
 
     fn probe(&self) -> Result<(), GuestCidClaimError> {
-        if let Some(stage) = self.scripted_probe_deviation.lock().take() {
+        let scripted = self.scripted_probe_deviation.lock().take();
+        if let Some(stage) = scripted {
             return Err(GuestCidClaimError::ProbeMismatch { stage });
         }
         // Faithfully exercise the kernel contract on the reserved probe CID:
@@ -145,9 +143,17 @@ impl GuestCidClaim for SimGuestCidClaim {
 /// or after `ClaimedGuestCid::into_device` hands it to the "VMM" and that is
 /// later dropped at the VMM's exit) releases the `ClaimSet` guard, freeing the
 /// CID — the sim analogue of the real last-close release (A-29).
-#[derive(Debug)]
 struct SimClaimedVsockDevice {
+    /// Held for its `Drop`: releasing the guard frees the CID.
     _guard: overdrive_core::claim_set::ClaimGuard<GuestCid>,
+}
+
+impl std::fmt::Debug for SimClaimedVsockDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `ClaimGuard` has no `Debug`; the device is identified by nothing more
+        // than being a simulated claim.
+        f.debug_struct("SimClaimedVsockDevice").finish_non_exhaustive()
+    }
 }
 
 impl ClaimedVsockDevice for SimClaimedVsockDevice {

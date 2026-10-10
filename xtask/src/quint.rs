@@ -9,8 +9,8 @@
 //! name = "owner-one-session-per-cid"
 //! spec = "owner_flows.qnt"          # relative to the subsystem dir
 //! main = "flows_ok"
-//! invariant = "Safety"              # or temporal = "<prop>"
-//! backend = "apalache"              # "apalache" | "tlc"
+//! invariant = "Safety"              # or temporal = "<prop>", or run = "<name>"
+//! backend = "apalache"              # "apalache" | "tlc" | "evaluator" (a run)
 //! max_steps = 14                    # apalache only
 //! expect = "holds"                  # "holds" | "violation"
 //! ci = true                         # run under --ci
@@ -19,8 +19,13 @@
 //! workers = 4                       # optional; TLC only
 //! ```
 //!
-//! `expect = "holds"` passes only on a clean result; `expect = "violation"`
-//! passes only when the checker reports a counterexample. A tool error
+//! A `run` names a `run` declaration of the spec, executed by `quint test`
+//! on `backend = "evaluator"`; every named run must be listed this way, and
+//! every module with a `step` relation must declare one ([`spec_run_problems`]).
+//!
+//! `expect = "holds"` passes only on a clean result (for a run: the run
+//! passed); `expect = "violation"` passes only when the checker reports a
+//! counterexample (for a run: an `expect` along it failed). A tool error
 //! (parse / type / name-resolution failure, Apalache or TLC crash, an
 //! unrecognised result) or a timeout fails the check regardless of
 //! `expect` — neither is ever mistaken for a violation.
@@ -38,37 +43,42 @@
 //! - **Timeouts.** Each attempt has a wall-clock budget (`--timeout`, else
 //!   the check's `timeout_secs`, else [`DEFAULT_TIMEOUT_SECS`]); exceeding it
 //!   yields [`Outcome::TimedOut`].
-//! - **Server start-up hangs.** Quint compiles every check (both backends)
-//!   through an Apalache server it starts on a private port. Two bounds
-//!   apply before Apalache begins its first pass ([`started_work`]): the
-//!   server must print its start line within [`STARTUP_BOUND_SECS`] of the
-//!   attempt's start, and the first pass must follow within
-//!   [`FIRST_PASS_BOUND_SECS`] of that line. Either miss kills the attempt
-//!   and retries it once on a fresh port; a second miss is a tool error
-//!   naming the cause. Quint exiting after starting the server but before the
-//!   first pass (a gRPC reflection failure under load) is the same failure
-//!   and gets the same single retry. A server that is merely listening is not
-//!   progress. The observed hang is in Quint's gRPC client: reflection
-//!   succeeds on its first channel, Quint opens a second channel for the
-//!   command, the HTTP/2 preface and SETTINGS are exchanged on it, and Quint
-//!   never sends the `run` request, which has no deadline — so the server
-//!   stays up and idle. Healthy attempts begin the first pass within 20 s of
-//!   the server's start line even with three checks per CPU, so the second
-//!   bound frees a hung attempt early instead of holding its reservation for
-//!   the full start-up bound.
-//! - **Completion stalls.** The same client fault can strike after the work:
-//!   the server prints its outcome line (`The outcome is: …`) but Quint never
-//!   takes the result and never prints its verdict, so the attempt would sit
-//!   idle until its timeout. Once the outcome line is in the attempt's log,
-//!   Quint must exit within [`COMPLETION_BOUND_SECS`]; otherwise the attempt
-//!   is killed and retried once on a fresh port, and a second stall is a tool
-//!   error. The verdict is never read from the server's log — only Quint's
-//!   own result and ITF trace count. A check is retried at most once,
-//!   whichever stage (start-up, first pass, after completion) stalled, and
-//!   the retry message names the stage.
+//! - **Client transport failures.** Quint compiles every check (both
+//!   backends) through an Apalache server it starts on a private port, and
+//!   talks to it over gRPC. The Quint 0.32 release binary is a `deno compile`
+//!   build (the toolchain therefore installs the npm package under Node.js
+//!   instead, see `infra/provision/install-quint.sh`), and its `node:http2` layer intermittently stops exchanging HTTP/2
+//!   frames on a live connection, at any point of the handoff: a reflection
+//!   reply never arrives within Quint's 5 s deadline (Quint exits non-zero
+//!   before the first pass); the `run` request (the spec, ~30 MB for the
+//!   larger subsystems) never completes, so the server stays up and idle; or
+//!   a reply stops at the 64 KiB HTTP/2 receive window because no
+//!   `WINDOW_UPDATE` is sent, so the server blocks mid-reply. Whether Quint
+//!   then hangs or exits **0** without a verdict depends on whether its event
+//!   loop still holds a handle: it exits 0 when the loop drains with the call
+//!   still pending. The failure is neither load-driven nor check-specific:
+//!   back-to-back owner-flows TLC checks failed 11 of 40 attempts two at a
+//!   time and 11 of 48 twelve at a time.
+//!
+//!   Every stage therefore has a positive progress marker and a bound, and
+//!   an attempt that misses one is killed: the server must print its start
+//!   line within [`STARTUP_BOUND_SECS`] of the attempt's start; its first
+//!   pass must follow within [`FIRST_PASS_BOUND_SECS`] of that line; a TLC
+//!   check's Quint must announce the TLC run (it then holds the TLA+
+//!   translation) within [`TRANSLATION_BOUND_SECS`] of the first pass; and
+//!   once the server prints its outcome line (`The outcome is: …`), Quint
+//!   must exit within [`COMPLETION_BOUND_SECS`]. A server that is merely
+//!   listening is not progress, and the verdict is never read from the
+//!   server's log — only Quint's own result and ITF trace count. Such a
+//!   stall, and an exit that [`client_transport_failure`] recognises, is
+//!   retried on a fresh port until the check has used [`MAX_ATTEMPTS`]
+//!   attempts; the retry message names the stage, every attempt keeps its own
+//!   log, and exhausting the budget is a tool error naming the stage. A
+//!   timeout, a result, and every other tool error are final on the first
+//!   attempt.
 //! - **Timing.** Each check records its own time (`seconds`, the final
-//!   attempt's run time), the run time of the attempts abandoned to stall
-//!   retries (`retry_seconds`), and the wall time from its first attempt's
+//!   attempt's run time), the run time of the attempts abandoned to client
+//!   transport retries (`retry_seconds`), and the wall time from its first attempt's
 //!   start to its verdict (`wall_seconds`, which also includes any wait for
 //!   the budget between attempts). The `ci = true` two-minute rule applies to
 //!   the check's own time: a `ci` check whose own time exceeds
@@ -102,7 +112,8 @@
 //! Nothing else writes `evidence/`.
 //!
 //! The pure parts — [`parse_checks`], [`classify`] / [`judge`],
-//! [`started_work`], [`LogScan`], [`deadline_check`] / [`attempt_verdict`], [`effective_timeout`],
+//! [`started_work`], [`LogScan`], [`deadline_check`] / [`client_transport_failure`] /
+//! [`attempt_verdict`], [`effective_timeout`],
 //! [`estimate_secs`] and [`parse_stat_state`] — are unit-tested here (admission
 //! and resource parsing in [`resources`]);
 //! [`typecheck`] and [`check`] shell out to `quint`.
@@ -123,6 +134,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod evidence;
 pub mod resources;
+pub mod spec_index;
 pub mod trace;
 
 use resources::{Reservation, ResourceConfig, ResourceOverrides, Sizing};
@@ -147,6 +159,10 @@ const FIRST_PASS_MARKER: &str = "PASS #0:";
 /// check (`The outcome is: NoError` / `Error` / …). Quint's own verdict
 /// follows within a fraction of a second on a healthy attempt.
 const OUTCOME_MARKER: &str = "The outcome is: ";
+/// Prefix of the line Quint prints (TLC backend) once it holds the TLA+
+/// translation from the Apalache server and starts TLC. After it, no gRPC
+/// call is in flight.
+const TLC_RUN_MARKER: &str = "[TLC] Running TLC model checker";
 
 /// Per-attempt wall-clock budget when neither `--timeout` nor the check's
 /// `timeout_secs` sets one.
@@ -162,6 +178,22 @@ pub const FIRST_PASS_BOUND_SECS: u64 = 45;
 /// verdict before the attempt counts as a completion stall. A healthy client
 /// prints it within a second.
 pub const COMPLETION_BOUND_SECS: u64 = 60;
+/// How long after the first pass a TLC check's Quint client may take to
+/// announce the TLC run.
+///
+/// Announcing it means the client has received the TLA+ translation; past this
+/// bound the attempt counts as a translation stall. Healthy attempts start TLC itself
+/// within 4.5 s of the first pass (340 attempts measured; median 0.4 s).
+pub const TRANSLATION_BOUND_SECS: u64 = 60;
+/// Attempts a check may use when the Quint client's transport to its Apalache
+/// server fails.
+///
+/// That covers every stall stage and the exits [`client_transport_failure`]
+/// recognises; each attempt is a fresh process group on a fresh port. The toolchain runs Quint's npm package under Node.js
+/// (`infra/provision/install-quint.sh`), which showed no transport failure in
+/// two full `ci = true` runs of `specs/quint/guest-flow-owner` (181 checks
+/// each); one retry is a safety net, not a rate-hiding budget.
+pub const MAX_ATTEMPTS: u32 = 2;
 /// The own time above which a `ci = true` check draws a warning.
 pub const CI_BUDGET_SECS: f64 = 120.0;
 /// How often the peak resident memory of running checks is sampled.
@@ -204,6 +236,10 @@ pub enum Backend {
     Apalache,
     /// Exhaustive explicit-state model checking (`quint verify --backend tlc`).
     Tlc,
+    /// Quint's own evaluator executing one named `run` (`quint test`): the
+    /// run is a scripted scenario of the spec's step relation, and passes
+    /// when every `expect` along it holds.
+    Evaluator,
 }
 
 impl Backend {
@@ -212,6 +248,7 @@ impl Backend {
         match self {
             Self::Apalache => "apalache",
             Self::Tlc => "tlc",
+            Self::Evaluator => "evaluator",
         }
     }
 }
@@ -243,6 +280,8 @@ pub enum Property {
     Invariant(String),
     /// A temporal property (`--temporal`).
     Temporal(String),
+    /// A named `run` declared by the spec, executed by `quint test`.
+    Run(String),
 }
 
 /// One validated `[[check]]` entry.
@@ -288,6 +327,7 @@ struct RawCheck {
     main: String,
     invariant: Option<String>,
     temporal: Option<String>,
+    run: Option<String>,
     backend: Backend,
     max_steps: Option<u32>,
     expect: Expect,
@@ -296,6 +336,106 @@ struct RawCheck {
     timeout_secs: Option<u64>,
     heap_mb: Option<u64>,
     workers: Option<u32>,
+}
+
+/// Validate one raw `[[check]]` table against the checks parsed before it and
+/// return the property it checks.
+fn validate_check(
+    c: &RawCheck,
+    earlier: &[Check],
+    invalid: &impl Fn(&str, &str) -> ChecksError,
+) -> Result<Property, ChecksError> {
+    if c.name.is_empty()
+        || !c.name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err(invalid(
+            &c.name,
+            "name must be non-empty [A-Za-z0-9_-] (it names the output directory)",
+        ));
+    }
+    if earlier.iter().any(|existing| existing.name == c.name) {
+        return Err(invalid(&c.name, "duplicate check name"));
+    }
+    if c.spec.is_absolute()
+        || c.spec.components().any(|comp| matches!(comp, std::path::Component::ParentDir))
+    {
+        return Err(invalid(
+            &c.name,
+            "spec must be a relative path inside the subsystem directory",
+        ));
+    }
+    let property = match (c.invariant.clone(), c.temporal.clone(), c.run.clone()) {
+        (Some(inv), None, None) => Property::Invariant(inv),
+        (None, Some(temp), None) => Property::Temporal(temp),
+        (None, None, Some(run)) => Property::Run(run),
+        (None, None, None) => {
+            return Err(invalid(&c.name, "set exactly one of `invariant`, `temporal` or `run`"));
+        }
+        _ => {
+            return Err(invalid(
+                &c.name,
+                "set exactly one of `invariant`, `temporal` or `run`, not both",
+            ));
+        }
+    };
+    match (&property, c.backend) {
+        (Property::Run(_), Backend::Evaluator) => {}
+        (Property::Run(_), _) => {
+            return Err(invalid(
+                &c.name,
+                "a `run` requires backend = \"evaluator\" (it is executed by `quint test`)",
+            ));
+        }
+        (_, Backend::Evaluator) => {
+            return Err(invalid(
+                &c.name,
+                "backend = \"evaluator\" executes a named `run`; set `run`, not a property",
+            ));
+        }
+        _ => {}
+    }
+    if c.backend == Backend::Evaluator && c.heap_mb.is_some() {
+        return Err(invalid(
+            &c.name,
+            "`heap_mb` applies to the JVM backends (\"apalache\", \"tlc\") only",
+        ));
+    }
+    match c.backend {
+        Backend::Tlc | Backend::Evaluator if c.max_steps.is_some() => {
+            return Err(invalid(
+                &c.name,
+                "`max_steps` applies to backend = \"apalache\" only (TLC is exhaustive; a \
+                     run is its own bound)",
+            ));
+        }
+        // Quint 0.32 prompts interactively ("proceed with Apalache
+        // anyway? (y/N)") for temporal properties on Apalache and
+        // reports no result non-interactively.
+        Backend::Apalache if matches!(property, Property::Temporal(_)) => {
+            return Err(invalid(&c.name, "temporal properties require backend = \"tlc\""));
+        }
+        Backend::Apalache | Backend::Tlc | Backend::Evaluator => {}
+    }
+    if c.timeout_secs == Some(0) {
+        return Err(invalid(&c.name, "`timeout_secs` must be at least 1"));
+    }
+    if let Some(Err(e)) = c.heap_mb.map(resources::validate_heap_mb) {
+        return Err(invalid(&c.name, &format!("`heap_mb`: {e}")));
+    }
+    match (c.backend, c.workers) {
+        (Backend::Apalache | Backend::Evaluator, Some(_)) => {
+            return Err(invalid(
+                &c.name,
+                "`workers` applies to backend = \"tlc\" only (Z3 and the evaluator are \
+                     single-threaded)",
+            ));
+        }
+        (Backend::Tlc, Some(0)) => {
+            return Err(invalid(&c.name, "`workers` must be at least 1"));
+        }
+        _ => {}
+    }
+    Ok(property)
 }
 
 /// Parse and validate a `checks.toml` body. `path` is used for error
@@ -311,71 +451,7 @@ pub fn parse_checks(path: &Path, body: &str) -> Result<Vec<Check>, ChecksError> 
 
     let mut checks: Vec<Check> = Vec::with_capacity(raw.check.len());
     for c in raw.check {
-        if c.name.is_empty()
-            || !c.name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-        {
-            return Err(invalid(
-                &c.name,
-                "name must be non-empty [A-Za-z0-9_-] (it names the output directory)",
-            ));
-        }
-        if checks.iter().any(|existing| existing.name == c.name) {
-            return Err(invalid(&c.name, "duplicate check name"));
-        }
-        if c.spec.is_absolute()
-            || c.spec.components().any(|comp| matches!(comp, std::path::Component::ParentDir))
-        {
-            return Err(invalid(
-                &c.name,
-                "spec must be a relative path inside the subsystem directory",
-            ));
-        }
-        let property = match (c.invariant, c.temporal) {
-            (Some(inv), None) => Property::Invariant(inv),
-            (None, Some(temp)) => Property::Temporal(temp),
-            (Some(_), Some(_)) => {
-                return Err(invalid(
-                    &c.name,
-                    "set exactly one of `invariant` or `temporal`, not both",
-                ));
-            }
-            (None, None) => {
-                return Err(invalid(&c.name, "set exactly one of `invariant` or `temporal`"));
-            }
-        };
-        match c.backend {
-            Backend::Tlc if c.max_steps.is_some() => {
-                return Err(invalid(
-                    &c.name,
-                    "`max_steps` applies to backend = \"apalache\" only (TLC is exhaustive)",
-                ));
-            }
-            // Quint 0.32 prompts interactively ("proceed with Apalache
-            // anyway? (y/N)") for temporal properties on Apalache and
-            // reports no result non-interactively.
-            Backend::Apalache if matches!(property, Property::Temporal(_)) => {
-                return Err(invalid(&c.name, "temporal properties require backend = \"tlc\""));
-            }
-            Backend::Apalache | Backend::Tlc => {}
-        }
-        if c.timeout_secs == Some(0) {
-            return Err(invalid(&c.name, "`timeout_secs` must be at least 1"));
-        }
-        if let Some(Err(e)) = c.heap_mb.map(resources::validate_heap_mb) {
-            return Err(invalid(&c.name, &format!("`heap_mb`: {e}")));
-        }
-        match (c.backend, c.workers) {
-            (Backend::Apalache, Some(_)) => {
-                return Err(invalid(
-                    &c.name,
-                    "`workers` applies to backend = \"tlc\" only (Z3 is single-threaded)",
-                ));
-            }
-            (Backend::Tlc, Some(0)) => {
-                return Err(invalid(&c.name, "`workers` must be at least 1"));
-            }
-            _ => {}
-        }
+        let property = validate_check(&c, &checks, &invalid)?;
         checks.push(Check {
             name: c.name,
             spec: c.spec,
@@ -441,6 +517,42 @@ pub fn classify(exit_success: bool, output: &str) -> Outcome {
     if exit_success {
         if output.contains(OK_MARKER) { Outcome::Holds } else { Outcome::ToolError }
     } else if output.contains(VIOLATION_MARKER) {
+        Outcome::Violation
+    } else {
+        Outcome::ToolError
+    }
+}
+
+/// Classify a `quint test --match '^<run>$'` execution of one named run.
+///
+/// As with [`classify`], a result needs positive evidence: `Holds` (the run
+/// passed) needs exit 0 AND Quint's `ok <run> passed` line; `Violation` (an
+/// `expect` along the run failed) needs a non-zero exit, Quint's
+/// `<n>) <run> failed` line AND its `error: Tests failed` summary. Anything
+/// else — including exit 0 with no line for the run, which is what Quint
+/// prints when no run of that name exists in the main module — is a tool
+/// error.
+pub fn classify_run(exit_success: bool, output: &str, run: &str) -> Outcome {
+    // Quint prints a run declared in an imported module, checked through an
+    // instance, module-qualified (`ok a::b::Run passed`); the run name is the
+    // last `::` segment and must match exactly.
+    let names_run = |token: &str| token.rsplit("::").next() == Some(run);
+    let passed = output.lines().any(|l| {
+        let mut words = l.split_whitespace();
+        words.next() == Some("ok")
+            && words.next().is_some_and(names_run)
+            && words.next() == Some("passed")
+    });
+    let failed = output.lines().any(|l| {
+        l.split_once(") ").is_some_and(|(_, rest)| {
+            let mut words = rest.split_whitespace();
+            words.next().is_some_and(names_run) && words.next() == Some("failed")
+        })
+    });
+    let has_summary = output.lines().any(|l| l.trim_start().starts_with("error: Tests failed"));
+    if exit_success {
+        if passed { Outcome::Holds } else { Outcome::ToolError }
+    } else if failed && has_summary {
         Outcome::Violation
     } else {
         Outcome::ToolError
@@ -546,10 +658,7 @@ pub fn typecheck() -> Result<()> {
             failed.push(rel.display().to_string());
         }
     }
-    if failed.is_empty() {
-        eprintln!("xtask quint typecheck: {} file(s) typecheck", files.len());
-        Ok(())
-    } else {
+    if !failed.is_empty() {
         bail!(
             "{} of {} Quint file(s) failed to typecheck: {}",
             failed.len(),
@@ -557,6 +666,201 @@ pub fn typecheck() -> Result<()> {
             failed.join(", ")
         )
     }
+    eprintln!("xtask quint typecheck: {} file(s) typecheck", files.len());
+    require_named_runs(&root, &subsystem_dirs(&specs)?, "typecheck")
+}
+
+/// Resolve a spec's `from "<path>"` import against the importing file's path
+/// (both relative to the subsystem directory, `/`-separated). Quint omits the
+/// `.qnt` extension in imports.
+fn resolve_import(from_rel: &str, import: &str) -> String {
+    let mut parts: Vec<&str> = from_rel.split('/').collect();
+    parts.pop();
+    for part in import.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if parts.pop().is_none() {
+                    parts.push("..");
+                }
+            }
+            other => parts.push(other),
+        }
+    }
+    let joined = parts.join("/");
+    let is_qnt = Path::new(&joined).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("qnt"));
+    if is_qnt { joined } else { format!("{joined}.qnt") }
+}
+
+/// The spec files `rel` reaches: itself and, transitively, every file it
+/// imports from.
+fn reachable_specs(files: &BTreeMap<String, spec_index::QntIndex>, rel: &str) -> BTreeSet<String> {
+    let mut seen = BTreeSet::new();
+    let mut todo = vec![rel.to_owned()];
+    while let Some(next) = todo.pop() {
+        if !seen.insert(next.clone()) {
+            continue;
+        }
+        if let Some(idx) = files.get(&next) {
+            todo.extend(idx.imports.iter().map(|i| resolve_import(&next, i)));
+        }
+    }
+    seen
+}
+
+/// Spec/manifest coherence problems of one subsystem.
+///
+/// Works over its indexed spec files (keyed by path relative to the subsystem
+/// directory, `/`-separated) and its `checks.toml` (`None` when the subsystem
+/// has none). `label` is the subsystem directory as shown in messages.
+///
+/// Three problems are reported, one message each, naming the spec file, the
+/// module and the run:
+///
+/// - a module that declares a `step` relation but no named `run` — the
+///   design's critical scenarios are named runs of the stateful module;
+/// - a named `run` no `[[check]]` lists (`run = "<name>"` with a `spec` that
+///   is, or imports, the declaring file);
+/// - a run check whose `run` is declared by no file its `spec` reaches.
+pub fn spec_run_problems(
+    label: &str,
+    files: &BTreeMap<String, spec_index::QntIndex>,
+    checks: Option<&[Check]>,
+) -> Vec<String> {
+    let manifest = format!("{label}/{CHECKS_FILE}");
+    let run_checks: Vec<(&Check, &str, BTreeSet<String>)> = checks
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| match &c.property {
+            Property::Run(run) => {
+                let spec = c.spec.to_string_lossy().replace('\\', "/");
+                Some((c, run.as_str(), reachable_specs(files, &spec)))
+            }
+            Property::Invariant(_) | Property::Temporal(_) => None,
+        })
+        .collect();
+    let mut problems = Vec::new();
+    for (rel, idx) in files {
+        for m in &idx.modules {
+            if m.step && m.runs.is_empty() {
+                problems.push(format!(
+                    "{label}/{rel}: module `{}` (line {}) declares a `step` relation but no named \
+                     `run`; write a named `run` for each critical scenario the design names and \
+                     list it in {manifest}",
+                    m.name, m.line
+                ));
+            }
+            for r in &m.runs {
+                let listed =
+                    run_checks.iter().any(|(_, run, reach)| *run == r.name && reach.contains(rel));
+                if !listed {
+                    let missing = if checks.is_some() {
+                        format!("is not listed in {manifest}")
+                    } else {
+                        format!("is not listed: the subsystem has no {manifest}")
+                    };
+                    problems.push(format!(
+                        "{label}/{rel}: run `{}` of module `{}` (line {}) {missing}; add a \
+                         [[check]] with spec = \"{rel}\", main, run = \"{}\", backend = \
+                         \"evaluator\"",
+                        r.name, m.name, r.line, r.name
+                    ));
+                }
+            }
+        }
+    }
+    for (c, run, reach) in &run_checks {
+        let declared =
+            reach.iter().filter_map(|f| files.get(f)).any(|idx| idx.run_names().any(|n| n == *run));
+        if !declared {
+            problems.push(format!(
+                "{manifest}: check `{}`: run `{run}` is declared neither in {} nor in a file it \
+                 imports",
+                c.name,
+                c.spec.display()
+            ));
+        }
+    }
+    problems
+}
+
+/// Index every spec file under a subsystem directory (keyed relative to it)
+/// and report its [`spec_run_problems`], reading its `checks.toml` when one
+/// exists. A file that cannot be read, a spec the lexer cannot index, or an
+/// invalid manifest is itself a reported problem.
+fn subsystem_run_problems(root: &Path, dir: &Path) -> Result<Vec<String>> {
+    let label = dir.strip_prefix(root).unwrap_or(dir).display().to_string();
+    let mut problems = Vec::new();
+    let mut paths = Vec::new();
+    collect_qnt(dir, &mut paths)?;
+    let mut files = BTreeMap::new();
+    for path in paths {
+        let rel = path.strip_prefix(dir).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        let body =
+            fs::read_to_string(&path).wrap_err_with(|| format!("reading {}", path.display()))?;
+        match spec_index::index(&body) {
+            Ok(idx) => {
+                files.insert(rel, idx);
+            }
+            Err(e) => problems.push(format!("{label}/{rel}: cannot index the spec: {e}")),
+        }
+    }
+    let manifest = dir.join(CHECKS_FILE);
+    let checks = if manifest.is_file() {
+        let body = fs::read_to_string(&manifest)
+            .wrap_err_with(|| format!("reading {}", manifest.display()))?;
+        match parse_checks(&manifest, &body) {
+            Ok(checks) => Some(checks),
+            Err(e) => {
+                problems.push(e.to_string());
+                return Ok(problems);
+            }
+        }
+    } else {
+        None
+    };
+    problems.extend(spec_run_problems(&label, &files, checks.as_deref()));
+    Ok(problems)
+}
+
+/// Fail with every [`spec_run_problems`] of the given subsystem directories.
+fn require_named_runs(root: &Path, dirs: &[PathBuf], command: &str) -> Result<()> {
+    let mut problems = Vec::new();
+    for dir in dirs {
+        problems.extend(subsystem_run_problems(root, dir)?);
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    for p in &problems {
+        eprintln!("  FAIL  {p}");
+    }
+    bail!(
+        "xtask quint {command}: {} named-run problem(s); every stateful module carries named runs \
+         for its critical scenarios, and every named run is listed in its subsystem's \
+         {CHECKS_FILE} (.claude/rules/design.md § \"Concurrent protocols carry a model-checked \
+         Quint specification\")",
+        problems.len()
+    )
+}
+
+/// The subsystem directories under `specs/quint/`: every directory directly
+/// below it, sorted.
+fn subsystem_dirs(specs: &Path) -> Result<Vec<PathBuf>> {
+    let mut dirs = Vec::new();
+    for entry in fs::read_dir(specs).wrap_err_with(|| format!("reading {}", specs.display()))? {
+        let entry = entry.wrap_err_with(|| format!("reading {}", specs.display()))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if entry.file_type().wrap_err_with(|| format!("stat {}", entry.path().display()))?.is_dir()
+            && !name.starts_with('.')
+            && !name.starts_with('_')
+        {
+            dirs.push(entry.path());
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
 }
 
 /// Selection filters for [`check`].
@@ -614,6 +918,10 @@ pub enum Stall {
     /// The server started, but no first pass followed within the first-pass
     /// bound: Quint never handed it the job.
     NoFirstPass,
+    /// TLC backend: the server began translating the spec to TLA+, but Quint
+    /// did not announce the TLC run within the translation bound: the client
+    /// never took the translation.
+    NoTranslation,
     /// The server printed its outcome line, but Quint printed no verdict
     /// within the completion bound: the client never took the result.
     NoClientResult,
@@ -625,6 +933,7 @@ impl Stall {
         match self {
             Self::ServerNotUp => "start-up",
             Self::NoFirstPass => "first pass",
+            Self::NoTranslation => "translation",
             Self::NoClientResult => "after completion",
         }
     }
@@ -637,43 +946,75 @@ pub struct StallBounds {
     pub server: Duration,
     /// From the server's start line to the first pass.
     pub first_pass: Duration,
+    /// TLC backend: from the first pass to Quint's TLC-run line.
+    pub translation: Duration,
     /// From the server's outcome line to Quint's exit with its verdict.
     pub completion: Duration,
 }
 
 impl StallBounds {
-    /// The runner's bounds: [`STARTUP_BOUND_SECS`], [`FIRST_PASS_BOUND_SECS`]
-    /// and [`COMPLETION_BOUND_SECS`].
+    /// The runner's bounds: [`STARTUP_BOUND_SECS`], [`FIRST_PASS_BOUND_SECS`],
+    /// [`TRANSLATION_BOUND_SECS`] and [`COMPLETION_BOUND_SECS`].
     pub const RUNNER: Self = Self {
         server: Duration::from_secs(STARTUP_BOUND_SECS),
         first_pass: Duration::from_secs(FIRST_PASS_BOUND_SECS),
+        translation: Duration::from_secs(TRANSLATION_BOUND_SECS),
         completion: Duration::from_secs(COMPLETION_BOUND_SECS),
     };
 }
 
+/// A progress marker in an attempt's log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Marker {
+    /// The server's start line.
+    ServerUp,
+    /// The first pass.
+    FirstPass,
+    /// Quint's TLC-run line: the client took the TLA+ translation.
+    Translated,
+    /// The server's outcome line.
+    Finished,
+}
+
 /// Incremental scan of an attempt's log for its progress markers.
 ///
-/// The markers are the server's start line, its first pass and its outcome
-/// line. Only complete lines are classified, so a line split across two
-/// reads is seen once, whole.
+/// The markers are the server's start line, its first pass, Quint's TLC-run
+/// line and the server's outcome line. Only complete lines are classified, so
+/// a line split across two reads is seen once, whole.
 #[derive(Debug, Default)]
 pub struct LogScan {
     /// Bytes of the log consumed so far.
     fed: u64,
     /// The trailing incomplete line.
     partial: Vec<u8>,
-    /// The server's start line was seen.
-    pub server_up: bool,
-    /// The first pass was seen.
-    pub started: bool,
-    /// The server's outcome line was seen.
-    pub finished: bool,
+    /// The markers seen so far; a marker, once seen, stays seen.
+    seen: BTreeSet<Marker>,
 }
 
 impl LogScan {
     /// Bytes of the log consumed so far: where the next read starts.
     pub const fn fed(&self) -> u64 {
         self.fed
+    }
+
+    /// The server's start line was seen.
+    pub fn server_up(&self) -> bool {
+        self.seen.contains(&Marker::ServerUp)
+    }
+
+    /// The first pass was seen.
+    pub fn started(&self) -> bool {
+        self.seen.contains(&Marker::FirstPass)
+    }
+
+    /// Quint's TLC-run line was seen: the client took the TLA+ translation.
+    pub fn translated(&self) -> bool {
+        self.seen.contains(&Marker::Translated)
+    }
+
+    /// The server's outcome line was seen.
+    pub fn finished(&self) -> bool {
+        self.seen.contains(&Marker::Finished)
     }
 
     /// Consume the next bytes of the log.
@@ -683,9 +1024,29 @@ impl LogScan {
         let Some(last_nl) = self.partial.iter().rposition(|&b| b == b'\n') else { return };
         let complete: Vec<u8> = self.partial.drain(..=last_nl).collect();
         for line in String::from_utf8_lossy(&complete).lines() {
-            self.server_up |= line.contains(SERVER_START_MARKER);
-            self.started |= line.starts_with(FIRST_PASS_MARKER);
-            self.finished |= line.starts_with(OUTCOME_MARKER);
+            if line.contains(SERVER_START_MARKER) {
+                self.seen.insert(Marker::ServerUp);
+            }
+            if line.starts_with(FIRST_PASS_MARKER) {
+                self.seen.insert(Marker::FirstPass);
+            }
+            if line.starts_with(TLC_RUN_MARKER) {
+                self.seen.insert(Marker::Translated);
+            }
+            if line.starts_with(OUTCOME_MARKER) {
+                self.seen.insert(Marker::Finished);
+            }
+        }
+    }
+
+    /// Whether the client/server handoff is over for `backend`, so the rest
+    /// of the log need not be scanned: the server's outcome line (Apalache)
+    /// or Quint's TLC-run line (TLC, after which no gRPC call is in flight).
+    pub fn handoff_done(&self, backend: Backend) -> bool {
+        match backend {
+            Backend::Apalache => self.finished(),
+            Backend::Tlc => self.translated(),
+            Backend::Evaluator => true,
         }
     }
 }
@@ -700,32 +1061,60 @@ pub fn started_work(output: &str) -> bool {
     output.lines().any(|l| l.starts_with(FIRST_PASS_MARKER))
 }
 
+/// Whether a check's output shows Quint took the TLA+ translation and
+/// started TLC (TLC backend).
+pub fn tlc_started(output: &str) -> bool {
+    output.lines().any(|l| l.starts_with(TLC_RUN_MARKER))
+}
+
+/// Whether a check's output holds the server's outcome line.
+pub fn server_finished(output: &str) -> bool {
+    output.lines().any(|l| l.starts_with(OUTCOME_MARKER))
+}
+
+/// How far a still-running attempt has got, as time since each marker was
+/// first seen in its log (`None` = not yet).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Progress {
+    /// Since the server's start line.
+    pub server_up: Option<Duration>,
+    /// Since the first pass.
+    pub first_pass: Option<Duration>,
+    /// TLC backend only: since the first pass, while Quint's TLC-run line is
+    /// still missing (`None` once it is seen, and always for Apalache).
+    pub awaiting_translation: Option<Duration>,
+    /// Since the server's outcome line.
+    pub server_done: Option<Duration>,
+}
+
 /// Decide whether a still-running attempt must be killed.
 ///
-/// `elapsed` runs from the attempt's start; `since_server_up` from when the
-/// server's start line was first seen and `since_server_done` from when its
-/// outcome line was first seen (`None` = not yet). The overall timeout takes
+/// `elapsed` runs from the attempt's start. The overall timeout takes
 /// precedence over every stall bound. Once the server has finished, only the
-/// completion bound applies; before that, an attempt Apalache has started
-/// (`started`) is never a start-up stall.
+/// completion bound applies; while a TLC check awaits its translation, only
+/// the translation bound; once Apalache has started the job otherwise, no
+/// stall bound applies (the check is working); before that, the first-pass
+/// bound runs from the server's start line and the server bound from the
+/// attempt's start.
 pub fn deadline_check(
     elapsed: Duration,
-    started: bool,
-    since_server_up: Option<Duration>,
-    since_server_done: Option<Duration>,
+    progress: Progress,
     timeout: Duration,
     bounds: StallBounds,
 ) -> Option<AttemptEnd> {
     if elapsed >= timeout {
         return Some(AttemptEnd::TimedOut);
     }
-    if let Some(done) = since_server_done {
+    if let Some(done) = progress.server_done {
         return (done >= bounds.completion).then_some(AttemptEnd::Stalled(Stall::NoClientResult));
     }
-    if started {
+    if let Some(wait) = progress.awaiting_translation {
+        return (wait >= bounds.translation).then_some(AttemptEnd::Stalled(Stall::NoTranslation));
+    }
+    if progress.first_pass.is_some() {
         return None;
     }
-    let stall = since_server_up.map_or_else(
+    let stall = progress.server_up.map_or_else(
         || (elapsed >= bounds.server).then_some(Stall::ServerNotUp),
         |up| (up >= bounds.first_pass).then_some(Stall::NoFirstPass),
     );
@@ -742,62 +1131,127 @@ pub enum AttemptVerdict {
         /// Human-readable cause for a non-result outcome.
         cause: Option<String>,
     },
-    /// Retry the check on a fresh server port.
+    /// Retry the check in a fresh process group on a fresh server port.
     Retry {
-        /// The stage the attempt stalled at ([`Stall::stage`]).
+        /// The client/server stage the attempt failed at ([`Stall::stage`]).
         stage: &'static str,
         /// Why the attempt was abandoned.
         cause: String,
     },
 }
 
+/// A Quint client transport failure recognised in an exited attempt's
+/// output: the stage, and what happened.
+///
+/// Two shapes qualify, and nothing else does:
+///
+/// - The server started but never began the job, whatever the exit status:
+///   Quint's reflection or `run` call failed before reaching the server (the
+///   reflection reply never arrives within its 5 s deadline, or the `run`
+///   request never completes).
+/// - Quint exited **0** without its verdict after the server began the job,
+///   while its call was still in flight (Apalache: any time before Quint
+///   prints its verdict; TLC: before its TLC-run line). Quint 0.32 `verify`
+///   exits 0 only after printing a result, so a silent 0 means the runtime's
+///   event loop drained with the gRPC call still pending.
+///
+/// A non-zero exit after the first pass is Quint's own error report, and an
+/// exit before the server started is a spec or CLI error (including the
+/// unanswered Apalache-temporal prompt, which exits 0): neither is a client
+/// transport failure.
+pub fn client_transport_failure(
+    backend: Backend,
+    success: bool,
+    output: &str,
+) -> Option<(&'static str, String)> {
+    let code = if success { "0" } else { "non-zero" };
+    if backend == Backend::Evaluator || !server_started(output) {
+        return None;
+    }
+    if !started_work(output) {
+        return Some((
+            Stall::NoFirstPass.stage(),
+            format!(
+                "Apalache server started but Quint exited {code} before the first pass (its \
+                 reflection or `run` call never reached the server)"
+            ),
+        ));
+    }
+    if !success || (backend == Backend::Tlc && tlc_started(output)) {
+        return None;
+    }
+    let stage = if server_finished(output) {
+        Stall::NoClientResult.stage()
+    } else if backend == Backend::Tlc {
+        Stall::NoTranslation.stage()
+    } else {
+        "during check"
+    };
+    Some((
+        stage,
+        format!(
+            "Quint exited 0 without its verdict while its call to the Apalache server was in \
+             flight ({stage}): the client dropped the pending call"
+        ),
+    ))
+}
+
 /// Turn an ended attempt (1-based `attempt`) into a verdict.
 ///
-/// A stall — at start-up, before the first pass, or after the server finished
-/// while Quint never printed its verdict — and Quint exiting after starting
-/// its server but before the first pass are retried exactly once; a second
-/// one is a tool error. A verdict is never read from the server's log: only
-/// Quint's own result (and ITF trace) counts, so a completion stall is
-/// retried, not classified.
+/// A client transport failure — a stall at start-up, before the first pass,
+/// awaiting the TLC translation, or after the server finished, or an exit
+/// [`client_transport_failure`] recognises — is retried on a fresh port until
+/// the check has used [`MAX_ATTEMPTS`]; the last one is a tool error naming
+/// the stage. A timeout, a result, and any other tool error are final. A
+/// verdict is never read from the server's log: only Quint's own result (and
+/// ITF trace) counts, so a completion stall is retried, not classified.
 pub fn attempt_verdict(
     attempt: u32,
+    check: &Check,
     end: AttemptEnd,
     output: &str,
     timeout: Duration,
     bounds: StallBounds,
 ) -> AttemptVerdict {
+    let transport = |stage: &'static str, what: String| {
+        if attempt < MAX_ATTEMPTS {
+            AttemptVerdict::Retry {
+                stage,
+                cause: format!(
+                    "{what}; process group killed, retrying on a fresh port (attempt {} of \
+                     {MAX_ATTEMPTS})",
+                    attempt + 1
+                ),
+            }
+        } else {
+            AttemptVerdict::Final {
+                outcome: Outcome::ToolError,
+                cause: Some(format!(
+                    "Quint client failed ({stage}) on {attempt} attempts (fresh port each); \
+                     last: {what}"
+                )),
+            }
+        }
+    };
     match end {
         AttemptEnd::Exited { success } => {
-            let outcome = classify(success, output);
-            // Quint started its Apalache server but failed before the server
-            // began the job (e.g. a gRPC reflection DEADLINE_EXCEEDED under
-            // load): the same start-up failure as a hang, so it gets the same
-            // single retry. A spec error never gets as far as the server.
-            if outcome == Outcome::ToolError && server_started(output) && !started_work(output) {
-                return if attempt <= 1 {
-                    AttemptVerdict::Retry {
-                        stage: Stall::NoFirstPass.stage(),
-                        cause: "Apalache server started but Quint failed before the first pass; \
-                                retrying on a fresh port"
-                            .to_owned(),
-                    }
-                } else {
-                    AttemptVerdict::Final {
-                        outcome,
-                        cause: Some(format!(
-                            "Apalache server start-up failed before the first pass on {attempt} \
-                             attempts (fresh port each); see the attempt logs"
-                        )),
-                    }
-                };
+            let outcome = match &check.property {
+                Property::Run(run) => classify_run(success, output, run),
+                Property::Invariant(_) | Property::Temporal(_) => classify(success, output),
+            };
+            if outcome != Outcome::ToolError {
+                return AttemptVerdict::Final { outcome, cause: None };
             }
-            let cause = (outcome == Outcome::ToolError).then(|| {
-                format!(
+            if let Some((stage, what)) = client_transport_failure(check.backend, success, output) {
+                return transport(stage, what);
+            }
+            AttemptVerdict::Final {
+                outcome,
+                cause: Some(format!(
                     "quint exited {} without a recognised result (see the attempt log)",
                     if success { "0" } else { "non-zero" }
-                )
-            });
-            AttemptVerdict::Final { outcome, cause }
+                )),
+            }
         }
         AttemptEnd::TimedOut => AttemptVerdict::Final {
             outcome: Outcome::TimedOut,
@@ -816,26 +1270,18 @@ pub fn attempt_verdict(
                      within {}s of the server's start)",
                     bounds.first_pass.as_secs()
                 ),
+                Stall::NoTranslation => format!(
+                    "Quint client did not take the TLA+ translation (no TLC run within {}s of \
+                     the first pass)",
+                    bounds.translation.as_secs()
+                ),
                 Stall::NoClientResult => format!(
                     "Quint client did not return after the server finished (no verdict within \
                      {}s of the server's outcome line)",
                     bounds.completion.as_secs()
                 ),
             };
-            let stage = stall.stage();
-            if attempt <= 1 {
-                AttemptVerdict::Retry {
-                    stage,
-                    cause: format!("{what}; process group killed, retrying on a fresh port"),
-                }
-            } else {
-                AttemptVerdict::Final {
-                    outcome: Outcome::ToolError,
-                    cause: Some(format!(
-                        "stalled ({stage}) on {attempt} attempts (fresh port each); last: {what}"
-                    )),
-                }
-            }
+            transport(stall.stage(), what)
         }
     }
 }
@@ -845,7 +1291,7 @@ pub fn attempt_verdict(
 pub struct CheckTiming {
     /// The check's own time: the final attempt's run time.
     pub seconds: f64,
-    /// Run time of the earlier attempts, abandoned to stall retries.
+    /// Run time of the earlier attempts, abandoned to client transport retries.
     pub retry_seconds: f64,
     /// From the first attempt's start to the verdict, including any wait for
     /// the budget between attempts.
@@ -879,6 +1325,7 @@ fn ci_overrun_hint(c: &Check) -> String {
         (Backend::Apalache, Some(n)) => format!("lower `max_steps` (now {n})"),
         (Backend::Apalache, None) => "set a lower `max_steps` (now Quint's default)".to_owned(),
         (Backend::Tlc, _) => "shrink the model's constants or raise `workers`".to_owned(),
+        (Backend::Evaluator, _) => "shorten the run".to_owned(),
     };
     format!("{bound}, or set `ci = false`")
 }
@@ -1244,12 +1691,16 @@ struct Job {
 struct Running {
     job: usize,
     attempt: u32,
-    port: u16,
+    /// The Apalache server's port (`None` for a run: `quint test` uses no
+    /// server).
+    port: Option<u16>,
     started: Instant,
     /// Progress markers read from the log so far.
     scan: LogScan,
     /// When the server's start line was first seen in the log.
     server_up: Option<Instant>,
+    /// When the first pass was first seen in the log.
+    first_pass: Option<Instant>,
     /// When the server's outcome line was first seen in the log.
     server_done: Option<Instant>,
     log_path: PathBuf,
@@ -1268,7 +1719,7 @@ struct CheckRecord {
     pass: bool,
     /// The check's own time: the final attempt's run time.
     seconds: f64,
-    /// Run time of the attempts abandoned to stall retries.
+    /// Run time of the attempts abandoned to client transport retries.
     retry_seconds: f64,
     /// From the first attempt's start to the verdict.
     wall_seconds: f64,
@@ -1362,6 +1813,69 @@ fn group_rss_mb(pgids: &BTreeSet<i32>) -> BTreeMap<i32, u64> {
     pages.into_iter().map(|(g, p)| (g, p * page / (1024 * 1024))).collect()
 }
 
+/// Add the `quint` subcommand and arguments for `j`'s attempt to `cmd`.
+///
+/// Returns the Apalache server's port and heap: none for a run (`quint test`
+/// uses no server), the check's own heap for Apalache, the compile-only cap
+/// for TLC (Quint keeps the server up through the TLC run).
+fn configure_quint_command(
+    cmd: &mut Command,
+    j: &Job,
+    attempt: u32,
+    ports: &mut BTreeSet<u16>,
+) -> Result<(Option<u16>, u64)> {
+    let c = &j.check;
+    let out_dir = &j.out_dir;
+    Ok(if let Property::Run(run) = &c.property {
+        cmd.arg("test")
+            .arg(j.dir.join(&c.spec))
+            .arg(format!("--main={}", c.main))
+            .arg(format!("--match=^{run}$"))
+            .arg("--verbosity=2");
+        (None, 0)
+    } else {
+        let port = free_port(ports)?;
+        cmd.arg("verify")
+            .arg(j.dir.join(&c.spec))
+            .arg(format!("--main={}", c.main))
+            .arg(format!("--backend={}", c.backend.as_str()))
+            // TLC prints its counterexample only from verbosity 3 (Quint 0.32
+            // writes no ITF for the TLC backend); the evidence keeps it.
+            .arg(format!("--verbosity={}", if c.backend == Backend::Tlc { 3 } else { 2 }))
+            .arg(format!("--server-endpoint=localhost:{port}"));
+        match &c.property {
+            Property::Invariant(inv) => cmd.arg(format!("--invariant={inv}")),
+            Property::Temporal(prop) => cmd.arg(format!("--temporal={prop}")),
+            Property::Run(_) => unreachable!("a run is executed by `quint test` above"),
+        };
+        if let Some(steps) = c.max_steps {
+            cmd.arg(format!("--max-steps={steps}"));
+        }
+        let heap = match c.backend {
+            Backend::Apalache => {
+                cmd.arg(format!("--out-itf={}", out_dir.join("trace.itf.json").display()));
+                j.sizing.heap_mb
+            }
+            Backend::Tlc => {
+                // Quint launches TLC as `java <maxHeap> -Xss515m … -workers <workers>`,
+                // defaulting to -Xmx8G / auto; `--tlc-config` is its supported
+                // override (quint/src/tlc.ts, TlcRuntimeConfig).
+                let cfg = out_dir.join(format!("tlc-config-{attempt}.json"));
+                let body = serde_json::json!({
+                    "maxHeap": format!("-Xmx{}m", j.sizing.heap_mb),
+                    "workers": j.sizing.workers,
+                });
+                fs::write(&cfg, body.to_string())
+                    .wrap_err_with(|| format!("writing {}", cfg.display()))?;
+                cmd.arg(format!("--tlc-config={}", cfg.display()));
+                resources::COMPILE_HEAP_MB
+            }
+            Backend::Evaluator => unreachable!("parse_checks pairs the evaluator with a run"),
+        };
+        (Some(port), heap)
+    })
+}
+
 fn start_attempt(
     jobs: &[Job],
     job: usize,
@@ -1392,47 +1906,8 @@ fn start_attempt(
     let log =
         File::create(&log_path).wrap_err_with(|| format!("creating {}", log_path.display()))?;
     let log_err = log.try_clone().wrap_err("duplicating log handle")?;
-    let port = free_port(ports)?;
-
-    let c = &j.check;
     let mut cmd = quint_command();
-    cmd.arg("verify")
-        .arg(j.dir.join(&c.spec))
-        .arg(format!("--main={}", c.main))
-        .arg(format!("--backend={}", c.backend.as_str()))
-        // TLC prints its counterexample only from verbosity 3 (Quint 0.32
-        // writes no ITF for the TLC backend); the evidence keeps it.
-        .arg(format!("--verbosity={}", if c.backend == Backend::Tlc { 3 } else { 2 }))
-        .arg(format!("--server-endpoint=localhost:{port}"));
-    match &c.property {
-        Property::Invariant(inv) => cmd.arg(format!("--invariant={inv}")),
-        Property::Temporal(prop) => cmd.arg(format!("--temporal={prop}")),
-    };
-    if let Some(steps) = c.max_steps {
-        cmd.arg(format!("--max-steps={steps}"));
-    }
-    // The Apalache server's heap: the check's own for Apalache, the
-    // compile-only cap for TLC (Quint keeps it up through the TLC run).
-    let server_heap_mb = match c.backend {
-        Backend::Apalache => {
-            cmd.arg(format!("--out-itf={}", out_dir.join("trace.itf.json").display()));
-            j.sizing.heap_mb
-        }
-        Backend::Tlc => {
-            // Quint launches TLC as `java <maxHeap> -Xss515m … -workers <workers>`,
-            // defaulting to -Xmx8G / auto; `--tlc-config` is its supported
-            // override (quint/src/tlc.ts, TlcRuntimeConfig).
-            let cfg = out_dir.join(format!("tlc-config-{attempt}.json"));
-            let body = serde_json::json!({
-                "maxHeap": format!("-Xmx{}m", j.sizing.heap_mb),
-                "workers": j.sizing.workers,
-            });
-            fs::write(&cfg, body.to_string())
-                .wrap_err_with(|| format!("writing {}", cfg.display()))?;
-            cmd.arg(format!("--tlc-config={}", cfg.display()));
-            resources::COMPILE_HEAP_MB
-        }
-    };
+    let (port, server_heap_mb) = configure_quint_command(&mut cmd, j, attempt, ports)?;
     // Every JVM in the group sees only the CPUs the check reserved, so its
     // GC and compiler threads stay within the reservation.
     let java_tool_options = format!(
@@ -1447,19 +1922,22 @@ fn start_attempt(
     // RAM-backed tmpfs in the Lima VM that a large state space can exhaust.
     cmd.current_dir(out_dir)
         .env("TMPDIR", &tmp)
-        .env("JVM_ARGS", format!("-Xmx{server_heap_mb}m"))
         .env("JAVA_TOOL_OPTIONS", java_tool_options)
         .env(RUN_MARKER_ENV, run_id)
         .stdin(Stdio::null())
         .stdout(log)
         .stderr(log_err);
+    if port.is_some() {
+        cmd.env("JVM_ARGS", format!("-Xmx{server_heap_mb}m"));
+    }
     let group = Group::spawn(&mut cmd)?;
     event(
         out_dir,
         &format!(
-            "attempt {attempt} start pgid={} port={port} timeout={}s heap={}MiB workers={} \
+            "attempt {attempt} start pgid={} port={} timeout={}s heap={}MiB workers={} \
              server_heap={server_heap_mb}MiB reserved={} log={}",
             group.pgid,
+            port.map_or_else(|| "none".to_owned(), |p| p.to_string()),
             j.timeout.as_secs(),
             j.sizing.heap_mb,
             j.sizing.workers,
@@ -1474,6 +1952,7 @@ fn start_attempt(
         started: Instant::now(),
         scan: LogScan::default(),
         server_up: None,
+        first_pass: None,
         server_done: None,
         log_path,
         group,
@@ -1483,13 +1962,22 @@ fn start_attempt(
 
 /// Poll one attempt; `Some(end)` once it has ended (and been killed).
 /// Reads only the log bytes appended since the last poll, and stops reading
-/// once the server's outcome line is seen.
-fn poll_attempt(r: &mut Running, timeout: Duration, out_dir: &Path) -> Result<Option<AttemptEnd>> {
+/// once the client/server handoff is over ([`LogScan::handoff_done`]).
+fn poll_attempt(
+    r: &mut Running,
+    backend: Backend,
+    timeout: Duration,
+    out_dir: &Path,
+) -> Result<Option<AttemptEnd>> {
     if let Some(status) = r.group.child.try_wait().wrap_err("polling quint")? {
         r.group.reaped = true;
         return Ok(Some(AttemptEnd::Exited { success: status.success() }));
     }
-    if !r.scan.finished {
+    if backend == Backend::Evaluator {
+        // `quint test` starts no server: only the timeout applies.
+        return Ok((r.started.elapsed() >= timeout).then_some(AttemptEnd::TimedOut));
+    }
+    if !r.scan.handoff_done(backend) {
         let mut log = File::open(&r.log_path)
             .wrap_err_with(|| format!("opening {}", r.log_path.display()))?;
         log.seek(SeekFrom::Start(r.scan.fed()))
@@ -1498,10 +1986,13 @@ fn poll_attempt(r: &mut Running, timeout: Duration, out_dir: &Path) -> Result<Op
         log.read_to_end(&mut fresh)
             .wrap_err_with(|| format!("reading {}", r.log_path.display()))?;
         r.scan.feed(&fresh);
-        if r.server_up.is_none() && r.scan.server_up {
+        if r.server_up.is_none() && r.scan.server_up() {
             r.server_up = Some(Instant::now());
         }
-        if r.server_done.is_none() && r.scan.finished {
+        if r.first_pass.is_none() && r.scan.started() {
+            r.first_pass = Some(Instant::now());
+        }
+        if r.server_done.is_none() && r.scan.finished() {
             r.server_done = Some(Instant::now());
             event(
                 out_dir,
@@ -1514,14 +2005,17 @@ fn poll_attempt(r: &mut Running, timeout: Duration, out_dir: &Path) -> Result<Op
             )?;
         }
     }
-    Ok(deadline_check(
-        r.started.elapsed(),
-        r.scan.started,
-        r.server_up.map(|t| t.elapsed()),
-        r.server_done.map(|t| t.elapsed()),
-        timeout,
-        StallBounds::RUNNER,
-    ))
+    let awaiting_translation = (backend == Backend::Tlc && !r.scan.translated())
+        .then_some(r.first_pass)
+        .flatten()
+        .map(|t| t.elapsed());
+    let progress = Progress {
+        server_up: r.server_up.map(|t| t.elapsed()),
+        first_pass: r.first_pass.map(|t| t.elapsed()),
+        awaiting_translation,
+        server_done: r.server_done.map(|t| t.elapsed()),
+    };
+    Ok(deadline_check(r.started.elapsed(), progress, timeout, StallBounds::RUNNER))
 }
 
 /// Read and filter every selected `[[check]]` into a [`Job`].
@@ -1598,8 +2092,9 @@ fn announce(
     eprintln!(
         "xtask quint check: {} check(s), budget {} (--jobs ≤ {max_jobs}), TLC heap {} MiB × {} \
          workers, Apalache heap {} MiB + 1 CPU, start-up bounds {STARTUP_BOUND_SECS}s to the server, {FIRST_PASS_BOUND_SECS}s \
-         from it to the first pass, {COMPLETION_BOUND_SECS}s from its outcome to Quint's verdict, run \
-         id {run_id}",
+         from it to the first pass, {TRANSLATION_BOUND_SECS}s from it to a TLC check's TLC run, \
+         {COMPLETION_BOUND_SECS}s from its outcome to Quint's verdict, client failures retried up to \
+         {MAX_ATTEMPTS} attempts, run id {run_id}",
         jobs.len(),
         res.budget,
         res.tlc_heap_mb,
@@ -1714,7 +2209,9 @@ impl<'a> Supervisor<'a> {
             let mut i = 0;
             while i < self.running.len() {
                 let j = &self.jobs[self.running[i].job];
-                if let Some(end) = poll_attempt(&mut self.running[i], j.timeout, &j.out_dir)? {
+                if let Some(end) =
+                    poll_attempt(&mut self.running[i], j.check.backend, j.timeout, &j.out_dir)?
+                {
                     let r = self.running.remove(i);
                     self.finish_attempt(r, end)?;
                 } else {
@@ -1784,6 +2281,7 @@ impl<'a> Supervisor<'a> {
                     format!("heap {} MiB, {} workers", j.sizing.heap_mb, j.sizing.workers)
                 }
                 Backend::Apalache => format!("heap {} MiB", j.sizing.heap_mb),
+                Backend::Evaluator => "quint test".to_owned(),
             };
             eprintln!(
                 "{} start  {}/{} [{}] attempt {attempt} reserves {} ({sizing}); in use {} of {} \
@@ -1795,7 +2293,7 @@ impl<'a> Supervisor<'a> {
                 j.reservation,
                 self.in_use,
                 self.res.budget,
-                r.port,
+                r.port.map_or_else(|| "none".to_owned(), |p| p.to_string()),
                 j.timeout.as_secs(),
                 self.running.len() + 1,
                 self.queue.len(),
@@ -1852,6 +2350,7 @@ impl<'a> Supervisor<'a> {
             fs::read(&r.log_path).wrap_err_with(|| format!("reading {}", r.log_path.display()))?;
         let verdict = attempt_verdict(
             r.attempt,
+            &j.check,
             end,
             &String::from_utf8_lossy(&output),
             j.timeout,
@@ -1872,7 +2371,7 @@ impl<'a> Supervisor<'a> {
         match verdict {
             AttemptVerdict::Retry { stage, cause } => {
                 eprintln!(
-                    "{now} retry  {}/{} (stalled: {stage}): {cause}",
+                    "{now} retry  {}/{} (client failed: {stage}): {cause}",
                     j.subsystem, j.check.name
                 );
                 self.queue.push_front((r.job, r.attempt + 1));
@@ -1881,7 +2380,7 @@ impl<'a> Supervisor<'a> {
                 let rec = self.record(r.job, outcome, r.attempt, cause, r.log_path);
                 let retries = if r.attempt > 1 {
                     format!(
-                        " + {:.1}s in {} stall retr{}, {:.1}s wall",
+                        " + {:.1}s in {} client retr{}, {:.1}s wall",
                         rec.retry_seconds,
                         r.attempt - 1,
                         if r.attempt == 2 { "y" } else { "ies" },
@@ -2011,6 +2510,9 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
         eprintln!("xtask quint check: no {SPECS_DIR}/ directory; nothing to check");
         return Ok(());
     }
+    let dirs: Vec<PathBuf> =
+        subsystems(&specs, filter.subsystem.as_deref())?.into_iter().map(|(_, dir)| dir).collect();
+    require_named_runs(&root, &dirs, "check")?;
     let cpus = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let res = ResourceConfig::resolve(opts.resources, cpus, meminfo().0);
     let started_unix = unix_now();
@@ -2082,9 +2584,21 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
     // End of run: what went wrong with the evidence, last, where it is seen.
     let evidence_failures = report_evidence(recorded.as_ref());
 
+    conclude(&jobs, &records, interrupted, &evidence_failures)
+}
+
+/// Turn the run's records into its result: an error naming every check that
+/// missed its expectation, the interrupting signal or the evidence problems,
+/// or `Ok` when all passed.
+fn conclude(
+    jobs: &[Job],
+    records: &[CheckRecord],
+    interrupted: Option<i32>,
+    evidence_failures: &[String],
+) -> Result<()> {
     let failures: Vec<String> = jobs
         .iter()
-        .zip(&records)
+        .zip(records)
         .filter(|(_, r)| !r.pass)
         .map(|(j, r)| {
             format!(
@@ -2107,7 +2621,7 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
         eprintln!("xtask quint check: {} check(s) passed", jobs.len());
         return Ok(());
     }
-    bail!(final_message(&failures, jobs.len(), &evidence_failures))
+    bail!(final_message(&failures, jobs.len(), evidence_failures))
 }
 
 /// Print what `--record` did — the evidence directory, or why nothing was
@@ -2338,6 +2852,197 @@ expect = "holds"
 ci = true
 "#;
 
+    /// A check of `backend` (a TLC check carries no `max_steps`).
+    fn chk(backend: Backend) -> Check {
+        let mut c = parse(APALACHE_INV).expect("parses").remove(0);
+        c.backend = backend;
+        if backend == Backend::Tlc {
+            c.max_steps = None;
+        }
+        c
+    }
+
+    const RUN_CHECK: &str = r#"
+[[check]]
+name = "owner-happy-path"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "happyPath"
+backend = "evaluator"
+expect = "holds"
+ci = true
+"#;
+
+    #[test]
+    fn parses_a_named_run_check_on_the_evaluator() {
+        let c = parse(RUN_CHECK).expect("parses").remove(0);
+        assert_eq!(c.property, Property::Run("happyPath".into()));
+        assert_eq!(c.backend, Backend::Evaluator);
+        assert_eq!(Backend::Evaluator.as_str(), "evaluator");
+    }
+
+    #[test]
+    fn a_run_and_the_evaluator_go_together_and_take_no_jvm_settings() {
+        // A run on a model checker, and the evaluator with a property.
+        assert!(
+            reason(&RUN_CHECK.replace("\"evaluator\"", "\"tlc\""))
+                .contains("requires backend = \"evaluator\"")
+        );
+        let prop = RUN_CHECK.replace("run = \"happyPath\"", "invariant = \"Safety\"");
+        assert!(reason(&prop).contains("executes a named `run`"));
+        // A run together with a property.
+        let both = RUN_CHECK.replace("run =", "invariant = \"S\"\nrun =");
+        assert!(reason(&both).contains("not both"));
+        for (field, needle) in [
+            ("max_steps = 3", "max_steps"),
+            ("heap_mb = 1024", "heap_mb"),
+            ("workers = 2", "workers"),
+        ] {
+            let body = RUN_CHECK.replace("ci = true", &format!("ci = true\n{field}"));
+            assert!(reason(&body).contains(needle), "{field}: {}", reason(&body));
+        }
+    }
+
+    // `quint test` output captured from Quint v0.32.0.
+    const RUN_PASSED_OUT: &str =
+        "\n  counter\n    ok passes passed 1 test(s)\n\n  1 passing (68ms)\n";
+    const RUN_FAILED_OUT: &str = "\n  counter\n    1) fails failed after 1 test(s)\n\n  1 failed\n\n  1) fails:\n       Error [QNT508]: Expect condition does not hold true\n    Use --seed=0xf4a344e530218208 --match=fails to repeat.\nerror: Tests failed\n";
+    const RUN_MISSING_OUT: &str = "\n  counter\n\n";
+
+    #[test]
+    fn classify_run_accepts_module_qualified_names_by_last_segment() {
+        let pass_q = "\n  t\n    ok table_ok::shared_table::Happy passed 1 test(s)\n";
+        let fail_q = "\n  t\n    1) table_ok::shared_table::Happy failed after 1 test(s)\nerror: Tests failed\n";
+        // bare form
+        assert_eq!(classify_run(true, "    ok Happy passed 1 test(s)\n", "Happy"), Outcome::Holds);
+        // qualified form
+        assert_eq!(classify_run(true, pass_q, "Happy"), Outcome::Holds);
+        // same suffix, different run: no prefix or suffix match
+        assert_eq!(classify_run(true, pass_q, "appy"), Outcome::ToolError);
+        assert_eq!(classify_run(true, pass_q, "UnHappy"), Outcome::ToolError);
+        assert_eq!(classify_run(true, pass_q, "shared_table"), Outcome::ToolError);
+        // failing qualified form
+        assert_eq!(classify_run(false, fail_q, "Happy"), Outcome::Violation);
+        assert_eq!(classify_run(false, fail_q, "appy"), Outcome::ToolError);
+    }
+
+    #[test]
+    fn classify_run_requires_quints_line_for_that_run() {
+        assert_eq!(classify_run(true, RUN_PASSED_OUT, "passes"), Outcome::Holds);
+        assert_eq!(classify_run(false, RUN_FAILED_OUT, "fails"), Outcome::Violation);
+        // `--match` naming no run exits 0 with no line: never a pass.
+        assert_eq!(classify_run(true, RUN_MISSING_OUT, "nosuch"), Outcome::ToolError);
+        // Another run's line, or a marker with the wrong exit status, is no result.
+        assert_eq!(classify_run(true, RUN_PASSED_OUT, "pass"), Outcome::ToolError);
+        assert_eq!(classify_run(false, RUN_PASSED_OUT, "passes"), Outcome::ToolError);
+        assert_eq!(classify_run(true, RUN_FAILED_OUT, "fails"), Outcome::ToolError);
+        // A non-zero exit that is not a failed run (a parse error) is a tool error.
+        assert_eq!(classify_run(false, NAME_ERROR_OUT, "fails"), Outcome::ToolError);
+    }
+
+    #[test]
+    fn a_run_is_judged_by_quint_test_and_never_retried_as_a_transport_failure() {
+        let (t, s) = (SECS(900), BOUNDS);
+        let run = |name: &str| Check {
+            property: Property::Run(name.into()),
+            ..parse(RUN_CHECK).expect("parses").remove(0)
+        };
+        assert_eq!(
+            attempt_verdict(1, &run("passes"), EXIT_0, RUN_PASSED_OUT, t, s),
+            AttemptVerdict::Final { outcome: Outcome::Holds, cause: None }
+        );
+        assert_eq!(
+            attempt_verdict(
+                1,
+                &run("fails"),
+                AttemptEnd::Exited { success: false },
+                RUN_FAILED_OUT,
+                t,
+                s
+            ),
+            AttemptVerdict::Final { outcome: Outcome::Violation, cause: None }
+        );
+        // No server, so a silent exit 0 is a tool error, not a dropped call.
+        assert!(matches!(
+            attempt_verdict(1, &run("nosuch"), EXIT_0, RUN_MISSING_OUT, t, s),
+            AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(_) }
+        ));
+    }
+
+    fn idx(src: &str) -> spec_index::QntIndex {
+        spec_index::index(src).expect("indexes")
+    }
+
+    const STATEFUL: &str = "module owner {\n  var n: int\n  action init = n' = 0\n  action step = n' = n + 1\n  run happyPath = init.then(step)\n}\nmodule owner_ok { import owner.* from \"./owner\" }\n";
+
+    #[test]
+    fn imports_resolve_relative_to_the_importing_file() {
+        assert_eq!(resolve_import("owner.qnt", "./landing"), "landing.qnt");
+        assert_eq!(resolve_import("hazard/h.qnt", "../owner"), "owner.qnt");
+        assert_eq!(resolve_import("hazard/h.qnt", "./x.qnt"), "hazard/x.qnt");
+        assert_eq!(resolve_import("h.qnt", "../outside"), "../outside.qnt");
+    }
+
+    #[test]
+    fn a_stateful_module_without_a_named_run_is_a_problem() {
+        let files = BTreeMap::from([
+            ("owner.qnt".to_owned(), idx("module owner { action init = true action step = true }")),
+            // A definitions-only module needs no run.
+            ("landing.qnt".to_owned(), idx("module landing { pure def f(x: int): int = x }")),
+        ]);
+        let problems = spec_run_problems("specs/quint/sub", &files, Some(&[]));
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(
+            problems[0].starts_with("specs/quint/sub/owner.qnt: module `owner` (line 1) declares a `step` relation but no named `run`"),
+            "{}",
+            problems[0]
+        );
+    }
+
+    #[test]
+    fn every_named_run_must_be_listed_and_every_listed_run_must_exist() {
+        let files = BTreeMap::from([
+            ("owner.qnt".to_owned(), idx(STATEFUL)),
+            ("hazard/h.qnt".to_owned(), idx("module h { import owner.* from \"../owner\" }")),
+        ]);
+        let run_check = |spec: &str, run: &str| Check {
+            spec: PathBuf::from(spec),
+            property: Property::Run(run.into()),
+            ..parse(RUN_CHECK).expect("parses").remove(0)
+        };
+        // Unlisted: named file, module, run and line.
+        let problems = spec_run_problems("specs/quint/sub", &files, Some(&[]));
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(
+            problems[0].contains("specs/quint/sub/owner.qnt: run `happyPath` of module `owner` (line 5) is not listed in specs/quint/sub/checks.toml"),
+            "{}",
+            problems[0]
+        );
+        // No manifest at all.
+        let none = spec_run_problems("specs/quint/sub", &files, None);
+        assert!(none[0].contains("the subsystem has no specs/quint/sub/checks.toml"), "{none:#?}");
+        // Listed directly, or through a spec that imports the declaring file.
+        assert!(
+            spec_run_problems("s", &files, Some(&[run_check("owner.qnt", "happyPath")])).is_empty()
+        );
+        assert!(
+            spec_run_problems("s", &files, Some(&[run_check("hazard/h.qnt", "happyPath")]))
+                .is_empty()
+        );
+        // A listed run nothing declares, alongside the run left unlisted.
+        let typo = spec_run_problems("s", &files, Some(&[run_check("owner.qnt", "happyPth")]));
+        assert_eq!(typo.len(), 2, "{typo:#?}");
+        assert!(
+            typo.iter().any(|p| p.contains(
+                "check `owner-happy-path`: run `happyPth` is declared neither in owner.qnt"
+            )),
+            "{typo:#?}"
+        );
+        // An invariant check does not list a run.
+        let inv = parse(APALACHE_INV).expect("parses");
+        assert_eq!(spec_run_problems("s", &files, Some(&inv)).len(), 1);
+    }
+
     #[test]
     fn parses_apalache_invariant_check() {
         let checks = parse(APALACHE_INV).expect("valid manifest");
@@ -2550,8 +3255,18 @@ expect = "violation"
     const BOUNDS: StallBounds = StallBounds {
         server: Duration::from_secs(120),
         first_pass: Duration::from_secs(45),
+        translation: Duration::from_secs(60),
         completion: Duration::from_secs(60),
     };
+    const NO_TRANSLATION: AttemptEnd = AttemptEnd::Stalled(Stall::NoTranslation);
+
+    fn up(server: u64) -> Progress {
+        Progress { server_up: Some(SECS(server)), ..Progress::default() }
+    }
+
+    fn working(server: u64, pass: u64) -> Progress {
+        Progress { first_pass: Some(SECS(pass)), ..up(server) }
+    }
     const NOT_UP: AttemptEnd = AttemptEnd::Stalled(Stall::ServerNotUp);
     const NO_PASS: AttemptEnd = AttemptEnd::Stalled(Stall::NoFirstPass);
     const NO_RESULT: AttemptEnd = AttemptEnd::Stalled(Stall::NoClientResult);
@@ -2559,32 +3274,45 @@ expect = "violation"
     #[test]
     fn deadline_check_orders_timeout_before_startup_hang() {
         let t = SECS(900);
+        let none = Progress::default();
         // Server not up yet: the server bound runs from the attempt's start.
-        assert_eq!(deadline_check(SECS(10), false, None, None, t, BOUNDS), None);
-        assert_eq!(deadline_check(SECS(119), false, None, None, t, BOUNDS), None);
-        assert_eq!(deadline_check(SECS(120), false, None, None, t, BOUNDS), Some(NOT_UP));
+        assert_eq!(deadline_check(SECS(10), none, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(119), none, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(120), none, t, BOUNDS), Some(NOT_UP));
         // Server up: the first-pass bound runs from the server's start line,
         // and the server bound no longer applies.
-        assert_eq!(deadline_check(SECS(150), false, Some(SECS(44)), None, t, BOUNDS), None);
-        assert_eq!(deadline_check(SECS(50), false, Some(SECS(45)), None, t, BOUNDS), Some(NO_PASS));
+        assert_eq!(deadline_check(SECS(150), up(44), t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(50), up(45), t, BOUNDS), Some(NO_PASS));
         // A check Apalache has started is never a start-up hang.
-        assert_eq!(deadline_check(SECS(800), true, Some(SECS(790)), None, t, BOUNDS), None);
-        assert_eq!(deadline_check(SECS(800), true, None, None, t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(800), working(790, 788), t, BOUNDS), None);
+        let pass_only = Progress { first_pass: Some(SECS(700)), ..none };
+        assert_eq!(deadline_check(SECS(800), pass_only, t, BOUNDS), None);
         assert_eq!(
-            deadline_check(SECS(900), true, Some(SECS(890)), None, t, BOUNDS),
+            deadline_check(SECS(900), working(890, 888), t, BOUNDS),
             Some(AttemptEnd::TimedOut)
         );
         // A timeout shorter than either bound fires as a timeout.
+        assert_eq!(deadline_check(SECS(5), none, SECS(5), BOUNDS), Some(AttemptEnd::TimedOut));
+        assert_eq!(deadline_check(SECS(60), up(50), SECS(60), BOUNDS), Some(AttemptEnd::TimedOut));
+    }
+
+    #[test]
+    fn deadline_check_bounds_a_tlc_check_awaiting_its_translation() {
+        let t = SECS(900);
+        let awaiting =
+            |wait| Progress { awaiting_translation: Some(SECS(wait)), ..working(5, wait) };
+        // The healthy gap is seconds; the bound is 60 s from the first pass.
+        assert_eq!(deadline_check(SECS(10), awaiting(4), t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(65), awaiting(59), t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(66), awaiting(60), t, BOUNDS), Some(NO_TRANSLATION));
+        // Once Quint announced the TLC run, TLC may take its whole budget.
+        assert_eq!(deadline_check(SECS(899), working(895, 890), t, BOUNDS), None);
+        // The overall timeout still wins.
         assert_eq!(
-            deadline_check(SECS(5), false, None, None, SECS(5), BOUNDS),
-            Some(AttemptEnd::TimedOut)
-        );
-        assert_eq!(
-            deadline_check(SECS(60), false, Some(SECS(50)), None, SECS(60), BOUNDS),
+            deadline_check(SECS(70), awaiting(64), SECS(70), BOUNDS),
             Some(AttemptEnd::TimedOut)
         );
     }
-
     #[test]
     fn server_started_reads_the_start_line() {
         assert!(server_started("Starting checker server on port 45655...   I@22:21:49.830\n"));
@@ -2649,34 +3377,39 @@ expect = "violation"
     #[test]
     fn attempt_verdict_classifies_every_end() {
         let (t, s) = (SECS(900), BOUNDS);
+        let (apa, tlc) = (chk(Backend::Apalache), chk(Backend::Tlc));
         assert_eq!(
-            attempt_verdict(1, AttemptEnd::Exited { success: true }, OK_OUT, t, s),
+            attempt_verdict(1, &apa, AttemptEnd::Exited { success: true }, OK_OUT, t, s),
             AttemptVerdict::Final { outcome: Outcome::Holds, cause: None }
         );
         assert_eq!(
-            attempt_verdict(2, AttemptEnd::Exited { success: false }, VIOLATION_OUT, t, s),
+            attempt_verdict(2, &apa, AttemptEnd::Exited { success: false }, VIOLATION_OUT, t, s),
             AttemptVerdict::Final { outcome: Outcome::Violation, cause: None }
         );
-        match attempt_verdict(1, AttemptEnd::Exited { success: false }, NAME_ERROR_OUT, t, s) {
+        match attempt_verdict(1, &apa, AttemptEnd::Exited { success: false }, NAME_ERROR_OUT, t, s)
+        {
             AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(_) } => {}
             other => panic!("expected tool error with cause, got {other:?}"),
         }
         // A timeout is its own outcome, even when the log already holds a
-        // counterexample marker — never a violation.
-        match attempt_verdict(1, AttemptEnd::TimedOut, VIOLATION_OUT, t, s) {
+        // counterexample marker — never a violation, never retried.
+        match attempt_verdict(1, &apa, AttemptEnd::TimedOut, VIOLATION_OUT, t, s) {
             AttemptVerdict::Final { outcome: Outcome::TimedOut, cause: Some(c) } => {
                 assert!(c.contains("900s"), "{c}");
             }
             other => panic!("expected timed-out, got {other:?}"),
         }
-        match attempt_verdict(1, NOT_UP, "", t, s) {
+        match attempt_verdict(1, &apa, NOT_UP, "", t, s) {
             AttemptVerdict::Retry { stage, cause } => {
                 assert_eq!(stage, "start-up");
-                assert!(cause.contains("did not start"), "{cause}");
+                assert!(
+                    cause.contains("did not start") && cause.contains("attempt 2 of 2"),
+                    "{cause}"
+                );
             }
             other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
         }
-        match attempt_verdict(1, NO_PASS, "", t, s) {
+        match attempt_verdict(1, &tlc, NO_PASS, "", t, s) {
             AttemptVerdict::Retry { stage, cause } => {
                 assert_eq!(stage, "first pass");
                 assert!(
@@ -2686,45 +3419,154 @@ expect = "violation"
             }
             other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
         }
+        match attempt_verdict(1, &tlc, NO_TRANSLATION, "", t, s) {
+            AttemptVerdict::Retry { stage, cause } => {
+                assert_eq!(stage, "translation");
+                assert!(cause.contains("TLA+ translation") && cause.contains("60s"), "{cause}");
+            }
+            other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
+        }
         // Captured: Quint exited after the server started, before any pass.
         let reflection = "Starting checker server on port 36103...   I@22:42:50.782\n\
                           The Apalache server is running on port 36103. Press Ctrl-C to stop.\n\
                           error: Error querying reflection endpoint: Error: 4 DEADLINE_EXCEEDED\n";
         let failed = AttemptEnd::Exited { success: false };
-        assert!(matches!(
-            attempt_verdict(1, failed, reflection, t, s),
-            AttemptVerdict::Retry { .. }
-        ));
-        match attempt_verdict(2, failed, reflection, t, s) {
-            AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(c) } => {
-                assert!(c.contains("start-up failed"), "{c}");
+        match attempt_verdict(1, &apa, failed, reflection, t, s) {
+            AttemptVerdict::Retry { stage, cause } => {
+                assert_eq!(stage, "first pass");
+                assert!(cause.contains("exited non-zero before the first pass"), "{cause}");
             }
-            other => panic!("expected tool error, got {other:?}"),
+            other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
         }
         // A failure after the first pass, or one that never started the
         // server (a spec error), is final on the first attempt.
         let crashed = format!("{reflection}PASS #0: SanyParser\nerror: boom\n");
         assert!(matches!(
-            attempt_verdict(1, failed, &crashed, t, s),
+            attempt_verdict(1, &apa, failed, &crashed, t, s),
             AttemptVerdict::Final { outcome: Outcome::ToolError, .. }
         ));
         assert!(matches!(
-            attempt_verdict(1, failed, NAME_ERROR_OUT, t, s),
+            attempt_verdict(1, &apa, failed, NAME_ERROR_OUT, t, s),
             AttemptVerdict::Final { outcome: Outcome::ToolError, .. }
         ));
         // A counterexample is never retried, whatever precedes it.
         assert!(matches!(
-            attempt_verdict(1, failed, &format!("{reflection}{VIOLATION_OUT}"), t, s),
+            attempt_verdict(1, &apa, failed, &format!("{reflection}{VIOLATION_OUT}"), t, s),
             AttemptVerdict::Final { outcome: Outcome::Violation, .. }
         ));
-        match attempt_verdict(2, NO_PASS, "", t, s) {
+    }
+
+    #[test]
+    fn client_failures_are_retried_until_the_attempt_budget_then_named() {
+        let (t, s) = (SECS(900), BOUNDS);
+        for attempt in 1..MAX_ATTEMPTS {
+            assert!(
+                matches!(
+                    attempt_verdict(attempt, &chk(Backend::Tlc), NO_PASS, "", t, s),
+                    AttemptVerdict::Retry { .. }
+                ),
+                "attempt {attempt} of {MAX_ATTEMPTS} must be retried"
+            );
+        }
+        match attempt_verdict(MAX_ATTEMPTS, &chk(Backend::Tlc), NO_PASS, "", t, s) {
             AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(c) } => {
-                assert!(c.contains("stalled (first pass) on 2 attempts"), "{c}");
+                assert!(
+                    c.contains("Quint client failed (first pass) on 2 attempts")
+                        && c.contains("never handed it the job"),
+                    "{c}"
+                );
+            }
+            other => panic!("expected tool error, got {other:?}"),
+        }
+        // The budget holds for an exit-classified failure too.
+        let silent = format!("{SERVER_UP_LOG}PASS #0: SanyParser   I@23:46:14.993\n");
+        match attempt_verdict(MAX_ATTEMPTS, &chk(Backend::Tlc), EXIT_0, &silent, t, s) {
+            AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(c) } => {
+                assert!(c.contains("(translation) on 2 attempts"), "{c}");
             }
             other => panic!("expected tool error, got {other:?}"),
         }
     }
 
+    /// The server lines of an attempt log up to the server's start (Quint
+    /// v0.32.0 / Apalache 0.56.1).
+    const SERVER_UP_LOG: &str = "\
+[TLC] Compiling to TLA+ (via Apalache)...
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@23:46:12.732
+Starting checker server on port 45061...                          I@23:46:12.739
+The Apalache server is running on port 45061. Press Ctrl-C to stop.
+";
+    const EXIT_0: AttemptEnd = AttemptEnd::Exited { success: true };
+
+    #[test]
+    fn a_silent_exit_0_mid_call_is_a_client_failure_and_nothing_else_is() {
+        let (t, s) = (SECS(900), BOUNDS);
+        // Captured: `owner-flows-half-close-completes` in run
+        // `guest-flow-owner/141172-1791580741.146` — Quint exited 0 after 6.6 s
+        // with the log ending at the first pass of the TLA+ translation: no
+        // TLC run, no verdict.
+        let tlc_silent = format!("{SERVER_UP_LOG}PASS #0: SanyParser   I@23:46:14.993\n");
+        match attempt_verdict(1, &chk(Backend::Tlc), EXIT_0, &tlc_silent, t, s) {
+            AttemptVerdict::Retry { stage, cause } => {
+                assert_eq!(stage, "translation");
+                assert!(
+                    cause.contains("exited 0 without its verdict")
+                        && cause.contains("attempt 2 of 2"),
+                    "{cause}"
+                );
+            }
+            other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
+        }
+        assert_eq!(
+            client_transport_failure(Backend::Tlc, true, &tlc_silent).map(|(stage, _)| stage),
+            Some("translation")
+        );
+        // Apalache: a silent exit while the server checks, or after it finished.
+        let apa_working =
+            format!("{SERVER_UP_LOG}PASS #0: SanyParser\nPASS #1: TypeCheckerSnowcat\n");
+        assert_eq!(
+            client_transport_failure(Backend::Apalache, true, &apa_working).map(|(st, _)| st),
+            Some("during check")
+        );
+        assert_eq!(
+            client_transport_failure(Backend::Apalache, true, COMPLETION_STALL_LOG)
+                .map(|(st, _)| st),
+            Some("after completion")
+        );
+        // Not client failures: TLC ran (no gRPC call in flight any more) and
+        // Quint still exited 0 without a verdict …
+        let tlc_ran = format!("{tlc_silent}[TLC] Running TLC model checker...\n");
+        assert_eq!(client_transport_failure(Backend::Tlc, true, &tlc_ran), None);
+        assert!(matches!(
+            attempt_verdict(1, &chk(Backend::Tlc), EXIT_0, &tlc_ran, t, s),
+            AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(_) }
+        ));
+        // … the unanswered Apalache-temporal prompt, which exits 0 before any
+        // server is started …
+        assert_eq!(client_transport_failure(Backend::Apalache, true, PROMPT_OUT), None);
+        assert!(matches!(
+            attempt_verdict(1, &chk(Backend::Apalache), EXIT_0, PROMPT_OUT, t, s),
+            AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(_) }
+        ));
+        // … and a non-zero exit after the first pass: Quint's own error report.
+        assert_eq!(client_transport_failure(Backend::Tlc, false, &tlc_silent), None);
+        assert_eq!(client_transport_failure(Backend::Apalache, true, ""), None);
+    }
+
+    #[test]
+    fn log_scan_sees_the_tlc_run_line_and_ends_the_handoff() {
+        let mut scan = LogScan::default();
+        scan.feed(SERVER_UP_LOG.as_bytes());
+        scan.feed(b"PASS #0: SanyParser   I@23:38:48.203\n[TLC] Running TLC mod");
+        assert!(scan.started() && !scan.translated(), "a partial line must not count: {scan:?}");
+        assert!(!scan.handoff_done(Backend::Tlc));
+        scan.feed(b"el checker...\n\nTLC2 Version 2.19 of 08 August 2024\n");
+        assert!(scan.translated() && scan.handoff_done(Backend::Tlc), "{scan:?}");
+        // The TLC-run line does not end an Apalache check's handoff.
+        assert!(!scan.handoff_done(Backend::Apalache));
+        assert!(tlc_started("[TLC] Running TLC model checker...\n"));
+        assert!(!tlc_started("[TLC] Compiling to TLA+ (via Apalache)...\n"));
+    }
     /// Lines of the attempt log of `owner-flows-safety-apalache-deep` in run
     /// `guest-flow-owner/754432-1791487082.104`: the server finished at
     /// ~585 s (`The outcome is: NoError`), Quint never printed its verdict,
@@ -2754,55 +3596,47 @@ The outcome is: NoError                                           I@21:27:49.547
             scan.feed(chunk);
             at += chunk.len();
         }
-        assert!(scan.server_up && scan.started, "{scan:?}");
-        assert!(!scan.finished, "a partial outcome line must not count: {scan:?}");
+        assert!(scan.server_up() && scan.started(), "{scan:?}");
+        assert!(!scan.finished(), "a partial outcome line must not count: {scan:?}");
         scan.feed(&bytes[at..]);
-        assert!(scan.finished, "{scan:?}");
+        assert!(scan.finished(), "{scan:?}");
         assert_eq!(scan.fed(), bytes.len() as u64);
 
         // Before the outcome line nothing has finished.
         let mut early = LogScan::default();
         early.feed(&bytes[..outcome_at]);
-        assert!(early.started && !early.finished, "{early:?}");
+        assert!(early.started() && !early.finished(), "{early:?}");
         // A TLC log (no Apalache outcome line) never finishes the scan.
         let mut tlc = LogScan::default();
         tlc.feed(b"[TLC] Compiling to TLA+ (via Apalache)...\nModel checking completed.\n");
-        assert!(!tlc.finished, "{tlc:?}");
+        assert!(!tlc.finished(), "{tlc:?}");
         // A line merely mentioning the outcome is not the server's line.
         let mut quoted = LogScan::default();
         quoted.feed(b"note: The outcome is: NoError\n");
-        assert!(!quoted.finished, "{quoted:?}");
+        assert!(!quoted.finished(), "{quoted:?}");
     }
 
     #[test]
     fn deadline_check_bounds_the_wait_for_quint_after_the_server_finished() {
         let t = SECS(1800);
+        let done = |server, d| Progress { server_done: Some(SECS(d)), ..working(server, server) };
         // The captured case: started, server up for ~583 s, finished.
-        assert_eq!(
-            deadline_check(SECS(586), true, Some(SECS(583)), Some(SECS(0)), t, BOUNDS),
-            None
-        );
-        assert_eq!(
-            deadline_check(SECS(645), true, Some(SECS(642)), Some(SECS(59)), t, BOUNDS),
-            None
-        );
-        assert_eq!(
-            deadline_check(SECS(646), true, Some(SECS(643)), Some(SECS(60)), t, BOUNDS),
-            Some(NO_RESULT)
-        );
+        assert_eq!(deadline_check(SECS(586), done(583, 0), t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(645), done(642, 59), t, BOUNDS), None);
+        assert_eq!(deadline_check(SECS(646), done(643, 60), t, BOUNDS), Some(NO_RESULT));
         // The overall timeout still wins.
         assert_eq!(
-            deadline_check(SECS(1800), true, Some(SECS(1797)), Some(SECS(30)), t, BOUNDS),
+            deadline_check(SECS(1800), done(1797, 30), t, BOUNDS),
             Some(AttemptEnd::TimedOut)
         );
     }
-
     #[test]
-    fn completion_stall_is_retried_once_and_never_read_as_a_verdict() {
+    fn completion_stall_is_retried_and_never_read_as_a_verdict() {
         let (t, s) = (SECS(1800), BOUNDS);
-        // First stall: retry on a fresh port, naming the stage — not `holds`,
+        let apa = chk(Backend::Apalache);
+        // A stall: retry on a fresh port, naming the stage — not `holds`,
         // although the server log says `NoError`.
-        match attempt_verdict(1, NO_RESULT, COMPLETION_STALL_LOG, t, s) {
+        match attempt_verdict(1, &apa, NO_RESULT, COMPLETION_STALL_LOG, t, s) {
             AttemptVerdict::Retry { stage, cause } => {
                 assert_eq!(stage, "after completion");
                 assert!(
@@ -2813,11 +3647,11 @@ The outcome is: NoError                                           I@21:27:49.547
             }
             other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
         }
-        // Second stall: a tool error naming the cause.
-        match attempt_verdict(2, NO_RESULT, COMPLETION_STALL_LOG, t, s) {
+        // The last attempt's stall: a tool error naming the cause.
+        match attempt_verdict(MAX_ATTEMPTS, &apa, NO_RESULT, COMPLETION_STALL_LOG, t, s) {
             AttemptVerdict::Final { outcome: Outcome::ToolError, cause: Some(c) } => {
                 assert!(
-                    c.contains("stalled (after completion) on 2 attempts")
+                    c.contains("Quint client failed (after completion) on 2 attempts")
                         && c.contains("Quint client did not return after the server finished"),
                     "{c}"
                 );
@@ -2829,24 +3663,23 @@ The outcome is: NoError                                           I@21:27:49.547
             "{COMPLETION_STALL_LOG}[ok] No violation found (585753ms).\nYou may increase --max-steps.\n"
         );
         assert_eq!(
-            attempt_verdict(1, AttemptEnd::Exited { success: true }, &healthy, t, s),
+            attempt_verdict(1, &apa, EXIT_0, &healthy, t, s),
             AttemptVerdict::Final { outcome: Outcome::Holds, cause: None }
         );
-        // Quint exiting without a verdict after the server finished is a
-        // tool error, never `holds` from the server's line.
-        assert!(matches!(
-            attempt_verdict(1, AttemptEnd::Exited { success: true }, COMPLETION_STALL_LOG, t, s),
-            AttemptVerdict::Final { outcome: Outcome::ToolError, .. }
-        ));
+        // Quint exiting 0 without a verdict after the server finished is the
+        // client dropping the call — retried, never `holds` from the server's line.
+        match attempt_verdict(1, &apa, EXIT_0, COMPLETION_STALL_LOG, t, s) {
+            AttemptVerdict::Retry { stage, .. } => assert_eq!(stage, "after completion"),
+            other @ AttemptVerdict::Final { .. } => panic!("expected retry, got {other:?}"),
+        }
     }
-
     #[test]
     fn stall_stages_are_named() {
         assert_eq!(Stall::ServerNotUp.stage(), "start-up");
         assert_eq!(Stall::NoFirstPass.stage(), "first pass");
+        assert_eq!(Stall::NoTranslation.stage(), "translation");
         assert_eq!(Stall::NoClientResult.stage(), "after completion");
     }
-
     #[test]
     fn judge_never_passes_timeout_or_interrupt() {
         for expect in [Expect::Holds, Expect::Violation] {

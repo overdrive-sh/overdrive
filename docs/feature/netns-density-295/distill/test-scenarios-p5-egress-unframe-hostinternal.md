@@ -1,5 +1,34 @@
 # P5 — Egress unframe (hybrid), host-internal deny, mesh/non-mesh egress, VIP
 
+> **DISTILL status (2026-10-10, second increment after DG-1..DG-16).** Every
+> round-1 `UI-*` item is closed by a DG decision. One round-2 item bears on
+> P5: the authoring time of P5-S7's resolve-adapter bodies (DG-2 row 14,
+> new-step 11) is not pinned (UI-R2-16). Source of truth: feature-delta § *vsock Reconciliation and Status
+> — 2026-10-10* (scenario status table, *Attachment-cut DISTILL increment*).
+>
+> - **Authored now (compiled, registered, ignored):**
+>   `overdrive-dataplane` `integration::vsock_egress_unframe` (P5-S1, P5-S3),
+>   `integration::vsock_fragment_map` (P5-S4) — `pending DELIVER vsock
+>   new-step 4 (…)`; `overdrive-control-plane`
+>   `guest_network::prefix_boot_acceptance` (P5-S1 boot `UnframeAttach`
+>   refusal, P5-S2) — `pending DELIVER vsock attachment cut (new-step 4, …)`;
+>   `overdrive-worker` `integration::vsock_host_internal_enforce` (P5-S8) —
+>   `pending DELIVER vsock attachment cut (new-step 14, host-internal deny set,
+>   D26 output rules)`; `overdrive-worker` `integration::vsock_mesh_egress_mtls`
+>   and the `mtls_intercept_worker` unit test (P5-S10, DG-10) — `pending
+>   DELIVER vsock attachment cut (new-step 8, mesh registration, D9)`; `overdrive-core`
+>   `dataplane::mtls_mark` mark-disjointness tests (P5-S8 layer-1, DG-9) —
+>   default lane, not ignored.
+> - **Attachment cut (DG-2 rows 2, 3, 7, 9, 14):** P5-S5..S7 and the P5-S9
+>   owner `NonMesh` decision — source-local in `overdrive-control-plane`
+>   beside the owner, over `SimGuestFlowIo`. The 91f9436ff draft
+>   `overdrive-control-plane/tests/acceptance/vsock_host_internal_deny.rs` was
+>   removed and is the starting draft. The P5-S9 end-to-end cell and the P5-S8
+>   `gateway:53` accept / guest-broadcast reject cells are P6-S13's (DG-16,
+>   UI-R2-14).
+>
+> Classes: `red-classification.md`.
+
 Scope: the hybrid datagram-frame removal (host verdict strip + fragment-aware
 TC egress unframe on `lo` and every root-namespace interface — D5a, D5a-IFACE,
 FRAG-MAP-LIFECYCLE), the no-UDP-segmentation-offload source rule
@@ -20,42 +49,48 @@ are P5's.)
 
 ## Load-bearing sequencing status (read first)
 
-The P5 production surface **does not exist in the tree** (confirmed 2026-10-09):
-`overdrive-dataplane::guest_flow::{GuestFlowForwarder, converge_unframe_interfaces,
-UnframeConvergence, UnframeAttachError}`, `GUEST_UNFRAME_FRAGMENTS_MAX`,
-`OWNER_EGRESS_MARK`, the reshaped `SharedGuestNetworkOwner` methods
-(`probe_startup` VIP/stacked checks, the D26 per-flow policy), the D24a VIP
-branch + `ServiceBackendsResolve::new(vip_ranges)`, and
-`MtlsInterceptWorker::register_forwarded_outbound` are ABSENT. `MtlsResolve`,
-`ServiceBackendsResolve`, `MtlsInterceptWorker`, `VipRange`,
-`MTLS_LEG_S_DIAL_MARK` exist and are extended; `GuestNetworkError` exists and
-gains variants. Per CLAUDE.md §"Implement to the design — never invent API
-surface" and `.claude/rules/testing.md` §"RED acceptance scaffolds and
-activation", the DELIVER roadmap reconciliation (the first DELIVER activity,
-feature-delta L16554-16558) creates the production scaffolds; the compiling
-Rust RED bodies in the five owned files are **co-sequenced** with those
-scaffolds and stay **unregistered** in the crate test entrypoints until then
-(shared-infra §6). The scenario specification below is the authorable-now
-DISTILL product; the body files are authored RED input DELIVER wires. See
-§"RED / activation / gaps".
+DG-2 splits P5 into two authoring times (feature-delta § *vsock
+Reconciliation and Status — 2026-10-10*):
+
+- **Authored now.** Bodies that name only additive surface —
+  `overdrive-dataplane::guest_flow::{GuestFlowForwarder, GuestFlowLinks,
+  UnframeAttachError, GuestFlowCounters}`, `GUEST_UNFRAME_FRAGMENTS_MAX`,
+  `OWNER_EGRESS_MARK` / `MTLS_TPROXY_MARK` / `MTLS_SHARED_NFT_TABLE` (DG-9),
+  `SharedGuestNetworkOwner::{probe_startup, converge_shared}` over
+  `with_flow_io`, `MtlsInterceptWorker::register_forwarded_outbound` — are
+  complete, compiled bodies registered in their crate's test entrypoint and
+  marked `#[ignore = "pending DELIVER vsock …"]` with the activating step.
+  The crafter removes only the marker (testing.md § "RED acceptance
+  scaffolds and activation").
+- **Attachment cut.** Bodies that must call a DG-2 row-1..18 replacement
+  (here rows 2, 3, 7, 9 and 14 — `GuestAddressPool::assign`, the
+  `GuestNetworkPlan` reshape, `ForwardingActivation`,
+  `HostSharedGuestNetworkOwner::new(ports)`,
+  `ServiceBackendsResolve::new(store, frontend, vip_ranges)`) cannot compile
+  before the cut, so they are not in the tree; their plan is the
+  *Attachment-cut DISTILL increment* row "Host policy P5-S5..S7, S9 owner
+  `NonMesh` decision", written in the cut's working tree before the crafter
+  lands it.
 
 ## Files owned (disjoint)
 
-| File | Lane | Entrypoint (NOT registered yet) | Contents |
-|---|---|---|---|
-| `crates/overdrive-dataplane/tests/integration/vsock_egress_unframe.rs` | Tier-3, `host-kernel-shared` | `tests/integration.rs` → `mod integration` | unframe byte-exactness, boot attach + errno map, stacked-iface refusal, USO |
-| `crates/overdrive-dataplane/tests/integration/vsock_fragment_map.rs` | unit/proptest + Tier-3 | `tests/integration.rs` → `mod integration` | fragment-decision pure fn proptest + lifecycle S1/S2/S3 |
-| `crates/overdrive-worker/tests/integration/vsock_mesh_egress_mtls.rs` | Tier-3, `host-kernel-shared` | `tests/integration.rs` → `mod integration` | non-mesh direct (D14), mesh leg-F mTLS wire (D9) |
-| `crates/overdrive-control-plane/tests/acceptance/vsock_host_internal_deny.rs` | default lane (unit/proptest) + seeded sim | `tests/acceptance.rs` → `mod acceptance` | D26 policy order, D24a resolve branches, mark disjointness, seeded-sim owner check |
-| `crates/overdrive-control-plane/tests/integration/vsock_host_internal_enforce.rs` | Tier-3, `host-kernel-shared` | `tests/integration.rs` → `mod integration` | D26-PINS rule construction F-1..F-6 |
+| File | Lane | Entrypoint | Contents | Status |
+|---|---|---|---|---|
+| `crates/overdrive-dataplane/tests/integration/vsock_egress_unframe.rs` | Tier-3, `host-kernel-shared` | registered in `tests/integration.rs` → `mod integration` | `load` / attach, boot-interface unframe byte-exactness, `EEXIST` / `ENODEV` / `EMFILE` attach classes, USO, forwarder-crate `UDP_SEGMENT` source check (P5-S1, P5-S3) | authored, `pending DELIVER vsock new-step 4 (…)` |
+| `crates/overdrive-dataplane/tests/integration/vsock_fragment_map.rs` | Tier-3, `host-kernel-shared` | registered in `tests/integration.rs` → `mod integration` | fragment lifecycle cells S1/S2/S3 (P5-S4) | authored, `pending DELIVER vsock new-step 4 (host forwarder fragment map)` |
+| `crates/overdrive-control-plane/src/guest_network/prefix_boot_acceptance.rs` (source-local `#[cfg(test)]`, shared with P4) | default lane over `SimGuestFlowIo` | in-crate module | boot `UnframeAttach` refusal (P5-S1), stacked-interface refusal and its property (P5-S2) | authored, `pending DELIVER vsock attachment cut (new-step 4, …)` |
+| `crates/overdrive-worker/tests/integration/vsock_host_internal_enforce.rs` | Tier-3, root, `host-kernel-shared` | registered in `tests/integration.rs` → `mod integration` | D26-PINS F-1..F-6 against the production shared table written by `MtlsInterceptWorker::start_shared_owner` (P5-S8) | authored, `pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)` |
+| `crates/overdrive-worker/tests/integration/vsock_mesh_egress_mtls.rs` | Tier-3, root, `host-kernel-shared` | registered in `tests/integration.rs` → `mod integration` | forwarded-outbound port on the real `MtlsInterceptWorker`, inter-agent mTLS wire, DG-10 drop readings and refusal precedence (P5-S10) | authored, `pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)` |
+| `crates/overdrive-worker/src/mtls_intercept_worker.rs` (in-crate unit test) | default lane | in-crate | DG-10 reading 1 stage labels (P5-S10) | authored, `pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)` |
+| `crates/overdrive-core/src/dataplane/mtls_mark.rs` (in-crate unit tests) | default lane | in-crate | DG-9 mark values and pairwise-disjoint single bits (P5-S8 layer-1) | authored, not ignored (GUARD) |
+| owner host-policy tests, source-local in `overdrive-control-plane` beside `HostSharedGuestNetworkOwner` | default lane over `SimGuestFlowIo` | in-crate | P5-S5..S7, P5-S9 owner `NonMesh` decision | attachment cut (DG-2 rows 2, 3, 7, 9, 14); starting draft `overdrive-control-plane/tests/acceptance/vsock_host_internal_deny.rs` @91f9436ff (removed) |
 
-`host-kernel-shared` nextest-group entries this piece adds (MODULE-matched,
-`.config/nextest.toml`): `overdrive-dataplane::integration::vsock_egress_unframe`,
-`overdrive-dataplane::integration::vsock_fragment_map` (Tier-3 cells only),
-`overdrive-worker::integration::vsock_mesh_egress_mtls`,
-`overdrive-control-plane::integration::vsock_host_internal_enforce`. **The author
-does not edit `.config/nextest.toml` now** (shared file; reported in gaps — the
-entry co-arrives with registration in DELIVER).
+The 2026-10-09 placement `overdrive-control-plane/tests/integration/vsock_host_internal_enforce.rs`
+moved to `overdrive-worker`: the worker owns the shared nft table, and its
+integration binary is already in `host-kernel-shared` (feature-delta
+§ *vsock Test Placement*). Both `overdrive-dataplane` and `overdrive-worker`
+`integration` binaries are assigned whole to `host-kernel-shared` in
+`.config/nextest.toml`, so no per-module entry is needed.
 
 ## Lanes & layered-PBT discipline (Mandate 9 / testing.md §"Integration vs unit gating")
 
@@ -64,22 +99,30 @@ entry co-arrives with registration in DELIVER).
   FRAG-MAP-LIFECYCLE fragment-shift decision function, the D26 host-internal
   policy order, the D24a resolve classification, the `OWNER_EGRESS_MARK`
   pairwise-disjoint-bits check. PBT full (`proptest`) — unbounded/combinatorial
-  errno and fragment-train input spaces. **Placement note:** the errno
-  classifier and fragment-decision fn are pure fns in
-  `overdrive-dataplane::guest_flow`; their proptests belong in that crate's
-  DEFAULT unit lane. The owned `tests/integration/*.rs` files are
-  `integration-tests`-gated, so the pure proptests authored there carry a
-  `// LAYER-1` marker and DELIVER SHOULD relocate them into the crate unit lane
-  when it extracts the pure fn (surfaced in gaps). The D26/D24a/mark-disjoint
-  pure tests live in `vsock_host_internal_deny.rs` under `tests/acceptance/`,
-  which is control-plane's **default** lane — correct placement.
+  errno and fragment-train input spaces. **Placement (2026-10-10):** the
+  IFACE-NO-STACK property is authored as
+  `probe_startup_refuses_iff_some_root_namespace_interface_is_stacked` in
+  `overdrive-control-plane` `guest_network::prefix_boot_acceptance` (default
+  lane). The mark-disjointness check is the DG-9 default-lane unit test in
+  `overdrive-core` `dataplane::mtls_mark`. No layer-1 proptest is authored for
+  the attach-errno classifier or the fragment-decision function: the design
+  pins those by behaviour, not by a public pure-function signature, so the
+  authored P5-S1 / P5-S4 bodies are Tier-3 example cells only; a crafter
+  extraction may add a default-lane proptest in `overdrive-dataplane`. The
+  D26 policy-order and D24a resolve tests are authored at the attachment cut,
+  source-local in `overdrive-control-plane` (default lane).
 - **Layer 2 (in-memory acceptance / seeded sim)** — the D26 owner-check flow
-  (`SimMtlsResolve` + `SimSharedGuestNetworkOwner` through the owner's private
-  seam). Example-pinned (sad paths enumerated), not PBT-generated (Mandate 11).
+  over the owner seam sim `SimGuestFlowIo` (`overdrive-control-plane`
+  `#[cfg(test)] guest_network::flow_io::sim`, scripted `route_type`; read
+  surfaces `socket_observation`, `steering_observation`, `steering_effects`)
+  plus the boot refusals over `SimGuestFlowIo` in `prefix_boot_acceptance`.
+  Example-pinned (sad paths enumerated), not PBT-generated (Mandate 11).
 - **Layer 3+ (Tier-3, example-only, `host-kernel-shared`)** — every kernel
   effect: the real egress unframe attach + datagram byte-exactness, the
   fragment lifecycle with packet injection, the D26-PINS marked-socket output
-  rule, mesh/non-mesh egress through `overdrive serve` + `overdrive deploy`.
+  rule, the forwarded-outbound mesh port on the real `MtlsInterceptWorker`;
+  mesh/non-mesh egress through `overdrive serve` + `overdrive deploy` is
+  P6-S13's walking skeleton (attachment cut).
   Example-based, sad paths enumerated (Mandate 11). State-delta/Universe is
   optional at layer 3+ (Mandate 8); the Tier-3 oracles are observable kernel
   state (`bpftool net/map`, `ss`, `ip`, `tcpdump`/`WireScan`, byte-exact
@@ -98,6 +141,25 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
 ### `vsock_egress_unframe.rs` — Tier-3 + layer-1 (`host-kernel-shared`)
 
 #### P5-S1 — every interface present at boot carries the egress unframe program `@contract-shape:unbounded-preservation`
+- **Status (2026-10-10):** authored: `overdrive-dataplane`
+  `integration::vsock_egress_unframe`::`load_attaches_every_link_and_the_unframe_program_to_lo_only`,
+  `load_refuses_the_root_cgroup`,
+  `every_boot_interface_carries_unframe_and_datagrams_arrive_byte_exact`,
+  `on_a_registered_tuple_only_a_valid_frame_is_removed`,
+  `an_unregistered_datagram_passes_a_converged_interface_unchanged`,
+  `oversize_and_malformed_guest_datagrams_are_dropped_and_counted`,
+  `a_second_attach_to_an_attached_interface_fails_naming_it` (`EEXIST`),
+  `an_interface_gone_before_its_attach_fails_naming_it_and_the_others_attach`
+  (`ENODEV`), `a_descriptor_limit_at_attach_fails_as_attach_naming_the_interface`
+  (`EMFILE`) — ignored `pending DELIVER vsock new-step 4 (host forwarder)`;
+  boot refusal: `overdrive-control-plane`
+  `guest_network::prefix_boot_acceptance`::`a_failed_boot_unframe_attach_refuses_startup_and_writes_nothing_else`
+  (scripted `KernelMemory` and `Attach` failures over `SimGuestFlowIo`) —
+  ignored `pending DELIVER vsock attachment cut (new-step 4, host forwarder: egress unframe attach at boot, D5a-IFACE-BOOT)`. Not authored at Tier-3: the `ENOMEM` and
+  `ERANGE` classes (they need a fault seam or 63 foreign TCX programs; the
+  boot refusal covers `KernelMemory` through the sim). The layer-1 errno
+  classifier proptest below is not authored (no pinned pure-function
+  signature).
 - **Decision/invariant:** D5a, D5a-IFACE, D5a-IFACE-BOOT, D5a-SERVE-IFACE, R5-38,
   R5-39, G-V1. ADR-0165. Anchored on P-44 (V-17) and P-30/P-31 (V-11).
 - **Contract:** at boot `GuestFlowForwarder::load` attaches the TCX egress
@@ -122,8 +184,13 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
   unchanged); kernel link query (`bpftool net` / `GuestFlowInventory.unframe_interfaces`)
   shows the link on every interface; on an attach failure `converge_shared`
   returns `GuestNetworkError::UnframeAttach { source }` whose `source.ifindex()`
-  names the interface and `run_server` emits `health.startup.refused` reason
-  `guest_network.converge`, **before** `open_after_boot`.
+  names the interface, and the seam records no route write and no later boot
+  effect (`steering_effects()`). The authored boot-refusal body observes only
+  the owner's `GuestNetworkError` and the sim seam's effects; it does not boot
+  `run_server`. The `run_server` projection — `health.startup.refused` reason
+  `guest_network.converge`, `open_after_boot` never reached, no veth pair or
+  nft table created — is the attachment-cut cell **"`run_server` boot
+  refusal"** (DG-2 row 9) planned under P4-S13.
 - **Layer-1 property (errno classifier):** for every errno, `ENOMEM →
   UnframeAttachError::KernelMemory`; every other errno (`EEXIST`, `ENODEV`,
   `EMFILE`, `ERANGE`, any) → `UnframeAttachError::Attach`. Proptest over the
@@ -131,13 +198,23 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
 - **Evidence lane:** Tier-3 (Lima CI + metal for a real NIC) for attach +
   datagram property; seeded sim (scripted `failed` convergence) for the boot
   refusal; layer-1 proptest for the classifier.
-- **Universe (sad, boot refusal, layer 2 sim):** `{ server.boot_reached_open,
-  startup.refused_reason, error.variant, error.ifindex, side_effects.boot }` —
-  `boot_reached_open set_to(false)`, `refused_reason set_to("guest_network.converge")`,
-  `error.variant set_to(UnframeAttach)`, `side_effects.boot unchanged` (no route,
-  no listener bound beyond the attach attempt).
+- **Universe (sad, boot refusal, layer 2 sim, as authored):** `{ error.variant,
+  error.ifindex, seam boot effects }` — `error.variant set_to(UnframeAttach)`,
+  the failing interface named, the seam's effects unchanged after the attach
+  attempt (no route write, no steering effect). `boot_reached_open` and
+  `startup.refused_reason` belong to the "`run_server` boot refusal" cell at
+  the cut (P4-S13).
 
 #### P5-S2 — serve refuses to boot on a stacked root-namespace interface `@contract-shape:unbounded-preservation`
+- **Status (2026-10-10):** authored: `overdrive-control-plane`
+  `guest_network::prefix_boot_acceptance`::`serve_refuses_to_boot_on_a_stacked_root_namespace_interface`,
+  `probe_startup_refuses_iff_some_root_namespace_interface_is_stacked`
+  (the layer-1 property) — ignored `pending DELIVER vsock attachment cut (new-step 4, probe_startup stacked-interface refusal, IFACE-NO-STACK)`. Both drive
+  `HostSharedGuestNetworkOwner::with_flow_io(ports, SimGuestFlowIo)` with a
+  scripted interface inventory; the "no effect" oracle reads the sim's
+  `steering_effects` / `socket_observation`. No Tier-3 stacked-topology body
+  is authored; the refusal is decided in `probe_startup` from interface
+  facts the seam supplies.
 - **Decision/invariant:** IFACE-NO-STACK (ADR-0181), R5-38 (stacked half), G-V1.
   Anchored on P-44 (V-17 falsified stacked double-unframe).
 - **Contract:** `probe_startup` refuses `GuestNetworkError::StackedInterface {
@@ -150,18 +227,33 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
   step 1, before `compose_vm_driver` / the step-3 veth pair).
 - **Fault stimulus:** boot on a host carrying a VLAN over an interface / a macvlan
   over one / a bridge with an enslaved port.
-- **Oracle:** `probe_startup` returns `StackedInterface` naming the interface and
-  its `InterfaceStacking`; `health.startup.refused` reason `guest_network.probe`;
-  the system filesystem/kernel is unchanged (no attach, no route, no table).
+- **Oracle (as authored):** `probe_startup` returns `StackedInterface` naming
+  the interface and its `InterfaceStacking`; the sim seam records no boot
+  effect (`steering_effects()` empty, `socket_observation()` unchanged: no
+  attach, no route, no steering). The `run_server` projection —
+  `health.startup.refused` reason `guest_network.probe`, `open_after_boot`
+  never reached, no veth pair or nft table created — is the attachment-cut
+  cell **"`run_server` boot refusal"** (DG-2 row 9) planned under P4-S13.
 - **Layer-1 property:** refusal **iff** some root-namespace interface has a
   master OR a stacking link kind; a veth peer, tunnel/encrypting kinds (`vxlan`,
   `geneve`, `gre`, `ipip`, `xfrm`, `macsec`, `wireguard`) are NOT stacked.
   Proptest over a generated interface inventory. (Pure predicate is a crafter
   extraction — gaps G-1.)
-- **Evidence lane:** Tier-3 (build the stacked topology, assert refusal + no
-  effect) + layer-1 proptest for the predicate.
+- **Evidence lane:** seeded sim over `SimGuestFlowIo` (refusal + no seam
+  effect) + layer-1 proptest for the predicate, both authored; the
+  `run_server` projection at the cut (P4-S13). A Tier-3 stacked-topology body
+  is not authored (see Status).
 
 #### P5-S3 — guest datagrams survive a UDP-segmentation-offload interface byte-exact `@contract-shape:unbounded-preservation`
+- **Status (2026-10-10):** authored: `overdrive-dataplane`
+  `integration::vsock_egress_unframe`::`guest_datagrams_survive_a_uso_interface_byte_exact`
+  — ignored `pending DELIVER vsock new-step 4 (host forwarder)`;
+  `the_forwarder_crate_never_references_udp_segment` — ignored `pending
+  DELIVER vsock new-step 4 (USO-NO-SEGMENT source check)`; a GUARD that
+  already holds today (forwarder-crate half only). The owner crate's
+  `UDP_SEGMENT` half and the `getsockopt(UDP_SEGMENT)` read-back on owner
+  sockets belong to `overdrive-control-plane` and are not in the authored
+  inventory; the full `run_server` USO path is P6-S13's.
 - **Decision/invariant:** USO-NO-SEGMENT, R5-46, G-V6. ADR-0165. P-43 (V-16).
 - **Contract:** guest datagrams of every size class (empty, 1 B, each MTU
   boundary, fragmented, frame-shaped, near-miss, 59,000 B) leaving through an
@@ -179,9 +271,17 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
   over the crate source, or an architecture test).
 - **Evidence lane:** Tier-3 (production `run_server`) + source check.
 
-### `vsock_fragment_map.rs` — layer-1 proptest + Tier-3
+### `vsock_fragment_map.rs` — Tier-3
 
 #### P5-S4 — a fragmented guest datagram is unframed exactly once over its own train `@contract-shape:pure-function` (decision fn) / `@contract-shape:unbounded-preservation` (Tier-3)
+- **Status (2026-10-10):** authored: `overdrive-dataplane`
+  `integration::vsock_fragment_map`::`a_fragmented_guest_datagram_is_unframed_once_over_its_own_train`,
+  `cut_train_then_unrelated_bare_fragmented_datagram_arrives_unshifted` (S1),
+  `map_filled_beyond_capacity_loses_whole_datagrams_never_corrupts` (S2),
+  `congested_qdisc_dropping_fragments_leaves_later_datagrams_byte_exact`
+  (S3) — ignored `pending DELIVER vsock new-step 4 (host forwarder fragment
+  map)`. The layer-1 decision-function proptest below is not authored (no
+  pinned pure-function signature).
 - **Decision/invariant:** FRAG-MAP-LIFECYCLE, R5-47, G-V6. ADR-0165. P-45 (V-18).
 - **Contract:** the egress program's `Fragments` map is a `BPF_MAP_TYPE_LRU_HASH`
   (`max_entries = GUEST_UNFRAME_FRAGMENTS_MAX = 4_096`) keyed by the IPv4
@@ -214,9 +314,22 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
 - **Evidence lane:** layer-1 proptest (decision fn) + Tier-3 with packet
   injection.
 
-### `vsock_host_internal_deny.rs` — default lane (unit/proptest) + seeded sim
+### Owner host policy — source-local in `overdrive-control-plane`, default lane over `SimGuestFlowIo` (attachment cut)
+
+The 2026-10-09 file `overdrive-control-plane/tests/acceptance/vsock_host_internal_deny.rs`
+no longer exists; it is the starting draft (@91f9436ff) for the
+attachment-cut item "Host policy P5-S5..S7, S9 owner `NonMesh` decision"
+(DG-2 rows 2, 3, 7, 9, 14): flows over `SimGuestFlowIo` with scripted
+`route_type`, asserting `Refused(HostInternal | Policy |
+DestinationUnreachable)`, the owner's O3 `flow_observation()` and the sim's
+`outbox`.
 
 #### P5-S5 — a guest flow to a host-internal destination is refused HostInternal `@contract-shape:pure-function`
+- **Status (2026-10-10):** attachment cut (DG-2 rows 2, 3, 7, 9): flows over
+  `SimGuestFlowIo` with scripted `route_type` drive the owner's per-flow
+  policy; asserts `Refused(HostInternal)` / `Refused(Policy)` per the order
+  below, O3 `flow_observation()` and S `outbox`, with allocation state
+  unchanged. No authored test yet.
 - **Decision/invariant:** D26, R5-6, G-V6. ADR-0167. Anchored on the per-flow
   policy order (owner).
 - **Contract:** the owner's per-flow policy evaluates in a fixed order, first
@@ -243,6 +356,13 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
   unchanged`, `counters.host_internal appended_with(1)`.
 
 #### P5-S6 — a late-added host address is still rejected by the kernel rule (TOCTOU) `@contract-shape:bounded-change`
+- **Status (2026-10-10):** attachment cut (DG-2 rows 2, 3, 7, 9): the owner's
+  association-end classification over `SimGuestFlowIo` (scripted transmit
+  error on H) asserts `FlowCloseCause::DestinationUnreachable`, then the next
+  datagram `Refused(HostInternal)`, via O3 and S `outbox`. The kernel-rule
+  half (a marked socket rejected regardless of when the address was added)
+  is authored in P5-S8's `vsock_host_internal_enforce`; the forwarder-redirect
+  transmit on H (R5-7, F-4) is P6-S13's walking skeleton.
 - **Decision/invariant:** D26-PINS F-4, R5-7, G-V6. ADR-0167. P-47 (V-21).
 - **Contract:** a host address added **between** the owner's check and the
   connect is still rejected by the constant marked-socket output rule, closing
@@ -266,6 +386,11 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
   for the owner's association-end classification.
 
 #### P5-S7 — guest access to a service VIP is mesh-resolved, unknown-VIP refused, datagram-VIP rewritten `@contract-shape:pure-function`
+- **Status (2026-10-10):** attachment cut (DG-2 rows 2, 3, 7, 9, 14; row 14 is
+  `ServiceBackendsResolve::new(store, frontend, vip_ranges)`, landed in its
+  own new-step 11): the D24a VIP branch arms and the owner's `Mesh` /
+  `MeshUnreachable` decision over `SimGuestFlowIo`. The enforced mesh path is
+  P6-S13's walking skeleton. No authored test yet.
 - **Decision/invariant:** D24, D24a, R5-8, G-V6. ADR-0164, ADR-0153. P-32 (VIP).
 - **Contract:** `ServiceBackendsResolve` (the VIP branch, D24a) classifies a TCP
   `(vip, port, Tcp)` matching a service exactly as a frontend hit (`Mesh(first
@@ -288,9 +413,33 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
 - **Evidence lane:** unit (resolve branches, mutation-killing) + Tier-3 (V-6,
   inside the walking skeleton / P6) for the enforced mesh path.
 
-### `vsock_host_internal_enforce.rs` — Tier-3 (`host-kernel-shared`)
+### `overdrive-worker/tests/integration/vsock_host_internal_enforce.rs` — Tier-3 (`host-kernel-shared`)
 
 #### P5-S8 — the host-internal output rule rejects marked owner sockets, structurally `@contract-shape:unbounded-preservation`
+- **Status (2026-10-10):** authored: `overdrive-worker`
+  `integration::vsock_host_internal_enforce`::`a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_without_hang`,
+  `a_marked_tcp_connect_to_a_host_interface_address_is_refused`,
+  `a_marked_udp_first_transmit_to_a_local_service_fails_eperm` (F-3),
+  `a_marked_udp_socket_reusing_an_unmarked_flows_source_port_is_still_rejected`
+  (F-1), `a_marked_udp_transmit_to_a_subnet_directed_broadcast_reaches_no_service`,
+  `a_marked_udp_transmit_to_the_limited_broadcast_reaches_no_service`,
+  `a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eperm`
+  (F-5), `a_marked_tcp_connect_to_a_link_local_service_is_refused`,
+  `a_packet_carrying_the_owner_bit_among_other_bits_is_refused` (F-6),
+  `a_marked_connect_storm_across_repeated_table_replacements_reaches_no_local_service`
+  (F-2), and three controls (ignored with their step; pass against today's table) `a_marked_tcp_connect_to_a_neighbour_stays_reachable`,
+  `a_marked_udp_transmit_to_an_off_host_address_is_not_rejected` (F-5
+  reachable half), `a_packet_carrying_only_the_leg_s_or_tproxy_mark_reaches_a_local_service`
+  (F-6 unaffected half) — all ignored `pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)`. The controls hold
+  against today's table; the rejection cells are RED until the D26 output
+  rules land. The `gateway:53` accept cell and the guest prefix's broadcast
+  reject cell need the shared prefix `local` route that only
+  `overdrive-control-plane`'s `converge_shared` writes, so they move to
+  P6-S13 at the attachment cut (UI-R2-14); a worker-crate body would have to
+  hand-install that route. Layer-1: `overdrive-core`
+  `dataplane::mtls_mark`::`overdrive_marks_are_single_bits_and_pairwise_disjoint`,
+  `overdrive_marks_and_table_carry_their_pinned_values` (DG-9) — default
+  lane, not ignored (GUARD).
 - **Decision/invariant:** D26-PINS (F-1, F-2, F-3, F-5, F-6), R5-48, G-V6.
   ADR-0167. P-47 (V-21).
 - **Contract:** with the production shared firewall table —
@@ -307,24 +456,36 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
     prefix's broadcast address and `224.0.0.1` reaches no host service — with and
     without `SO_BROADCAST` — while `gateway:53`, an off-host address and a
     neighbour stay reachable (`fib daddr type != unicast` plus loopback /
-    link-local).
+    link-local). (The prefix-broadcast and `gateway:53` cells are P6-S13's,
+    UI-R2-14.)
   - **F-6 (mark):** a packet carrying the owner bit with other bits set is
     rejected; a packet with only the leg-S or TPROXY mark is unaffected.
-- **Production owner path:** `run_server` composes the shared table; the owner
-  marks H with `OWNER_EGRESS_MARK` for every direct-connect flow (not leg-F).
-- **Layer-1 property:** `OWNER_EGRESS_MARK`, `MTLS_LEG_S_DIAL_MARK` and the
-  TPROXY mark are **pairwise-disjoint single bits** (unit, default lane — but
-  this cell lives here with its Tier-3 siblings per file ownership; marked
-  `// LAYER-1`, DELIVER may relocate).
+- **Production owner path:** `run_server` composes the shared table, whose
+  owner is the mTLS worker (`MtlsInterceptWorker::start_shared_owner` over
+  the production `HostMtlsIntercept`; a successor worker's call replaces the
+  table). The owner marks H with `OWNER_EGRESS_MARK` for every direct-connect
+  flow (not leg-F). In the authored bodies a marked userspace socket stands in
+  for H; no body writes an nft rule, set or chain itself.
+- **Layer-1 property:** `OWNER_EGRESS_MARK`, `MTLS_LEG_S_DIAL_MARK` and
+  `MTLS_TPROXY_MARK` are **pairwise-disjoint single bits** — the DG-9
+  default-lane unit test in `overdrive-core` `dataplane::mtls_mark`.
 - **Fault stimulus:** each F-case enumerated as a named Tier-3 cell (`Sad_*`).
 - **Oracle:** host service byte count == 0 for rejected dials; `ECONNREFUSED` /
   `EPERM` observed; latency bounded (no hang); reachable destinations still
   reachable; the mark-disjoint unit assertion.
 - **Evidence lane:** Tier-3 (production table) + unit (mark constants).
 
-### `vsock_mesh_egress_mtls.rs` — Tier-3 (`host-kernel-shared`)
+### Mesh and non-mesh egress — `overdrive-worker` Tier-3 (P5-S10), owner decision at the cut (P5-S9)
 
 #### P5-S9 — non-mesh guest egress is kernel-forwarded directly to its destination `@contract-shape:unbounded-preservation`
+- **Status (2026-10-10):** attachment cut (DG-2 rows 2, 3, 7, 9; DG-16): the
+  owner-level `NonMesh` decision — route-type check, marked direct connect,
+  `DestinationUnreachable` projection — is a seeded-sim scenario over
+  `SimGuestFlowIo`, source-local in `overdrive-control-plane`; asserts O3 and
+  S `outbox`, and that no `register_forwarded_outbound` is made. The
+  end-to-end non-mesh egress cell (destination receives bytes, no leg-F hop
+  on the wire) is P6-S13's walking skeleton. Not in
+  `vsock_mesh_egress_mtls.rs`. No authored test yet.
 - **Decision/invariant:** D14, G-V6. ADR-0162. Anchored on D14 (leg-F cleartext
   relay removed).
 - **Contract:** a guest TCP flow to a non-mesh unicast destination is forwarded
@@ -342,6 +503,28 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
   `overdrive_testing::cidr_lease::TestCidrLease::acquire` — NOT a CIDR literal).
 
 #### P5-S10 — mesh guest egress is resolved once at pairing and enforced with mTLS on the inter-agent wire `@contract-shape:unbounded-preservation`
+- **Status (2026-10-10):** authored: `overdrive-worker`
+  `integration::vsock_mesh_egress_mtls`::`registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_leg_f_resolving_again`,
+  `a_replayed_peer_and_an_unregistered_peer_are_closed_by_leg_f_without_resolution`,
+  `a_second_registration_for_the_same_forwarder_address_is_refused`,
+  `an_allocation_without_a_live_intercept_cannot_register_a_forwarded_flow`,
+  `dropping_an_unclaimed_registration_closes_the_flow_before_it_reaches_the_backend`,
+  `dropping_a_claimed_registration_with_the_loopback_leg_open_resets_both_sides`,
+  `dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fin`,
+  `forwarded_registration_refusals_follow_the_pinned_precedence`,
+  `a_clean_close_of_both_directions_ends_the_remote_stream_with_fin`,
+  `a_serve_exit_mid_flow_resets_the_remote_peer`; and the in-crate unit test
+  `overdrive-worker` `mtls_intercept_worker`::`forwarded_outbound_refusals_have_pinned_stage_labels`
+  — all ignored `pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)`.
+  The DG-10 readings pin the bodies: reading 1 stage labels
+  (`not_intercept_live`, `duplicate_forwarded_registration`), reading 2/3
+  claimed vs unclaimed drop and clean-close FIN vs reset, reading 4 refusal
+  precedence. The bodies drive the real `MtlsInterceptWorker`
+  (`HostMtlsIntercept`, `HostMtlsEnforcement`, `start_alloc`) and play the
+  owner only at the port boundary (`register_forwarded_outbound` plus the
+  forwarder-side loopback socket); the `MtlsResolve` double counts calls and
+  answers `MeshUnreachable`. The full `overdrive serve` + `overdrive deploy`
+  mesh cell is P6-S13's.
 - **Decision/invariant:** D9, G-V6. ADR-0153. Inherits CLAUDE.md §"East-west
   mTLS tests — the egress DIALER speaks PLAINTEXT".
 - **Contract:** a guest TCP flow to a mesh peer reaches leg-F only through a
@@ -368,8 +551,9 @@ outcome elevator pitch (domain verb) propagates to the test name verbatim.
 - **Oracle:** byte-exact plaintext round-trip at the guest app; leg-F wire scan
   shows `0x17` TLS records with zero cleartext on the inter-agent leg;
   `register_forwarded_outbound` claimed exactly once.
-- **Evidence lane:** Tier-3 through `overdrive serve` + `overdrive deploy`
-  (mesh peer another node / HeldServerIdentity PKI).
+- **Evidence lane:** Tier-3 adapter integration on the real
+  `MtlsInterceptWorker` (remote peer holding an SVID chain from the test CA);
+  the `overdrive serve` + `overdrive deploy` cell is P6-S13's.
 
 ## Required boundary scenarios — G-V1 (unframe-attach half) and G-V6 (egress legs)
 
@@ -379,11 +563,11 @@ unframe-attach half of G-V1 and the egress-legs half of G-V6.
 | Row | G-V1 (unframe attach) | G-V6 (egress legs) | Covered by |
 |---|---|---|---|
 | 1 available | boot attaches every present interface; datagrams byte-exact | `Paired` mesh/non-mesh flow carries bytes | P5-S1, P5-S9, P5-S10 |
-| 2 typed failure in owner domain | `UnframeAttach` / `StackedInterface` → `health.startup.refused` | `Refused(HostInternal)` / `Refused(MeshUnreachable)` / `Refused(DestinationUnreachable)` | P5-S1(sad), P5-S2, P5-S5, P5-S6, P5-S7 |
+| 2 typed failure in owner domain | `UnframeAttach` / `StackedInterface` from the owner (authored); `health.startup.refused` through `run_server` (cut cell "`run_server` boot refusal", P4-S13) | `Refused(HostInternal)` / `Refused(MeshUnreachable)` / `Refused(DestinationUnreachable)` | P5-S1(sad), P5-S2, P5-S5, P5-S6, P5-S7; P4-S13 cut cell |
 | 3 unrelated unchanged | boot refusal reclaims/adopts nothing; late-registered interfaces never gate | per-flow refusal never advances/revokes allocation `Running`/READY/Service `Stable` | P5-S2 (no effect), P5-S5 (alloc unchanged) |
 | 4 late success can't resurrect | an interface registered after boot is never attached and carries no guest datagram (D5a-LATE) | — (flow-scoped; no terminal-state resurrection in P5 egress) | P5-S1 note, P5 doc §D5a-LATE |
 | 5 disconnect/reconnect | — (boot-only) | association ended `DestinationUnreachable` does not re-associate by itself (U-2); next datagram opens a new one refused `HostInternal` | P5-S6 |
-| 6 feature disabled | single-cut; substitute sim fixture `transport: None` behaves as `network: None` | ← | shared-infra; P5 asserts no owner effect under `transport: None` |
+| 6 feature disabled | single-cut; substitute sim fixture `transport: None` behaves as `network: None` | ← | the planned attachment-cut cell P6-S12b (feature-disabled path, C5a / C5b) |
 
 **D5a-LATE (row 4) note:** there is no late-interface attach operation, no
 link-notification watch, relist or retry for unframe attachments. The appliance
@@ -448,63 +632,58 @@ oracle traces to a design-pinned observable or a crafter-extractable pure fn.
 
 ## RED / activation / gaps
 
-- **Activation markers.** Every body carries `#[ignore = "pending DELIVER …"]`
-  naming the activating DELIVER work (roadmap reconciliation is the first
-  DELIVER activity; exact step numbers are produced by it — the markers name the
-  decision + activity):
-  - P5-S1/S2/S3/S4 → the egress-unframe forwarder + `probe_startup`
-    stacked/USO checks (forwarder-load step, ≈ step 4; D5a-IFACE / IFACE-NO-STACK
-    / USO-NO-SEGMENT / FRAG-MAP-LIFECYCLE).
-  - P5-S5/S6/S7/S8 → the owner D26 policy + `OWNER_EGRESS_MARK` rule +
-    `connect4`/VIP resolve (owner + rule step, ≈ steps 9/11; D26 / D26-PINS /
-    D24 / D24a).
-  - P5-S9/S10 → non-mesh direct + mesh leg-F registration (egress step, ≈ step
-    ≥ 9; D14 / D9).
-- **Blocked on nothing** — no contract-shaping validation item is open (V-16/17/18
-  = P-43/44/45; V-21 = P-47; all DONE). These are normal RED scaffolds, not
-  blocked.
-- **Gaps / shared-fixture dependencies (reported, NOT edited by this piece):**
-  - **G-1 (pure-fn extraction, internal structure — CLAUDE.md §"interface
-    contracts, not internal structure").** The attach-errno classifier, the
-    IFACE-NO-STACK stacked predicate, the FRAG-MAP-LIFECYCLE fragment-shift
-    decision fn, the D26 per-flow policy order, and the D24a resolve
-    classification are PURE fns the design pins by *behaviour* (enum + map +
-    table) but not by a public pure-fn signature. DELIVER extracts them (Mandate
-    4 / CM-D) and SHOULD place the layer-1 proptest in the owning crate's
-    **default** unit lane. The bodies reference recommended signatures marked
-    `// CRAFTER-EXTRACTION`; the exact name/location is the crafter's HOW, not a
-    design gap routed to DESIGN.
-  - **G-2 (shared sim + fixtures; layer placement).** The seeded-sim
-    P5-S1(sad)/S5 bodies need `SimSharedGuestNetworkOwner` reshaped to the new
-    traits + `SimMtlsResolve` VIP-branch scripting + the owner's private
-    forwarder seam (`SimGuestFlowForwarder` scripting
-    `converge_unframe_interfaces` `failed` entries) — shared-layer, first-needer
-    creates (shared-infra §3). **The crate-local Tier-3 bodies drive their own
-    crate's real objects, NOT `boot_vsock_node`** (an `overdrive-dataplane` /
-    `overdrive-worker` test depending on `tests/conformance` is a dependency
-    cycle): `vsock_egress_unframe.rs` / `vsock_fragment_map.rs` drive
-    `GuestFlowForwarder` directly over a RAII veth fixture (the existing
-    `tests/integration/helpers` veth pair); `vsock_mesh_egress_mtls.rs` drives
-    `MtlsInterceptWorker` leg-F directly + a route-disjoint netns peer
-    (`TestCidrLease`); `vsock_host_internal_enforce.rs` composes the production
-    shared table (control-plane + worker) + a marked dialer. The genuinely
-    end-to-end cells that require full `overdrive serve` + `overdrive deploy`
-    (R5-7's production redirect reporting on owner socket H; R5-46's full
-    `run_server` USO path; P5-S9/S10 through `deploy`) are discharged inside
-    **P6's walking skeleton / `tests/conformance`** (V-6); the crate-local tests
-    cover the component-level kernel behaviour and cross-reference P6.
-  - **G-3 (`.config/nextest.toml` host-kernel-shared entries).** Shared file; the
-    four module→group entries co-arrive with registration in DELIVER.
-  - **G-4 (placement).** The layer-1 pure proptests in the two
-    `tests/integration/*.rs` files are `integration-tests`-gated by their
-    entrypoint; DELIVER SHOULD relocate the pure-fn proptests (errno classifier,
-    fragment-decision fn, mark-disjointness) into the crate default unit lane so
-    they run fast and unserialized. Marked `// LAYER-1` in the bodies.
-  - **G-5 (compile verification).** Because the production surface is gated and
-    the files stay unregistered (shared-infra §6), `cargo check --all-targets`
-    does NOT compile these bodies; they are authored RED input, compile-verified
-    when DELIVER registers them against the step-1 scaffold. The exact
-    design-pinned symbols each file depends on are listed in its file header.
+- **Activation markers (exact, 2026-10-10).** Every authored body carries a
+  reasoned `#[ignore]` naming its activating DELIVER step:
+  - `pending DELIVER vsock new-step 4 (host forwarder)` —
+    `vsock_egress_unframe` P5-S1 / P5-S3 cells;
+    `pending DELIVER vsock new-step 4 (USO-NO-SEGMENT source check)` —
+    `the_forwarder_crate_never_references_udp_segment` (GUARD, holds today);
+    `pending DELIVER vsock new-step 4 (host forwarder fragment map)` —
+    `vsock_fragment_map` (P5-S4).
+  - `pending DELIVER vsock attachment cut (new-step 4, probe_startup stacked-interface refusal, IFACE-NO-STACK)` and `pending DELIVER vsock attachment cut (new-step 4, host forwarder: egress unframe attach at boot, D5a-IFACE-BOOT)` —
+    `prefix_boot_acceptance` (P5-S2, P5-S1 boot refusal).
+  - `pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)` — `vsock_host_internal_enforce` (P5-S8, including
+    its three controls, ignored with their step; they pass against today's
+    table).
+  - `pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)` —
+    `vsock_mesh_egress_mtls` and `forwarded_outbound_refusals_have_pinned_stage_labels`
+    (P5-S10).
+  - The DG-9 `mtls_mark` unit tests are not ignored (default lane).
+- **Attachment cut.** P5-S5, P5-S6 (owner half), P5-S7, P5-S9 (owner
+  `NonMesh` half) are written at the cut (DG-2 rows 2, 3, 7, 9, 14), source-local
+  in `overdrive-control-plane`, from the removed 91f9436ff draft
+  `vsock_host_internal_deny.rs`. The P5-S9 end-to-end cell, the P5-S8
+  `gateway:53` / guest-broadcast cells and every `overdrive serve` +
+  `overdrive deploy` cell are P6-S13's (DG-16, UI-R2-14).
+- **Blocked on nothing.** No contract-shaping validation item is open
+  (V-16/17/18 = P-43/44/45; V-21 = P-47; all DONE) and every round-1 design
+  gap is closed by a DG decision.
+- **Gaps (2026-10-09 list, current disposition):**
+  - **G-1 (pure-function extraction).** Unchanged as a crafter note: the
+    attach-errno classifier and the fragment-decision function have no
+    pinned public signature, so no layer-1 proptest is authored for them;
+    a crafter extraction may add one in `overdrive-dataplane`'s default
+    lane. The IFACE-NO-STACK property is authored
+    (`probe_startup_refuses_iff_some_root_namespace_interface_is_stacked`).
+    The D26 policy-order and D24a classification tests are at the cut.
+  - **G-2 (shared sim + fixtures).** Closed. The owner seam sim is
+    `SimGuestFlowIo` / `SimGuestNode` (`overdrive-control-plane`
+    `#[cfg(test)] guest_network::flow_io::sim`), already used by
+    `prefix_boot_acceptance`; the 2026-10-09 `SimSharedGuestNetworkOwner` /
+    `SimGuestFlowForwarder` names are not used. The crate-local Tier-3 bodies
+    drive their own crate's real objects (`GuestFlowForwarder` over the
+    `overdrive-dataplane` `helpers::guest_net` veth fixtures;
+    `MtlsInterceptWorker` over a `TestCidrLease` netns topology).
+  - **G-3 (`.config/nextest.toml`).** Closed. The `overdrive-dataplane` and
+    `overdrive-worker` `integration` binaries are assigned whole to
+    `host-kernel-shared`.
+  - **G-4 (placement).** Closed. No layer-1 proptest sits in an
+    `integration-tests`-gated file; the mark check is the DG-9
+    `overdrive-core` unit test.
+  - **G-5 (compile verification).** Closed. Every authored body is
+    registered and compiled (`cargo check --workspace --all-targets
+    --features integration-tests` clean on Lima, per the feature-delta
+    status); attachment-cut bodies are not in the tree (DG-2).
 
 ## Retired (by DELIVER roadmap reconciliation, NOT by this piece)
 

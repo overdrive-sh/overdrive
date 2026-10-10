@@ -563,7 +563,7 @@ fn build_client_spec(pki: &TestPki, _host_veth: Option<String>) -> AllocationSpe
         ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: None,
+        transport: None,
         service_ports: Vec::new(),
     }
 }

@@ -15,7 +15,7 @@ Bare metal removes the nesting. That is the whole reason this exists.
 | `partitions.json` | Scaleway, at install | Custom disk layout — no RAID, second disk left raw. |
 | `bootstrap.sh` | Your laptop | rsync the tree up, then drive provisioning over ssh. |
 | `provision.sh` | The box, as root | Media check, confinement identity, disks — then calls `../provision/*.sh`. |
-| `../provision/*.sh` | The box | Provisioning. Written to be reusable by Lima, but **Lima does not invoke it today** — `infra/lima/overdrive-dev.yaml` still carries its own inline blocks, so the two drift. See the scope note in `common-system.sh` for the known divergences. |
+| `../provision/*.sh` | The box | Provisioning, including `install-quint.sh` (pinned Node + Quint + JDK + Apalache under `/opt/quint-toolchain`, wrapper at `/usr/local/bin/quint`). Written to be reusable by Lima, but **Lima does not invoke it today** — `infra/lima/overdrive-dev.yaml` still carries its own inline blocks, so the two drift. See the scope note in `common-system.sh` for the known divergences. |
 
 ## Order of operations
 

@@ -149,6 +149,10 @@ pub struct SimMtlsIntercept {
     converge_shared_fault: Mutex<Option<SimInterceptFault>>,
     /// Standing fault for [`observe_shared`](MtlsIntercept::observe_shared).
     observe_shared_fault: Mutex<Option<SimInterceptFault>>,
+    /// One-shot fault for the NEXT shared-table transaction
+    /// ([`converge_shared`](MtlsIntercept::converge_shared)); consumed by the
+    /// call it fails.
+    next_table_transaction_fault: Mutex<Option<SimInterceptFault>>,
     /// The complete shared identity last installed through the sim port.
     shared_observation: Arc<Mutex<Option<InterceptPostcondition>>>,
     /// Exact listener targets recorded only while a node guard is retained.
@@ -164,6 +168,18 @@ pub struct SimMtlsIntercept {
     /// Weak live-listener table keyed by bound address. The adapter never
     /// extends a listener's life.
     listeners: Mutex<BTreeMap<SocketAddrV4, Weak<SimInterceptListener>>>,
+}
+
+/// The two states the shared nft table can be in after any single table
+/// transaction (QPROJ-7, D26-PINS F-2): no table, or the table with every
+/// constant guest-prefix rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimSharedTable {
+    /// No shared table.
+    Absent,
+    /// The shared table with every constant rule (divert, output reject,
+    /// prerouting drop).
+    Complete,
 }
 
 struct SimSharedGuard {
@@ -411,6 +427,7 @@ impl SimMtlsIntercept {
         Self {
             converge_shared_fault: Mutex::new(None),
             observe_shared_fault: Mutex::new(None),
+            next_table_transaction_fault: Mutex::new(None),
             shared_observation: Arc::new(Mutex::new(None)),
             recorded_targets: Arc::new(Mutex::new(None)),
             bind_fault: Mutex::new(None),
@@ -462,6 +479,35 @@ impl SimMtlsIntercept {
     #[must_use]
     pub fn parked_accepts(&self, at: SocketAddrV4) -> usize {
         self.live_listener(at).map_or(0, |listener| listener.state.lock().parked)
+    }
+
+    /// QPROJ-7 arbiter read: the shared table is [`SimSharedTable::Absent`],
+    /// or [`SimSharedTable::Complete`] — present with every constant
+    /// guest-prefix rule (divert, output reject, prerouting drop). These are
+    /// the only two states a single nft transaction leaves (D26-PINS F-2,
+    /// boot step 8): the sim applies a table write
+    /// ([`converge_shared`](MtlsIntercept::converge_shared)) atomically, and a
+    /// scripted failed write leaves the state as it was. Tier-3 pairing:
+    /// R5-43, R5-48 (`nft list table` read-back of the production table).
+    #[must_use]
+    pub fn shared_table_state(&self) -> SimSharedTable {
+        match &*self.shared_observation.lock() {
+            Some(InterceptPostcondition::ConstantRules { .. }) => SimSharedTable::Complete,
+            // `converge_shared` only ever records a complete `ConstantRules`
+            // program; any other recorded shape would be a partial table,
+            // which a single nft transaction cannot leave.
+            Some(other) => unreachable!("the sim records only complete shared programs: {other:?}"),
+            None => SimSharedTable::Absent,
+        }
+    }
+
+    /// Make the NEXT shared-table transaction
+    /// ([`converge_shared`](MtlsIntercept::converge_shared)) fail with `fault`
+    /// (sanctioned: [`SimInterceptFault::NftRuleInstall`]); the failed
+    /// transaction writes nothing, so [`shared_table_state`](Self::shared_table_state)
+    /// is unchanged. One-shot: consumed by the call it fails.
+    pub fn fail_next_table_transaction(&self, fault: SimInterceptFault) {
+        *self.next_table_transaction_fault.lock() = Some(fault);
     }
 
     fn live_listener(&self, at: SocketAddrV4) -> Option<Arc<SimInterceptListener>> {
@@ -584,6 +630,7 @@ impl SimMtlsIntercept {
     pub fn clear_faults(&self) {
         *self.converge_shared_fault.lock() = None;
         *self.observe_shared_fault.lock() = None;
+        *self.next_table_transaction_fault.lock() = None;
         *self.bind_fault.lock() = None;
         *self.outbound_fault.lock() = None;
         *self.inbound_fault.lock() = None;
@@ -705,6 +752,10 @@ impl MtlsIntercept for SimMtlsIntercept {
             });
         }
         if let Some(fault) = armed(&self.converge_shared_fault) {
+            return Err(materialise(fault, leg_f));
+        }
+        let next_fault = self.next_table_transaction_fault.lock().take();
+        if let Some(fault) = next_fault {
             return Err(materialise(fault, leg_f));
         }
         let observed = self.shared_observation.lock().clone();
@@ -897,6 +948,76 @@ mod tests {
             prerouting: vec![encode(leg_f)],
             output: vec![encode(leg_c)],
         }
+    }
+
+    /// QPROJ-7: a fresh adapter has no shared table; a successful table
+    /// transaction leaves it complete; a repeat at the same targets keeps it
+    /// complete.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn shared_table_state_is_absent_until_a_transaction_completes_it() {
+        let sut = SimMtlsIntercept::new();
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Absent);
+
+        let guard = converge_at_install_ports(&sut);
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Complete);
+
+        let prior = sut.observe_shared().expect("observe the converged program");
+        let again = sut
+            .converge_shared(prior.as_ref(), INSTALL_LEG_F, INSTALL_LEG_C)
+            .expect("an adopt at the same targets succeeds");
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Complete);
+        drop(again);
+        drop(guard);
+    }
+
+    /// QPROJ-7: a scripted failed table transaction writes nothing — from
+    /// `Absent` the table stays absent, from `Complete` it stays complete with
+    /// the same program — and the failure is one-shot.
+    /// CONTRACT_SHAPE: unbounded-preservation.
+    #[test]
+    fn a_failed_table_transaction_leaves_the_table_as_it_was() {
+        let fault = SimInterceptFault::NftRuleInstall { op: "observe-shared", errno: libc::EBUSY };
+        let sut = SimMtlsIntercept::new();
+
+        sut.fail_next_table_transaction(fault);
+        let err = sut
+            .converge_shared(None, INSTALL_LEG_F, INSTALL_LEG_C)
+            .err()
+            .expect("the scripted transaction fails");
+        assert!(matches!(err, InterceptError::NftRuleInstallFailed { op: "observe-shared", .. }));
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Absent, "nothing was written");
+        assert_eq!(sut.observe_shared().expect("observe"), None);
+
+        let guard = sut
+            .converge_shared(None, INSTALL_LEG_F, INSTALL_LEG_C)
+            .expect("the fault was consumed by the call it failed");
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Complete);
+        let before = sut.observe_shared().expect("observe the converged program");
+
+        sut.fail_next_table_transaction(fault);
+        let retargeted = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 4003);
+        assert!(sut.converge_shared(before.as_ref(), retargeted, INSTALL_LEG_C).is_err());
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Complete, "still complete");
+        assert_eq!(sut.observe_shared().expect("observe after the failure"), before);
+        drop(guard);
+    }
+
+    /// `clear_faults` also disarms a pending one-shot table failure.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn clear_faults_disarms_a_pending_table_failure() {
+        let sut = SimMtlsIntercept::new();
+        sut.fail_next_table_transaction(SimInterceptFault::NftRuleInstall {
+            op: "observe-shared",
+            errno: libc::EIO,
+        });
+        sut.clear_faults();
+        let guard = sut
+            .converge_shared(None, INSTALL_LEG_F, INSTALL_LEG_C)
+            .expect("no fault remains armed");
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Complete);
+        drop(guard);
     }
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
@@ -1576,6 +1697,7 @@ mod tests {
     /// Realism criterion (research Finding 5.3, DFS-4): the faults are armed in
     /// the REAL shapes the substrate produces — `libc::EPERM` is the
     /// missing-`CAP_NET_ADMIN` shape — never a generic "fail now".
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn armed_fault_surfaces_as_the_real_substrate_error() {
         for (method, fault, expected) in sanctioned_pairings() {
@@ -1603,6 +1725,7 @@ mod tests {
     /// regression makes the SECOND call take the `Ok` arm — which for
     /// `bind_transparent` would additionally drag a real socket bind into the
     /// default lane.
+    /// CONTRACT_SHAPE: unbounded-preservation.
     #[test]
     fn armed_fault_is_standing_and_fires_on_every_call() {
         let sut = SimMtlsIntercept::new();
@@ -1636,6 +1759,7 @@ mod tests {
     /// The second `clear_faults()` is the fault state machine's
     /// illegal-event-from-the-disarmed-state case (C2b), asserted as a benign
     /// no-op rather than a panic or a state flip.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn clear_faults_disarms_every_slot_and_is_idempotent() {
         let sut = SimMtlsIntercept::new();
@@ -1689,6 +1813,7 @@ mod tests {
     /// stays pending until the DELIVER step that carries B-7 (05-01) makes
     /// that `Ok` arm socket-free; before that step the arm binds a real socket
     /// (DFS-5), so the direction is not covered by the active suite.
+    /// CONTRACT_SHAPE: unbounded-preservation.
     #[test]
     fn arming_one_slot_leaves_the_others_on_their_success_arms() {
         let outbound_fault = SimInterceptFault::NftElementUpdate {

@@ -73,22 +73,7 @@ State 5: <table_live_bugAnyRestore_shared_table_ListenerTaskExit line 391, col 3
 /\ table_live_bugAnyRestore_shared_table_table = "absent"
 /\ table_live_bugAnyRestore_shared_table_repLeft = -1
 
-State 6: <table_live_bugAnyRestore_shared_table_BringUp line 661, col 3 to line 687, col 7 of module table_live_bugAnyRestore>
-/\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
-/\ table_live_bugAnyRestore_shared_table_entries = {1}
-/\ table_live_bugAnyRestore_shared_table_phase = "open"
-/\ table_live_bugAnyRestore_shared_table_lis = {1}
-/\ table_live_bugAnyRestore_shared_table_link = "pinned"
-/\ table_live_bugAnyRestore_shared_table_flDmg = TRUE
-/\ table_live_bugAnyRestore_shared_table_up = TRUE
-/\ table_live_bugAnyRestore_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ table_live_bugAnyRestore_shared_table_route = "local"
-/\ table_live_bugAnyRestore_shared_table_holders = {}
-/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> FALSE]
-/\ table_live_bugAnyRestore_shared_table_table = "absent"
-/\ table_live_bugAnyRestore_shared_table_repLeft = -1
-
-State 7: <table_live_bugAnyRestore_shared_table_RecQuiesce line 423, col 3 to line 449, col 48 of module table_live_bugAnyRestore>
+State 6: <table_live_bugAnyRestore_shared_table_RecQuiesce line 423, col 3 to line 449, col 48 of module table_live_bugAnyRestore>
 /\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
 /\ table_live_bugAnyRestore_shared_table_entries = {}
 /\ table_live_bugAnyRestore_shared_table_phase = "open"
@@ -99,11 +84,11 @@ State 7: <table_live_bugAnyRestore_shared_table_RecQuiesce line 423, col 3 to li
 /\ table_live_bugAnyRestore_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ table_live_bugAnyRestore_shared_table_route = "local"
 /\ table_live_bugAnyRestore_shared_table_holders = {"IpRules"}
-/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> FALSE]
+/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> FALSE]
 /\ table_live_bugAnyRestore_shared_table_table = "absent"
 /\ table_live_bugAnyRestore_shared_table_repLeft = -1
 
-State 8: <table_live_bugAnyRestore_shared_table_RecQuiesce line 423, col 3 to line 449, col 48 of module table_live_bugAnyRestore>
+State 7: <table_live_bugAnyRestore_shared_table_RecQuiesce line 423, col 3 to line 449, col 48 of module table_live_bugAnyRestore>
 /\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "held", FlowListeners |-> "held"]
 /\ table_live_bugAnyRestore_shared_table_entries = {}
 /\ table_live_bugAnyRestore_shared_table_phase = "open"
@@ -114,11 +99,11 @@ State 8: <table_live_bugAnyRestore_shared_table_RecQuiesce line 423, col 3 to li
 /\ table_live_bugAnyRestore_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ table_live_bugAnyRestore_shared_table_route = "local"
 /\ table_live_bugAnyRestore_shared_table_holders = {"IpRules", "FlowListeners"}
-/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> FALSE]
+/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> FALSE]
 /\ table_live_bugAnyRestore_shared_table_table = "absent"
 /\ table_live_bugAnyRestore_shared_table_repLeft = -1
 
-State 9: <table_live_bugAnyRestore_shared_table_RecRepair line 455, col 3 to line 487, col 48 of module table_live_bugAnyRestore>
+State 8: <table_live_bugAnyRestore_shared_table_RecRepair line 455, col 3 to line 487, col 48 of module table_live_bugAnyRestore>
 /\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "held", FlowListeners |-> "repaired"]
 /\ table_live_bugAnyRestore_shared_table_entries = {}
 /\ table_live_bugAnyRestore_shared_table_phase = "open"
@@ -129,11 +114,11 @@ State 9: <table_live_bugAnyRestore_shared_table_RecRepair line 455, col 3 to lin
 /\ table_live_bugAnyRestore_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ table_live_bugAnyRestore_shared_table_route = "local"
 /\ table_live_bugAnyRestore_shared_table_holders = {"IpRules", "FlowListeners"}
-/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> FALSE]
+/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> FALSE]
 /\ table_live_bugAnyRestore_shared_table_table = "absent"
 /\ table_live_bugAnyRestore_shared_table_repLeft = -1
 
-State 10: <table_live_bugAnyRestore_shared_table_RecRestore line 531, col 3 to line 591, col 51 of module table_live_bugAnyRestore>
+State 9: <table_live_bugAnyRestore_shared_table_RecRestore line 531, col 3 to line 591, col 51 of module table_live_bugAnyRestore>
 /\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
 /\ table_live_bugAnyRestore_shared_table_entries = {}
 /\ table_live_bugAnyRestore_shared_table_phase = "open"
@@ -144,17 +129,17 @@ State 10: <table_live_bugAnyRestore_shared_table_RecRestore line 531, col 3 to l
 /\ table_live_bugAnyRestore_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ table_live_bugAnyRestore_shared_table_route = "local"
 /\ table_live_bugAnyRestore_shared_table_holders = {}
-/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> TRUE]
+/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> FALSE, reopenEarly |-> TRUE]
 /\ table_live_bugAnyRestore_shared_table_table = "absent"
 /\ table_live_bugAnyRestore_shared_table_repLeft = -1
 
-State 11: <table_live_bugAnyRestore_shared_table_ListenerTaskExit line 391, col 3 to line 408, col 48 of module table_live_bugAnyRestore>
+State 10: <table_live_bugAnyRestore_shared_table_BringUp line 661, col 3 to line 687, col 7 of module table_live_bugAnyRestore>
 /\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
-/\ table_live_bugAnyRestore_shared_table_entries = {}
+/\ table_live_bugAnyRestore_shared_table_entries = {1}
 /\ table_live_bugAnyRestore_shared_table_phase = "open"
-/\ table_live_bugAnyRestore_shared_table_lis = {}
+/\ table_live_bugAnyRestore_shared_table_lis = {1}
 /\ table_live_bugAnyRestore_shared_table_link = "pinned"
-/\ table_live_bugAnyRestore_shared_table_flDmg = TRUE
+/\ table_live_bugAnyRestore_shared_table_flDmg = FALSE
 /\ table_live_bugAnyRestore_shared_table_up = TRUE
 /\ table_live_bugAnyRestore_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
 /\ table_live_bugAnyRestore_shared_table_route = "local"
@@ -163,7 +148,22 @@ State 11: <table_live_bugAnyRestore_shared_table_ListenerTaskExit line 391, col 
 /\ table_live_bugAnyRestore_shared_table_table = "absent"
 /\ table_live_bugAnyRestore_shared_table_repLeft = -1
 
-State 12: <table_live_bugAnyRestore_shared_table_RecQuiesce line 423, col 3 to line 449, col 48 of module table_live_bugAnyRestore>
+State 11: <table_live_bugAnyRestore_shared_table_RecQuiesce line 423, col 3 to line 449, col 48 of module table_live_bugAnyRestore>
+/\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+/\ table_live_bugAnyRestore_shared_table_entries = {}
+/\ table_live_bugAnyRestore_shared_table_phase = "open"
+/\ table_live_bugAnyRestore_shared_table_lis = {}
+/\ table_live_bugAnyRestore_shared_table_link = "pinned"
+/\ table_live_bugAnyRestore_shared_table_flDmg = FALSE
+/\ table_live_bugAnyRestore_shared_table_up = TRUE
+/\ table_live_bugAnyRestore_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
+/\ table_live_bugAnyRestore_shared_table_route = "local"
+/\ table_live_bugAnyRestore_shared_table_holders = {"IpRules"}
+/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> TRUE]
+/\ table_live_bugAnyRestore_shared_table_table = "absent"
+/\ table_live_bugAnyRestore_shared_table_repLeft = -1
+
+State 12: <table_live_bugAnyRestore_shared_table_ListenerTaskExit line 391, col 3 to line 408, col 48 of module table_live_bugAnyRestore>
 /\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "held", FlowListeners |-> "idle"]
 /\ table_live_bugAnyRestore_shared_table_entries = {}
 /\ table_live_bugAnyRestore_shared_table_phase = "open"
@@ -208,4 +208,19 @@ State 14: <table_live_bugAnyRestore_shared_table_RecRepair line 455, col 3 to li
 /\ table_live_bugAnyRestore_shared_table_table = "absent"
 /\ table_live_bugAnyRestore_shared_table_repLeft = -1
 
-Back to state 10: <table_live_bugAnyRestore_shared_table_RecRestore line 531, col 3 to line 591, col 51 of module table_live_bugAnyRestore>
+State 15: <table_live_bugAnyRestore_shared_table_RecRestore line 531, col 3 to line 591, col 51 of module table_live_bugAnyRestore>
+/\ table_live_bugAnyRestore_shared_table_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+/\ table_live_bugAnyRestore_shared_table_entries = {}
+/\ table_live_bugAnyRestore_shared_table_phase = "open"
+/\ table_live_bugAnyRestore_shared_table_lis = {}
+/\ table_live_bugAnyRestore_shared_table_link = "pinned"
+/\ table_live_bugAnyRestore_shared_table_flDmg = FALSE
+/\ table_live_bugAnyRestore_shared_table_up = TRUE
+/\ table_live_bugAnyRestore_shared_table_att = [IpRules |-> 0, FlowListeners |-> 0]
+/\ table_live_bugAnyRestore_shared_table_route = "local"
+/\ table_live_bugAnyRestore_shared_table_holders = {}
+/\ table_live_bugAnyRestore_shared_table_g = [absentUp |-> TRUE, bypassed |-> TRUE, reopenEarly |-> TRUE]
+/\ table_live_bugAnyRestore_shared_table_table = "absent"
+/\ table_live_bugAnyRestore_shared_table_repLeft = -1
+
+Back to state 10: <table_live_bugAnyRestore_shared_table_BringUp line 661, col 3 to line 687, col 7 of module table_live_bugAnyRestore>

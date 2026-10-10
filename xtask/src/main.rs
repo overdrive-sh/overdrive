@@ -40,16 +40,18 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
-    /// Hollow Quint-conformance-driver gate — reject always-false `cfg`
-    /// gates, empty action handlers, and `State::from_driver` projections
-    /// that read `Sim*` state or only the driver's own bookkeeping in every
-    /// quint-connect driver under `crates/*/src/**/*.rs` and
-    /// `tests/conformance/tests/*.rs`. See
-    /// `xtask/src/conformance_lint.rs` and `.claude/rules/testing.md`
-    /// § "Quint conformance".
+    /// Hollow Quint-conformance gate over `crates/*/src/**`,
+    /// `crates/*/tests/**` and `tests/conformance/**` — in every
+    /// quint-connect driver, reject always-false `cfg` gates, empty action
+    /// handlers, `State::from_driver` projections that read `Sim*` state or
+    /// only the driver's own bookkeeping, a missing `#[quint_test]`, and a
+    /// `#[quint_test]` naming a run its spec does not declare; in every file,
+    /// reject a Quint spec referenced without quint-connect and a spawned
+    /// `quint` CLI. See `xtask/src/conformance_lint.rs` and
+    /// `.claude/rules/testing.md` § "Quint conformance".
     ConformanceLint {
         /// Path to the workspace `Cargo.toml`; the scan roots are
-        /// `crates/*/src` and `tests/conformance/tests` beside it.
+        /// `crates/*/src`, `crates/*/tests` and `tests/conformance` beside it.
         #[arg(long, default_value = "Cargo.toml")]
         manifest_path: std::path::PathBuf,
     },
@@ -164,7 +166,9 @@ enum Task {
 
     /// Quint formal models under `specs/quint/<subsystem>/` — typecheck
     /// every spec, or model-check the entries of each subsystem's
-    /// `checks.toml` (Apalache / TLC via `quint verify`). Logs and ITF
+    /// `checks.toml` (Apalache / TLC via `quint verify`, named runs via
+    /// `quint test`). Both fail when a stateful module declares no named
+    /// `run` or a named run is not listed in `checks.toml`. Logs and ITF
     /// traces land under `target/quint/`; `check --record` alone writes a
     /// subsystem's `evidence/`, and `verify-evidence` checks it against the
     /// specs. See `xtask/src/quint.rs`.
@@ -271,10 +275,13 @@ enum McpAction {
 
 #[derive(Debug, Subcommand)]
 enum QuintAction {
-    /// `quint typecheck` every `specs/quint/**/*.qnt`.
+    /// `quint typecheck` every `specs/quint/**/*.qnt`, then require named
+    /// runs: every module with a `step` relation declares one, and each is
+    /// listed in its subsystem's `checks.toml`.
     Typecheck,
     /// Run the `[[check]]` entries of `specs/quint/<subsystem>/checks.toml`;
-    /// fails unless every outcome matches its `expect`.
+    /// fails unless every outcome matches its `expect`, and refuses to start
+    /// on a named-run problem (see `typecheck`).
     Check {
         /// Only checks marked `ci = true`.
         #[arg(long)]

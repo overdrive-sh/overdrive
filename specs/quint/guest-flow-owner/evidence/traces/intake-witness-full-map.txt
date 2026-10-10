@@ -34,11 +34,11 @@ State 6 [ActivateBegin]
 State 7 [BindListen]
   lis = {1}
 
-State 8 [BindListen]
-  lis = {1, 2}
+State 8 [Steer]
+  entries = {1}
 
-State 9 [Steer]
-  entries = {2}
+State 9 [BindListen]
+  lis = {1, 2}
 
 State 10 [Steer]
   entries = {1, 2}

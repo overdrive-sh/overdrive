@@ -5,8 +5,10 @@ piece-authors do not each invent it. Authored by the DISTILL planner.
 Binding rule for this project: **no `.feature` files** — scenarios are
 specified as GIVEN/WHEN/THEN in the per-piece `test-scenarios-*.md` docs
 (spec only, never parsed), and the crafter/author translates each into a Rust
-`#[test]` / `#[tokio::test]` body under `crates/{crate}/tests/{acceptance,integration}/*.rs`
-or `tests/conformance/tests/*.rs` (`.claude/rules/testing.md` §"Testing").
+`#[test]` / `#[tokio::test]` body under `crates/{crate}/tests/{acceptance,integration}/*.rs`,
+source-local in the owner crate's `src/` where the surface is crate-private
+(QPROJ-1, DG-5), or `tests/conformance/tests/*.rs` (`.claude/rules/testing.md`
+§"Testing").
 
 The design handed to DISTILL is `docs/feature/netns-density-295/feature-delta.md`
 §"Wave: DESIGN / [REF] vsock Attachment Replacement DESIGN" (L16552+) and
@@ -16,35 +18,43 @@ ADR-0145..0181. The Quint oracle is `specs/quint/guest-flow-owner/`.
 
 ## 0. Load-bearing sequencing constraint (read first)
 
-The replacement production surface (`SharedGuestNetworkOwner::activate`,
-`GuestAddressPool` CID-claim, the `guest_flow` host forwarder, `GuestPrefixSteering`,
-the CH-fork `fd=` backend, guest `overdrive-init` programs, the wire codecs)
-**does not exist yet**. DELIVER is stopped at the old-model step 08-04, the
-**roadmap reconciliation is the first DELIVER activity** (feature-delta
-L16554-16558, user decision 2026-10-08), and the old attachment-model code +
-its GREEN tests are still in tree.
+DG-2 (feature-delta § *DISTILL design-gap closure*, 2026-10-09) sorts every
+body and driver into one of two authoring times; this increment (2026-10-10)
+follows it exactly:
 
-Consequence for DISTILL authoring:
-
-- A Rust acceptance body only compiles once the production API it calls exists.
-  Per CLAUDE.md §"Implement to the design — never invent API surface" and
-  `.claude/rules/testing.md` §"RED acceptance scaffolds and activation",
-  authors MUST NOT invent production surface to make a body compile. The
-  production scaffolds (exact API shapes the feature-delta §"[REF] Interface
-  contracts" pins) are created during DELIVER roadmap reconciliation / step 1,
-  not by the DISTILL planner.
-- Therefore each piece's **scenario-spec doc is authorable now** (the real
-  DISTILL product); the **compiling Rust RED scaffolds + harness + quint-connect
-  drivers are gated** on that reconciliation. This is recorded in `blocked`.
+- **Additive surface — authored now.** New modules and types with no live
+  counterpart are RED production scaffolds (Mandate 7, `// SCAFFOLD: true`,
+  bodies `panic!("Not yet implemented -- RED scaffold")`); plain data and
+  constants are real. This covers the core vocabulary and codecs
+  (`overdrive_core::guest_transport` + `::wire`, `overdrive_core::net`, DG-7's
+  `BeaconParseError::InvalidLaunchToken`, DG-8 `DatagramFrame`, DG-11, DG-12),
+  the DG-9 marks and table name, the DG-14 constants and
+  `overdrive_dataplane::guest_steering::guest_steering_key`,
+  `overdrive_dataplane::guest_flow`, the three seams and their sims
+  (`GuestFlowIo` / `SimGuestFlowIo`, `BeaconIo` / `SimBeaconIo` /
+  `BeaconIntake`, `GuestOwnerIo` / `SimGuestOwnerIo`), `GuestFlowOwnerPorts` and
+  `HostSharedGuestNetworkOwner::with_flow_io`, the observation accessors
+  QPROJ-2 to QPROJ-6, the worker's forwarded-outbound port, and the whole
+  `overdrive-init` `transport` and `guest_flow` modules (not yet called by
+  `main`). Every body over this surface is compiled and marked
+  `#[ignore = "pending DELIVER vsock new-step N (…)"]`, or `"pending DELIVER
+  vsock attachment cut (…)"` where the behaviour lands in the cut although the
+  body names no replaced signature.
+- **Bodies that name a replaced signature — authored at the attachment cut.**
+  The pool (`GuestAddressPool::new` / `assign`), the plan reshape,
+  `AllocationSpec.transport`, `Vmm::create(&cfg, claim)`, `ForwardingActivation`,
+  `quiesce_forwarding` / `restore_forwarding`,
+  `HostSharedGuestNetworkOwner::new(ports)`, the component and operation enums,
+  `recovery_progress`, READY's `launch`, `VmDriver::new(.., beacon)` and
+  `vm_override` are DG-2 rows 1-13 and 15-18. A body or driver calling any of
+  them cannot compile before the cut and is not in the tree (no unregistered
+  file, no always-false `cfg`). The cut's DISTILL increment writes them first,
+  in the cut's working tree, from the plan in feature-delta § *Attachment-cut
+  DISTILL increment*.
 - All contract-shaping validations (V-10, V-22, V-24, V-25, V-26, V-5(c),
-  V-13, V-16, V-17, V-18, V-20, V-21) have **run** (P-37..P-48). **Nothing is
-  blocked on V-22/V-24/V-25/V-26** — their remediation decisions (ATTR-TOKEN,
-  ATTR-LIVE-CLAIM, CLAIM-PINS, STEER-PINS, HALFCLOSE-SIGNAL, CELL-RECREATE,
-  USO-NO-SEGMENT, IFACE-NO-STACK, FRAG-MAP-LIFECYCLE, D26-PINS) ARE the design.
-- `V-6, V-8, V-9, V-19, V-1(c), V-12, V-28` are DELIVER-step validations;
-  scenarios resting on them are authored as RED bodies marked
-  `#[ignore = "pending DELIVER step NN-NN"]` (normal RED-scaffold convention,
-  `.claude/rules/testing.md`), not "blocked".
+  V-13, V-16, V-17, V-18, V-20, V-21) have run (P-37..P-48). V-6, V-8, V-9,
+  V-19, V-1(c), V-12 and V-28 are DELIVER-step validations; their scenarios
+  are authored RED with a reasoned `#[ignore]` or planned at the cut.
 
 ---
 
@@ -63,93 +73,94 @@ proptest call site (`.claude/rules/testing.md` §"Property-based testing").
 
 ---
 
-## 2. Production composition harness (shared) — `tests/conformance`
+## 2. Production composition — `run_server` and the public API
 
-The walking skeleton, the cross-owner crash matrix, and every quint-connect
-conformance driver drive the **production composition** through its public
-entry points (`overdrive serve` boot via `run_server_with_obs_and_drivers`,
-and `overdrive deploy`), with only external / non-deterministic ports faked
-(Pillar 3). The root `overdrive-system-conformance` crate (`tests/conformance/`)
-already exists and depends on control-plane + core + netlink + sim + worker.
+The walking skeleton and the cross-owner crash matrix (P6-S13..S15) drive the
+**production composition** in-process through its entry points (`run_server`
+and the public HTTPS API that `overdrive deploy` calls — never the binary,
+`.claude/rules/testing.md`), with `Sim*` only at the external or
+non-deterministic ports (clock, entropy, KEK). They need the attachment cut
+(DG-2 rows 1-6) and run on native metal.
 
-Shared builder to add (shared layer, NOT owned by a single piece —
-`tests/conformance/src/lib.rs` + `tests/conformance/src/vsock_harness.rs`):
+There is no shared `boot_vsock_node` builder and no `ConformanceNode`. The one
+production-composition harness in the tree is
+`tests/conformance/src/prefix_landing.rs`: `LandingNode` (`:904`) owns the
+`ServerHandle` from `run_server` (`boot` `:912`, `kill` `:951`, `shutdown`
+`:956`) and reads the kernel through independent queries (`read_net` `:456`).
+The P6-S13 bodies written at the cut extend this harness or sit beside it in
+`tests/conformance`.
 
-- `fn boot_vsock_node(cfg) -> ConformanceNode` — boots the server composition
-  with the vsock transport wired, injecting `Sim*` at the external/
-  non-deterministic driven ports (clock, entropy, VMM, LLM, CA) and real
-  adapters for internal driven ports per the Project Infrastructure Policy
-  (`docs/architecture/atdd-infrastructure-policy.md`).
-- `ConformanceNode` exposes only the observable surface the oracles read
-  (public API, `alloc_status`, exported handler, kernel-query helpers such as
-  `ss`, `bpftool net/link/map`, `ip route`) — never private owner fields
-  (Quint-conformance rule: state projected from the observable surface,
-  `.claude/rules/testing.md` §"Quint conformance").
-
-Existing `tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs`
-is an OLD-model fail-stop test — retired by the DELIVER roadmap reconciliation
-alongside the old production code (see §7); its replacement is P6
-`vsock_crash_matrix.rs`.
+`tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs` is an
+OLD-model fail-stop test, retired in the attachment cut with the production
+code it defends (§7).
 
 ---
 
-## 3. Sim adapters (shared) — `overdrive-sim/src/adapters`
+## 3. Sim adapters and seam sims
 
-The seeded-sim lane drives the production owner path through the private seam
-with `Sim*` adapters at the driven ports (`.claude/rules/testing.md` §"Tier 1").
-The vsock surface needs these Sim adapters. Unless owned by a piece below they
-belong to the **shared layer** and the first piece to need one creates it,
-announcing it here:
+The seeded-sim lane drives the production owner through its driving ports with
+`Sim*` at the driven ports (`.claude/rules/testing.md` § "Tier 1"). Sim
+placement follows QPROJ-1's crate-graph rule: core-trait sims in
+`overdrive-sim`; every owner-seam sim source-local `#[cfg(test)]` beside its
+seam in the owner crate. Every sim enforces the preconditions the real
+adapter enforces (`.claude/rules/development.md` § "Trait definitions specify
+behavior").
 
-| Sim adapter | Models | Owner |
-|---|---|---|
-| `SimGuestCidClaim` | host-kernel CID holder table; holders outside the pool's leases (R5-19) | **P1** (CID-centric) |
-| `SimGuestFlowForwarder` | `overdrive-dataplane::guest_flow` forwarder port (install/route/abort/drain) | shared (first of P2/P3/P6) |
-| `SimGuestPrefixSteering` | `GuestPrefixSteering` load/attach/swap/steer/close with a capacity bound | shared (first of P4) |
-| `SimVmmVsock` | CH-fork `backend=vhost-kernel` probe + `fd=` launch + pre-READY exit | shared (extend `adapters/vmm.rs`; first of P1/P6) |
+| Sim | Crate / module | Models | Stepping and scripting surface | Read surface (QPROJ-7 arbiter) |
+|---|---|---|---|---|
+| `SimGuestCidClaim` | `overdrive-sim` `adapters::guest_cid_claim` | the host-kernel CID holder table, incl. holders outside the pool's leases (R5-19) | `new`, `script_claim_error`, `script_probe_deviation`, `survivor_hold` | `held_cids()`; Tier-3 pairing `vsock_cid_claim_handoff` (P1-S12) |
+| `SimBeaconIo` (`SimBeaconSocketObservation`) | `overdrive-sim` `adapters::beacon_io` | the node beacon listener (DG-4), coupled to a `SimVmm`: a connection whose VM died fails its next I/O | `new(vmm)` (delivers what is available) / `stepped(vmm)` (every `accept` / `read_line` waits for a grant), `queue_connection`, `release_accept`, `release_read`, `parked`, `fail_next_bind`, `is_bound`, `guest_write`, `guest_close`, `written_lines`, `observe_vm_exits` | `beacon_socket_observation()`: the accept queue with each queued connection's buffered READY token (`Option<LaunchToken>` from the READY `launch=` field; a line without a valid token projects `None`, UI-R2-15) and the connections the driver closed; Tier-3 pairing R5-41 (beacon part) |
+| `SimVmm::spawn_bare_process` | `overdrive-sim` `adapters::vmm` | a live VMM process with no rootfs clone, ended by `Vmm::terminate` like a `create`d one | test hook for exercising `SimBeaconIo` without staging an image | `is_live(pid)` |
+| `SimMtlsIntercept::shared_table_state` (`SimSharedTable`) | `overdrive-sim` `adapters::mtls_intercept` | the shared nft table's two states, absent or complete (U-QP-1); a failed transaction leaves it as it was | `fail_next_table_transaction(fault)`; `clear_faults` disarms it | `shared_table_state()`; Tier-3 pairing `vsock_host_internal_enforce` (P5-S8) |
+| `SimGuestFlowIo` / `SimGuestNode` | `overdrive-control-plane` `#[cfg(test)] guest_network::flow_io::sim` | the host owner seam `GuestFlowIo` (DG-3): vsock sessions and flows, intake listeners and steering, the steering link / program / prefix route, the forwarder and unframe attaches. `SimGuestNode` holds node-global objects that persist across `serve` processes | `SimGuestNode::new`, `set_host_facts`, `update_host_facts`, `fail_host_facts`, `set_stale_objects`; `SimGuestFlowIo::new(&node, SimProgramVersion)`, `exit_process`; effect stepping `hold`, `auto_release`, `auto_release_all`, `issued`, `held`, `held_of`, `release`, `fail`, `script_failure`, `script_unframe_failure`; peer stimuli `queue_connection`, `release_accept`, `release_read`, `end_connection`, `send_on_connection`, `vm_stop`, `fail_listener`, `consume_outbox`, `connect_intake_client`, `release_intake_accept`, `end_intake_client`, `pair_hangup`, `set_drained`, `deliver_vsock_end`; host facts `set_route_type`, `set_connect4_rewrite`, `set_counters` | `socket_observation()`, `steering_observation()`, `steering_effects()`; Tier-3 pairings R5-24, R5-34, R5-25 (steering) and the owner-socket R5 rows |
+| `SimGuestOwnerIo` + `SimGuestClock` | `overdrive-init` `#[cfg(test)] guest_flow::sim` | the guest owner seam `GuestOwnerIo` (DG-5): the control session, flow and slot sockets, application legs, the listener map, readiness events; one injected clock (`GuestClock`) | `SimGuestClock::new`, `advance`; `SimGuestOwnerIo::new(workload_addr, clock)`; faults `fail_next`, `fail_event_wait`, `fail_cell_creation`, `flow_vsock_error`; connects `pending_connects`, `complete_connect`, `complete_host_connect`, `complete_app_connect`; host side `host_send_control`, `host_control`, `release_control_read`, `take_outbox`, `host_take_message`, `host_take_next`, `host_take_first`, `host_open_accept`, `release_inbound_accept`, `release_inbound_request`, `host_vsock_end`, `host_observe_vsock_end`, `host_observe_legs_end`, `host_datagram`, `end_session`, `host_end_session_deferred`, `session_end_pending`, `release_session_end`, `host_owner_dies`, `guest_owner_dies`; applications `app_connect`, `app_end`, `app_send`, `app_send_on`, `app_close_socket`, `release_socket_report`, `release_slot_ready`, `set_drained`, `set_drained_default`, `set_listener_map`, `listener_map_wake`, `listener_failed`; inspection `effects`, `clear_effects`, `deliverable`, `last_wait`, `session_socket`, `control_opens`, `slot_state`, `exhausted_sends` | `guest_socket_observation()`; Tier-3 pairings R5-10, R5-14, R5-27, R5-28, R5-31, R5-45 |
 
-Every Sim adapter MUST enforce the same input preconditions the real adapter
-rejects (`.claude/rules/tdd-methodology`, "test doubles must validate inputs";
-`.claude/rules/development.md` §"Trait definitions specify behavior"). The
-existing OLD-model `adapters/guest_network.rs` and
-`invariants/netns_density_boot_order.rs` are retired by the DELIVER roadmap
-reconciliation (§7).
+The OLD-model `overdrive-sim` `adapters/guest_network.rs` and
+`invariants/netns_density_boot_order.rs` are retired in the attachment cut
+(§7). The earlier plan's `SimGuestFlowForwarder` and `SimGuestPrefixSteering`
+were never built: the forwarder and steering effects are part of the
+`GuestFlowIo` seam and `SimGuestFlowIo` models them. There is no VMM probe
+sim: Overdrive runs only with the vendored Cloud Hypervisor fork, no probe
+stage identifies the installed build, and the provisioning checksum is the
+identity check (DG-1); `/dev/vhost-vsock` access is the claim probe's
+(`GuestCidClaim::probe`).
 
 ---
 
-## 4. quint-connect conformance drivers (shared base + per-module files)
+## 4. Quint conformance drivers — placement per QPROJ-1
 
-`quint-connect = "=0.1.2"` is **already** a workspace dependency (root
-`Cargo.toml:227`) — no Cargo edit needed. No conformance driver exists yet.
+Each driver is a `quint-connect` module in its owner's crate,
+`#[cfg(all(test, feature = "integration-tests"))]`, beside the owner;
+`State` is projected from the owner's public read-only observation accessors
+(QPROJ-2 to QPROJ-6) and the named sim arbiters (QPROJ-7), each arbiter read
+marked `// conformance-lint: sim-arbiter-ok …` with its Tier-3 pairing. Only
+`prefix_landing` lives in `tests/conformance` on the real kernel (QPROJ-8).
+There is no shared `quint_driver` base and no `tests/conformance/tests/vsock_*_conformance.rs`
+driver other than `prefix_landing`.
 
-Per `.claude/rules/testing.md` §"Quint conformance": the driver drives the
-production owner through its driving ports (Sim at driven ports), projects
-`State` from the owner's **observable** surface, references the spec **in
-place** (`specs/quint/guest-flow-owner/<module>.qnt` — never copied), and runs
-both trace modes (`#[quint_test]` for the named CI runs in `checks.toml`,
-`#[quint_run]` randomized with the seed printed on failure). Conformance tests
-spawn the `quint` CLI → gated behind `integration-tests`, run via
-`cargo xtask lima run --`, placed with the owning crate / in `tests/conformance`.
+Authored now (4 driver modules, 7 `#[quint_run]` instances, ignored until
+their DELIVER step):
 
-Shared base to add (`tests/conformance/src/quint_driver.rs`): the
-`quint-connect` wiring scaffold (trace ingest, per-step dispatch trait,
-state-equality harness) that each module driver specialises. The eight module
-drivers are owned per piece:
+| Driver | Module | Instances | Seam sim |
+|---|---|---|---|
+| `prefix_boot` | `overdrive-control-plane` `guest_network::prefix_boot_conformance` | `boot_ok`, `boot_faulty`, `boot_live` | `SimGuestFlowIo` / `SimGuestNode` |
+| `owner_flows` guest side | `overdrive-init` `guest_flow::quint_owner_flows` | `flows_ok` | `SimGuestOwnerIo` + `SimGuestClock` |
+| `owner_flows` `flows_half_guest` | `overdrive-init` `guest_flow::quint_flows_half` | `flows_half_guest` | `SimGuestOwnerIo` + `SimGuestClock` |
+| `udp_slots` guest side | `overdrive-init` `guest_flow::quint_udp_slots` | `slots_ok`, `slots_live` | `SimGuestOwnerIo` + `SimGuestClock` |
 
-| Quint module (`specs/quint/guest-flow-owner/`) | Driver file | Piece |
-|---|---|---|
-| `cid_lease.qnt` | `tests/conformance/tests/vsock_cid_lease_conformance.rs` | P1 |
-| `owner_flows.qnt` | `tests/conformance/tests/vsock_owner_flows_conformance.rs` | P2 |
-| `udp_slots.qnt` | `tests/conformance/tests/vsock_udp_slots_conformance.rs` | P3 |
-| `prefix_boot.qnt` | `tests/conformance/tests/vsock_prefix_boot_conformance.rs` | P4 |
-| `intake.qnt` | `tests/conformance/tests/vsock_intake_conformance.rs` | P4 |
-| `prefix_landing.qnt` | `tests/conformance/tests/vsock_prefix_landing_conformance.rs` | P4 |
-| `quiescence.qnt` | `tests/conformance/tests/vsock_quiescence_conformance.rs` | P6 |
-| `shared_table.qnt` | `tests/conformance/tests/vsock_shared_table_conformance.rs` | P6 |
+At the attachment cut (7 drivers): `cid_lease`, `owner_flows` host side,
+`flows_half_host`, `udp_slots` host side, `intake`, `quiescence`,
+`shared_table` in `overdrive-control-plane`; `flows_beacon` in
+`overdrive-worker`. The specs define no Quint `run`, so every driver runs
+`#[quint_run]` only and no `#[quint_test]` pin exists (UI-R2-1). Shared ITF
+decoding for the three `overdrive-init` drivers is the module
+`guest_flow::quint_itf`.
 
-Every spec invariant must have ≥1 conformance path; the per-piece scenario
-doc records which named `checks.toml` run + invariant each driver replays.
-**Do NOT edit `specs/quint/**`** (checks.toml is hashed into the evidence).
+`quint-connect` is a workspace dependency; `overdrive-control-plane`,
+`overdrive-worker` and `overdrive-init` add it (with `itf` and `anyhow`) under
+`[dev-dependencies]`. The per-driver checklist is in
+[`test-scenarios.md` § Quint conformance drivers](test-scenarios.md#quint-conformance-drivers-qproj-1-to-qproj-8-approved-2026-10-09).
+**Do NOT edit `specs/quint/**`.**
 
 ---
 
@@ -183,85 +194,52 @@ Instead:
   (`.claude/rules/testing.md` §"native x86_64 bare-metal KVM host"). Never
   pipe Lima/metal runs through `tail`/`head`.
 
-### 5.1 `host-kernel-shared` entries for the 6 Tier-3 modules (gap closed at DISTILL)
+### 5.1 Test binaries and `host-kernel-shared` membership (2026-10-10)
 
-The piece-authors listed the `host-kernel-shared` membership their Tier-3
-modules need (P6 §"Real-kernel fixture policy", P1 §file-ownership) but could
-**not add it themselves** — `.config/nextest.toml` is a single shared file, and
-six piece-authors each editing it in parallel would collide. The P6 doc records
-it as a gap ("`.config/nextest.toml` is not a P6 file"). This shared-file piece
-closes that gap **now** (DISTILL scaffolds), using the same "membership declared
-before the body exists" discipline the `guest_stack_mtls_egress` /
-`vm_walking_skeleton` entries already follow: a `binary()` / `test()` filter
-matches nothing until DELIVER lands the compiling body, so declaring it early is
-safe and keeps the group in place the moment the body co-arrives. The entries
-match **by BINARY** (rename-proof) per `.claude/rules/testing.md` §"Node-global
-kernel state requires a catch-all nextest group".
+Every authored binary that touches node-global kernel state is a whole-binary
+member of `host-kernel-shared` (`max-threads = 1`, `.config/nextest.toml`):
 
-Concrete `.config/nextest.toml` `profile.default` overrides → `host-kernel-shared`:
-
-| Module (P6 gap list) | nextest filter | Status |
+| Binary | Lane / entry | Authored vsock tests in it |
 |---|---|---|
-| `overdrive-system-conformance::vsock_walking_skeleton` | `package(overdrive-system-conformance) & binary(vsock_walking_skeleton)` | **added** (one OR-override with the other three conformance binaries) |
-| `overdrive-system-conformance::vsock_crash_matrix` | `… & binary(vsock_crash_matrix)` | **added** (same OR-override) |
-| `overdrive-system-conformance::vsock_quiescence_conformance` | `… & binary(vsock_quiescence_conformance)` | **added** (same OR-override) |
-| `overdrive-system-conformance::vsock_shared_table_conformance` | `… & binary(vsock_shared_table_conformance)` | **added** (same OR-override) |
-| `overdrive-host::integration::vsock_vmm_backend_probe` | `package(overdrive-host) & binary(integration)` | **already covered** by the existing whole-binary M4 entry — no new filter; the M4 comment is extended to name `vsock_vmm_backend_probe` so the binary-level membership survives the DELIVER retirement of `vmm_tap_queue_errors.rs` |
-| `overdrive-init::integration::vsock_guest_ready_config` | `package(overdrive-init) & binary(integration)` | **added** as the WHOLE integration binary (catch-all form, matching the B5 / M4 whole-binary precedent), not a per-module `test()` filter |
+| `overdrive-core` `acceptance` | default lane, no kernel state | `vsock_datagram_frame`, `vsock_deploy_validation`, `vsock_guest_transport_vocabulary`, `vsock_wire_codec` |
+| `overdrive-core` lib | default lane | `dataplane::mtls_mark` unit tests (DG-9 GUARDs) |
+| `overdrive-dataplane` lib | default lane | `guest_steering` key-encoder unit tests |
+| `overdrive-dataplane` `integration` | Tier-3, whole binary in `host-kernel-shared` | `vsock_guest_steering`, `vsock_egress_unframe`, `vsock_fragment_map` |
+| `overdrive-sim` lib | default lane | `adapters::beacon_io` and `adapters::mtls_intercept` unit tests (the sims' own semantics) |
+| `overdrive-host` `integration` | `kvm-tests` (module `#[cfg(feature = "kvm-tests")]`), native metal; whole binary in `host-kernel-shared` | `vsock_cid_claim_handoff` (real `/dev/vhost-vsock`) |
+| `overdrive-worker` `acceptance` | default lane | `vsock_beacon_intake` |
+| `overdrive-worker` lib | default lane | `mtls_intercept_worker` stage-label unit test |
+| `overdrive-worker` `integration` | Tier-3, whole binary in `host-kernel-shared` | `vsock_mesh_egress_mtls`, `vsock_host_internal_enforce` |
+| `overdrive-control-plane` lib | source-local; `--features integration-tests` for the driver | `guest_network::prefix_boot_acceptance` (`#[cfg(test)]`), `guest_network::prefix_boot_conformance` (`#[cfg(all(test, feature = "integration-tests"))]`), `guest_network::flow_io::sim::tests` (the sim's own tests) |
+| `overdrive-init` bin | source-local in the binary crate (no library target, DG-5) | `transport::tests`, `guest_flow::tests::{newtypes, session, tcp_accept, tcp_connect, half_close, udp_slots}`, and the drivers `guest_flow::quint_{owner_flows, flows_half, udp_slots}` (`integration-tests`) |
+| `overdrive-system-conformance` `vsock_prefix_landing_conformance` | native metal, own `host-kernel-shared` entry | `native_metal_kvm_prefix_landing_matches_lands_for_every_client_class_and_reachable_configuration` |
 
-Notes on the two deviations from the P6 gap list's module-granularity wording:
-
-- **`vsock_vmm_backend_probe` needs no new entry.** It lives in
-  `overdrive-host`'s `integration` binary, which the existing M4 override already
-  places whole-binary in `host-kernel-shared`. Adding a redundant module filter
-  would be the discouraged "module-only" form the catch-all rule warns against;
-  the gap is closed by documentation (the M4 comment now names it) rather than a
-  second filter.
-- **`vsock_guest_ready_config` joins as the whole `overdrive-init` integration
-  binary**, not a `test(vsock_guest_ready_config)` module filter. The catch-all
-  rule mandates the whole package/binary pair; `overdrive-init` has no other
-  `host-kernel-shared` entry, so the whole-binary form is the sole assignment
-  (never module-only). `overdrive-init`'s separate `acceptance` binary
-  (`vsock_guest_udp_slots.rs`, a P3 file) is intentionally left for the P3 author
-  — outside this 6-module gap.
-
-The `vsock_crash_matrix` binary replaces the retired
-`shared_guest_network_fail_stop_recovery` conformance binary (§7); its existing
-single-binary override is left in place until the DELIVER roadmap reconciliation
-removes the old-model binary it names (removing the override now would strand an
-entry for a binary still in tree). No `specs/quint/**` or Cargo files were
-touched.
+The `overdrive-init` tests pass the kernel command line as a string
+(`parse_transport_token`); they touch no kernel state. The old
+`overdrive-host` `vsock_vmm_backend_probe` module was deleted with the probe
+(DG-1).
 
 ---
 
 ## 6. Test entrypoint + module registration contract
 
-Each piece owns a disjoint set of **module files** (listed in its scenario
-doc). When an author creates a module file, they register it in the crate's
-existing inline entrypoint block (`crates/{crate}/tests/acceptance.rs` →
-`mod acceptance { … }`, `crates/{crate}/tests/integration.rs` →
-`#![cfg(feature = "integration-tests")] mod integration { … }`,
-`tests/conformance/tests/*.rs` are standalone binaries) — adding only their own
-`mod <file>;` line. Because registration + the compiling body co-arrive with
-the DELIVER production scaffold the body calls, the planner does **not**
-pre-create empty stubs in the committed entrypoints (that would be premature
-churn before the roadmap reconciliation reshapes the step→crate→file map and
-removes the old-model modules the entrypoints currently register). The
-disjoint file-ownership table in each scenario doc + the plan is the
-collision-avoidance SSOT the parallel authors rely on.
-
-`overdrive-init` has no `tests/acceptance.rs` entrypoint today; the first of
-P3/P6 to need guest-side Rust tests creates it (test-support surface is
-DISTILL's to shape, CLAUDE.md §"Implement to the design"). Guest-only
-behaviour that cannot run on the host (real guest kernel) is a Tier-3 cell
-inside the P6 walking skeleton, not a standalone host test.
+Each authored module is registered in its crate's inline entrypoint block
+(`tests/acceptance.rs` → `mod acceptance { … }`, `tests/integration.rs` →
+`#![cfg(feature = "integration-tests")] mod integration { … }`;
+`tests/conformance/tests/*.rs` are standalone binaries) or, for source-local
+tests and drivers, by a `mod` declaration in the owner's `src/` under
+`#[cfg(test)]` / `#[cfg(all(test, feature = "integration-tests"))]`. No
+unregistered file and no always-false `cfg` is in the tree. Bodies that name
+a DG-2 replaced signature are registered in the attachment cut, in the commit
+that lands the cut.
 
 ---
 
 ## 7. Retired by DELIVER roadmap reconciliation (NOT deleted by the planner)
 
 The following OLD-attachment-model (TAP / shared-bridge / intercept-program)
-GREEN tests defend old production code **still in tree**. Per
+GREEN tests defend old production code **still in tree**. DG-2 places their
+removal in the attachment cut. Per
 `.claude/rules/development.md` §"Deletion discipline" (delete production code
 AND its tests in the SAME commit) and the user decision that roadmap
 reconciliation is the first DELIVER activity, they are retired **in DELIVER**,
@@ -285,6 +263,8 @@ Cataloged here so the reconciliation does not miss them:
 - `crates/overdrive-host/tests/integration/vmm_tap_queue_errors`
 - `crates/overdrive-netlink/tests/integration/{tap_queue_attach,bridge_guard_lifecycle,managed_link_address,tap_debug_msg_mask}`
 - `tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs`
+- `crates/overdrive-control-plane/bin/netns_density_benchmark.rs` and
+  `guest_network::e18_test_support` (DG-2 row 17; V-9 replaces E18)
 
 The Contract-impact matrix (feature-delta §"Contract impact matrix") classes
 each prior ADR Replaced / Retained / Revalidate — the reconciliation uses it

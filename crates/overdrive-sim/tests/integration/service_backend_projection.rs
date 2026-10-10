@@ -1088,7 +1088,7 @@ async fn consumer_trajectory(include_hydrator: bool) {
     world.run("service-lifecycle").await;
     world.assert_shape(&world.rows().await, 1, true);
     let resolve =
-        ServiceBackendsResolve::new(world.obs.clone(), world.state.frontend_addr_allocator.clone());
+        ServiceBackendsResolve::new(world.obs.clone(), world.state.frontend_addr_allocator.clone(), overdrive_dataplane::allocators::VipRange::default());
     let dns = NameIndex::new(world.obs.clone(), world.state.frontend_addr_allocator.clone());
     resolve.probe().await.unwrap();
     dns.probe().await.unwrap();

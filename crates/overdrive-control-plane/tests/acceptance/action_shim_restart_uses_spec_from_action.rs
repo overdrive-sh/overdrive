@@ -159,7 +159,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-        network: None,
+        transport: None,
         service_ports: Vec::new(),
     };
     let action = Action::RestartAllocation {

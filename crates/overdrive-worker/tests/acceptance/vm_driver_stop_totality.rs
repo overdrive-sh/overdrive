@@ -26,13 +26,13 @@
 )]
 
 use std::future::Future as _;
-use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
+use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::id::AllocationId;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::CgroupFs;
@@ -45,7 +45,7 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
-use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
+use overdrive_core::vm::beacon::BeaconMessage;
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
@@ -57,8 +57,8 @@ use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
+
+use super::support::{BeaconHarness, GuestSession, beacon_key};
 
 // ---------------------------------------------------------------------
 // Fixture builders
@@ -152,19 +152,22 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
         ),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: Some(overdrive_core::traits::driver::GuestNetworkAssignment {
-            address: "100.96.0.6".parse().expect("valid fixture guest address"),
-            tap: "ovd-tap-0001".to_owned(),
-            mac: [0x02, 0, 0, 0, 0, 1],
-            gateway: "100.96.0.5".parse().expect("valid fixture gateway"),
-            prefix: 30,
-            dns: "100.96.0.5".parse().expect("valid fixture DNS"),
-        }),
+        transport: Some(super::support::transport(
+            "100.96.0.6".parse().expect("valid fixture guest address"),
+            "100.96.0.5".parse().expect("valid fixture gateway"),
+            0,
+        )),
         service_ports: Vec::new(),
     }
 }
 
-fn build_driver(vmm: std::sync::Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock) {
+/// A `VmDriver` over `vmm` whose beacon intake is a [`BeaconHarness`]
+/// coupled to `sim` (the `SimVmm` whose processes the fixture guests run in).
+async fn build_driver(
+    sim: &SimVmm,
+    vmm: std::sync::Arc<dyn Vmm>,
+    layout: VmHostLayout,
+) -> (VmDriver, SimClock, BeaconHarness) {
     let clock = SimClock::new();
     let fs: std::sync::Arc<dyn overdrive_core::traits::CgroupFs> =
         std::sync::Arc::new(SimCgroupFs::new());
@@ -175,16 +178,18 @@ fn build_driver(vmm: std::sync::Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver
         clock.clone(),
     ));
     assert!(wiring.supervisor().open_after_boot());
+    let beacon = BeaconHarness::new(sim);
     let driver = VmDriver::new(
-        vmm,
+        beacon.vmm(vmm),
         std::sync::Arc::new(clock.clone()),
         fs,
         cgroup_accounting,
         probe_runner(),
         wiring.gate(),
         layout,
+        beacon.intake().await,
     );
-    (driver, clock)
+    (driver, clock, beacon)
 }
 
 /// Like [`build_driver`], but additionally returns the concrete
@@ -194,10 +199,11 @@ fn build_driver(vmm: std::sync::Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver
 /// pattern already used throughout this file: the fs is cloned before
 /// being erased to the trait object, so both the driver and the test
 /// observe the same `Arc<Mutex<...>>`-backed mutations.
-fn build_driver_with_cgroup_fs(
+async fn build_driver_with_cgroup_fs(
+    sim: &SimVmm,
     vmm: std::sync::Arc<dyn Vmm>,
     layout: VmHostLayout,
-) -> (VmDriver, SimClock, SimCgroupFs) {
+) -> (VmDriver, SimClock, SimCgroupFs, BeaconHarness) {
     let clock = SimClock::new();
     let cgroup_fs = SimCgroupFs::new();
     let fs: std::sync::Arc<dyn overdrive_core::traits::CgroupFs> =
@@ -209,16 +215,18 @@ fn build_driver_with_cgroup_fs(
         clock.clone(),
     ));
     assert!(wiring.supervisor().open_after_boot());
+    let beacon = BeaconHarness::new(sim);
     let driver = VmDriver::new(
-        vmm,
+        beacon.vmm(vmm),
         std::sync::Arc::new(clock.clone()),
         fs,
         cgroup_accounting,
         probe_runner(),
         wiring.gate(),
         layout,
+        beacon.intake().await,
     );
-    (driver, clock, cgroup_fs)
+    (driver, clock, cgroup_fs, beacon)
 }
 
 /// Test adapter over the existing [`CgroupFs`] port that holds the allocation
@@ -280,54 +288,25 @@ impl CgroupFs for HoldsWorkloadScopeRemoval {
     }
 }
 
-fn beacon_socket_path(run_dir_root: &Path, alloc: &AllocationId) -> PathBuf {
-    VmRunDir::for_alloc(run_dir_root, alloc).beacon_socket(BEACON_VSOCK_PORT)
-}
-
-/// Retry-connect to the beacon `UnixListener` — robust against the
-/// listener not being bound the instant the spawned `start()` task is
-/// scheduled, with no reliance on driver-internal timing. The retry
-/// budget is TIME-bounded, not iteration-bounded: a `yield_now` spin
-/// burns its whole budget in ~20 ms of CPU when the workspace's full
-/// parallel suite starves the spawned `start()` task of a scheduling
-/// slot, failing tests that pass in isolation.
-async fn connect_with_retry(path: &Path) -> UnixStream {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        match UnixStream::connect(path).await {
-            Ok(stream) => return stream,
-            Err(_) if std::time::Instant::now() < deadline => {
-                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            }
-            Err(last) => panic!(
-                "beacon listener never became connectable within 10s at {} (last error: {last})",
-                path.display()
-            ),
-        }
-    }
-}
-
-/// Spawn `driver.start(&spec)`, dial the beacon, write `READY`, and
-/// await the spawned task to completion — the shared "beacon wins the
-/// boot race" happy path several scenarios below build on.
+/// Spawn `driver.start(&spec)`; once its VMM exists the guest connects
+/// with `READY`; await the spawned task to completion — the shared "beacon
+/// wins the boot race" happy path several scenarios below build on.
 async fn start_with_beacon_accepted(
     driver: &VmDriver,
     spec: &AllocationSpec,
-    run_dir_root: &Path,
-) -> (AllocationHandle, UnixStream) {
-    let beacon_path = beacon_socket_path(run_dir_root, &spec.alloc);
+    beacon: &BeaconHarness,
+) -> (AllocationHandle, GuestSession) {
     let driver = driver.clone();
     let spec_owned = spec.clone();
     let start_task = tokio::spawn(async move { driver.start(&spec_owned).await });
 
-    let mut stream = connect_with_retry(&beacon_path).await;
-    stream.write_all(b"READY pid=1 port=1234\n").await.expect("write READY");
+    let guest = beacon.dial_ready(spec).await;
 
     let handle = start_task
         .await
         .expect("start task did not panic")
         .expect("start resolves Ok once the beacon accepts");
-    (handle, stream)
+    (handle, guest)
 }
 
 /// Test-only `Vmm` decorator: right after `create()` succeeds, fires a
@@ -357,8 +336,8 @@ impl Vmm for ExposesCreatedControl {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config).await?;
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config, vsock).await?;
         let sender = self.created.lock().expect("control mutex not poisoned").take();
         if let Some(sender) = sender {
             let _ = sender.send(process.control.clone());
@@ -381,8 +360,8 @@ impl Vmm for DiesBeforeBeacon {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config).await?;
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config, vsock).await?;
         let control = process.control.clone();
         let inner = self.inner.clone();
         tokio::spawn(async move {
@@ -422,7 +401,8 @@ async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() 
     let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
     sim.inject_create_failure();
-    let (driver, _clock, cgroup_fs) = build_driver_with_cgroup_fs(std::sync::Arc::new(sim), layout);
+    let (driver, _clock, cgroup_fs, _beacon) =
+        build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-create-fail").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
@@ -500,8 +480,8 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
     let dies_before_beacon = DiesBeforeBeacon { inner: sim.clone() };
-    let (driver, _clock, cgroup_fs) =
-        build_driver_with_cgroup_fs(std::sync::Arc::new(dies_before_beacon), layout);
+    let (driver, _clock, cgroup_fs, _beacon) =
+        build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(dies_before_beacon), layout).await;
 
     let alloc = AllocationId::new("alloc-exit-before-beacon").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
@@ -572,7 +552,6 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
 async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_exit() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
     sim.inject_exit(Some(78), Some(15));
     let (created_tx, created_rx) = tokio::sync::oneshot::channel();
@@ -580,7 +559,7 @@ async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_e
         inner: sim.clone(),
         created: std::sync::Arc::new(std::sync::Mutex::new(Some(created_tx))),
     };
-    let (driver, _clock) = build_driver(std::sync::Arc::new(exposed), layout);
+    let (driver, _clock, beacon) = build_driver(&sim, std::sync::Arc::new(exposed), layout).await;
     let alloc = AllocationId::new("alloc-close-before-ready").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
     let driver_for_start = driver.clone();
@@ -588,8 +567,9 @@ async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_e
     let start = tokio::spawn(async move { driver_for_start.start(&spec_for_start).await });
 
     let control = created_rx.await.expect("VMM control published after create");
-    let stream = connect_with_retry(&beacon_socket_path(&run_dir_root, &alloc)).await;
-    drop(stream);
+    // The guest connects and closes before writing READY.
+    let guest = beacon.dial(beacon_key(&spec), control.pid, &[]);
+    drop(guest);
     sim.terminate(&control, Duration::ZERO).await.expect("scripted VMM ending resolves");
 
     let error = start.await.expect("start task joins").expect_err("pre-READY close rejects start");
@@ -628,8 +608,8 @@ async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
     let rootfs_master = fixture_rootfs_path(&tmp);
     let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock, cgroup_fs) =
-        build_driver_with_cgroup_fs(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, clock, cgroup_fs, _beacon) =
+        build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-deadline").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
@@ -731,16 +711,16 @@ async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
 async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, _clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, _clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-exit-report").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
     let mut exit_rx = driver.take_exit_receiver().expect("exit receiver available exactly once");
 
-    let (handle, mut stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
     // Fire the Running-confirmed gate, standing in for the action shim's
     // post-`obs.write(Running)` `release_for_exit_emission` (this
@@ -767,7 +747,7 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     // deliberately delayed so the watcher's retry loop has already
     // started polling before this line becomes readable.
     yield_for_task_poll().await;
-    stream.write_all(b"EXIT 7\n").await.expect("write EXIT report");
+    stream.write("EXIT 7");
 
     let event = exit_rx.recv().await.expect("exit watcher emits exactly one ExitEvent");
     assert_eq!(event.alloc, alloc);
@@ -799,54 +779,52 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
 async fn start_defers_exec_message_until_the_running_gate_is_released() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
+    let (driver, _clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-exec-write").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let (handle, stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, mut stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    let before_release =
-        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line)).await;
+    let before_release = tokio::time::timeout(Duration::from_millis(100), stream.next_line()).await;
     assert!(
         before_release.is_err(),
         "the post-READY guest session must remain silent until the action shim releases it; \
-         got {before_release:?} with bytes {line:?}"
+         got {before_release:?} with lines {:?}",
+        stream.written()
     );
 
     driver.release_for_exit_emission(&handle).await;
 
     // Bounded real-wall-clock timeout, not a `SimClock` wait: the async Driver
     // hook owns the write and does not resolve until its acknowledgement.
-    tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
+    let line = tokio::time::timeout(Duration::from_secs(5), stream.next_line())
         .await
         .expect("read the released host -> guest line within 5s")
         .expect("read the first host -> guest line");
 
-    let message: BeaconMessage =
-        line.trim_end().parse().expect("EXEC line parses as a BeaconMessage");
+    let message: BeaconMessage = line.parse().expect("EXEC line parses as a BeaconMessage");
     assert_eq!(
         message,
         BeaconMessage::Exec { argv: vec!["/sbin/init".to_owned()] },
         "the first host -> guest line after release must be EXEC with spec.command/args as argv"
     );
     assert_eq!(
-        line, "EXEC [\"/sbin/init\"]\n",
+        stream.written(),
+        vec!["EXEC [\"/sbin/init\"]".to_owned()],
         "the complete permitted beacon-byte delta is one canonical EXEC line"
     );
 
     driver.release_for_exit_emission(&handle).await;
-    line.clear();
     let after_duplicate =
-        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line)).await;
+        tokio::time::timeout(Duration::from_millis(100), stream.next_line()).await;
     assert!(
         after_duplicate.is_err(),
         "the idempotent duplicate release must preserve the empty byte complement; got \
-         {after_duplicate:?} with bytes {line:?}"
+         {after_duplicate:?} with lines {:?}",
+        stream.written()
     );
 }
 
@@ -883,8 +861,8 @@ impl<V: Vmm> Vmm for SignalsOnceLive<V> {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config).await?;
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config, vsock).await?;
         let signal = self.signal.lock().expect("signal mutex not poisoned").take();
         if let Some(tx) = signal {
             let _ = tx.send(());
@@ -925,10 +903,10 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     let sim = SimVmm::new();
     let (live_tx, live_rx) = tokio::sync::oneshot::channel();
     let vmm = SignalsOnceLive {
-        inner: sim,
+        inner: sim.clone(),
         signal: std::sync::Arc::new(std::sync::Mutex::new(Some(live_tx))),
     };
-    let (driver, _clock) = build_driver(std::sync::Arc::new(vmm), layout);
+    let (driver, _clock, _beacon) = build_driver(&sim, std::sync::Arc::new(vmm), layout).await;
 
     let alloc = AllocationId::new("alloc-stop-a").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
@@ -987,15 +965,14 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
 async fn stop_sequence_b_writer_and_vmm_waits_begin_together() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-stop-b").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let (handle, _unresponsive_stream) =
-        start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, _unresponsive_stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
     // `_unresponsive_stream` is held alive but never read from — the
     // guest is connected and simply does not consume the SHUTDOWN byte.
 
@@ -1036,30 +1013,19 @@ async fn stop_sequence_b_writer_and_vmm_waits_begin_together() {
 async fn backpressured_exec_release_cannot_delay_stop_deadline() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-stop-backpressured-exec").expect("valid alloc id");
     let mut spec = build_spec(&alloc, &tmp);
     let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
     payload.args.push("x".repeat(16 * 1024 * 1024));
 
-    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
-    let receive_bytes: libc::c_int = 4 * 1024;
-    // SAFETY: `guest` owns a live Unix-stream fd and the option points to one
-    // correctly-sized integer for the duration of the call.
-    let set_rcvbuf = unsafe {
-        libc::setsockopt(
-            guest.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_RCVBUF,
-            std::ptr::from_ref(&receive_bytes).cast(),
-            libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
-                .expect("socket option length fits socklen_t"),
-        )
-    };
-    assert_eq!(set_rcvbuf, 0, "shrink guest receive buffer to force backpressure");
+    let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
+    // The guest stops draining its receive side, forcing backpressure on the
+    // 16 MiB EXEC write.
+    guest.backpressure();
 
     assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
     assert!(sim.is_live(handle.pid.expect("VM handle carries pid")));
@@ -1097,16 +1063,13 @@ async fn backpressured_exec_release_cannot_delay_stop_deadline() {
         .expect("stop cancellation must acknowledge the pending release")
         .expect("release task must not panic");
 
-    let mut complete_session = Vec::new();
-    tokio::time::timeout(Duration::from_secs(1), guest.read_to_end(&mut complete_session))
+    let complete_session = tokio::time::timeout(Duration::from_secs(1), guest.session_to_end())
         .await
-        .expect("writer close makes the complete guest byte stream readable")
-        .expect("read complete guest byte stream");
+        .expect("writer close makes the complete guest byte stream readable");
     assert!(
-        complete_session.split(|byte| *byte == b'\n').all(|line| {
-            std::str::from_utf8(line)
+        complete_session.iter().all(|line| {
+            line.parse::<BeaconMessage>()
                 .ok()
-                .and_then(|line| line.parse::<BeaconMessage>().ok())
                 .is_none_or(|message| !matches!(message, BeaconMessage::Exec { .. }))
         }),
         "stop won a forced-backpressure race, so the complete session must contain no parseable \
@@ -1220,8 +1183,8 @@ impl Vmm for RecordsTermination {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        self.inner.create(config).await
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
+        self.inner.create(config, vsock).await
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
@@ -1281,8 +1244,8 @@ impl Vmm for HoldsFirstTermination {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        self.inner.create(config).await
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
+        self.inner.create(config, vsock).await
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
@@ -1328,10 +1291,10 @@ impl Vmm for HoldsFirstTermination {
 async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
     let (held_termination, termination_control) = HoldsFirstTermination::new(sim.clone());
-    let (driver, _clock) = build_driver(std::sync::Arc::new(held_termination), layout);
+    let (driver, _clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(held_termination), layout).await;
     let mut exit_rx = driver.take_exit_receiver().expect("VmDriver exposes one exit receiver");
 
     let alloc = AllocationId::new("alloc-cancel-backpressured-exec").expect("valid alloc id");
@@ -1339,23 +1302,13 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
     payload.args.push("y".repeat(16 * 1024 * 1024));
 
-    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
-    let receive_bytes: libc::c_int = 4 * 1024;
-    // SAFETY: `guest` owns a live Unix-stream fd and the option points to one
-    // correctly-sized integer for the duration of the call.
-    let set_rcvbuf = unsafe {
-        libc::setsockopt(
-            guest.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_RCVBUF,
-            std::ptr::from_ref(&receive_bytes).cast(),
-            libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
-                .expect("socket option length fits socklen_t"),
-        )
-    };
-    assert_eq!(set_rcvbuf, 0, "shrink guest receive buffer to force backpressure");
+    let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
+    // The guest stops draining its receive side, forcing backpressure on the
+    // 16 MiB EXEC write.
+    guest.backpressure();
 
-    guest.write_all(b"EXIT 0\n").await.expect("guest reports exit before release cancellation");
+    // The guest reports exit before release cancellation.
+    guest.write("EXIT 0");
     let before_cancellation =
         tokio::time::timeout(Duration::from_millis(100), exit_rx.recv()).await;
     assert!(
@@ -1407,16 +1360,13 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     assert_eq!(exit_event.alloc, alloc);
     assert_eq!(exit_event.kind, ExitKind::CleanExit);
 
-    let mut complete_session = Vec::new();
-    tokio::time::timeout(Duration::from_secs(1), guest.read_to_end(&mut complete_session))
+    let complete_session = tokio::time::timeout(Duration::from_secs(1), guest.session_to_end())
         .await
-        .expect("cancellation must close the writer instead of leaving it detached")
-        .expect("read complete guest byte stream after cancellation");
+        .expect("cancellation must close the writer instead of leaving it detached");
     assert!(
-        complete_session.split(|byte| *byte == b'\n').all(|line| {
-            std::str::from_utf8(line)
+        complete_session.iter().all(|line| {
+            line.parse::<BeaconMessage>()
                 .ok()
-                .and_then(|line| line.parse::<BeaconMessage>().ok())
                 .is_none_or(|message| !matches!(message, BeaconMessage::Exec { .. }))
         }),
         "a cancelled release must never finish a parseable EXEC line"
@@ -1445,14 +1395,14 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
 async fn stop_sequence_c_already_dead_vmm_returns_ok() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-stop-c").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
     // The VMM dies on its own BEFORE the operator's stop arrives.
     let control = VmControl { pid: handle.pid.expect("pid populated"), api_socket: PathBuf::new() };
@@ -1498,12 +1448,13 @@ async fn stop_sequence_d_double_stop_is_idempotent_and_never_panics() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-stop-d").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
     let driver_for_first = driver.clone();
     let handle_for_first = handle.clone();
@@ -1562,8 +1513,8 @@ impl Vmm for NeverSignalsExit {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config).await?;
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config, vsock).await?;
         let (tx, rx) = tokio::sync::oneshot::channel();
         // Deliberate permanent leak — see the struct doc comment.
         std::mem::forget(tx);
@@ -1595,15 +1546,15 @@ impl Vmm for NeverSignalsExit {
 async fn stop_ok_then_status_reports_not_found() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let never_signals_exit = NeverSignalsExit { inner: sim };
-    let (driver, clock) = build_driver(std::sync::Arc::new(never_signals_exit), layout);
+    let never_signals_exit = NeverSignalsExit { inner: sim.clone() };
+    let (driver, clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(never_signals_exit), layout).await;
 
     let alloc = AllocationId::new("alloc-stop-then-status").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
     let driver_for_task = driver.clone();
     let handle_owned = handle.clone();
@@ -1633,16 +1584,16 @@ async fn stop_ok_then_status_reports_not_found() {
 async fn live_allocations_reports_membership_and_release_supervision_is_idempotent() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
+    let (driver, _clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-live-report").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
     assert_eq!(driver.live_allocations(), Some(Vec::new()), "nothing live before start");
 
-    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
     assert_eq!(
         driver.live_allocations(),
         Some(vec![alloc.clone()]),
@@ -1706,13 +1657,13 @@ async fn live_allocations_reports_membership_and_release_supervision_is_idempote
 async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
+    let (driver, _clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("vm-resize-refused").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
-    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
     // The typed rejection — the variant, the self-named driver family,
     // the allocation resize was called on, and `#92` in the detail.
@@ -1799,14 +1750,16 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
         clock.clone(),
     ));
     assert!(wiring.supervisor().open_after_boot());
+    let beacon = BeaconHarness::new(&sim);
     let driver = VmDriver::new(
-        std::sync::Arc::new(sim.clone()),
+        beacon.vmm(std::sync::Arc::new(sim.clone())),
         std::sync::Arc::new(clock.clone()),
         std::sync::Arc::new(held_cleanup.clone()),
         std::sync::Arc::new(SimCgroupAccounting::new()),
         probe_runner(),
         wiring.gate(),
         layout,
+        beacon.intake().await,
     );
 
     // Drain the driver's `ExitEvent` channel — the exit observer's role.
@@ -1814,12 +1767,12 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
 
     // Beacon wins the boot race: `start` returns Ok and the exit watcher
     // is armed with a gate whose sender is stashed on the `Live` entry.
-    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
     // The guest exits cleanly and immediately — the sub-millisecond
     // lifetime the gate exists to defend. The watcher reads `EXIT 0`,
     // classifies `CleanExit`, then parks on the gate.
-    guest.write_all(b"EXIT 0\n").await.expect("write EXIT");
+    guest.write("EXIT 0");
 
     // Before the gate fires the event MUST NOT be delivered. A bounded
     // real-time wait that ELAPSES is the proof the gate is holding it —
@@ -1911,10 +1864,11 @@ async fn completed_shutdown_write_has_no_two_second_floor() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
     let alloc = AllocationId::new("alloc-responsive-stop").expect("valid allocation");
     let spec = build_spec(&alloc, &tmp);
-    let (handle, _guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, _guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
     let task_driver = driver.clone();
     let task_handle = handle.clone();
     let mut stopping = tokio::spawn(async move { task_driver.stop(&task_handle).await });
@@ -1961,26 +1915,22 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new();
         let vmm = RecordsTermination::new(sim.clone(), true);
-        let (driver, _clock, cgroup_fs) =
-            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let (driver, _clock, cgroup_fs, beacon) =
+            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-writer-completed").expect("valid allocation");
         let spec = build_spec(&alloc, &tmp);
-        let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+        let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
         let stop_driver = driver.clone();
         let stop_handle = handle.clone();
         let stop = tokio::spawn(async move { stop_driver.stop(&stop_handle).await });
         vmm.wait_until_entered().await;
 
-        let mut shutdown = String::new();
-        tokio::time::timeout(
-            Duration::from_secs(1),
-            BufReader::new(&mut guest).read_line(&mut shutdown),
-        )
-        .await
-        .expect("completed writer is consumed before the VMM grace resolves")
-        .expect("read the completed shutdown write");
-        assert_eq!(shutdown, "SHUTDOWN\n");
+        let shutdown = tokio::time::timeout(Duration::from_secs(1), guest.next_line())
+            .await
+            .expect("completed writer is consumed before the VMM grace resolves")
+            .expect("read the completed shutdown write");
+        assert_eq!(shutdown, "SHUTDOWN");
         assert!(!stop.is_finished(), "the explicit VMM latch still owns stop completion");
 
         vmm.release();
@@ -2009,13 +1959,12 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new();
         let vmm = RecordsTermination::new(sim.clone(), true);
-        let (driver, _clock, cgroup_fs) =
-            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let (driver, _clock, cgroup_fs, beacon) =
+            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-writer-error").expect("valid allocation");
         let spec = build_spec(&alloc, &tmp);
-        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
-        // SAFETY: `guest` owns this live Unix socket for the whole call.
-        assert_eq!(unsafe { libc::shutdown(guest.as_raw_fd(), libc::SHUT_RD) }, 0);
+        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
+        guest.refuse_host_writes();
         let stop_driver = driver.clone();
         let stop_handle = handle.clone();
         let stop = tokio::spawn(async move { stop_driver.stop(&stop_handle).await });
@@ -2046,14 +1995,14 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new();
         let vmm = RecordsTermination::new(sim.clone(), true);
-        let (driver, _clock, cgroup_fs) =
-            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let (driver, _clock, cgroup_fs, beacon) =
+            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-writer-peer-eof").expect("valid allocation");
         let spec = build_spec(&alloc, &tmp);
-        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
-        // SAFETY: `guest` owns a live Unix socket; SHUT_WR preserves its read
-        // direction and therefore differs from the preceding EPIPE arm.
-        assert_eq!(unsafe { libc::shutdown(guest.as_raw_fd(), libc::SHUT_WR) }, 0);
+        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
+        // Closing only the send direction preserves the guest's receive
+        // side and therefore differs from the preceding EPIPE arm.
+        guest.close_send();
         let mut stop = Box::pin(driver.stop(&handle));
         std::future::poll_fn(|context| match stop.as_mut().poll(context) {
             std::task::Poll::Pending => std::task::Poll::Ready(()),
@@ -2086,14 +2035,14 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let run_dir_root = layout.run_dir_root.clone();
         let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new();
-        let vmm = RecordsTermination::new(sim, true);
+        let vmm = RecordsTermination::new(sim.clone(), true);
         let (live_tx, live_rx) = tokio::sync::oneshot::channel();
         let signals_live = SignalsOnceLive {
             inner: vmm.clone(),
             signal: std::sync::Arc::new(std::sync::Mutex::new(Some(live_tx))),
         };
-        let (driver, _clock, cgroup_fs) =
-            build_driver_with_cgroup_fs(std::sync::Arc::new(signals_live), layout);
+        let (driver, _clock, cgroup_fs, _beacon) =
+            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(signals_live), layout).await;
         let alloc = AllocationId::new("s08-writer-absent").expect("valid allocation");
         let spec = build_spec(&alloc, &tmp);
         let start_driver = driver.clone();
@@ -2131,28 +2080,15 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new();
         let vmm = RecordsTermination::new(sim.clone(), true);
-        let (driver, clock, cgroup_fs) =
-            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let (driver, clock, cgroup_fs, beacon) =
+            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-writer-backpressure").expect("valid allocation");
         let mut spec = build_spec(&alloc, &tmp);
         let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
         payload.args.push("z".repeat(16 * 1024 * 1024));
-        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
-        let receive_bytes: libc::c_int = 4 * 1024;
-        // SAFETY: `guest` owns a live fd and the option points to one integer.
-        assert_eq!(
-            unsafe {
-                libc::setsockopt(
-                    guest.as_raw_fd(),
-                    libc::SOL_SOCKET,
-                    libc::SO_RCVBUF,
-                    std::ptr::from_ref(&receive_bytes).cast(),
-                    libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
-                        .expect("socklen"),
-                )
-            },
-            0
-        );
+        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
+        // The guest stops draining: the 16 MiB EXEC write is backpressured.
+        guest.backpressure();
         let release_driver = driver.clone();
         let release_handle = handle.clone();
         let release_exec =
@@ -2195,28 +2131,15 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new();
         let vmm = RecordsTermination::new(sim.clone(), false);
-        let (driver, _clock, cgroup_fs) =
-            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let (driver, _clock, cgroup_fs, beacon) =
+            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-early-vmm-exit").expect("valid allocation");
         let mut spec = build_spec(&alloc, &tmp);
         let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
         payload.args.push("e".repeat(16 * 1024 * 1024));
-        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
-        let receive_bytes: libc::c_int = 4 * 1024;
-        // SAFETY: `guest` owns a live fd and the option points to one integer.
-        assert_eq!(
-            unsafe {
-                libc::setsockopt(
-                    guest.as_raw_fd(),
-                    libc::SOL_SOCKET,
-                    libc::SO_RCVBUF,
-                    std::ptr::from_ref(&receive_bytes).cast(),
-                    libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
-                        .expect("socklen"),
-                )
-            },
-            0
-        );
+        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
+        // The guest stops draining: the 16 MiB EXEC write is backpressured.
+        guest.backpressure();
         let release_driver = driver.clone();
         let release_handle = handle.clone();
         let release_exec =

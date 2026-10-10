@@ -44,7 +44,7 @@ State 1: <Initial predicate>
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 0
 
-State 2: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of module flows_beacon>
+State 2: <flows_beacon_owner_flows_step line 2893, col 4 to line 2893, col 70 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = FALSE
 /\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
@@ -90,7 +90,7 @@ State 2: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 0
 
-State 3: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of module flows_beacon>
+State 3: <flows_beacon_owner_flows_step line 2893, col 4 to line 2893, col 70 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = TRUE
 /\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
@@ -136,7 +136,7 @@ State 3: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 1
 
-State 4: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of module flows_beacon>
+State 4: <flows_beacon_owner_flows_step line 2893, col 4 to line 2893, col 70 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = TRUE
 /\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
@@ -182,9 +182,9 @@ State 4: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 1
 
-State 5: <flows_beacon_owner_flows_step line 2869, col 9 to line 2869, col 78 of module flows_beacon>
+State 5: <flows_beacon_owner_flows_step line 2895, col 9 to line 2895, col 78 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = TRUE
-/\ flows_beacon_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
 /\ flows_beacon_owner_flows_toHostRefused = {}
 /\ flows_beacon_owner_flows_toGuestAbort = {}
@@ -228,9 +228,9 @@ State 5: <flows_beacon_owner_flows_step line 2869, col 9 to line 2869, col 78 of
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 1
 
-State 6: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of module flows_beacon>
+State 6: <flows_beacon_owner_flows_step line 2893, col 4 to line 2893, col 70 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = FALSE
-/\ flows_beacon_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
 /\ flows_beacon_owner_flows_toHostRefused = {}
 /\ flows_beacon_owner_flows_toGuestAbort = {}
@@ -274,9 +274,9 @@ State 6: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 1
 
-State 7: <flows_beacon_owner_flows_step line 2869, col 9 to line 2869, col 78 of module flows_beacon>
+State 7: <flows_beacon_owner_flows_step line 2895, col 9 to line 2895, col 78 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = FALSE
-/\ flows_beacon_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
 /\ flows_beacon_owner_flows_toHostRefused = {}
 /\ flows_beacon_owner_flows_toGuestAbort = {}
@@ -320,9 +320,9 @@ State 7: <flows_beacon_owner_flows_step line 2869, col 9 to line 2869, col 78 of
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 1
 
-State 8: <flows_beacon_owner_flows_step line 2869, col 9 to line 2869, col 78 of module flows_beacon>
+State 8: <flows_beacon_owner_flows_step line 2895, col 9 to line 2895, col 78 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = FALSE
-/\ flows_beacon_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
 /\ flows_beacon_owner_flows_toHostRefused = {}
 /\ flows_beacon_owner_flows_toGuestAbort = {}
@@ -366,9 +366,9 @@ State 8: <flows_beacon_owner_flows_step line 2869, col 9 to line 2869, col 78 of
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 1
 
-State 9: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of module flows_beacon>
+State 9: <flows_beacon_owner_flows_step line 2893, col 4 to line 2893, col 70 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = FALSE
-/\ flows_beacon_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
 /\ flows_beacon_owner_flows_toHostRefused = {}
 /\ flows_beacon_owner_flows_toGuestAbort = {}
@@ -412,9 +412,9 @@ State 9: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 1
 
-State 10: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of module flows_beacon>
+State 10: <flows_beacon_owner_flows_step line 2893, col 4 to line 2893, col 70 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = FALSE
-/\ flows_beacon_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
 /\ flows_beacon_owner_flows_toHostRefused = {}
 /\ flows_beacon_owner_flows_toGuestAbort = {}
@@ -458,9 +458,9 @@ State 10: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 o
 /\ flows_beacon_owner_flows_toHostPaired = {}
 /\ flows_beacon_owner_flows_vmGen = 1
 
-State 11: <flows_beacon_owner_flows_step line 2867, col 4 to line 2867, col 70 of module flows_beacon>
+State 11: <flows_beacon_owner_flows_step line 2893, col 4 to line 2893, col 70 of module flows_beacon>
 /\ flows_beacon_owner_flows_vmUp = TRUE
-/\ flows_beacon_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_beacon_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 /\ flows_beacon_owner_flows_phantom = FALSE
 /\ flows_beacon_owner_flows_toHostRefused = {}
 /\ flows_beacon_owner_flows_toGuestAbort = {}

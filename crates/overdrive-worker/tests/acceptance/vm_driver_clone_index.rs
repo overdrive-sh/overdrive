@@ -53,6 +53,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
+use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::id::AllocationId;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverPayload, Resources, VmPayload};
@@ -61,9 +62,8 @@ use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
-use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
 use overdrive_core::vm::config::{
-    Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
+    Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmmIdentity,
 };
 use overdrive_host::RealVmHostState;
 use overdrive_sim::adapters::clock::SimClock;
@@ -74,8 +74,8 @@ use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
-use tokio::io::AsyncWriteExt;
-use tokio::net::UnixStream;
+
+use super::support::BeaconHarness;
 
 // ---------------------------------------------------------------------
 // Fixtures — a per-test operator rootfs-master dir + a distinct
@@ -134,7 +134,7 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
     }
 }
 
-fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
+fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/clone-index-test/alloc/x")
@@ -147,19 +147,22 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: Some(overdrive_core::traits::driver::GuestNetworkAssignment {
-            address: "100.96.0.6".parse().expect("valid fixture guest address"),
-            tap: "ovd-tap-0001".to_owned(),
-            mac: [0x02, 0, 0, 0, 0, 1],
-            gateway: "100.96.0.5".parse().expect("valid fixture gateway"),
-            prefix: 30,
-            dns: "100.96.0.5".parse().expect("valid fixture DNS"),
-        }),
+        transport: Some(super::support::transport(
+            "100.96.0.6".parse().expect("valid fixture guest address"),
+            "100.96.0.5".parse().expect("valid fixture gateway"),
+            cid_offset,
+        )),
         service_ports: Vec::new(),
     }
 }
 
-fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock) {
+/// A `VmDriver` over `vmm` whose beacon intake is a [`BeaconHarness`]
+/// coupled to `sim` (the VMM `vmm` delegates to).
+async fn build_driver(
+    sim: &SimVmm,
+    vmm: Arc<dyn Vmm>,
+    layout: VmHostLayout,
+) -> (VmDriver, SimClock, BeaconHarness) {
     let clock = SimClock::new();
     let fs: Arc<dyn overdrive_core::traits::CgroupFs> = Arc::new(SimCgroupFs::new());
     let cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting> =
@@ -167,41 +170,29 @@ fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock)
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
     assert!(wiring.supervisor().open_after_boot());
+    let beacon = BeaconHarness::new(sim);
     let driver = VmDriver::new(
-        vmm,
+        beacon.vmm(vmm),
         Arc::new(clock.clone()),
         fs,
         cgroup_accounting,
         probe_runner(),
         wiring.gate(),
         layout,
+        beacon.intake().await,
     );
-    (driver, clock)
+    (driver, clock, beacon)
 }
 
-fn beacon_socket_path(run_dir_root: &Path, alloc: &AllocationId) -> PathBuf {
-    VmRunDir::for_alloc(run_dir_root, alloc).beacon_socket(BEACON_VSOCK_PORT)
-}
-
-async fn connect_with_retry(path: &Path) -> UnixStream {
-    for _ in 0..2000 {
-        match UnixStream::connect(path).await {
-            Ok(stream) => return stream,
-            Err(_) => tokio::task::yield_now().await,
-        }
-    }
-    panic!("beacon listener never became connectable at {}", path.display());
-}
-
-/// Spawn `start`, dial the beacon, write `READY`, await `start` to `Ok`.
-async fn start_with_beacon(driver: &VmDriver, spec: &AllocationSpec, run_dir_root: &Path) {
-    let beacon_path = beacon_socket_path(run_dir_root, &spec.alloc);
+/// Spawn `start`, the guest connects with `READY` once its VMM exists,
+/// await `start` to `Ok`. The guest connection closes on return, as the
+/// dropped stream did.
+async fn start_with_beacon(driver: &VmDriver, spec: &AllocationSpec, beacon: &BeaconHarness) {
     let driver = driver.clone();
     let spec_owned = spec.clone();
     let start_task = tokio::spawn(async move { driver.start(&spec_owned).await });
 
-    let mut stream = connect_with_retry(&beacon_path).await;
-    stream.write_all(b"READY pid=1 port=1234\n").await.expect("write READY");
+    let _guest = beacon.dial_ready(spec).await;
 
     start_task.await.expect("start task did not panic").expect("start resolves Ok on beacon-win");
 }
@@ -229,12 +220,12 @@ impl Vmm for RecordsFsAtCreate {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
         let link_exists = std::fs::symlink_metadata(config.rootfs.index_link()).is_ok();
         let clone_exists = config.rootfs.clone_dest().exists();
         *self.at_create.lock().expect("recorder mutex not poisoned") =
             Some((link_exists, clone_exists));
-        self.inner.create(config).await
+        self.inner.create(config, vsock).await
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
@@ -271,7 +262,6 @@ fn link_present(p: &Path) -> bool {
 async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let index_dir = layout.clone_index_dir.clone();
     let staging_dir = layout.clone_staging_dir.clone();
     let master = operator_rootfs_path(&tmp);
@@ -279,12 +269,13 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
 
     // === Part A — CREATION ordering: link strictly precedes the clone. ===
     let recorder: Arc<Mutex<Option<(bool, bool)>>> = Arc::new(Mutex::new(None));
-    let vmm = RecordsFsAtCreate { inner: SimVmm::new(), at_create: recorder.clone() };
-    let (driver, clock) = build_driver(Arc::new(vmm), layout.clone());
+    let sim = SimVmm::new();
+    let vmm = RecordsFsAtCreate { inner: sim.clone(), at_create: recorder.clone() };
+    let (driver, clock, beacon) = build_driver(&sim, Arc::new(vmm), layout.clone()).await;
 
     let alloc = AllocationId::new("alloc-clone-index-a").expect("valid alloc id");
-    let spec = build_spec(&alloc, &tmp);
-    start_with_beacon(&driver, &spec, &run_dir_root).await;
+    let spec = build_spec(&alloc, &tmp, 0);
+    start_with_beacon(&driver, &spec, &beacon).await;
 
     let (link_at_create, clone_at_create) =
         recorder.lock().expect("recorder mutex").take().expect("Vmm::create was entered");
@@ -362,8 +353,8 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
     // === Part D — the stop path removes the clone AND its link; the
     // post-stop residue is nothing (§D3f point 4). ===
     let alloc_stop = AllocationId::new("alloc-clone-index-stop").expect("valid alloc id");
-    let spec_stop = build_spec(&alloc_stop, &tmp);
-    start_with_beacon(&driver, &spec_stop, &run_dir_root).await;
+    let spec_stop = build_spec(&alloc_stop, &tmp, 1);
+    start_with_beacon(&driver, &spec_stop, &beacon).await;
     let stop_plan =
         RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc_stop, &staging_dir, &index_dir);
     assert!(
@@ -409,16 +400,16 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
 async fn stop_keeps_the_index_link_when_the_clone_removal_fails() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let run_dir_root = layout.run_dir_root.clone();
     let index_dir = layout.clone_index_dir.clone();
     let staging_dir = layout.clone_staging_dir.clone();
     let master = operator_rootfs_path(&tmp);
     let master_bytes = std::fs::metadata(&master).expect("stat master").len();
-    let (driver, clock) = build_driver(Arc::new(SimVmm::new()), layout.clone());
+    let sim = SimVmm::new();
+    let (driver, clock, beacon) = build_driver(&sim, Arc::new(sim.clone()), layout.clone()).await;
 
     let alloc = AllocationId::new("alloc-clone-index-stuck").expect("valid alloc id");
-    let spec = build_spec(&alloc, &tmp);
-    start_with_beacon(&driver, &spec, &run_dir_root).await;
+    let spec = build_spec(&alloc, &tmp, 0);
+    start_with_beacon(&driver, &spec, &beacon).await;
     let plan =
         RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &staging_dir, &index_dir);
     assert!(

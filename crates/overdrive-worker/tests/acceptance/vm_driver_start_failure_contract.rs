@@ -22,6 +22,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
+use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::id::AllocationId;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{
@@ -33,7 +34,6 @@ use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
     VmmError, VmmExit, VmmProbeError,
 };
-use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
@@ -46,9 +46,9 @@ use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
-use tokio::io::AsyncWriteExt as _;
-use tokio::net::UnixStream;
 use tokio::sync::{Mutex, Semaphore, oneshot};
+
+use super::support::{BeaconHarness, GuestSession};
 
 // ---------------------------------------------------------------------
 // Fixtures — mirror `vm_driver_stop_totality.rs`'s established shapes.
@@ -109,7 +109,10 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
     }
 }
 
-fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
+/// A VM spec whose transport carries a fresh claim of
+/// `GUEST_CID_BASE + cid_offset` — one launch. A restart or a duplicate
+/// request is a second launch: build a second spec for it.
+fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-fail/alloc/x")
@@ -122,19 +125,23 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        network: Some(overdrive_core::traits::driver::GuestNetworkAssignment {
-            address: "100.96.0.6".parse().expect("valid fixture guest address"),
-            tap: "ovd-tap-0001".to_owned(),
-            mac: [0x02, 0, 0, 0, 0, 1],
-            gateway: "100.96.0.5".parse().expect("valid fixture gateway"),
-            prefix: 30,
-            dns: "100.96.0.5".parse().expect("valid fixture DNS"),
-        }),
+        transport: Some(super::support::transport(
+            "100.96.0.6".parse().expect("valid fixture guest address"),
+            "100.96.0.5".parse().expect("valid fixture gateway"),
+            cid_offset,
+        )),
         service_ports: Vec::new(),
     }
 }
 
-fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock, SimCgroupFs) {
+/// A `VmDriver` over `vmm` whose beacon intake is a [`BeaconHarness`]
+/// coupled to `sim` (the VMM whose processes fixture guests run in; a fresh
+/// unused one for doubles that never admit a guest).
+async fn build_driver(
+    sim: &SimVmm,
+    vmm: Arc<dyn Vmm>,
+    layout: VmHostLayout,
+) -> (VmDriver, SimClock, SimCgroupFs, BeaconHarness) {
     let clock = SimClock::new();
     let cgroup_fs = SimCgroupFs::new();
     let fs: Arc<dyn overdrive_core::traits::CgroupFs> = Arc::new(cgroup_fs.clone());
@@ -143,52 +150,34 @@ fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock,
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
     assert!(wiring.supervisor().open_after_boot());
+    let beacon = BeaconHarness::new(sim);
     let driver = VmDriver::new(
-        vmm,
+        beacon.vmm(vmm),
         Arc::new(clock.clone()),
         fs,
         accounting,
         probe_runner(),
         wiring.gate(),
         layout,
+        beacon.intake().await,
     );
-    (driver, clock, cgroup_fs)
+    (driver, clock, cgroup_fs, beacon)
 }
 
-async fn connect_beacon(run_dir_root: &Path, alloc: &AllocationId) -> UnixStream {
-    let socket = VmRunDir::for_alloc(run_dir_root, alloc).beacon_socket(BEACON_VSOCK_PORT);
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        match UnixStream::connect(&socket).await {
-            Ok(stream) => return stream,
-            Err(_) if std::time::Instant::now() < deadline => {
-                tokio::time::sleep(Duration::from_millis(2)).await;
-            }
-            Err(error) => panic!(
-                "beacon listener did not become connectable at {}: {error}",
-                socket.display()
-            ),
-        }
-    }
-}
-
+/// Spawn `start`; the guest connects with READY once its VMM exists; the
+/// start completes and its Running gate is released.
 async fn start_ready(
     driver: &VmDriver,
     spec: &AllocationSpec,
-    run_dir_root: &Path,
-) -> (AllocationHandle, UnixStream) {
+    beacon: &BeaconHarness,
+) -> (AllocationHandle, GuestSession) {
     let task_driver = driver.clone();
-    let spec = spec.clone();
-    let alloc = spec.alloc.clone();
-    let task = tokio::spawn(async move { task_driver.start(&spec).await });
-    let mut beacon = connect_beacon(run_dir_root, &alloc).await;
-    beacon
-        .write_all(b"READY pid=1 port=1234\n")
-        .await
-        .expect("send READY through the production beacon parser");
+    let owned_spec = spec.clone();
+    let task = tokio::spawn(async move { task_driver.start(&owned_spec).await });
+    let guest = beacon.dial_ready(spec).await;
     let handle = task.await.expect("start task did not panic").expect("READY completes the start");
     driver.release_for_exit_emission(&handle).await;
-    (handle, beacon)
+    (handle, guest)
 }
 
 async fn stop_ready(driver: &VmDriver, handle: &AllocationHandle, clock: &SimClock) {
@@ -247,7 +236,7 @@ impl Vmm for CreateBarrierVmm {
         Ok(())
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
         self.create_calls.fetch_add(1, Ordering::SeqCst);
         if config.alloc == self.target {
             let entered = self.entered.lock().await.take();
@@ -256,7 +245,7 @@ impl Vmm for CreateBarrierVmm {
             }
             self.release.acquire().await.expect("barrier stays open").forget();
         }
-        self.inner.create(config).await
+        self.inner.create(config, vsock).await
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
@@ -314,7 +303,7 @@ impl Vmm for FailsCreate {
     async fn probe(&self) -> std::result::Result<(), VmmProbeError> {
         Ok(())
     }
-    async fn create(&self, _config: &VmConfig) -> VmmResult<VmProcess> {
+    async fn create(&self, _config: &VmConfig, _vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
         Err((self.make)())
     }
     async fn terminate(&self, _c: &VmControl, _g: Duration) -> VmmResult<VmTermination> {
@@ -336,7 +325,7 @@ impl Vmm for ExitsBeforeBeacon {
     async fn probe(&self) -> std::result::Result<(), VmmProbeError> {
         Ok(())
     }
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+    async fn create(&self, config: &VmConfig, _vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
         let (diagnostics, writer) = VmmDiagnostics::new();
         if let Some(tail) = self.exit.stderr_tail.as_deref() {
             writer.append(tail.as_bytes());
@@ -368,7 +357,7 @@ impl Vmm for SilentButNoisy {
     async fn probe(&self) -> std::result::Result<(), VmmProbeError> {
         Ok(())
     }
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+    async fn create(&self, config: &VmConfig, _vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
         let (diagnostics, writer) = VmmDiagnostics::new();
         writer.append(self.console.as_bytes());
         // Deliberately leak the sender: a dropped sender resolves
@@ -407,11 +396,12 @@ async fn vm_start_failure_class_is_independent_of_vmm_diagnostic_wording() {
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, text),
             }),
         };
-        let (driver, _clock, _fs) = build_driver(Arc::new(vmm), layout);
+        let (driver, _clock, _fs, _beacon) =
+            build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
         let alloc = AllocationId::new("alloc-wording").expect("valid alloc id");
 
         let err =
-            driver.start(&build_spec(&alloc, &tmp)).await.expect_err("create failure rejects");
+            driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("create failure rejects");
         let (class, detail) = expect_vm_class(err);
         observed.push((class, detail));
     }
@@ -445,10 +435,10 @@ async fn vm_start_failure_preserves_verbatim_vmm_diagnostic_detail() {
             ),
         }),
     };
-    let (driver, _clock, _fs) = build_driver(Arc::new(vmm), layout);
+    let (driver, _clock, _fs, _beacon) = build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
     let alloc = AllocationId::new("alloc-verbatim").expect("valid alloc id");
 
-    let err = driver.start(&build_spec(&alloc, &tmp)).await.expect_err("create failure rejects");
+    let err = driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("create failure rejects");
     let (class, detail) = expect_vm_class(err);
 
     assert_eq!(
@@ -475,11 +465,11 @@ async fn vm_early_exit_failure_preserves_exit_code_signal_and_final_stderr_tail(
             stderr_tail: Some("cloud-hypervisor: fatal: bad disk\nabort".to_owned()),
         },
     };
-    let (driver, _clock, _fs) = build_driver(Arc::new(vmm), layout);
+    let (driver, _clock, _fs, _beacon) = build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
     let alloc = AllocationId::new("alloc-early-exit").expect("valid alloc id");
 
     let err =
-        driver.start(&build_spec(&alloc, &tmp)).await.expect_err("early VMM exit rejects start");
+        driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("early VMM exit rejects start");
     let (class, detail) = expect_vm_class(err);
 
     assert_eq!(
@@ -503,9 +493,9 @@ async fn vm_boot_deadline_failure_preserves_deadline_milliseconds_and_live_conso
     let run_dir_root = layout.run_dir_root.clone();
     let vmm =
         SilentButNoisy { console: "[    0.78] Run /sbin/init as init process\npanic: no init" };
-    let (driver, clock, _fs) = build_driver(Arc::new(vmm), layout);
+    let (driver, clock, _fs, _beacon) = build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
     let alloc = AllocationId::new("alloc-deadline-tail").expect("valid alloc id");
-    let spec = build_spec(&alloc, &tmp);
+    let spec = build_spec(&alloc, &tmp, 0);
 
     let driver_task = driver.clone();
     let spec_owned = spec.clone();
@@ -566,13 +556,18 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     // Delete the configured rootfs so BOTH attempts fail identically.
     std::fs::remove_file(fixture_rootfs_path(&tmp)).expect("remove the configured rootfs master");
     let configured = fixture_rootfs_path(&tmp).display().to_string();
-    let (driver, _clock, _fs) = build_driver(Arc::new(SimVmm::new()), layout);
+    let sim = SimVmm::new();
+    let (driver, _clock, _fs, _beacon) = build_driver(&sim, Arc::new(sim.clone()), layout).await;
     let alloc = AllocationId::new("alloc-restart-parity").expect("valid alloc id");
-    let spec = build_spec(&alloc, &tmp);
+    let spec = build_spec(&alloc, &tmp, 0);
+    // A restart is a second launch of the allocation: placement hands it a
+    // fresh lease and claim (D16-CLAIM), so it carries its own transport.
+    let restart_spec = build_spec(&alloc, &tmp, 0);
 
     let first = expect_vm_class(driver.start(&spec).await.expect_err("initial start rejects"));
     driver.release_supervision(&alloc);
-    let second = expect_vm_class(driver.start(&spec).await.expect_err("restart start rejects"));
+    let second =
+        expect_vm_class(driver.start(&restart_spec).await.expect_err("restart start rejects"));
     driver.release_supervision(&alloc);
 
     assert_eq!(
@@ -608,12 +603,14 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
         release: Semaphore::new(0),
         create_calls: AtomicUsize::new(0),
     });
-    let (driver, clock, cgroup_fs) = build_driver(barrier_vmm.clone(), layout);
-    let target_spec = build_spec(&target, &tmp);
-    let sibling_spec = build_spec(&sibling, &tmp);
+    let (driver, clock, cgroup_fs, beacon) = build_driver(&sim, barrier_vmm.clone(), layout).await;
+    let target_spec = build_spec(&target, &tmp, 0);
+    let sibling_spec = build_spec(&sibling, &tmp, 1);
+    // A duplicate request is a second launch request for the target: it
+    // carries its own transport (a fresh claim of the target's CID).
+    let duplicate_spec = || build_spec(&target, &tmp, 0);
 
-    let (sibling_handle, _sibling_beacon) =
-        start_ready(&driver, &sibling_spec, &run_dir_root).await;
+    let (sibling_handle, _sibling_beacon) = start_ready(&driver, &sibling_spec, &beacon).await;
     let sibling_pid = sibling_handle.pid.expect("sibling start returns a VMM pid");
     let target_task_driver = driver.clone();
     let target_task_spec = target_spec.clone();
@@ -634,7 +631,7 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     );
 
     let duplicate = driver
-        .start(&target_spec)
+        .start(&duplicate_spec())
         .await
         .expect_err("a second start while the first is Starting is rejected");
     let rejection = expect_rejection(duplicate);
@@ -664,9 +661,8 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     assert_eq!(barrier_vmm.create_calls.load(Ordering::SeqCst), 2, "no replacement create");
     assert!(sim.is_live(sibling_pid), "the independent sibling remains live");
 
-    let mut target_beacon = connect_beacon(&run_dir_root, &target).await;
-    target_beacon.write_all(b"READY pid=1 port=1234\n").await.expect("queue target READY");
     barrier_vmm.release.add_permits(1);
+    let _target_beacon = beacon.dial_ready(&target_spec).await;
     let target_handle = target_task
         .await
         .expect("target start task did not panic")
@@ -680,7 +676,7 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     let live_clone_tree = artifact_tree(&clone_staging);
     let live_index_tree = artifact_tree(&clone_index);
     let live_duplicate = expect_rejection(
-        driver.start(&target_spec).await.expect_err("a duplicate Live start is rejected"),
+        driver.start(&duplicate_spec()).await.expect_err("a duplicate Live start is rejected"),
     );
     assert!(matches!(
         live_duplicate.class,
@@ -734,13 +730,12 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
     let clone_index = layout.clone_index_dir.clone();
     let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock, cgroup_fs) = build_driver(Arc::new(sim.clone()), layout);
+    let (driver, clock, cgroup_fs, beacon) =
+        build_driver(&sim, Arc::new(sim.clone()), layout).await;
     let sibling = AllocationId::new("alloc-cleanup-twice-sibling").expect("valid sibling id");
     let target = AllocationId::new("alloc-cleanup-twice-target").expect("valid target id");
-    let sibling_spec = build_spec(&sibling, &tmp);
-    let target_spec = build_spec(&target, &tmp);
-    let (sibling_handle, _sibling_beacon) =
-        start_ready(&driver, &sibling_spec, &run_dir_root).await;
+    let sibling_spec = build_spec(&sibling, &tmp, 0);
+    let (sibling_handle, _sibling_beacon) = start_ready(&driver, &sibling_spec, &beacon).await;
     let sibling_pid = sibling_handle.pid.expect("sibling VMM pid");
     let sibling_claims = driver.live_allocations().expect("VM driver reports claims");
     let sibling_cgroups = cgroup_fs.snapshot();
@@ -752,6 +747,8 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
 
     let mut residue_snapshots = Vec::new();
     for attempt in 1..=2 {
+        // Every fresh start is its own launch with its own transport.
+        let target_spec = build_spec(&target, &tmp, 1);
         let failure = expect_rejection(
             driver
                 .start(&target_spec)
@@ -832,9 +829,9 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
             }),
         };
 
-        let (driver, _clock, cgroup_fs) = build_driver(vmm, layout);
+        let (driver, _clock, cgroup_fs, _beacon) = build_driver(&sim, vmm, layout).await;
         let alloc = AllocationId::new("alloc-cleanup").expect("valid alloc id");
-        let err = driver.start(&build_spec(&alloc, &tmp)).await.expect_err("start rejects");
+        let err = driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("start rejects");
         assert!(matches!(err, DriverError::StartRejected { .. }), "[{arm}] must reject");
 
         assert_eq!(
@@ -889,7 +886,8 @@ async fn run_directory_create_failure_attempts_the_complete_known_cleanup_partit
         .expect("make the run-directory root non-traversable");
     let alloc = AllocationId::new("alloc-run-dir-create-failure").expect("valid alloc id");
     let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&layout.cgroup_root);
-    let (driver, _clock, cgroup_fs) = build_driver(Arc::new(SimVmm::new()), layout.clone());
+    let (driver, _clock, cgroup_fs, _beacon) =
+        build_driver(&SimVmm::new(), Arc::new(SimVmm::new()), layout.clone()).await;
     cgroup_fs.inject_error(
         SimOp::Write,
         scope_dir.join("cgroup.kill"),
@@ -899,7 +897,7 @@ async fn run_directory_create_failure_attempts_the_complete_known_cleanup_partit
 
     let failure = expect_rejection(
         driver
-            .start(&build_spec(&alloc, &tmp))
+            .start(&build_spec(&alloc, &tmp, 0))
             .await
             .expect_err("run-directory creation must reject"),
     );
@@ -936,7 +934,8 @@ async fn cgroup_create_failure_attempts_cleanup_and_removes_the_run_directory() 
     let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&layout.cgroup_root);
     let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
     let sim = SimVmm::new();
-    let (driver, _clock, cgroup_fs) = build_driver(Arc::new(sim.clone()), layout);
+    let (driver, _clock, cgroup_fs, _beacon) =
+        build_driver(&sim, Arc::new(sim.clone()), layout).await;
     cgroup_fs.inject_error(
         SimOp::CreateDir,
         scope_dir.clone(),
@@ -950,7 +949,7 @@ async fn cgroup_create_failure_attempts_cleanup_and_removes_the_run_directory() 
     cgroup_fs.inject_error(SimOp::RemoveDir, scope_dir, std::io::ErrorKind::DirectoryNotEmpty);
 
     let failure = expect_rejection(
-        driver.start(&build_spec(&alloc, &tmp)).await.expect_err("cgroup creation must reject"),
+        driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("cgroup creation must reject"),
     );
 
     assert_eq!(failure.class, DriverStartClass::Unclassified { driver: DriverType::Vm });
@@ -981,10 +980,11 @@ async fn a_permission_error_is_never_reported_as_a_missing_artifact() {
             ))
         }),
     };
-    let (driver, _clock, _fs) = build_driver(Arc::new(vmm), layout);
+    let (driver, _clock, _fs, _beacon) = build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
     let alloc = AllocationId::new("alloc-eacces").expect("valid alloc id");
 
-    let err = driver.start(&build_spec(&alloc, &tmp)).await.expect_err("io failure rejects start");
+    let err =
+        driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("io failure rejects start");
     let failure = expect_rejection(err);
 
     assert!(

@@ -10,9 +10,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use overdrive_control_plane::guest_network::{
-    GuestLinkKind, GuestNetworkError, GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan,
-    GuestNetworkProvisioner, Result, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
-    SharedGuestNetworkOwner, TapActivation, TapQuiescence,
+    ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestNetworkError,
+    GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
+    QuiescenceHold, QuiescenceHolder, Result, SharedGuestNetworkAudit,
+    SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
 };
 use overdrive_core::guest_network::{GuestNetworkExecWiring, SharedGuestNetworkComponent};
 use overdrive_core::id::AllocationId;
@@ -35,14 +36,14 @@ struct Trace {
     sweep_calls: Vec<SimSharedGuestNetworkSweepCall>,
 }
 
-/// Standing outcome of every subsequent `quiesce_managed_taps` call.
+/// Standing outcome of every subsequent `quiesce_forwarding` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimQuiesceOutcome {
-    /// `Ok(TapQuiescence)` naming these allocations unconfirmed, each with a
-    /// fresh `GuestNetworkError::Io { operation: TapSetDown, .. }`; empty is
-    /// full quiescence. The `Default`.
+    /// `Ok(ForwardingQuiescence)` naming these allocations unconfirmed, each
+    /// with a fresh `GuestNetworkError::Io { operation: ForwardingQuiesce, .. }`;
+    /// empty is full quiescence. The `Default`.
     Unconfirmed(BTreeSet<AllocationId>),
-    /// `Err(GuestNetworkError::Io { operation: TapSetDown, .. })`.
+    /// `Err(GuestNetworkError::Io { operation: ForwardingQuiesce, .. })`.
     Fail,
     /// A future that never resolves.
     Hang,
@@ -58,8 +59,8 @@ impl Default for SimQuiesceOutcome {
 /// `Condemned` exclusion set (D-295-R5, R14).
 #[derive(Debug, Default)]
 struct Quiescence {
-    /// Set by every `quiesce_managed_taps`; cleared only by a successful
-    /// `restore_quiesced_taps`.
+    /// Set by every `quiesce_forwarding`; cleared only by a successful
+    /// `restore_forwarding`.
     latched: bool,
     /// Every allocation a returned quiescence or audit result has named.
     condemned: BTreeSet<AllocationId>,
@@ -74,7 +75,8 @@ pub struct SimSharedGuestNetworkOwner {
     sweep: AtomicBool,
     converge: AtomicBool,
     restore: AtomicBool,
-    audit_components: [AtomicBool; 12],
+    audit_components: [AtomicBool; 10],
+    #[allow(dead_code, reason = "read by `quiesce_forwarding` once its RED scaffold (QuiescenceHold blocker) is resolved")]
     quiesce_outcome: Mutex<SimQuiesceOutcome>,
     audit_damage: Mutex<BTreeSet<AllocationId>>,
     quiescence: Mutex<Quiescence>,
@@ -112,7 +114,7 @@ impl SimSharedGuestNetworkOwner {
         self.converge.store(armed, Ordering::SeqCst);
     }
     pub fn script_audit_failure(&self, armed: bool) {
-        self.script_component_audit_failure(SharedGuestNetworkComponent::Bridge, armed);
+        self.script_component_audit_failure(SharedGuestNetworkComponent::Forwarder, armed);
     }
     pub fn script_component_audit_failure(
         &self,
@@ -128,11 +130,11 @@ impl SimSharedGuestNetworkOwner {
     ) {
         *self.audit_error.lock() = Some((component, source));
     }
-    /// Set the standing outcome of every subsequent `quiesce_managed_taps`.
+    /// Set the standing outcome of every subsequent `quiesce_forwarding`.
     pub fn script_quiesce_outcome(&self, outcome: SimQuiesceOutcome) {
         *self.quiesce_outcome.lock() = outcome;
     }
-    /// Arm (`true`) or disarm (`false`) the standing `restore_quiesced_taps`
+    /// Arm (`true`) or disarm (`false`) the standing `restore_forwarding`
     /// refusal.
     pub fn script_restore_failure(&self, armed: bool) {
         self.restore.store(armed, Ordering::SeqCst);
@@ -176,14 +178,11 @@ impl SimSharedGuestNetworkOwner {
     /// record — here, a condemned one.
     fn condemned_refusal(plan: &GuestNetworkPlan) -> GuestNetworkError {
         GuestNetworkError::PostconditionMismatch {
-            operation: GuestNetworkOperation::TapObserve,
-            expected: GuestNetworkFact::Tap {
-                name: plan.assignment().tap.clone(),
-                ifindex: None,
-                link_kind: GuestLinkKind::Tap,
-                persistent: true,
-                up: false,
-                owner_uid: Some(0),
+            operation: GuestNetworkOperation::ForwardingActivate,
+            expected: GuestNetworkFact::AllocationForwarding {
+                alloc: plan.alloc().clone(),
+                cid: plan.assignment().cid(),
+                pairs: 0,
             },
             observed: None,
         }
@@ -205,35 +204,31 @@ impl SimSharedGuestNetworkOwner {
             .collect()
     }
 
-    const COMPONENTS: [SharedGuestNetworkComponent; 12] = [
-        SharedGuestNetworkComponent::Bridge,
+    const COMPONENTS: [SharedGuestNetworkComponent; 10] = [
+        SharedGuestNetworkComponent::Forwarder,
+        SharedGuestNetworkComponent::FlowListeners,
+        SharedGuestNetworkComponent::ControlListener,
+        SharedGuestNetworkComponent::IntakeListeners,
         SharedGuestNetworkComponent::LegF,
         SharedGuestNetworkComponent::LegC,
-        SharedGuestNetworkComponent::Dns,
-        SharedGuestNetworkComponent::TcxLink,
-        SharedGuestNetworkComponent::EndpointMap,
-        SharedGuestNetworkComponent::CounterMap,
-        SharedGuestNetworkComponent::BpffsPin,
-        SharedGuestNetworkComponent::BridgeGuard,
         SharedGuestNetworkComponent::IpRules,
         SharedGuestNetworkComponent::IpSets,
+        SharedGuestNetworkComponent::Dns,
         SharedGuestNetworkComponent::Supervisor,
     ];
 
     const fn component_index(component: SharedGuestNetworkComponent) -> usize {
         match component {
-            SharedGuestNetworkComponent::Bridge => 0,
-            SharedGuestNetworkComponent::LegF => 1,
-            SharedGuestNetworkComponent::LegC => 2,
-            SharedGuestNetworkComponent::Dns => 3,
-            SharedGuestNetworkComponent::TcxLink => 4,
-            SharedGuestNetworkComponent::EndpointMap => 5,
-            SharedGuestNetworkComponent::CounterMap => 6,
-            SharedGuestNetworkComponent::BpffsPin => 7,
-            SharedGuestNetworkComponent::BridgeGuard => 8,
-            SharedGuestNetworkComponent::IpRules => 9,
-            SharedGuestNetworkComponent::IpSets => 10,
-            SharedGuestNetworkComponent::Supervisor => 11,
+            SharedGuestNetworkComponent::Forwarder => 0,
+            SharedGuestNetworkComponent::FlowListeners => 1,
+            SharedGuestNetworkComponent::ControlListener => 2,
+            SharedGuestNetworkComponent::IntakeListeners => 3,
+            SharedGuestNetworkComponent::LegF => 4,
+            SharedGuestNetworkComponent::LegC => 5,
+            SharedGuestNetworkComponent::IpRules => 6,
+            SharedGuestNetworkComponent::IpSets => 7,
+            SharedGuestNetworkComponent::Dns => 8,
+            SharedGuestNetworkComponent::Supervisor => 9,
         }
     }
 
@@ -266,31 +261,32 @@ impl SimSharedGuestNetworkOwner {
 #[async_trait::async_trait]
 impl GuestNetworkProvisioner for SimSharedGuestNetworkOwner {
     async fn provision(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        self.record(GuestNetworkOperation::TapCreate);
-        Self::result(&self.provision, GuestNetworkOperation::TapCreate)
+        self.record(GuestNetworkOperation::PairInstall);
+        Self::result(&self.provision, GuestNetworkOperation::PairInstall)
     }
 
     /// `Ok(QuiescenceLatched)` with nothing recorded while the latch is set;
-    /// otherwise records `TapSetUp` and returns the host's source-less
-    /// `PostconditionMismatch` for a condemned allocation, `Ok(Raised)` else.
-    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<TapActivation> {
+    /// otherwise records `ForwardingActivate` and returns the source-less
+    /// `PostconditionMismatch` for a condemned allocation, `Ok(Activated)`
+    /// else.
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<ForwardingActivation> {
         let condemned = {
             let quiescence = self.quiescence.lock();
             if quiescence.latched {
-                return Ok(TapActivation::QuiescenceLatched);
+                return Ok(ForwardingActivation::QuiescenceLatched);
             }
             quiescence.condemned.contains(plan.alloc())
         };
-        self.record(GuestNetworkOperation::TapSetUp);
+        self.record(GuestNetworkOperation::ForwardingActivate);
         if condemned {
             return Err(Self::condemned_refusal(plan));
         }
-        Ok(TapActivation::Raised)
+        Ok(ForwardingActivation::Activated)
     }
 
     async fn teardown(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        self.record(GuestNetworkOperation::TapDelete);
-        Self::result(&self.teardown, GuestNetworkOperation::TapDelete)
+        self.record(GuestNetworkOperation::PairRemove);
+        Self::result(&self.teardown, GuestNetworkOperation::PairRemove)
     }
 }
 
@@ -322,8 +318,8 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
     }
 
     async fn converge_shared(&self) -> Result<()> {
-        self.record(GuestNetworkOperation::BridgeConverge);
-        Self::result(&self.converge, GuestNetworkOperation::BridgeConverge)
+        self.record(GuestNetworkOperation::ForwarderLoad);
+        Self::result(&self.converge, GuestNetworkOperation::ForwarderLoad)
     }
 
     /// Node-level result as D11 pins it; when no node-level slot fires,
@@ -332,7 +328,7 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
-        self.record(GuestNetworkOperation::BridgeObserve);
+        self.record(GuestNetworkOperation::SharedAudit);
         let taken = self.audit_error.lock().take();
         if let Some((component, source)) = taken {
             return Err(SharedGuestNetworkAuditError { component, source });
@@ -342,31 +338,28 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
         }
         let damage = self.audit_damage.lock().clone();
         Ok(SharedGuestNetworkAudit {
-            damaged: self.condemn(&damage, GuestNetworkOperation::TapObserve),
+            damaged: self.condemn(&damage, GuestNetworkOperation::SharedAudit),
         })
     }
 
-    /// Sets the latch, records `TapSetDown`, and returns the standing outcome.
-    async fn quiesce_managed_taps(&self) -> Result<TapQuiescence> {
-        self.quiescence.lock().latched = true;
-        self.record(GuestNetworkOperation::TapSetDown);
-        let outcome = self.quiesce_outcome.lock().clone();
-        match outcome {
-            SimQuiesceOutcome::Unconfirmed(named) => Ok(TapQuiescence {
-                unconfirmed: self.condemn(&named, GuestNetworkOperation::TapSetDown),
-            }),
-            SimQuiesceOutcome::Fail => Err(Self::refusal(GuestNetworkOperation::TapSetDown)),
-            SimQuiesceOutcome::Hang => std::future::pending().await,
-        }
+    /// SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step, 09-01
+    /// rework). The sim must return a `QuiescenceHold`, which the design makes
+    /// constructible only by the owner (D8a-HOLD); no constructor reachable
+    /// from `overdrive-sim` is pinned — surfaced as a DISTILL blocker.
+    async fn quiesce_forwarding(
+        &self,
+        _holder: QuiescenceHolder,
+    ) -> Result<(QuiescenceHold, ForwardingQuiescence)> {
+        panic!("Not yet implemented -- RED scaffold")
     }
 
-    /// Records `TapSetUp`; returns the standing restore refusal, and clears
-    /// the latch only on `Ok`.
-    async fn restore_quiesced_taps(&self) -> Result<()> {
-        self.record(GuestNetworkOperation::TapSetUp);
-        Self::result(&self.restore, GuestNetworkOperation::TapSetUp)?;
+    /// Records `ForwardingRestore`; returns the standing restore refusal, and
+    /// clears the latch (`Reopened`) only on `Ok`.
+    async fn restore_forwarding(&self, _hold: QuiescenceHold) -> Result<ForwardingRestore> {
+        self.record(GuestNetworkOperation::ForwardingRestore);
+        Self::result(&self.restore, GuestNetworkOperation::ForwardingRestore)?;
         self.quiescence.lock().latched = false;
-        Ok(())
+        Ok(ForwardingRestore::Reopened)
     }
 }
 
@@ -476,7 +469,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// The standing non-audit slots (sweep, converge, restore), the standing
-    /// quiescence outcome `Fail`, and the Bridge audit slot each refuse every
+    /// quiescence outcome `Fail`, and the Forwarder audit slot each refuse every
     /// call while armed, with the exact mapped operation and a fresh
     /// `"scripted sim owner refusal"` source; each disarms independently, the
     /// default quiescence outcome is full quiescence, and every call is
@@ -484,21 +477,19 @@ mod tests {
     #[tokio::test]
     async fn standing_owner_controls_preserve_exact_operation_semantics() {
         use GuestNetworkOperation::{
-            BridgeConverge, BridgeObserve, CleanupComplement, TapSetDown, TapSetUp,
+            CleanupComplement, ForwarderLoad, ForwardingQuiesce, ForwardingRestore, SharedAudit,
         };
         let owner = SimSharedGuestNetworkOwner::default();
         owner.script_sweep_failure(true);
         owner.script_converge_failure(true);
         owner.script_audit_failure(true);
         owner.script_quiesce_outcome(SimQuiesceOutcome::Fail);
-        owner.script_restore_failure(true);
 
         for call in 0..2 {
             for (result, operation) in [
                 (owner.sweep_stale().await, CleanupComplement),
-                (owner.converge_shared().await, BridgeConverge),
-                (owner.quiesce_managed_taps().await.map(|_| ()), TapSetDown),
-                (owner.restore_quiesced_taps().await, TapSetUp),
+                (owner.converge_shared().await, ForwarderLoad),
+                (owner.quiesce_forwarding(holder()).await.map(|_| ()), ForwardingQuiesce),
             ] {
                 assert!(
                     matches!(
@@ -511,8 +502,8 @@ mod tests {
                 );
             }
         }
-        let audit = owner.audit_shared().await.expect_err("Bridge audit slot refuses");
-        assert_eq!(audit.component, SharedGuestNetworkComponent::Bridge);
+        let audit = owner.audit_shared().await.expect_err("Forwarder audit slot refuses");
+        assert_eq!(audit.component, SharedGuestNetworkComponent::Forwarder);
         assert!(matches!(
             audit.source,
             GuestNetworkError::PostconditionMismatch {
@@ -520,33 +511,52 @@ mod tests {
                 ..
             }
         ));
-        let armed = [CleanupComplement, BridgeConverge, TapSetDown, TapSetUp];
-        assert_eq!(owner.calls(), [&armed[..], &armed[..], &[BridgeObserve][..]].concat());
+        let armed = [CleanupComplement, ForwarderLoad, ForwardingQuiesce];
+        assert_eq!(owner.calls(), [&armed[..], &armed[..], &[SharedAudit][..]].concat());
+
+        // The standing restore refusal: a hold from a successful quiesce is
+        // refused while armed.
+        owner.script_quiesce_outcome(SimQuiesceOutcome::default());
+        owner.script_restore_failure(true);
+        let (hold, _) = owner.quiesce_forwarding(holder()).await.expect("default outcome");
+        let refused = owner.restore_forwarding(hold).await;
+        assert!(
+            matches!(
+                &refused,
+                Err(GuestNetworkError::Io { operation: ForwardingRestore, source })
+                    if source.to_string() == "scripted sim owner refusal"
+            ),
+            "standing ForwardingRestore refusal, got {refused:?}",
+        );
 
         owner.script_sweep_failure(false);
         owner.script_converge_failure(false);
         owner.script_audit_failure(false);
-        owner.script_quiesce_outcome(SimQuiesceOutcome::default());
         owner.script_restore_failure(false);
         owner.sweep_stale().await.expect("sweep slot disarms independently");
         owner.converge_shared().await.expect("converge slot disarms independently");
         let healthy = owner.audit_shared().await.expect("audit slot disarms independently");
         assert!(healthy.damaged.is_empty(), "no damage is scripted");
-        let quiesced = owner.quiesce_managed_taps().await.expect("quiesce outcome resets");
+        let (hold, quiesced) = owner.quiesce_forwarding(holder()).await.expect("quiesce outcome resets");
         assert!(quiesced.unconfirmed.is_empty(), "the default outcome is full quiescence");
-        owner.restore_quiesced_taps().await.expect("restore slot disarms independently");
+        assert_eq!(
+            owner.restore_forwarding(hold).await.expect("restore slot disarms independently"),
+            ForwardingRestore::Reopened,
+        );
         assert_eq!(
             owner.calls(),
             [
                 &armed[..],
                 &armed[..],
                 &[
-                    BridgeObserve,
+                    SharedAudit,
+                    ForwardingQuiesce,
+                    ForwardingRestore,
                     CleanupComplement,
-                    BridgeConverge,
-                    BridgeObserve,
-                    TapSetDown,
-                    TapSetUp
+                    ForwarderLoad,
+                    SharedAudit,
+                    ForwardingQuiesce,
+                    ForwardingRestore
                 ][..],
             ]
             .concat(),
@@ -554,51 +564,56 @@ mod tests {
         );
     }
 
+    /// The holder every sim-owner quiescence in these bodies presents.
+    const fn holder() -> QuiescenceHolder {
+        QuiescenceHolder::Recovery(SharedGuestNetworkComponent::Forwarder)
+    }
+
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
     /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// Each `SimQuiesceOutcome` gives its pinned result: `Unconfirmed(set)`
-    /// names each not-yet-condemned member with a fresh `Io { TapSetDown }`
+    /// names each not-yet-condemned member with a fresh `Io { ForwardingQuiesce }`
     /// (empty is full quiescence), `Fail` refuses, `Hang` never resolves.
     /// Every allocation a quiescence or audit result names is condemned and
     /// never named again by either operation (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the sim adapter); FD § "Public deterministic shared-owner simulation API" (the pending `Default`, damage, and condemned-set rules)).
     #[tokio::test]
     async fn scripted_quiescence_outcomes_condemn_each_named_allocation_once() {
-        use GuestNetworkOperation::{BridgeObserve, TapObserve, TapSetDown};
+        use GuestNetworkOperation::{ForwardingQuiesce, SharedAudit};
         let owner = SimSharedGuestNetworkOwner::default();
 
-        let full = owner.quiesce_managed_taps().await.expect("the default outcome succeeds");
+        let full = owner.quiesce_forwarding(holder()).await.expect("the default outcome succeeds");
         assert!(full.unconfirmed.is_empty(), "the default Unconfirmed(∅) is full quiescence");
 
         owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["a", "b"])));
-        let first = owner.quiesce_managed_taps().await.expect("Unconfirmed is an Ok outcome");
-        assert_named(&first.unconfirmed, &allocs(&["a", "b"]), TapSetDown);
-        let repeat = owner.quiesce_managed_taps().await.expect("the outcome is standing");
-        assert_named(&repeat.unconfirmed, &allocs(&[]), TapSetDown);
+        let first = owner.quiesce_forwarding(holder()).await.expect("Unconfirmed is an Ok outcome");
+        assert_named(&first.unconfirmed, &allocs(&["a", "b"]), ForwardingQuiesce);
+        let repeat = owner.quiesce_forwarding(holder()).await.expect("the outcome is standing");
+        assert_named(&repeat.unconfirmed, &allocs(&[]), ForwardingQuiesce);
 
         owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["b", "c"])));
-        let overlap = owner.quiesce_managed_taps().await.expect("Unconfirmed is an Ok outcome");
-        assert_named(&overlap.unconfirmed, &allocs(&["c"]), TapSetDown);
+        let overlap = owner.quiesce_forwarding(holder()).await.expect("Unconfirmed is an Ok outcome");
+        assert_named(&overlap.unconfirmed, &allocs(&["c"]), ForwardingQuiesce);
 
         owner.script_audit_damage(allocs(&["a", "c", "d"]));
         let audit = owner.audit_shared().await.expect("no node-level audit slot is armed");
-        assert_named(&audit.damaged, &allocs(&["d"]), TapObserve);
+        assert_named(&audit.damaged, &allocs(&["d"]), SharedAudit);
         let reaudit = owner.audit_shared().await.expect("the damage set is standing");
-        assert_named(&reaudit.damaged, &allocs(&[]), TapObserve);
+        assert_named(&reaudit.damaged, &allocs(&[]), SharedAudit);
         owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["d"])));
-        let after_audit = owner.quiesce_managed_taps().await.expect("Unconfirmed is an Ok outcome");
-        assert_named(&after_audit.unconfirmed, &allocs(&[]), TapSetDown);
+        let after_audit = owner.quiesce_forwarding(holder()).await.expect("Unconfirmed is an Ok outcome");
+        assert_named(&after_audit.unconfirmed, &allocs(&[]), ForwardingQuiesce);
 
         owner.script_quiesce_outcome(SimQuiesceOutcome::Fail);
-        let failed = owner.quiesce_managed_taps().await;
+        let failed = owner.quiesce_forwarding(holder()).await;
         assert!(
-            matches!(&failed, Err(GuestNetworkError::Io { operation: TapSetDown, .. })),
-            "Fail refuses with Io {{ TapSetDown }}, got {failed:?}",
+            matches!(&failed, Err(GuestNetworkError::Io { operation: ForwardingQuiesce, .. })),
+            "Fail refuses with Io {{ ForwardingQuiesce }}, got {failed:?}",
         );
 
         owner.script_quiesce_outcome(SimQuiesceOutcome::Hang);
-        let mut hung = owner.quiesce_managed_taps();
+        let mut hung = owner.quiesce_forwarding(holder());
         for poll in 0..2 {
             assert!(hung.as_mut().now_or_never().is_none(), "Hang never resolves (poll {poll})");
             tokio::task::yield_now().await;
@@ -606,24 +621,24 @@ mod tests {
         drop(hung);
 
         owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["e"])));
-        let fresh = owner.quiesce_managed_taps().await.expect("Unconfirmed is an Ok outcome");
-        assert_named(&fresh.unconfirmed, &allocs(&["e"]), TapSetDown);
+        let fresh = owner.quiesce_forwarding(holder()).await.expect("Unconfirmed is an Ok outcome");
+        assert_named(&fresh.unconfirmed, &allocs(&["e"]), ForwardingQuiesce);
 
         assert_eq!(
             owner.calls(),
             [
-                TapSetDown,
-                TapSetDown,
-                TapSetDown,
-                TapSetDown,
-                BridgeObserve,
-                BridgeObserve,
-                TapSetDown,
-                TapSetDown,
-                TapSetDown,
-                TapSetDown,
+                ForwardingQuiesce,
+                ForwardingQuiesce,
+                ForwardingQuiesce,
+                ForwardingQuiesce,
+                SharedAudit,
+                SharedAudit,
+                ForwardingQuiesce,
+                ForwardingQuiesce,
+                ForwardingQuiesce,
+                ForwardingQuiesce,
             ],
-            "every quiescence records TapSetDown and every audit BridgeObserve, hung call included",
+            "every quiescence records ForwardingQuiesce and every audit SharedAudit, hung call included",
         );
     }
 
@@ -673,7 +688,7 @@ mod tests {
             owner.audit_shared().await.expect("component disarms independently");
             assert_eq!(
                 owner.calls(),
-                [GuestNetworkOperation::BridgeObserve, GuestNetworkOperation::BridgeObserve]
+                [GuestNetworkOperation::SharedAudit, GuestNetworkOperation::SharedAudit]
             );
         }
 
@@ -681,16 +696,16 @@ mod tests {
         owner.script_component_audit_failure(SharedGuestNetworkComponent::Supervisor, true);
         owner.script_component_audit_failure(SharedGuestNetworkComponent::LegC, true);
         owner.script_next_audit_error(
-            SharedGuestNetworkComponent::TcxLink,
+            SharedGuestNetworkComponent::Forwarder,
             GuestNetworkError::Io {
-                operation: GuestNetworkOperation::TcxQuery,
+                operation: GuestNetworkOperation::ForwarderInventory,
                 source: std::io::Error::other("replaced one-shot"),
             },
         );
         owner.script_next_audit_error(
             SharedGuestNetworkComponent::Dns,
             GuestNetworkError::Io {
-                operation: GuestNetworkOperation::BridgeObserve,
+                operation: GuestNetworkOperation::SharedAudit,
                 source: std::io::Error::other("final one-shot"),
             },
         );
@@ -699,7 +714,7 @@ mod tests {
         assert!(matches!(
             one_shot.source,
             GuestNetworkError::Io {
-                operation: GuestNetworkOperation::BridgeObserve,
+                operation: GuestNetworkOperation::SharedAudit,
                 source,
             } if source.to_string() == "final one-shot"
         ));

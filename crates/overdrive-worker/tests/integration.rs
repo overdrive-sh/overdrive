@@ -183,6 +183,20 @@ mod integration {
     // and the bodies make real client connections and prove real socket release.
     mod netns_density_shared_owner;
 
+    // netns-density-295 DISTILL (P5-S10, D9/D14) — the mTLS forwarded-outbound
+    // port on the real worker: `register_forwarded_outbound` / `leg_f_addr` /
+    // `ForwardedOutbound`, claim by exact 4-tuple, no leg-F re-resolution, and
+    // the H-5 remote-side linger. RED until DELIVER vsock new-step 8.
+    mod vsock_mesh_egress_mtls;
+
+    // netns-density-295 DISTILL (P5-S8, D26 / D26-PINS F-1..F-6) — the
+    // constant output rules of the production shared nft table, written by
+    // `start_shared_owner` over `HostMtlsIntercept`, reject marked
+    // (`OWNER_EGRESS_MARK`) sockets to host-internal and non-unicast
+    // destinations with a plain `reject`, and keep unicast reachable. RED until
+    // DELIVER lands the D26 output rules.
+    mod vsock_host_internal_enforce;
+
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.

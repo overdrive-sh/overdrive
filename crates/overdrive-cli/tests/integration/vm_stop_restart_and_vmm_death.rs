@@ -151,6 +151,7 @@
     clippy::similar_names
 )]
 
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -164,24 +165,26 @@ use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::api::AllocStateWire;
-use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_control_plane::{ServerConfig, ServerHandle, VmOverride, run_server};
 use overdrive_core::TransitionReason;
+use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
 use overdrive_core::transition_reason::StoppedBy;
+use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconSocket};
 use overdrive_core::vm::config::{VmConfig, VmRunDir};
 use overdrive_host::{CloudHypervisorVmm, RealCgroupFs};
 use overdrive_sim::SimVmm;
+use overdrive_sim::adapters::beacon_io::SimBeaconIo;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_testing::vm_fixture::VmFixture;
 use serde::Serialize;
 use serial_test::serial;
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
@@ -248,14 +251,14 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
 
 /// The same real in-process `serve` composition as [`spawn_vm_server`], with
 /// the `Vmm` port additionally bound to a caller-supplied adapter
-/// (`ServerConfig.vmm_override`, ADR-0083 §D8, step 01-09). S-VM-51 binds a
+/// (`ServerConfig.vm_override`, ADR-0083 §D8, step 01-09; DG-4). S-VM-51 binds a
 /// [`SimVmm`] armed to fail `create` CLOSED with `VmmError::ConfinementUnavailable`
 /// — `.probe()` still runs unconditionally against it (a clean sim probe), so
 /// the node boots and registers the VM driver exactly as in production; only
 /// the port binding differs. Mirrors `vm_boot_failure_vocabulary.rs`'s helper
 /// of the same name (a file-local copy — sibling test modules cannot share
 /// private items).
-async fn spawn_vm_server_with_vmm(vmm: std::sync::Arc<dyn Vmm>) -> (ServeHandle, TempDir) {
+async fn spawn_vm_server_with_vmm(vm_override: VmOverride) -> (ServeHandle, TempDir) {
     // data_dir on the reflink staging root — see `server_tmp_on_staging_root`.
     let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
@@ -264,14 +267,14 @@ async fn spawn_vm_server_with_vmm(vmm: std::sync::Arc<dyn Vmm>) -> (ServeHandle,
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
     let args = ServeArgs { bind, data_dir, config_dir };
-    let handle = overdrive_cli::commands::serve::run_with_dataplane_and_vmm_override(
+    let handle = overdrive_cli::commands::serve::run_with_dataplane_and_vm_override(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        vmm,
+        vm_override,
     )
     .await
-    .expect("serve::run_with_dataplane_and_vmm_override");
+    .expect("serve::run_with_dataplane_and_vm_override");
     (handle, tmp)
 }
 
@@ -736,7 +739,7 @@ async fn spawn_vm_server_at(data_dir: &Path, config_dir: &Path) -> ServeHandle {
 }
 
 /// Direct production `run_server` composition with the already-sanctioned
-/// `ServerConfig.clock` and `vmm_override` test boundaries. The real cgroupfs,
+/// `ServerConfig.clock` and `vm_override` test boundaries. The real cgroupfs,
 /// real `VmDriver`, real `RealVmHostState`, and decorated real Cloud Hypervisor
 /// remain composed; the logical clock lets the test release registered
 /// reclamation only after observing replacement bind/create.
@@ -754,7 +757,12 @@ async fn spawn_clocked_vm_server_at_with_vmm(
         operator_config_dir: config_dir.to_path_buf(),
         clock,
         dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
-        vmm_override: Some(vmm),
+        // A decorator over the real Cloud Hypervisor pairs with the real
+        // node beacon intake port (DG-4).
+        vm_override: Some(VmOverride {
+            vmm,
+            beacon: Arc::new(overdrive_host::VsockBeaconIo::new()),
+        }),
         ..ServerConfig::new(
             Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
             std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
@@ -1776,8 +1784,12 @@ impl Vmm for AllocationOwnershipVmm {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config).await?;
+    async fn create(
+        &self,
+        config: &VmConfig,
+        vsock: ClaimedGuestCid,
+    ) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config, vsock).await?;
         let ordinal = self.create_ordinal.fetch_add(1, Ordering::SeqCst);
         self.creations.lock().expect("creation evidence mutex not poisoned").push(
             VmCreationEvidence {
@@ -1876,10 +1888,6 @@ impl AllocationOwnershipStrace {
             .expect("attach strace to the owning Rust test process");
         std::thread::sleep(Duration::from_millis(400));
         Self { child: Some(child), path }
-    }
-
-    fn contains(&self, needle: &str) -> bool {
-        std::fs::read_to_string(&self.path).is_ok_and(|trace| trace.contains(needle))
     }
 
     fn finish(&mut self) -> String {
@@ -1992,9 +2000,7 @@ async fn poll_exact_allocation_state_advancing_clock(
 fn evidence_artifacts(evidence: &VmCreationEvidence, data_dir: &Path) -> Vec<PathBuf> {
     vec![
         evidence.run_dir.path().to_path_buf(),
-        evidence.run_dir.beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT),
         evidence.run_dir.api_socket(),
-        evidence.run_dir.vsock_socket(),
         evidence.run_dir.console_log(),
         evidence.run_dir.kernel_copy(),
         evidence.rootfs.clone_dest().to_path_buf(),
@@ -2021,15 +2027,13 @@ fn assert_execution_artifacts_present(evidence: &VmCreationEvidence, data_dir: &
 }
 
 fn assert_terminal_predecessor_artifacts_present(evidence: &VmCreationEvidence, data_dir: &Path) {
-    let vsock = evidence.run_dir.vsock_socket();
     let mut paths = evidence_artifacts(evidence, data_dir);
     let index_root = paths.pop().expect("index root sentinel");
     assert!(index_root.starts_with(data_dir));
-    let missing =
-        paths.into_iter().filter(|path| path != &vsock && !path.exists()).collect::<Vec<_>>();
+    let missing = paths.into_iter().filter(|path| !path.exists()).collect::<Vec<_>>();
     assert!(
         missing.is_empty(),
-        "terminal predecessor {} must retain every artifact except its already-closed vsock; missing={missing:?}",
+        "terminal predecessor {} must retain every artifact; missing={missing:?}",
         evidence.alloc,
     );
 }
@@ -2122,38 +2126,6 @@ fn assert_strace_ownership(
     old: &VmCreationEvidence,
     replacement: &VmCreationEvidence,
 ) {
-    let old_beacon = old
-        .run_dir
-        .beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT)
-        .display()
-        .to_string();
-    let replacement_beacon = replacement
-        .run_dir
-        .beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT)
-        .display()
-        .to_string();
-    let old_bind = trace
-        .lines()
-        .position(|line| {
-            line.contains("bind(") && line.contains(&old_beacon) && line.contains("= 0")
-        })
-        .expect("strace contains predecessor beacon bind");
-    let replacement_bind = trace
-        .lines()
-        .position(|line| {
-            line.contains("bind(") && line.contains(&replacement_beacon) && line.contains("= 0")
-        })
-        .expect("strace contains replacement beacon bind");
-    assert_ne!(old_beacon, replacement_beacon);
-    assert!(replacement_bind > old_bind, "replacement bind follows predecessor bind");
-    assert!(
-        trace
-            .lines()
-            .filter(|line| line.contains(&replacement_beacon))
-            .all(|line| !line.contains("EADDRINUSE")),
-        "the replacement's distinct beacon path must never receive EADDRINUSE",
-    );
-
     let replacement_first = trace
         .lines()
         .position(|line| line.contains(replacement.alloc.as_str()))
@@ -2172,9 +2144,7 @@ fn assert_strace_ownership(
     let retained = trace
         .lines()
         .filter(|line| {
-            line.contains(&old_beacon)
-                || line.contains(&replacement_beacon)
-                || line.contains(&old.run_dir.path().display().to_string())
+            line.contains(&old.run_dir.path().display().to_string())
                 || line.contains(&replacement.run_dir.path().display().to_string())
         })
         .collect::<Vec<_>>();
@@ -2182,8 +2152,8 @@ fn assert_strace_ownership(
 }
 
 /// S-284-METAL-01 — both legal #284 interleavings use disjoint allocation
-/// artifact families: predecessor beacon ownership overlaps replacement bind,
-/// then predecessor reclamation follows replacement creation. The old owner
+/// artifact families: predecessor artifact ownership overlaps replacement
+/// creation, then predecessor reclamation follows replacement creation. The old owner
 /// removes only old artifacts; the second real VMM reaches Running; final
 /// operator cleanup removes both allocation families.
 /// CONTRACT_SHAPE: bounded-change.
@@ -2272,9 +2242,8 @@ async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
         .expect("predecessor row")
         .clone();
 
-    // Current code fails before the second Vmm::create call because it tries
-    // to bind the predecessor beacon pathname. Detect and report that original
-    // ownership cause directly rather than converting it into a short timeout.
+    // Report a missing second Vmm::create as the ownership failure directly
+    // rather than converting it into a short timeout.
     let second_wait = second_created.notified();
     tokio::pin!(second_wait);
     let second_deadline = tokio::time::Instant::now() + Duration::from_secs(45);
@@ -2288,16 +2257,6 @@ async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
                     logical_advances += 1;
                 }
                 let out = describe_once(&cfg, workload).await;
-                if out.snapshot.rows.iter().any(|row| {
-                    row.error.as_deref().is_some_and(|error| {
-                        error.to_ascii_lowercase().contains("address already in use")
-                    })
-                }) || strace.contains("EADDRINUSE") {
-                    break Some(
-                        "production reused the predecessor AllocationId; the second beacon bind returned EADDRINUSE before Vmm::create"
-                            .to_owned(),
-                    );
-                }
                 if tokio::time::Instant::now() >= second_deadline {
                     break Some(format!(
                         "no second Vmm::create completed before the bounded owner deadline; rows={:?}",
@@ -2350,11 +2309,11 @@ async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
     assert_eq!(old.alloc, predecessor_id);
     assert_eq!(old.pid, predecessor_running.pid);
     assert_ne!(old.alloc, replacement.alloc, "each real VM execution has a fresh ID");
-    // The production terminal transition closes the predecessor's vsock
-    // pathname and may reap its VMM before replacement creation. Its complete
-    // family and live PID were asserted at Running above; every other old
-    // artifact must still overlap the paused replacement until exact-old
-    // cleanup begins, and the final complement below still proves PID absence.
+    // The production terminal transition may reap the predecessor's VMM
+    // before replacement creation. Its complete family and live PID were
+    // asserted at Running above; every old artifact must still overlap the
+    // paused replacement until exact-old cleanup begins, and the final
+    // complement below still proves PID absence.
     assert_terminal_predecessor_artifacts_present(&old, &data_dir);
     wait_execution_artifacts_present(&replacement, &data_dir).await;
 
@@ -2493,21 +2452,6 @@ fn explicit_landlock_rules(args: &[String]) -> Vec<String> {
     args.windows(2).filter(|w| w[0] == "--landlock-rules").map(|w| w[1].clone()).collect()
 }
 
-/// The selected allocation TAP from the live hypervisor's `--net` value.
-/// Reading the same process argv that the Landlock oracle observes keeps the
-/// test on the production-selected identity; the test never derives or
-/// hand-creates a second TAP name.
-fn selected_network_tap(args: &[String]) -> &str {
-    let net = args
-        .windows(2)
-        .find(|pair| pair[0] == "--net")
-        .map(|pair| pair[1].as_str())
-        .expect("a networked VM launch carries --net");
-    net.split(',')
-        .find_map(|field| field.strip_prefix("tap="))
-        .expect("the network attachment carries its selected TAP")
-}
-
 /// Deploy a long-lived spin VM and return `(handle, server_tmp, cfg, workload,
 /// alloc, vmm_pid)` once it is Running — the shared setup S-VM-49/50/53 need to
 /// observe the confined hypervisor's live `/proc` surface. `rootfs_prefix`
@@ -2561,8 +2505,7 @@ async fn stop_and_shutdown(handle: ServeHandle, cfg: &Path, workload_id: &str) {
 /// non-root, Landlock-confined hypervisor. The confined process reports a
 /// non-zero real AND effective uid/gid, resource limits strictly below the
 /// NAMED `overdrive serve` process (by explicit numeric pid, never
-/// `/proc/self`), and exactly the selected allocation TAP sysfs read grant
-/// followed by the run-directory read-write grant.
+/// `/proc/self`), and exactly the run-directory read-write grant.
 ///
 /// ```gherkin
 /// Given Ana has deployed a VM workload on a host that supports the required
@@ -2571,10 +2514,8 @@ async fn stop_and_shutdown(handle: ServeHandle, cfg: &Path, workload_id: &str) {
 /// Then /proc/<vmm-pid>/status reports a non-zero real AND effective Uid and Gid
 /// And /proc/<vmm-pid>/limits reports Max file size and Max open files strictly
 ///   below the SAME fields on the overdrive serve process
-/// And the hypervisor was launched under a Landlock ruleset granting read-only
-///   access to that allocation's selected TAP sysfs leaf first and read-write
-///   access to that allocation's run directory second, with no other explicit
-///   grant
+/// And the hypervisor was launched under a Landlock ruleset granting read-write
+///   access to that allocation's run directory, with no other explicit grant
 /// ```
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
@@ -2617,22 +2558,19 @@ async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
          serve={serve_nofile_hard}",
     );
 
-    // --- Landlock: exact selected-TAP read, then run-directory write ---
+    // --- Landlock: exactly the run-directory write grant ---
     let args = proc_cmdline_args(vmm_pid);
     assert!(
         args.iter().any(|a| a == "--landlock"),
         "the hypervisor must be launched with --landlock; argv={args:?}",
     );
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
-    let selected_tap = selected_network_tap(&args);
-    let expected_tap_rule = format!("path=/sys/class/net/{selected_tap},access=r");
     let expected_run_dir_rule = format!("path={},access=rw", run_dir.path().display());
     assert_eq!(
         explicit_landlock_rules(&args),
-        vec![expected_tap_rule, expected_run_dir_rule],
-        "the explicit Landlock rules must be exactly the selected allocation TAP sysfs leaf \
-         read-only first, then the allocation run directory read-write; no parent sysfs path, \
-         glob, other TAP, alternate path, TAP write access, or extra rule is allowed; argv={args:?}",
+        vec![expected_run_dir_rule],
+        "the explicit Landlock rules must be exactly the allocation run directory read-write; \
+         no sysfs path, glob, alternate path, or extra rule is allowed; argv={args:?}",
     );
 
     stop_and_shutdown(handle, &cfg, "vm-confined").await;
@@ -2708,21 +2646,19 @@ async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() 
     stop_and_shutdown(handle, &cfg, "vm-outside").await;
 }
 
-/// S-VM-53 / `@correction:C-4` — a networked VM's explicit Landlock rules are
-/// exactly the selected allocation TAP sysfs read grant followed by the run
-/// directory read-write grant. The run directory holds nothing but this VM's
-/// own sockets, logs, and its own kernel copy (ADR-0082
+/// S-VM-53 / `@correction:C-4` — a VM's explicit Landlock rules are exactly
+/// the run directory read-write grant. The run directory holds nothing but
+/// this VM's own sockets, logs, and its own kernel copy (ADR-0082
 /// 2026-08-18 fourth amendment (c-fix.1) copies the operator kernel into the
-/// run dir). CH needs read-only access to the selected TAP's sysfs leaf and
-/// does not auto-derive a rule for the vsock socket it binds itself. The
-/// directory-exclusivity property (SD-2) keeps the writable grant bounded.
+/// run dir). The directory-exclusivity property (SD-2) keeps the writable
+/// grant bounded.
 ///
 /// ```gherkin
 /// Given Ana has deployed a VM workload
 /// When the hypervisor is launched
 /// Then the run directory holds nothing but this VM's own sockets and logs
-/// And the Landlock ruleset grants read-only on the selected TAP sysfs leaf
-///   first and read-write on that run directory second, with no other rule
+/// And the Landlock ruleset grants read-write on that run directory, with no
+///   other rule
 /// ```
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
@@ -2731,7 +2667,7 @@ async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() 
 )]
 #[tokio::test]
 #[serial(cgroup)]
-async fn networked_vm_landlock_rules_are_exact_tap_read_then_run_dir_write() {
+async fn vm_landlock_rules_are_exactly_the_exclusive_run_dir_write() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
     let (handle, _server_tmp, cfg, alloc, vmm_pid, _rootfs, _rootfs_tmp) =
@@ -2751,17 +2687,14 @@ async fn networked_vm_landlock_rules_are_exact_tap_read_then_run_dir_write() {
         run_dir.path().display(),
     );
     for name in &entries {
-        // This VM's own files: CH's main vsock UDS (`vsock`), API socket
-        // (`api`) and the API-socket lock CH writes beside it (`api.lock`),
-        // the serial capture (`console.log`), the driver-bound beacon socket
-        // (`vsock_<port>`), and THIS allocation's own `kernel` copy — ADR-0082
+        // This VM's own files: the API socket (`api`) and the API-socket lock
+        // CH writes beside it (`api.lock`), the serial capture
+        // (`console.log`), and THIS allocation's own `kernel` copy — ADR-0082
         // 2026-08-18 fourth amendment (c-fix.1) refines SD-2's "holds nothing
         // else" to "sockets, console log, and this allocation's own kernel
         // copy". All belong to THIS allocation — nothing foreign shares the
         // directory (SD-2).
-        let is_own =
-            matches!(name.as_str(), "vsock" | "api" | "api.lock" | "console.log" | "kernel")
-                || name.starts_with("vsock_");
+        let is_own = matches!(name.as_str(), "api" | "api.lock" | "console.log" | "kernel");
         assert!(
             is_own,
             "the run directory must hold ONLY this VM's own sockets and logs; found a foreign \
@@ -2769,22 +2702,17 @@ async fn networked_vm_landlock_rules_are_exact_tap_read_then_run_dir_write() {
         );
     }
 
-    // The complete explicit rule set is selected-TAP sysfs read-only first,
-    // then the read-write DIRECTORY grant on the run directory (C-4). Exact
-    // equality rejects the parent /sys/class/net path, globs, every other TAP,
-    // alternate paths/aliases, TAP write access, and any extra rule.
+    // The complete explicit rule set is the read-write DIRECTORY grant on the
+    // run directory (C-4). Exact equality rejects sysfs paths, globs,
+    // alternate paths/aliases, and any extra rule.
     let args = proc_cmdline_args(vmm_pid);
-    let selected_tap = selected_network_tap(&args);
-    let expected_tap_path = format!("/sys/class/net/{selected_tap}");
-    let expected_tap_rule = format!("path={expected_tap_path},access=r");
     let expected_run_dir_rule = format!("path={},access=rw", run_dir.path().display());
     let rules = explicit_landlock_rules(&args);
     assert_eq!(
         rules,
-        vec![expected_tap_rule, expected_run_dir_rule],
-        "the rules must contain only the exact selected allocation TAP sysfs leaf read-only, then \
-         the allocation run directory read-write; this forbids /sys/class/net, globs, another TAP, \
-         alternate paths, TAP write access, and a third rule; argv={args:?}",
+        vec![expected_run_dir_rule],
+        "the rules must contain only the allocation run directory read-write; this forbids \
+         sysfs paths, globs, alternate paths, and a second rule; argv={args:?}",
     );
 
     stop_and_shutdown(handle, &cfg, "vm-vsock-grant").await;
@@ -2923,7 +2851,7 @@ async fn confined_deploy_leaves_operator_kernel_and_rootfs_mode_and_bytes_unchan
 /// Landlock-less host exists in it — a confinement capability is a
 /// fixed-kernel-shape property, not something a fixture can toggle. So the
 /// unavailable-control condition is injected at the `Vmm` port boundary via the
-/// SAME `ServerConfig.vmm_override` seam step 01-09 wired (ADR-0083 §D8): a
+/// SAME `ServerConfig.vm_override` seam step 01-09 wired (ADR-0083 §D8): a
 /// [`SimVmm`] whose `create` fails CLOSED with
 /// `VmmError::ConfinementUnavailable { control: Landlock, .. }`. `.probe()`
 /// still runs unconditionally against it (a clean sim probe), so a REAL
@@ -2980,7 +2908,10 @@ async fn host_that_cannot_confine_refuses_the_workload_and_never_starts_unconfin
         ConfinementControl::Landlock,
         "sim-injected: cloud-hypervisor below the --landlock version floor",
     );
-    let (handle, server_tmp) = spawn_vm_server_with_vmm(std::sync::Arc::new(vmm)).await;
+    // A simulated VMM travels with the simulated beacon coupled to it (DG-4).
+    let beacon = std::sync::Arc::new(SimBeaconIo::new(vmm.clone()));
+    let (handle, server_tmp) =
+        spawn_vm_server_with_vmm(VmOverride { vmm: std::sync::Arc::new(vmm), beacon }).await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),
@@ -3155,18 +3086,18 @@ async fn confinement_adds_no_new_operator_surface() {
     handle.shutdown().await.expect("clean shutdown");
 }
 
-// vm-lifecycle-latency native complements.  The control-stream decorator below
-// stays at the already-existing Vmm port: Cloud Hypervisor and the rootfs's
-// production overdrive-init still execute unchanged.  It merely interposes the
-// Unix endpoint which implements CH's guest-to-host vsock transport so the
-// acceptance matrix can deliver byte splits, coalescing, EOF and invalid
+// vm-lifecycle-latency native complements. The control-stream decorator below
+// sits at the node beacon intake's existing `BeaconIo` port (DG-4): Cloud
+// Hypervisor, the real `VsockBeaconIo` and the rootfs's production
+// overdrive-init still execute unchanged. It forwards every control line and,
+// per script, substitutes, repeats or appends whole lines, or closes the
+// connection, so the acceptance matrix can deliver EOF, invalid and duplicate
 // messages that the well-behaved production BeaconWriter cannot originate.
 
 #[derive(Clone, Copy, Debug)]
 enum GuestControlScript {
     Pass,
     RepeatShutdown,
-    SplitExec,
     ExecThenShutdown,
     ExecThenEof,
     ExecThenMalformed,
@@ -3180,7 +3111,7 @@ enum GuestControlScript {
 struct GuestControlEvidence {
     guest_to_host: Arc<Mutex<Vec<u8>>>,
     host_to_guest: Arc<Mutex<Vec<u8>>>,
-    proxy_dirs: Arc<Mutex<Vec<PathBuf>>>,
+    consoles: Arc<Mutex<Vec<String>>>,
 }
 
 impl GuestControlEvidence {
@@ -3198,155 +3129,18 @@ impl GuestControlEvidence {
         .into_owned()
     }
 
+    /// The serial console of every VM this server ran, snapshotted when its
+    /// VMM exited (before teardown reclaims the run directory).
     fn console_text(&self) -> String {
-        self.proxy_dirs
-            .lock()
-            .expect("proxy-dir mutex not poisoned")
-            .iter()
-            .filter_map(|dir| std::fs::read(dir.join("console.log")).ok())
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn cleanup_proxy_dirs(&self) {
-        for dir in self.proxy_dirs.lock().expect("proxy-dir mutex not poisoned").iter() {
-            let _ = std::fs::remove_dir_all(dir);
-        }
+        self.consoles.lock().expect("console mutex not poisoned").join("\n")
     }
 }
 
-#[derive(Clone)]
+/// A real Cloud Hypervisor whose exit watch snapshots the guest console into
+/// the evidence before the driver observes the exit.
 struct GuestControlVmm {
     inner: CloudHypervisorVmm,
-    script: GuestControlScript,
     evidence: GuestControlEvidence,
-}
-
-impl GuestControlVmm {
-    fn new(script: GuestControlScript) -> (Self, GuestControlEvidence) {
-        let evidence = GuestControlEvidence::default();
-        (Self { inner: CloudHypervisorVmm::new(), script, evidence: evidence.clone() }, evidence)
-    }
-}
-
-async fn connect_control_upstream(path: &Path) -> UnixStream {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        match UnixStream::connect(path).await {
-            Ok(stream) => return stream,
-            Err(error) if tokio::time::Instant::now() < deadline => {
-                let _ = error;
-                tokio::time::sleep(Duration::from_millis(2)).await;
-            }
-            Err(error) => panic!(
-                "production VmDriver beacon listener at {} was not reachable: {error}",
-                path.display()
-            ),
-        }
-    }
-}
-
-async fn proxy_guest_control(
-    listener: UnixListener,
-    upstream_path: PathBuf,
-    script: GuestControlScript,
-    evidence: GuestControlEvidence,
-) {
-    let (guest, _) = listener.accept().await.expect("production init connects to proxy vsock");
-    let host = connect_control_upstream(&upstream_path).await;
-    let (mut guest_read, mut guest_write) = guest.into_split();
-    let (host_read, mut host_write) = host.into_split();
-
-    let guest_evidence = evidence.clone();
-    let guest_to_host = async move {
-        let mut buffer = [0_u8; 4096];
-        loop {
-            let count = guest_read.read(&mut buffer).await.expect("read production init bytes");
-            if count == 0 {
-                break;
-            }
-            guest_evidence
-                .guest_to_host
-                .lock()
-                .expect("guest transcript mutex not poisoned")
-                .extend_from_slice(&buffer[..count]);
-            host_write
-                .write_all(&buffer[..count])
-                .await
-                .expect("forward production init bytes to VmDriver");
-        }
-    };
-
-    let host_evidence = evidence;
-    let host_to_guest = async move {
-        let mut reader = BufReader::new(host_read);
-        let mut line = Vec::new();
-        loop {
-            line.clear();
-            let count = reader.read_until(b'\n', &mut line).await.expect("read BeaconWriter line");
-            if count == 0 {
-                break;
-            }
-            host_evidence
-                .host_to_guest
-                .lock()
-                .expect("host transcript mutex not poisoned")
-                .extend_from_slice(&line);
-            let is_exec = line.starts_with(b"EXEC ");
-            let is_shutdown = line == b"SHUTDOWN\n";
-            match (script, is_exec, is_shutdown) {
-                (GuestControlScript::EofBeforeExec, true, _) => break,
-                (GuestControlScript::MalformedBeforeExec, true, _) => {
-                    guest_write.write_all(b"EXEC not-json\n").await.expect("write malformed EXEC");
-                }
-                (GuestControlScript::ShutdownBeforeExec, true, _) => {
-                    guest_write.write_all(b"SHUTDOWN\n").await.expect("write unexpected SHUTDOWN");
-                }
-                (GuestControlScript::SplitExec, true, _) => {
-                    let midpoint = line.len() / 2;
-                    guest_write.write_all(&line[..midpoint]).await.expect("write EXEC prefix");
-                    tokio::task::yield_now().await;
-                    guest_write.write_all(&line[midpoint..]).await.expect("write EXEC suffix");
-                }
-                (GuestControlScript::ExecThenShutdown, true, _) => {
-                    let mut coalesced = line.clone();
-                    coalesced.extend_from_slice(b"SHUTDOWN\n");
-                    guest_write
-                        .write_all(&coalesced)
-                        .await
-                        .expect("write coalesced EXEC and SHUTDOWN");
-                }
-                (GuestControlScript::ExecThenEof, true, _) => {
-                    guest_write.write_all(&line).await.expect("write EXEC before EOF");
-                    break;
-                }
-                (GuestControlScript::ExecThenMalformed, true, _) => {
-                    let mut coalesced = line.clone();
-                    coalesced.extend_from_slice(b"not-a-beacon-frame\n");
-                    guest_write
-                        .write_all(&coalesced)
-                        .await
-                        .expect("write coalesced malformed frame");
-                }
-                (GuestControlScript::ExecThenDuplicate, true, _) => {
-                    let mut coalesced = line.clone();
-                    coalesced.extend_from_slice(&line);
-                    guest_write.write_all(&coalesced).await.expect("write duplicate EXEC frames");
-                }
-                (GuestControlScript::RepeatShutdown, _, true) => {
-                    guest_write
-                        .write_all(b"SHUTDOWN\nSHUTDOWN\n")
-                        .await
-                        .expect("write repeated SHUTDOWN in one packet");
-                }
-                _ => guest_write.write_all(&line).await.expect("forward BeaconWriter line"),
-            }
-        }
-        let _ = guest_write.shutdown().await;
-    };
-
-    tokio::join!(guest_to_host, host_to_guest);
 }
 
 #[async_trait]
@@ -3359,43 +3153,154 @@ impl Vmm for GuestControlVmm {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        static PROXY_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let sequence = PROXY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let upstream_path =
-            config.run_dir.beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT);
-        let proxy_alloc_name =
-            format!("{}-control-proxy-{}-{sequence}", config.alloc, std::process::id());
-        let proxy_alloc =
-            AllocationId::new(&proxy_alloc_name).expect("valid control-proxy allocation id");
-        let proxy_run_dir = VmRunDir::for_alloc(
-            config.run_dir.path().parent().expect("VM run directory has parent"),
-            &proxy_alloc,
-        );
-        std::fs::create_dir_all(proxy_run_dir.path()).expect("create control-proxy run directory");
-        let listener = UnixListener::bind(
-            proxy_run_dir.beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT),
-        )
-        .expect("bind control-proxy beacon socket before Cloud Hypervisor starts");
-        self.evidence
-            .proxy_dirs
-            .lock()
-            .expect("proxy-dir mutex not poisoned")
-            .push(proxy_run_dir.path().to_path_buf());
-        tokio::spawn(proxy_guest_control(
-            listener,
-            upstream_path,
-            self.script,
-            self.evidence.clone(),
-        ));
-        let mut proxied = config.clone();
-        proxied.run_dir = proxy_run_dir;
-        self.inner.create(&proxied).await
+    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
+        let VmProcess { control, mut exit, diagnostics } =
+            self.inner.create(config, vsock).await?;
+        let console = config.run_dir.console_log();
+        let consoles = Arc::clone(&self.evidence.consoles);
+        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            if let Some(ending) = exit.recv().await {
+                let text = std::fs::read_to_string(&console).unwrap_or_else(|error| {
+                    format!("<console {} unreadable: {error}>", console.display())
+                });
+                consoles.lock().expect("console mutex not poisoned").push(text);
+                let _ = exit_tx.send(ending);
+            }
+        });
+        Ok(VmProcess {
+            control,
+            exit: overdrive_core::traits::vmm::VmExitWatch::new(exit_rx),
+            diagnostics,
+        })
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
         self.inner.terminate(control, grace).await
     }
+}
+
+/// The real node beacon listener, with the scripted control-stream fault in
+/// front of it.
+struct GuestControlBeacon {
+    inner: overdrive_host::VsockBeaconIo,
+    script: GuestControlScript,
+    evidence: GuestControlEvidence,
+    /// Connections the script closed early; their later reads report end of
+    /// stream, their later writes are dropped, and the driver's own close is
+    /// absorbed.
+    closed: Mutex<BTreeSet<u64>>,
+}
+
+impl GuestControlBeacon {
+    async fn write(&self, socket: &BeaconSocket, line: &str) -> std::io::Result<()> {
+        self.inner.write_line(socket, line).await
+    }
+
+    async fn end_stream(&self, socket: &BeaconSocket) {
+        let first = self.closed.lock().expect("closed-set mutex not poisoned").insert(socket.raw());
+        if first {
+            self.inner.close(BeaconSocket::from_raw(socket.raw())).await;
+        }
+    }
+}
+
+#[async_trait]
+impl BeaconIo for GuestControlBeacon {
+    async fn bind(&self) -> std::io::Result<()> {
+        self.inner.bind().await
+    }
+
+    async fn accept(&self) -> std::io::Result<(BeaconSocket, BeaconConnKey)> {
+        self.inner.accept().await
+    }
+
+    async fn read_line(&self, socket: &BeaconSocket) -> std::io::Result<Option<String>> {
+        if self.closed.lock().expect("closed-set mutex not poisoned").contains(&socket.raw()) {
+            return Ok(None);
+        }
+        let line = self.inner.read_line(socket).await?;
+        if let Some(line) = line.as_deref() {
+            let mut transcript =
+                self.evidence.guest_to_host.lock().expect("guest transcript mutex not poisoned");
+            transcript.extend_from_slice(line.as_bytes());
+            transcript.push(b'\n');
+        }
+        Ok(line)
+    }
+
+    async fn write_line(&self, socket: &BeaconSocket, line: &str) -> std::io::Result<()> {
+        {
+            let mut transcript =
+                self.evidence.host_to_guest.lock().expect("host transcript mutex not poisoned");
+            transcript.extend_from_slice(line.as_bytes());
+            transcript.push(b'\n');
+        }
+        if self.closed.lock().expect("closed-set mutex not poisoned").contains(&socket.raw()) {
+            return Ok(());
+        }
+        let is_exec = line.starts_with("EXEC ");
+        let is_shutdown = line == "SHUTDOWN";
+        match (self.script, is_exec, is_shutdown) {
+            (GuestControlScript::EofBeforeExec, true, _) => {
+                self.end_stream(socket).await;
+                Ok(())
+            }
+            (GuestControlScript::MalformedBeforeExec, true, _) => {
+                self.write(socket, "EXEC not-json").await
+            }
+            (GuestControlScript::ShutdownBeforeExec, true, _) => {
+                self.write(socket, "SHUTDOWN").await
+            }
+            (GuestControlScript::ExecThenShutdown, true, _) => {
+                self.write(socket, line).await?;
+                self.write(socket, "SHUTDOWN").await
+            }
+            (GuestControlScript::ExecThenEof, true, _) => {
+                self.write(socket, line).await?;
+                self.end_stream(socket).await;
+                Ok(())
+            }
+            (GuestControlScript::ExecThenMalformed, true, _) => {
+                self.write(socket, line).await?;
+                self.write(socket, "not-a-beacon-frame").await
+            }
+            (GuestControlScript::ExecThenDuplicate, true, _) => {
+                self.write(socket, line).await?;
+                self.write(socket, line).await
+            }
+            (GuestControlScript::RepeatShutdown, _, true) => {
+                self.write(socket, "SHUTDOWN").await?;
+                self.write(socket, "SHUTDOWN").await
+            }
+            _ => self.write(socket, line).await,
+        }
+    }
+
+    async fn close(&self, socket: BeaconSocket) {
+        let already = self.closed.lock().expect("closed-set mutex not poisoned").remove(&socket.raw());
+        if !already {
+            self.inner.close(socket).await;
+        }
+    }
+}
+
+/// A real-VMM `VmOverride` whose node beacon port carries `script`.
+fn guest_control_override(script: GuestControlScript) -> (VmOverride, GuestControlEvidence) {
+    let evidence = GuestControlEvidence::default();
+    let vm_override = VmOverride {
+        vmm: Arc::new(GuestControlVmm {
+            inner: CloudHypervisorVmm::new(),
+            evidence: evidence.clone(),
+        }),
+        beacon: Arc::new(GuestControlBeacon {
+            inner: overdrive_host::VsockBeaconIo::new(),
+            script,
+            evidence: evidence.clone(),
+            closed: Mutex::new(BTreeSet::new()),
+        }),
+    };
+    (vm_override, evidence)
 }
 
 async fn run_guest_control_case(
@@ -3412,8 +3317,8 @@ async fn run_guest_control_case(
     let command = write_guest_script(fixture_tmp.path(), "control-case", command_body);
     let rootfs =
         stage_rootfs_with_guest_script(fixture_tmp.path(), fixture, &command, "vll-control-case");
-    let (vmm, evidence) = GuestControlVmm::new(script);
-    let (server, server_tmp) = spawn_vm_server_with_vmm(Arc::new(vmm)).await;
+    let (vm_override, evidence) = guest_control_override(script);
+    let (server, server_tmp) = spawn_vm_server_with_vmm(vm_override).await;
     let cfg = config_path(server_tmp.path());
     let spec = write_toml(
         server_tmp.path(),
@@ -3428,7 +3333,6 @@ async fn run_guest_control_case(
         let _ =
             stop(StopArgs { id: submitted.workload_id.clone(), config_path: cfg.clone() }).await;
         let _ = server.shutdown().await;
-        evidence.cleanup_proxy_dirs();
         panic!("S-VLL-10b: {label} did not terminate after the controlled stream fault");
     };
     // Before EXEC, ADR-0103 deliberately starts no child and returns the
@@ -3449,7 +3353,6 @@ async fn run_guest_control_case(
             wait_for_vm_artifact_absence(&alloc, &rootfs, &server_tmp.path().join("data")).await
         {
             let _ = server.shutdown().await;
-            evidence.cleanup_proxy_dirs();
             panic!("S-VLL-10b: {label}: {cleanup_error}");
         }
     }
@@ -4905,9 +4808,9 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
         &natural_script,
         "vll-direct-first",
     );
-    let (natural_vmm, natural_evidence) = GuestControlVmm::new(GuestControlScript::Pass);
+    let (natural_override, natural_evidence) = guest_control_override(GuestControlScript::Pass);
     let (natural_server, natural_server_tmp) =
-        spawn_vm_server_with_vmm(Arc::new(natural_vmm)).await;
+        spawn_vm_server_with_vmm(natural_override).await;
     let natural_cfg = config_path(natural_server_tmp.path());
     let natural_spec = write_toml(
         natural_server_tmp.path(),
@@ -4933,7 +4836,6 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
         })
         .await;
         let _ = natural_server.shutdown().await;
-        natural_evidence.cleanup_proxy_dirs();
         panic!(
             "S-VLL-10a: production init waited for post-EXIT SHUTDOWN instead of powering off after group completion"
         );
@@ -4970,10 +4872,9 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
         None
     );
     natural_server.shutdown().await.expect("shutdown natural-exit server");
-    natural_evidence.cleanup_proxy_dirs();
 
-    // EXEC and SHUTDOWN arrive in one transport read while the direct child
-    // is live.  Whether its natural timer or SIGTERM handling wins, the direct
+    // EXEC and SHUTDOWN arrive back to back while the direct child is
+    // live.  Whether its natural timer or SIGTERM handling wins, the direct
     // child deliberately returns 29; a late/repeated control message cannot
     // replace that saved status or cause a second EXIT.
     let (raced_terminal, raced_evidence) = run_guest_control_case(
@@ -4991,10 +4892,9 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
     assert!(raced_console.contains("shutdown-received"), "missing race receipt: {raced_console}");
     assert!(raced_console.contains("group-complete"), "missing raced reap: {raced_console}");
     assert_normal_vmm_reap(&events, &alloc_id_of(&raced_terminal));
-    raced_evidence.cleanup_proxy_dirs();
 
-    // Both the direct child and its descendant ignore TERM.  Two coalesced
-    // SHUTDOWN frames must establish only one five-second deadline.  The guest
+    // Both the direct child and its descendant ignore TERM.  Two
+    // back-to-back SHUTDOWN frames must establish only one five-second deadline.  The guest
     // then SIGKILLs/reaps the group and powers off early enough to remain
     // inside the host's single ten-second grace.
     let forced_tmp = tempfile::Builder::new()
@@ -5012,8 +4912,8 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
         &forced_script,
         "vll-ignore-term",
     );
-    let (forced_vmm, forced_evidence) = GuestControlVmm::new(GuestControlScript::RepeatShutdown);
-    let (forced_server, forced_server_tmp) = spawn_vm_server_with_vmm(Arc::new(forced_vmm)).await;
+    let (forced_override, forced_evidence) = guest_control_override(GuestControlScript::RepeatShutdown);
+    let (forced_server, forced_server_tmp) = spawn_vm_server_with_vmm(forced_override).await;
     let forced_cfg = config_path(forced_server_tmp.path());
     let forced_spec = write_toml(
         forced_server_tmp.path(),
@@ -5044,7 +4944,7 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
     assert_eq!(
         forced_evidence.host_text().matches("SHUTDOWN\n").count(),
         1,
-        "the real host submits one request; the proxy duplicates it only on the guest side"
+        "the real host submits one request; the beacon decorator duplicates it only on the guest side"
     );
     let forced_console = forced_evidence.console_text();
     assert!(forced_console.contains("shutdown-received"), "missing receipt: {forced_console}");
@@ -5071,7 +4971,6 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
         None
     );
     forced_server.shutdown().await.expect("shutdown forced-group server");
-    forced_evidence.cleanup_proxy_dirs();
 
     // A deliberately escaped descendant is not claimed as graceful-group
     // coverage.  It must not hold PID 1 indefinitely after the direct child
@@ -5091,8 +4990,8 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
         &escape_script,
         "vll-group-escape",
     );
-    let (escape_vmm, escape_evidence) = GuestControlVmm::new(GuestControlScript::Pass);
-    let (escape_server, escape_server_tmp) = spawn_vm_server_with_vmm(Arc::new(escape_vmm)).await;
+    let (escape_override, escape_evidence) = guest_control_override(GuestControlScript::Pass);
+    let (escape_server, escape_server_tmp) = spawn_vm_server_with_vmm(escape_override).await;
     let escape_cfg = config_path(escape_server_tmp.path());
     let escape_spec = write_toml(
         escape_server_tmp.path(),
@@ -5125,13 +5024,12 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
         None
     );
     escape_server.shutdown().await.expect("shutdown escape server");
-    escape_evidence.cleanup_proxy_dirs();
 }
 
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-10b. Before EXEC: EOF, malformed and unexpected frame start no child.
-/// During execution: partial and coalesced frames, repeated SHUTDOWN, EOF,
-/// malformed frame and duplicate EXEC preserve framing and bounded teardown
+/// During execution: EOF, malformed frame and duplicate EXEC preserve framing
+/// and bounded teardown
 /// with no false EXIT. Source-local File/process-boundary tests pin every exact
 /// typed error; this qualified-native case retains group, reap and poweroff
 /// evidence separately. EINTR retains deadlines; ESRCH is absence; ECHILD
@@ -5188,7 +5086,6 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() 
             0,
             "a pre-EXEC failure cannot fabricate EXIT"
         );
-        evidence.cleanup_proxy_dirs();
     }
 
     // After EXEC, EOF/malformed/duplicate control retain their original cause
@@ -5229,31 +5126,7 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() 
             console.contains("poweroff-requested"),
             "{label} must reach the existing fatal poweroff path: {console}"
         );
-        evidence.cleanup_proxy_dirs();
     }
-
-    // A split valid EXEC must remain one frame.  Rapid adopted-child exits
-    // exercise real SIGCHLD interruption/retry and the direct child's exit
-    // races group disappearance/reaping (the naturally reachable
-    // EINTR/ESRCH/ECHILD edges) without an injected syscall seam.
-    let (split_terminal, split_evidence) = run_guest_control_case(
-        &fixture,
-        "vll-s10b-split-exec",
-        GuestControlScript::SplitExec,
-        "i=0; while [ $i -lt 32 ]; do (exit 0) & i=$((i + 1)); done\nwait\nexit 19",
-        Duration::from_secs(15),
-    )
-    .await;
-    assert_eq!(
-        split_terminal.snapshot.rows.first().and_then(|row| row.exit_code),
-        Some(19),
-        "ECHILD after reaping cannot erase the direct child's saved status"
-    );
-    assert_eq!(split_evidence.guest_text().matches("EXIT 19\n").count(), 1);
-    let split_console = split_evidence.console_text();
-    assert!(split_console.contains("group-complete"), "split EXEC lost group completion");
-    assert!(split_console.contains("poweroff-requested"), "split EXEC lost poweroff");
-    split_evidence.cleanup_proxy_dirs();
 }
 
 /// CONTRACT_SHAPE: bounded-change.

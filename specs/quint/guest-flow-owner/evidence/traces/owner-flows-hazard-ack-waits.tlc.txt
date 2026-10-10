@@ -44,7 +44,53 @@ State 1: <Initial predicate>
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 2: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 2: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
+/\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
+/\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_claim = 0
+/\ flows_bugAckWaits_owner_flows_gen = 0
+/\ flows_bugAckWaits_owner_flows_badPaired = FALSE
+/\ flows_bugAckWaits_owner_flows_toGuestAbort = {}
+/\ flows_bugAckWaits_owner_flows_abortDiscarded = {}
+/\ flows_bugAckWaits_owner_flows_readyCross = FALSE
+/\ flows_bugAckWaits_owner_flows_vmUp = FALSE
+/\ flows_bugAckWaits_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugAckWaits_owner_flows_heldByOther = FALSE
+/\ flows_bugAckWaits_owner_flows_vmGen = 0
+/\ flows_bugAckWaits_owner_flows_phantom = FALSE
+/\ flows_bugAckWaits_owner_flows_quiesced = FALSE
+/\ flows_bugAckWaits_owner_flows_resurrected = FALSE
+/\ flows_bugAckWaits_owner_flows_toHostRefused = {}
+/\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_toHostPaired = {}
+/\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> FALSE, h |-> FALSE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
+  ann |-> [g |-> "none", h |-> "none"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> TRUE ]
+/\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_bclaim = 0
+/\ flows_bugAckWaits_owner_flows_drvLive = FALSE
+/\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
+/\ flows_bugAckWaits_owner_flows_alloc = "Absent"
+
+State 3: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -78,11 +124,11 @@ State 2: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
   ch |-> [g |-> <<>>, h |-> <<"Paired">>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
   earlyShut |-> FALSE,
-  faulted |-> FALSE ]
+  faulted |-> TRUE ]
 /\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_bclaim = 0
@@ -90,7 +136,7 @@ State 2: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 3: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 4: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -111,9 +157,9 @@ State 3: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
 /\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_toHostPaired = {}
 /\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> TRUE],
-  outEof |-> [g |-> TRUE, h |-> FALSE],
-  farHc |-> [g |-> TRUE, h |-> FALSE],
+  paired |-> [g |-> TRUE, h |-> TRUE],
+  outEof |-> [g |-> FALSE, h |-> FALSE],
+  farHc |-> [g |-> FALSE, h |-> FALSE],
   ann |-> [g |-> "none", h |-> "none"],
   acked |-> [g |-> FALSE, h |-> FALSE],
   ackDue |-> [g |-> FALSE, h |-> FALSE],
@@ -123,12 +169,12 @@ State 3: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
   dead |-> [g |-> FALSE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<"Paired">>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
   earlyShut |-> FALSE,
-  faulted |-> FALSE ]
+  faulted |-> TRUE ]
 /\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_bclaim = 0
@@ -136,7 +182,7 @@ State 3: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 4: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 5: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -157,9 +203,9 @@ State 4: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
 /\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_toHostPaired = {}
 /\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> TRUE],
-  outEof |-> [g |-> TRUE, h |-> TRUE],
-  farHc |-> [g |-> TRUE, h |-> TRUE],
+  paired |-> [g |-> TRUE, h |-> TRUE],
+  outEof |-> [g |-> FALSE, h |-> TRUE],
+  farHc |-> [g |-> FALSE, h |-> TRUE],
   ann |-> [g |-> "none", h |-> "none"],
   acked |-> [g |-> FALSE, h |-> FALSE],
   ackDue |-> [g |-> FALSE, h |-> FALSE],
@@ -169,12 +215,12 @@ State 4: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
   dead |-> [g |-> FALSE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<"Paired">>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
+  ch |-> [g |-> <<>>, h |-> <<>>],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
   earlyShut |-> FALSE,
-  faulted |-> FALSE ]
+  faulted |-> TRUE ]
 /\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_bclaim = 0
@@ -182,7 +228,7 @@ State 4: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 5: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 6: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -216,146 +262,8 @@ State 5: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
   ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
-/\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_bclaim = 0
-/\ flows_bugAckWaits_owner_flows_drvLive = FALSE
-/\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
-/\ flows_bugAckWaits_owner_flows_alloc = "Absent"
-
-State 6: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
-/\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
-/\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_claim = 0
-/\ flows_bugAckWaits_owner_flows_gen = 0
-/\ flows_bugAckWaits_owner_flows_badPaired = FALSE
-/\ flows_bugAckWaits_owner_flows_toGuestAbort = {}
-/\ flows_bugAckWaits_owner_flows_abortDiscarded = {}
-/\ flows_bugAckWaits_owner_flows_readyCross = FALSE
-/\ flows_bugAckWaits_owner_flows_vmUp = FALSE
-/\ flows_bugAckWaits_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugAckWaits_owner_flows_heldByOther = FALSE
-/\ flows_bugAckWaits_owner_flows_vmGen = 0
-/\ flows_bugAckWaits_owner_flows_phantom = FALSE
-/\ flows_bugAckWaits_owner_flows_quiesced = FALSE
-/\ flows_bugAckWaits_owner_flows_resurrected = FALSE
-/\ flows_bugAckWaits_owner_flows_toHostRefused = {}
-/\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_toHostPaired = {}
-/\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> TRUE, h |-> TRUE],
-  outEof |-> [g |-> TRUE, h |-> TRUE],
-  farHc |-> [g |-> TRUE, h |-> TRUE],
-  ann |-> [g |-> "pending", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<"HalfClose">>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
-/\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_bclaim = 0
-/\ flows_bugAckWaits_owner_flows_drvLive = FALSE
-/\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
-/\ flows_bugAckWaits_owner_flows_alloc = "Absent"
-
-State 7: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
-/\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
-/\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_claim = 0
-/\ flows_bugAckWaits_owner_flows_gen = 0
-/\ flows_bugAckWaits_owner_flows_badPaired = FALSE
-/\ flows_bugAckWaits_owner_flows_toGuestAbort = {}
-/\ flows_bugAckWaits_owner_flows_abortDiscarded = {}
-/\ flows_bugAckWaits_owner_flows_readyCross = FALSE
-/\ flows_bugAckWaits_owner_flows_vmUp = FALSE
-/\ flows_bugAckWaits_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugAckWaits_owner_flows_heldByOther = FALSE
-/\ flows_bugAckWaits_owner_flows_vmGen = 0
-/\ flows_bugAckWaits_owner_flows_phantom = FALSE
-/\ flows_bugAckWaits_owner_flows_quiesced = FALSE
-/\ flows_bugAckWaits_owner_flows_resurrected = FALSE
-/\ flows_bugAckWaits_owner_flows_toHostRefused = {}
-/\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_toHostPaired = {}
-/\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> TRUE, h |-> TRUE],
-  outEof |-> [g |-> TRUE, h |-> TRUE],
-  farHc |-> [g |-> TRUE, h |-> TRUE],
-  ann |-> [g |-> "pending", h |-> "pending"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<"HalfClose">>, h |-> <<"HalfClose">>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
-/\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_bclaim = 0
-/\ flows_bugAckWaits_owner_flows_drvLive = FALSE
-/\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
-/\ flows_bugAckWaits_owner_flows_alloc = "Absent"
-
-State 8: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
-/\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
-/\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_claim = 0
-/\ flows_bugAckWaits_owner_flows_gen = 0
-/\ flows_bugAckWaits_owner_flows_badPaired = FALSE
-/\ flows_bugAckWaits_owner_flows_toGuestAbort = {}
-/\ flows_bugAckWaits_owner_flows_abortDiscarded = {}
-/\ flows_bugAckWaits_owner_flows_readyCross = FALSE
-/\ flows_bugAckWaits_owner_flows_vmUp = FALSE
-/\ flows_bugAckWaits_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugAckWaits_owner_flows_heldByOther = FALSE
-/\ flows_bugAckWaits_owner_flows_vmGen = 0
-/\ flows_bugAckWaits_owner_flows_phantom = FALSE
-/\ flows_bugAckWaits_owner_flows_quiesced = FALSE
-/\ flows_bugAckWaits_owner_flows_resurrected = FALSE
-/\ flows_bugAckWaits_owner_flows_toHostRefused = {}
-/\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_toHostPaired = {}
-/\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> TRUE, h |-> TRUE],
-  outEof |-> [g |-> TRUE, h |-> TRUE],
-  farHc |-> [g |-> TRUE, h |-> TRUE],
-  ann |-> [g |-> "pending", h |-> "pending"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<"HalfClose">>, h |-> <<"HalfClose">>],
-  vEnd |-> [g |-> FALSE, h |-> TRUE],
-  vEndSent |-> [g |-> FALSE, h |-> TRUE],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
   earlyShut |-> FALSE,
   faulted |-> TRUE ]
@@ -366,7 +274,7 @@ State 8: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 9: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 7: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -390,9 +298,9 @@ State 9: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
   paired |-> [g |-> TRUE, h |-> TRUE],
   outEof |-> [g |-> TRUE, h |-> TRUE],
   farHc |-> [g |-> TRUE, h |-> TRUE],
-  ann |-> [g |-> "pending", h |-> "pending"],
-  acked |-> [g |-> FALSE, h |-> TRUE],
-  ackDue |-> [g |-> FALSE, h |-> TRUE],
+  ann |-> [g |-> "none", h |-> "pending"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
   outShut |-> [g |-> FALSE, h |-> FALSE],
   open |-> [g |-> TRUE, h |-> TRUE],
   far |-> [g |-> "none", h |-> "none"],
@@ -400,8 +308,8 @@ State 9: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
   ch |-> [g |-> <<>>, h |-> <<"HalfClose">>],
-  vEnd |-> [g |-> FALSE, h |-> TRUE],
-  vEndSent |-> [g |-> FALSE, h |-> TRUE],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
   earlyShut |-> FALSE,
   faulted |-> TRUE ]
@@ -412,7 +320,99 @@ State 9: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 10: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 8: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
+/\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
+/\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_claim = 0
+/\ flows_bugAckWaits_owner_flows_gen = 0
+/\ flows_bugAckWaits_owner_flows_badPaired = FALSE
+/\ flows_bugAckWaits_owner_flows_toGuestAbort = {}
+/\ flows_bugAckWaits_owner_flows_abortDiscarded = {}
+/\ flows_bugAckWaits_owner_flows_readyCross = FALSE
+/\ flows_bugAckWaits_owner_flows_vmUp = FALSE
+/\ flows_bugAckWaits_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugAckWaits_owner_flows_heldByOther = FALSE
+/\ flows_bugAckWaits_owner_flows_vmGen = 0
+/\ flows_bugAckWaits_owner_flows_phantom = FALSE
+/\ flows_bugAckWaits_owner_flows_quiesced = FALSE
+/\ flows_bugAckWaits_owner_flows_resurrected = FALSE
+/\ flows_bugAckWaits_owner_flows_toHostRefused = {}
+/\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_toHostPaired = {}
+/\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> TRUE, h |-> TRUE],
+  outEof |-> [g |-> TRUE, h |-> TRUE],
+  farHc |-> [g |-> TRUE, h |-> TRUE],
+  ann |-> [g |-> "pending", h |-> "pending"],
+  acked |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<"HalfClose">>, h |-> <<"HalfClose">>],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> TRUE ]
+/\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_bclaim = 0
+/\ flows_bugAckWaits_owner_flows_drvLive = FALSE
+/\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
+/\ flows_bugAckWaits_owner_flows_alloc = "Absent"
+
+State 9: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
+/\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
+/\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_claim = 0
+/\ flows_bugAckWaits_owner_flows_gen = 0
+/\ flows_bugAckWaits_owner_flows_badPaired = FALSE
+/\ flows_bugAckWaits_owner_flows_toGuestAbort = {}
+/\ flows_bugAckWaits_owner_flows_abortDiscarded = {}
+/\ flows_bugAckWaits_owner_flows_readyCross = FALSE
+/\ flows_bugAckWaits_owner_flows_vmUp = FALSE
+/\ flows_bugAckWaits_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugAckWaits_owner_flows_heldByOther = FALSE
+/\ flows_bugAckWaits_owner_flows_vmGen = 0
+/\ flows_bugAckWaits_owner_flows_phantom = FALSE
+/\ flows_bugAckWaits_owner_flows_quiesced = FALSE
+/\ flows_bugAckWaits_owner_flows_resurrected = FALSE
+/\ flows_bugAckWaits_owner_flows_toHostRefused = {}
+/\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_toHostPaired = {}
+/\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> TRUE, h |-> TRUE],
+  outEof |-> [g |-> TRUE, h |-> TRUE],
+  farHc |-> [g |-> TRUE, h |-> TRUE],
+  ann |-> [g |-> "pending", h |-> "pending"],
+  acked |-> [g |-> TRUE, h |-> FALSE],
+  ackDue |-> [g |-> TRUE, h |-> FALSE],
+  outShut |-> [g |-> FALSE, h |-> FALSE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "none"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<"HalfClose">>, h |-> <<>>],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> TRUE ]
+/\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_bclaim = 0
+/\ flows_bugAckWaits_owner_flows_drvLive = FALSE
+/\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
+/\ flows_bugAckWaits_owner_flows_alloc = "Absent"
+
+State 10: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -446,8 +446,8 @@ State 10: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
   ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> TRUE],
-  vEndSent |-> [g |-> FALSE, h |-> TRUE],
+  vEnd |-> [g |-> TRUE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
   earlyShut |-> FALSE,
   faulted |-> TRUE ]
@@ -458,7 +458,7 @@ State 10: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 11: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 11: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -484,62 +484,16 @@ State 11: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
   farHc |-> [g |-> TRUE, h |-> TRUE],
   ann |-> [g |-> "pending", h |-> "pending"],
   acked |-> [g |-> TRUE, h |-> TRUE],
-  ackDue |-> [g |-> TRUE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
+  ackDue |-> [g |-> TRUE, h |-> TRUE],
+  outShut |-> [g |-> FALSE, h |-> TRUE],
   open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<"Ack">>],
-  vEnd |-> [g |-> FALSE, h |-> TRUE],
-  vEndSent |-> [g |-> FALSE, h |-> TRUE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> TRUE ]
-/\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_bclaim = 0
-/\ flows_bugAckWaits_owner_flows_drvLive = FALSE
-/\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
-/\ flows_bugAckWaits_owner_flows_alloc = "Absent"
-
-State 12: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
-/\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
-/\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_claim = 0
-/\ flows_bugAckWaits_owner_flows_gen = 0
-/\ flows_bugAckWaits_owner_flows_badPaired = FALSE
-/\ flows_bugAckWaits_owner_flows_toGuestAbort = {}
-/\ flows_bugAckWaits_owner_flows_abortDiscarded = {}
-/\ flows_bugAckWaits_owner_flows_readyCross = FALSE
-/\ flows_bugAckWaits_owner_flows_vmUp = FALSE
-/\ flows_bugAckWaits_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugAckWaits_owner_flows_heldByOther = FALSE
-/\ flows_bugAckWaits_owner_flows_vmGen = 0
-/\ flows_bugAckWaits_owner_flows_phantom = FALSE
-/\ flows_bugAckWaits_owner_flows_quiesced = FALSE
-/\ flows_bugAckWaits_owner_flows_resurrected = FALSE
-/\ flows_bugAckWaits_owner_flows_toHostRefused = {}
-/\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugAckWaits_owner_flows_toHostPaired = {}
-/\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> TRUE, h |-> TRUE],
-  outEof |-> [g |-> TRUE, h |-> TRUE],
-  farHc |-> [g |-> TRUE, h |-> TRUE],
-  ann |-> [g |-> "done", h |-> "pending"],
-  acked |-> [g |-> TRUE, h |-> TRUE],
-  ackDue |-> [g |-> TRUE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
+  far |-> [g |-> "none", h |-> "eof"],
   dead |-> [g |-> FALSE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],
   ctlDown |-> FALSE,
   ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> TRUE, h |-> TRUE],
-  vEndSent |-> [g |-> TRUE, h |-> TRUE],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
   held |-> [g |-> FALSE, h |-> FALSE],
   earlyShut |-> FALSE,
   faulted |-> TRUE ]
@@ -550,7 +504,7 @@ State 12: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 13: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 12: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -574,9 +528,55 @@ State 13: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
   paired |-> [g |-> TRUE, h |-> TRUE],
   outEof |-> [g |-> TRUE, h |-> TRUE],
   farHc |-> [g |-> TRUE, h |-> TRUE],
-  ann |-> [g |-> "done", h |-> "pending"],
+  ann |-> [g |-> "pending", h |-> "pending"],
   acked |-> [g |-> TRUE, h |-> TRUE],
-  ackDue |-> [g |-> TRUE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> TRUE],
+  outShut |-> [g |-> FALSE, h |-> TRUE],
+  open |-> [g |-> TRUE, h |-> TRUE],
+  far |-> [g |-> "none", h |-> "eof"],
+  dead |-> [g |-> FALSE, h |-> FALSE],
+  loss |-> [g |-> FALSE, h |-> FALSE],
+  ctlDown |-> FALSE,
+  ch |-> [g |-> <<"Ack">>, h |-> <<>>],
+  vEnd |-> [g |-> FALSE, h |-> FALSE],
+  vEndSent |-> [g |-> TRUE, h |-> FALSE],
+  held |-> [g |-> FALSE, h |-> FALSE],
+  earlyShut |-> FALSE,
+  faulted |-> TRUE ]
+/\ flows_bugAckWaits_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_bclaim = 0
+/\ flows_bugAckWaits_owner_flows_drvLive = FALSE
+/\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
+/\ flows_bugAckWaits_owner_flows_alloc = "Absent"
+
+State 13: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
+/\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
+/\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_claim = 0
+/\ flows_bugAckWaits_owner_flows_gen = 0
+/\ flows_bugAckWaits_owner_flows_badPaired = FALSE
+/\ flows_bugAckWaits_owner_flows_toGuestAbort = {}
+/\ flows_bugAckWaits_owner_flows_abortDiscarded = {}
+/\ flows_bugAckWaits_owner_flows_readyCross = FALSE
+/\ flows_bugAckWaits_owner_flows_vmUp = FALSE
+/\ flows_bugAckWaits_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugAckWaits_owner_flows_heldByOther = FALSE
+/\ flows_bugAckWaits_owner_flows_vmGen = 0
+/\ flows_bugAckWaits_owner_flows_phantom = FALSE
+/\ flows_bugAckWaits_owner_flows_quiesced = FALSE
+/\ flows_bugAckWaits_owner_flows_resurrected = FALSE
+/\ flows_bugAckWaits_owner_flows_toHostRefused = {}
+/\ flows_bugAckWaits_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugAckWaits_owner_flows_toHostPaired = {}
+/\ flows_bugAckWaits_owner_flows_hc = [ opener |-> "g",
+  paired |-> [g |-> TRUE, h |-> TRUE],
+  outEof |-> [g |-> TRUE, h |-> TRUE],
+  farHc |-> [g |-> TRUE, h |-> TRUE],
+  ann |-> [g |-> "pending", h |-> "done"],
+  acked |-> [g |-> TRUE, h |-> TRUE],
+  ackDue |-> [g |-> FALSE, h |-> TRUE],
   outShut |-> [g |-> FALSE, h |-> TRUE],
   open |-> [g |-> TRUE, h |-> TRUE],
   far |-> [g |-> "none", h |-> "eof"],
@@ -596,7 +596,7 @@ State 13: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 14: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 14: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -620,9 +620,9 @@ State 14: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
   paired |-> [g |-> TRUE, h |-> TRUE],
   outEof |-> [g |-> TRUE, h |-> TRUE],
   farHc |-> [g |-> TRUE, h |-> TRUE],
-  ann |-> [g |-> "done", h |-> "pending"],
+  ann |-> [g |-> "pending", h |-> "done"],
   acked |-> [g |-> TRUE, h |-> TRUE],
-  ackDue |-> [g |-> TRUE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> TRUE],
   outShut |-> [g |-> TRUE, h |-> TRUE],
   open |-> [g |-> TRUE, h |-> TRUE],
   far |-> [g |-> "eof", h |-> "eof"],
@@ -642,7 +642,7 @@ State 14: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
 /\ flows_bugAckWaits_owner_flows_crossMsg = FALSE
 /\ flows_bugAckWaits_owner_flows_alloc = "Absent"
 
-State 15: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col 47 of module flows_bugAckWaits>
+State 15: <flows_bugAckWaits_owner_flows_step line 3373, col 9 to line 3374, col 47 of module flows_bugAckWaits>
 /\ flows_bugAckWaits_owner_flows_bHeldByOther = FALSE
 /\ flows_bugAckWaits_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugAckWaits_owner_flows_claim = 0
@@ -666,11 +666,11 @@ State 15: <flows_bugAckWaits_owner_flows_step line 3345, col 9 to line 3346, col
   paired |-> [g |-> TRUE, h |-> TRUE],
   outEof |-> [g |-> TRUE, h |-> TRUE],
   farHc |-> [g |-> TRUE, h |-> TRUE],
-  ann |-> [g |-> "done", h |-> "pending"],
+  ann |-> [g |-> "pending", h |-> "done"],
   acked |-> [g |-> TRUE, h |-> TRUE],
-  ackDue |-> [g |-> TRUE, h |-> FALSE],
+  ackDue |-> [g |-> FALSE, h |-> TRUE],
   outShut |-> [g |-> TRUE, h |-> TRUE],
-  open |-> [g |-> FALSE, h |-> TRUE],
+  open |-> [g |-> TRUE, h |-> FALSE],
   far |-> [g |-> "eof", h |-> "eof"],
   dead |-> [g |-> FALSE, h |-> FALSE],
   loss |-> [g |-> FALSE, h |-> FALSE],

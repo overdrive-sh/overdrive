@@ -27,13 +27,6 @@ crate_class = "adapter-host"
 name = "openapi"
 path = "src/bin/openapi.rs"
 
-[[bin]]
-# DISTILL-owned, non-EDD E18 measurement support. This is not an Overdrive
-# operator command and is excluded from the default product build.
-name = "netns_density_benchmark"
-path = "bin/netns_density_benchmark.rs"
-required-features = ["integration-tests"]
-
 [features]
 # Opt-in gate for slow / real-infra tests in this crate. Off by default
 # so `cargo nextest run --workspace` stays under the 60s slow-test
@@ -197,11 +190,24 @@ libc.workspace = true
 rustix = { workspace = true, features = ["thread"], optional = true }
 
 [dev-dependencies]
+# quint-connect conformance drivers (netns-density-295, QPROJ-1): source-local
+# `#[cfg(all(test, feature = "integration-tests"))]` modules replaying
+# `specs/quint/guest-flow-owner/*.qnt` against the production owner.
+quint-connect.workspace = true
+itf.workspace           = true
+anyhow.workspace        = true
+# `test-util`: `SimGuestFlowIo::settled` (DG-3) detects an idle owner through
+# a paused current-thread runtime's auto-advance (`start_paused`).
+tokio = { workspace = true, features = ["test-util"] }
 rustix = { workspace = true, features = ["thread"] }
 # `overdrive-sim` is used by tests only (`tests/acceptance/*.rs`) for
 # DST-style `Sim*` adapters — it is NOT a runtime dep (see note on
 # `overdrive-store-local` above + ADR-0012 revision 2026-04-24).
 overdrive-sim.path       = "../overdrive-sim"
+# `aya` error types: the source-local `SimGuestFlowIo` (DG-3) builds the
+# scripted `GuestSteeringError` / `GuestFlowError` / `UnframeAttachError`
+# outcomes the owner seam's contract names (UI-COV-1).
+aya.workspace            = true
 # `overdrive-testing` — shared real-infra fixtures. GH #295 E23 uses its
 # `pids_max` cgroup v2 thread-refusal guard in the source-local Lima-root
 # `guest_network::shared_owner_link_address_kernel` module. Dev-only.

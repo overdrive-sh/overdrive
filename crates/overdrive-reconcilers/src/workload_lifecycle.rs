@@ -1315,7 +1315,7 @@ impl WorkloadLifecycle {
                                 service_ports: desired.service_ports.clone(),
                                 // Netns/veth/addr-agnostic reconciler (JOIN-2 +
                                 // D-A1) — see the RestartAllocation spec above.
-                                network: None,
+                                transport: None,
                             },
                             kind: desired.workload_kind,
                         };
@@ -1594,7 +1594,7 @@ fn restart_allocation_action(
             resources: job.resources,
             probe_descriptors: desired.probe_descriptors.clone(),
             service_ports: desired.service_ports.clone(),
-            network: None,
+            transport: None,
         },
         kind: desired.workload_kind,
     }
@@ -2001,7 +2001,7 @@ pub fn allocation_spec_for_live_intent(
         resources,
         probe_descriptors: project_probe_descriptors(intent),
         service_ports: project_service_listen_ports(intent),
-        network: None,
+        transport: None,
     })
 }
 

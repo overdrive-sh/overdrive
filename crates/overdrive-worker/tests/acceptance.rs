@@ -9,6 +9,11 @@
 #![allow(clippy::unwrap_used)]
 
 mod acceptance {
+    // Shared `VmDriver` beacon-intake / guest-transport fixtures (GH #295
+    // vsock attachment cut): the simulated guest side of the node beacon
+    // intake and the claimed-CID transport handoff.
+    mod support;
+
     mod cgroup_manager;
     // `cgroup_path_roundtrip` / `cgroup_path_validation` RELOCATED to
     // `overdrive-core/tests/acceptance/` (review remediation, step 01-01
@@ -55,4 +60,8 @@ mod acceptance {
     // (no guest boot), the same ADR-0082 §D4 carve-out as S-VM-76.
     // RED scaffold — production body lands in DELIVER.
     mod vm_driver_clone_index;
+    // netns-density-295 DG-4 / QPROJ-4 (D17) — the node beacon intake over
+    // the core `BeaconIo` port (`SimBeaconIo`) and `VmDriver::beacon_observation`.
+    // RED: `#[ignore = "pending DELIVER vsock attachment cut (new-step 6, …)"]`.
+    mod vsock_beacon_intake;
 }

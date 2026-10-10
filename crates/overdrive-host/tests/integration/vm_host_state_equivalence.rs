@@ -24,12 +24,15 @@ use std::path::{Path, PathBuf};
 use overdrive_core::AllocationId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::traits::vm_host_state::VmHostState;
+use overdrive_core::guest_transport::{
+    ClaimedGuestCid, GUEST_CID_BASE, GuestCid, GuestCidClaim,
+};
 use overdrive_core::traits::vmm::Vmm;
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
     VmConfig, VmConfinement, VmRunDir, VmmIdentity, clone_index_dir,
 };
-use overdrive_host::{CloudHypervisorVmm, RealVmHostState};
+use overdrive_host::{CloudHypervisorVmm, RealVmHostState, VhostVsockCidClaim};
 use overdrive_sim::SimVmHostState;
 use overdrive_testing::vm_fixture::{VmFixture, default_staging_root};
 use serial_test::serial;
@@ -40,6 +43,13 @@ const GUEST_BYTES: u64 = 128 * 1024 * 1024;
 
 /// The real cgroupfs root every workload scope resolves under.
 const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+
+/// A guest CID claimed on `claims` for one launch (D16-CLAIM): the claim
+/// `Vmm::create` takes.
+fn claimed_cid(claims: &dyn GuestCidClaim, offset: u32) -> ClaimedGuestCid {
+    let cid = GuestCid::new(GUEST_CID_BASE + offset).expect("an in-range guest CID");
+    claims.claim(cid).expect("claim the launch's guest CID")
+}
 
 fn read_kernel_header(path: &Path) -> Vec<u8> {
     use std::io::Read;
@@ -86,7 +96,6 @@ fn sample_vm_config(fixture: &VmFixture, run_root: &Path, index_dir: &Path) -> V
         vcpus: NonZeroU8::new(1).expect("1 is nonzero"),
         run_dir: VmRunDir::for_alloc(run_root, &alloc),
         confinement: sample_confinement(),
-        network: None,
         cgroup_scope: CgroupPath::for_alloc(&alloc),
     }
 }
@@ -187,7 +196,10 @@ async fn vm_host_state_equivalence_real() {
     // synthetic stand-in.
     let vmm = CloudHypervisorVmm::default();
     vmm.probe().await.expect("Vmm::probe succeeds on this host");
-    let proc = vmm.create(&config).await.expect("Vmm::create boots a real VMM");
+    let proc = vmm
+        .create(&config, claimed_cid(&VhostVsockCidClaim::new(), 0x0320))
+        .await
+        .expect("Vmm::create boots a real VMM");
 
     // The clone-index link is `VmDriver`'s to create at launch; this test
     // drives the `Vmm` port directly (no `VmDriver` in `overdrive-host`),
