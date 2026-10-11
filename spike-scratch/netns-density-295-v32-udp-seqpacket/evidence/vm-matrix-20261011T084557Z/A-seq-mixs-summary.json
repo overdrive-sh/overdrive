@@ -1,0 +1,313 @@
+{
+ "label": "A-seq-mixs",
+ "cell": {
+  "label": "A-seq-mixs",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000
+ },
+ "wall_s": 26.261927366256714,
+ "host": {
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+   "redirect_ok": 7558,
+   "rx_badmagic": 51,
+   "rx_long": 1,
+   "rx_long_second_magic": 1,
+   "rx_ok": 7558,
+   "rx_pkt_seq_eom": 7610,
+   "rx_pkt_seq_eom_bytes": 8024101
+  },
+  "check": 1,
+  "events": {
+   "badmagic": 51,
+   "long": 1,
+   "long_with_second_magic": 1,
+   "lt8": 0,
+   "sample": [
+    {
+     "declared": 659,
+     "first8_hex": "0000000000001d86",
+     "kind": "long",
+     "n": 1238,
+     "second_magic": 1,
+     "seq": 7558
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 1238,
+     "second_magic": 0,
+     "seq": null
+    }
+   ],
+   "short": 0
+  },
+  "guest_done": "{\"sent\":15264,\"stalled\":true}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 100000,
+  "outcome": {
+   "delivered_once": 7558,
+   "duplicate_extra_copies": 0,
+   "duplicated_seqs": 0,
+   "lost": 92442,
+   "n": 100000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+   "badmagic": 0,
+   "bytes": 0,
+   "long": 0,
+   "long_second_magic": 0,
+   "lt8": 0,
+   "ok": 0,
+   "records": 0,
+   "short": 0
+  },
+  "sink": {
+   "bad": 0,
+   "bad_reasons": {},
+   "bytes": 7959725,
+   "desync_bytes_skipped": 0,
+   "frames_parsed": 7558,
+   "frames_verified_ok": 7558
+  },
+  "size": "mixs",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 26.195198962
+ },
+ "guest": {
+  "app_sent_ok": 15264,
+  "bound": 59000,
+  "bpf_counters": {
+   "fexit_bytes": 8024101,
+   "fexit_calls": 7610,
+   "guest_encoded": 15264,
+   "redirect_ok": 22874,
+   "strp_bad_frame": 2,
+   "strp_frames": 7610,
+   "strp_parse_calls": 7612,
+   "tx_alloc_seq_noeom": 7610,
+   "tx_alloc_seq_noeom_bytes": 8024101
+  },
+  "drain_wall_s": 22.56776903,
+  "guest_events": {
+   "parse_bad": 2,
+   "sample": [
+    {
+     "declared": 0,
+     "first8_hex": "a0a1a2a3a4a5a6a7",
+     "kind": "parse_bad",
+     "n": 255,
+     "second_magic": 0,
+     "seq": 11574711341044573863
+    },
+    {
+     "declared": 0,
+     "first8_hex": "a0a1a2a3a4a5a6a7",
+     "kind": "parse_bad",
+     "n": 255,
+     "second_magic": 0,
+     "seq": 11574711341044573863
+    }
+   ]
+  },
+  "guest_vsock_buffer_size": 262144,
+  "n": 100000,
+  "role": "guest",
+  "send_wall_s": 20.364614447,
+  "sender_stalled": true,
+  "size": "mixs",
+  "skb_send_sock_outcomes_on_vsock_leg": {
+   "ok_full": 7610
+  },
+  "synth": 0,
+  "udp_snmp_delta": {
+   "OutDatagrams": 15264
+  },
+  "uname": "7.0.0-29-generic",
+  "variant": "seq"
+ },
+ "guest_stdout_tail": "GUEST_DONE sent=15264 stalled=true\n"
+}

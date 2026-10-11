@@ -1,0 +1,4 @@
+
+thread 'main' (4049611) panicked at src/main.rs:156:59:
+tp init: "load: ParseError(ElfError(Error(\"Invalid ELF header size or alignment\")))"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

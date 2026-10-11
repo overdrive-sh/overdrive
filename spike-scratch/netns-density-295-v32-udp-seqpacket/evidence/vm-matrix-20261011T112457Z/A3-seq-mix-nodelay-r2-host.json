@@ -1,0 +1,106 @@
+{
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+    "redirect_ok": 100000,
+    "rx_ok": 100000,
+    "rx_pkt_seq_eom": 100000,
+    "rx_pkt_seq_eom_bytes": 2949391933,
+    "rx_pkt_seq_noeom": 6,
+    "rx_pkt_seq_noeom_bytes": 157540,
+    "rx_short": 6
+  },
+  "check": 1,
+  "events": {
+    "badmagic": 0,
+    "long": 0,
+    "long_with_second_magic": 0,
+    "lt8": 0,
+    "sample": [
+      {
+        "declared": 58293,
+        "first8_hex": "000000000000650b",
+        "kind": "short",
+        "n": 30519,
+        "second_magic": 0,
+        "seq": 25867
+      },
+      {
+        "declared": 34775,
+        "first8_hex": "0000000000006c4f",
+        "kind": "short",
+        "n": 9956,
+        "second_magic": 0,
+        "seq": 27727
+      },
+      {
+        "declared": 31614,
+        "first8_hex": "00000000000073b4",
+        "kind": "short",
+        "n": 13484,
+        "second_magic": 0,
+        "seq": 29620
+      },
+      {
+        "declared": 49854,
+        "first8_hex": "0000000000007ef6",
+        "kind": "short",
+        "n": 34360,
+        "second_magic": 0,
+        "seq": 32502
+      },
+      {
+        "declared": 48487,
+        "first8_hex": "00000000000081ff",
+        "kind": "short",
+        "n": 46543,
+        "second_magic": 0,
+        "seq": 33279
+      },
+      {
+        "declared": 52902,
+        "first8_hex": "000000000000d2b4",
+        "kind": "short",
+        "n": 22678,
+        "second_magic": 0,
+        "seq": 53940
+      }
+    ],
+    "short": 6
+  },
+  "guest_done": "{\"sent\":100000,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 100000,
+  "outcome": {
+    "delivered_once": 100000,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 0,
+    "n": 100000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 0,
+    "bad_reasons": {},
+    "bytes": 2949391933,
+    "desync_bytes_skipped": 0,
+    "frames_parsed": 100000,
+    "frames_verified_ok": 100000
+  },
+  "size": "mix",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 59.351872026
+}

@@ -1,0 +1,64 @@
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 178318
+  },
+  "source": "vmm",
+  "event": "starting",
+  "properties": null
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 2967327
+  },
+  "source": "vm",
+  "event": "booting",
+  "properties": null
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 16043775
+  },
+  "source": "vm",
+  "event": "booted",
+  "properties": null
+}
+
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 528148407
+  },
+  "source": "virtio-device",
+  "event": "activated",
+  "properties": {
+    "id": "_vsock0"
+  }
+}
+
+{
+  "timestamp": {
+    "secs": 1,
+    "nanos": 647035827
+  },
+  "source": "virtio-device",
+  "event": "reset",
+  "properties": {
+    "id": "_vsock0"
+  }
+}
+
+{
+  "timestamp": {
+    "secs": 1,
+    "nanos": 656919196
+  },
+  "source": "vm",
+  "event": "rebooting",
+  "properties": null
+}
+

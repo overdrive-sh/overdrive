@@ -1,0 +1,41 @@
+[
+ {
+  "name": "k-crash-fin-ev",
+  "action": "none",
+  "repeat": 16,
+  "trials": 300,
+  "conc": 64,
+  "flows": 512,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15 --crash-permille 300 --crash-kind fin --crash-ms-max 25",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 41400,
+  "settle_s": 30,
+  "client_timeout": 300,
+  "events": true,
+  "events_sample": 1
+ },
+ {
+  "name": "k-crash-fin-noev",
+  "action": "none",
+  "repeat": 16,
+  "trials": 300,
+  "conc": 64,
+  "flows": 512,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15 --crash-permille 300 --crash-kind fin --crash-ms-max 25",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 41500,
+  "settle_s": 30,
+  "client_timeout": 300,
+  "events_sample": 1
+ }
+]

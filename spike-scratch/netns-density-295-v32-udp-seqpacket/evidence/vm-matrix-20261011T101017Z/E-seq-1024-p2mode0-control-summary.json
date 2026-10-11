@@ -1,0 +1,301 @@
+{
+ "label": "E-seq-1024-p2mode0-control",
+ "cell": {
+  "label": "E-seq-1024-p2mode0-control",
+  "variant": "seq",
+  "size": 1024,
+  "n": 20000,
+  "p2mode": 0,
+  "nodelay": 1
+ },
+ "wall_s": 6.580759048461914,
+ "host": {
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+   "redirect_ok": 19529,
+   "rx_badmagic": 471,
+   "rx_ok": 19529,
+   "rx_pkt_seq_eom": 20471,
+   "rx_pkt_seq_eom_bytes": 20640000,
+   "rx_pkt_seq_noeom": 1,
+   "rx_pkt_seq_noeom_bytes": 16,
+   "rx_short": 472
+  },
+  "check": 1,
+  "events": {
+   "badmagic": 471,
+   "long": 0,
+   "long_with_second_magic": 0,
+   "lt8": 0,
+   "sample": [
+    {
+     "declared": 1024,
+     "first8_hex": "0000000000000068",
+     "kind": "short",
+     "n": 776,
+     "second_magic": 0,
+     "seq": 104
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 256,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "0000000000000088",
+     "kind": "short",
+     "n": 520,
+     "second_magic": 0,
+     "seq": 136
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 512,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "00000000000000a8",
+     "kind": "short",
+     "n": 264,
+     "second_magic": 0,
+     "seq": 168
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 768,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "00000000000000e7",
+     "kind": "short",
+     "n": 776,
+     "second_magic": 0,
+     "seq": 231
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 256,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "0000000000000107",
+     "kind": "short",
+     "n": 520,
+     "second_magic": 0,
+     "seq": 263
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 512,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "0000000000000127",
+     "kind": "short",
+     "n": 264,
+     "second_magic": 0,
+     "seq": 295
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 768,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "000000000000015f",
+     "kind": "short",
+     "n": 776,
+     "second_magic": 0,
+     "seq": 351
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 256,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "000000000000017f",
+     "kind": "short",
+     "n": 520,
+     "second_magic": 0,
+     "seq": 383
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 512,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "000000000000019f",
+     "kind": "short",
+     "n": 264,
+     "second_magic": 0,
+     "seq": 415
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 768,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "00000000000001de",
+     "kind": "short",
+     "n": 776,
+     "second_magic": 0,
+     "seq": 478
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 256,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "00000000000001fe",
+     "kind": "short",
+     "n": 520,
+     "second_magic": 0,
+     "seq": 510
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 512,
+     "second_magic": 0,
+     "seq": null
+    },
+    {
+     "declared": 1024,
+     "first8_hex": "000000000000021e",
+     "kind": "short",
+     "n": 264,
+     "second_magic": 0,
+     "seq": 542
+    },
+    {
+     "declared": 0,
+     "first8_hex": "ffffffffffffffff",
+     "kind": "badmagic",
+     "n": 768,
+     "second_magic": 0,
+     "seq": null
+    }
+   ],
+   "short": 472
+  },
+  "guest_done": "{\"sent\":20000,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 20000,
+  "outcome": {
+   "delivered_once": 19529,
+   "duplicate_extra_copies": 0,
+   "duplicated_seqs": 0,
+   "lost": 471,
+   "n": 20000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+   "badmagic": 0,
+   "bytes": 0,
+   "long": 0,
+   "long_second_magic": 0,
+   "lt8": 0,
+   "ok": 0,
+   "records": 0,
+   "short": 0
+  },
+  "sink": {
+   "bad": 0,
+   "bad_reasons": {},
+   "bytes": 20153928,
+   "desync_bytes_skipped": 0,
+   "frames_parsed": 19529,
+   "frames_verified_ok": 19529
+  },
+  "size": "1024",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 6.520286766
+ },
+ "guest": {
+  "app_sent_ok": 20000,
+  "bound": 59000,
+  "bpf_counters": {
+   "fexit_bytes": 20640000,
+   "fexit_calls": 20003,
+   "guest_encoded": 20000,
+   "redirect_ok": 40000,
+   "strp_frames": 20000,
+   "strp_parse_calls": 20000,
+   "tx_alloc_seq_noeom": 20472,
+   "tx_alloc_seq_noeom_bytes": 20640016
+  },
+  "cell": "tcp",
+  "drain_wall_s": 2.880040454,
+  "guest_events": {
+   "parse_bad": 0,
+   "sample": []
+  },
+  "guest_vsock_buffer_size": 262144,
+  "k1": 0,
+  "n": 20000,
+  "role": "guest",
+  "send_wall_s": 0.475871341,
+  "sender_stalled": false,
+  "size": "1024",
+  "skb_send_sock_outcomes_on_vsock_leg": {
+   "errno11": 3,
+   "ok_full": 20000
+  },
+  "synth": 0,
+  "udp_snmp_delta": {
+   "OutDatagrams": 20000
+  },
+  "uname": "7.0.0-29-generic",
+  "variant": "seq"
+ },
+ "guest_stdout_tail": "GUEST_DONE sent=20000 stalled=false\n"
+}

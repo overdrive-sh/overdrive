@@ -1,0 +1,77 @@
+[    0.003006] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=0993a554-cc10-44e0-9821-308b7a35427c
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO sysrq-c
+GUEST_ACT sysrq-c
+[    1.431127] sysrq: Trigger a crash
+[    1.432273] Kernel panic - not syncing: sysrq triggered crash
+[    1.433976] CPU: 0 UID: 0 PID: 80 Comm: guest-run.sh Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.436777] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.438679] Call Trace:
+[    1.439467]  <TASK>
+[    1.440152]  show_stack+0x49/0x60
+[    1.441188]  dump_stack_lvl+0x5f/0x90
+[    1.442337]  dump_stack+0x10/0x18
+[    1.443364]  vpanic+0x262/0x4b0
+[    1.444346]  panic+0x67/0x70
+[    1.445263]  sysrq_handle_crash+0x1a/0x20
+[    1.446482]  __handle_sysrq.cold+0x23/0x167
+[    1.447752]  write_sysrq_trigger+0x62/0xa0
+[    1.448995]  proc_reg_write+0x6d/0xd0
+[    1.450122]  vfs_write+0xce/0x490
+[    1.451157]  ksys_write+0x71/0xf0
+[    1.452193]  __x64_sys_write+0x19/0x30
+[    1.453360]  x64_sys_call+0x22f/0x2390
+[    1.454509]  do_syscall_64+0x105/0x5a0
+[    1.455660]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.457089]  ? schedule+0x3d/0x90
+[    1.458127]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.459568]  ? exit_to_user_mode_loop+0x68/0x540
+[    1.460948]  ? __x64_sys_openat+0x5f/0xa0
+[    1.462166]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.463611]  ? arch_exit_to_user_mode_prepare.isra.0+0xc3/0xe0
+[    1.465354]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.466779]  ? do_syscall_64+0x140/0x5a0
+[    1.467980]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.469409]  ? do_read_fault+0x10a/0x280
+[    1.470353]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.471479]  ? wp_page_reuse+0x97/0xc0
+[    1.472382]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.473517]  ? alloc_fd+0xd2/0x140
+[    1.474363]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.475492]  ? filp_flush+0x64/0xb0
+[    1.476345]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.477473]  ? filp_close+0x22/0x30
+[    1.478328]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.479460]  ? do_dup2+0xb2/0x150
+[    1.480274]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.481403]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.482531]  ? ksys_dup3+0xa1/0x130
+[    1.483381]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.484098]  ? __x64_sys_dup2+0x24/0x110
+[    1.484694]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.485412]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.486264]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.486970]  ? do_syscall_64+0x140/0x5a0
+[    1.487566]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.488281]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.489023] RIP: 0033:0x4ccde6
+[    1.489503] Code: 47 ba 04 00 00 00 48 c7 c0 e8 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[    1.492132] RSP: 002b:00007fff4c2d18d0 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[    1.493232] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00000000004ccde6
+[    1.494276] RDX: 0000000000000002 RSI: 0000000037ddb900 RDI: 0000000000000001
+[    1.495316] RBP: 00007fff4c2d18e0 R08: 0000000000000000 R09: 0000000000000000
+[    1.496354] R10: 0000000000000000 R11: 0000000000000202 R12: 0000000037ddb900
+[    1.497391] R13: 0000000000000002 R14: 0000000000000000 R15: 0000000037ddb902
+[    1.498432]  </TASK>
+[    1.498888] Kernel Offset: 0x27600000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.500430] Rebooting in 1 seconds..
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====
+[    0.003014] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=dfb9efe9-57df-46a7-a689-b5e907734f78
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT

@@ -1,0 +1,5 @@
+[    0.003021] KHO: Failed to reserve nid 0 scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=bc967d2f-1b87-49f6-ad0e-a6039c3d0851
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT

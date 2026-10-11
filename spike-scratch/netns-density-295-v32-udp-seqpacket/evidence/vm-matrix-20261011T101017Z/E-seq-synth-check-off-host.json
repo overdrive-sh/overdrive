@@ -1,0 +1,121 @@
+{
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+    "redirect_ok": 11,
+    "rx_badmagic": 1,
+    "rx_long": 2,
+    "rx_long_second_magic": 1,
+    "rx_mismatch_passed_check_off": 7,
+    "rx_ok": 4,
+    "rx_pkt_seq_eom": 11,
+    "rx_pkt_seq_eom_bytes": 63045,
+    "rx_short": 4
+  },
+  "check": 0,
+  "events": {
+    "badmagic": 1,
+    "long": 2,
+    "long_with_second_magic": 1,
+    "lt8": 0,
+    "sample": [
+      {
+        "declared": 100,
+        "first8_hex": "0000000000000001",
+        "kind": "long",
+        "n": 316,
+        "second_magic": 1,
+        "seq": 1
+      },
+      {
+        "declared": 300,
+        "first8_hex": "0000000000000003",
+        "kind": "short",
+        "n": 150,
+        "second_magic": 0,
+        "seq": 3
+      },
+      {
+        "declared": 100,
+        "first8_hex": "0000000000000004",
+        "kind": "long",
+        "n": 111,
+        "second_magic": 0,
+        "seq": 4
+      },
+      {
+        "declared": 500,
+        "first8_hex": "0000000000000006",
+        "kind": "short",
+        "n": 28,
+        "second_magic": 0,
+        "seq": 6
+      },
+      {
+        "declared": 3000,
+        "first8_hex": "0000000000000008",
+        "kind": "short",
+        "n": 1000,
+        "second_magic": 0,
+        "seq": 8
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 2008,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 200,
+        "first8_hex": "eeeeeeeeeeeeeeee",
+        "kind": "short",
+        "n": 100,
+        "second_magic": 0,
+        "seq": 17216961135462248174
+      }
+    ],
+    "short": 4
+  },
+  "guest_done": "{\"sent\":0,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 8,
+  "outcome": {
+    "delivered_once": 3,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 5,
+    "n": 8
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 8,
+    "bad_reasons": {
+      "pattern_corrupt": 2,
+      "seq_out_of_range": 1,
+      "size_field_mismatch": 1,
+      "stream_desync": 4
+    },
+    "bytes": 63045,
+    "desync_bytes_skipped": 58589,
+    "frames_parsed": 7,
+    "frames_verified_ok": 3
+  },
+  "size": "any",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 6.309454872
+}

@@ -1,0 +1,49 @@
+{"ev":"relay_ready","fwd":"Splice","legs":"vsock","native":true,"peer_mode":"gateway","uname":"7.0.0-29-generic"}
+{"early":0,"ev":"relay_paired","hs_us":934,"id":1,"legs_open_us":530,"peer_c":"198.18.28.1:44171"}
+{"bytes":67108864,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791712103645468}
+{"dir":"s2c","ev":"vsock_eof_classify","id":1,"mode":2,"zero_send_errno":32}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":1}
+{"bytes":67108864,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791712103656686}
+{"ev":"relay_done","id":1,"r":{"aborted":false,"c2s":{"bytes":67108864,"end":"eof_clean"},"s2c":{"bytes":67108864,"end":"eof_clean"}},"us":182591}
+{"early":0,"ev":"relay_paired","hs_us":887,"id":2,"legs_open_us":297,"peer_c":"198.18.28.1:54333"}
+{"bytes":67108864,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":2,"splice_einval":0,"t_us":1791712103836371}
+{"dir":"s2c","ev":"vsock_eof_classify","id":2,"mode":2,"zero_send_errno":32}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":2}
+{"bytes":67108864,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":2,"splice_einval":0,"t_us":1791712103836755}
+{"ev":"relay_done","id":2,"r":{"aborted":false,"c2s":{"bytes":67108864,"end":"eof_clean"},"s2c":{"bytes":67108864,"end":"eof_clean"}},"us":179607}
+{"early":0,"ev":"relay_paired","hs_us":590,"id":3,"legs_open_us":208,"peer_c":"198.18.28.1:39339"}
+{"bytes":67108864,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":3,"splice_einval":0,"t_us":1791712103988498}
+{"dir":"s2c","ev":"vsock_eof_classify","id":3,"mode":2,"zero_send_errno":32}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":3}
+{"bytes":67108864,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":3,"splice_einval":0,"t_us":1791712103988876}
+{"ev":"relay_done","id":3,"r":{"aborted":false,"c2s":{"bytes":67108864,"end":"eof_clean"},"s2c":{"bytes":67108864,"end":"eof_clean"}},"us":151824}
+{"early":0,"ev":"relay_paired","hs_us":1024,"id":4,"legs_open_us":197,"peer_c":"198.18.28.1:54443"}
+{"bytes":67108864,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":4,"splice_einval":0,"t_us":1791712104143348}
+{"dir":"s2c","ev":"vsock_eof_classify","id":4,"mode":2,"zero_send_errno":32}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":4}
+{"bytes":67108864,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":4,"splice_einval":0,"t_us":1791712104143759}
+{"ev":"relay_done","id":4,"r":{"aborted":false,"c2s":{"bytes":67108864,"end":"eof_clean"},"s2c":{"bytes":67108864,"end":"eof_clean"}},"us":154607}
+{"early":0,"ev":"relay_paired","hs_us":975,"id":5,"legs_open_us":197,"peer_c":"198.18.28.1:39243"}
+{"bytes":67108864,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":5,"splice_einval":0,"t_us":1791712104304580}
+{"dir":"s2c","ev":"vsock_eof_classify","id":5,"mode":2,"zero_send_errno":32}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":5}
+{"bytes":67108864,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":5,"splice_einval":0,"t_us":1791712104305342}
+{"ev":"relay_done","id":5,"r":{"aborted":false,"c2s":{"bytes":67108864,"end":"eof_clean"},"s2c":{"bytes":67108864,"end":"eof_clean"}},"us":161387}
+{"early":0,"ev":"relay_paired","hs_us":846,"id":6,"legs_open_us":243,"peer_c":"198.18.28.1:45647"}
+{"bytes":67108864,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":6,"splice_einval":0,"t_us":1791712104431352}
+{"dir":"s2c","ev":"vsock_eof_classify","id":6,"mode":2,"zero_send_errno":32}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":6}
+{"bytes":67108864,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":6,"splice_einval":0,"t_us":1791712104431667}
+{"ev":"relay_done","id":6,"r":{"aborted":false,"c2s":{"bytes":67108864,"end":"eof_clean"},"s2c":{"bytes":67108864,"end":"eof_clean"}},"us":126099}
+{"early":0,"ev":"relay_paired","hs_us":611,"id":7,"legs_open_us":272,"peer_c":"198.18.28.1:57951"}
+{"bytes":67108864,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":7,"splice_einval":0,"t_us":1791712104628623}
+{"dir":"s2c","ev":"vsock_eof_classify","id":7,"mode":2,"zero_send_errno":32}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":7}
+{"bytes":67108864,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":7,"splice_einval":0,"t_us":1791712104629076}
+{"ev":"relay_done","id":7,"r":{"aborted":false,"c2s":{"bytes":67108864,"end":"eof_clean"},"s2c":{"bytes":67108864,"end":"eof_clean"}},"us":197162}
+{"early":0,"ev":"relay_paired","hs_us":648,"id":8,"legs_open_us":330,"peer_c":"198.18.28.1:50807"}
+{"bytes":67108864,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":8,"splice_einval":0,"t_us":1791712104772095}
+{"dir":"s2c","ev":"vsock_eof_classify","id":8,"mode":2,"zero_send_errno":32}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":8}
+{"bytes":67108864,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":8,"splice_einval":0,"t_us":1791712104772340}
+{"ev":"relay_done","id":8,"r":{"aborted":false,"c2s":{"bytes":67108864,"end":"eof_clean"},"s2c":{"bytes":67108864,"end":"eof_clean"}},"us":142965}

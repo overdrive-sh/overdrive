@@ -1,0 +1,49 @@
+{
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {},
+  "check": 1,
+  "events": {
+    "badmagic": 0,
+    "long": 0,
+    "long_with_second_magic": 0,
+    "lt8": 0,
+    "sample": [],
+    "short": 0
+  },
+  "guest_done": "{\"sent\":200,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 200,
+  "outcome": {
+    "delivered_once": 0,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 200,
+    "n": 200
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 0,
+    "bad_reasons": {},
+    "bytes": 0,
+    "desync_bytes_skipped": 0,
+    "frames_parsed": 0,
+    "frames_verified_ok": 0
+  },
+  "size": "1024",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 5.703461408
+}

@@ -1,0 +1,251 @@
+[08:30:28] === preflight
+[08:30:28] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[08:30:28]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[08:30:28]     none
+[08:30:28]     model name	: AMD EPYC 8024P 8-Core Processor
+[08:30:28]     16
+[08:30:28]     crw-rw---- 1 root kvm 10, 232 Oct 11 08:29 /dev/kvm
+[08:30:28] substrate probes: {"machine": "x86_64", "virt": "none", "kvm_chardev": true, "kvm_api": 12, "kvm_create_vm": true, "cpu_virt_ext": true, "uname_r": "7.0.0-29-generic"}
+[08:30:28] === build
+[08:30:28] $ sha256sum /tmp/v29-work/prior/cloud-hypervisor; /tmp/v29-work/prior/cloud-hypervisor --version  (rc=0)
+[08:30:28]     bb8f79275fd85a2ff89de33f247e90af6523c6b2db1f7c7de566a14aa8b512a8  /tmp/v29-work/prior/cloud-hypervisor
+[08:30:28]     cloud-hypervisor v53.0.0
+[08:30:28]     Migration Protocol Versions: 0
+[08:30:28] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --offline --manifest-path /tmp/v29-work/bpf/Cargo.toml  (rc=0)
+[08:30:28]         Finished `release` profile [optimized] target(s) in 0.05s
+[08:30:28] $ cargo build --release --target x86_64-unknown-linux-gnu --offline --manifest-path /tmp/v29-work/vfwd/Cargo.toml  (rc=0)
+[08:30:28]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[08:30:28]         |            ^^^^^^
+[08:30:28]     
+[08:30:28]     warning: `vfwd` (bin "vfwd") generated 5 warnings (run `cargo fix --bin "vfwd" -p vfwd` to apply 2 suggestions)
+[08:30:28]         Finished `release` profile [optimized + debuginfo] target(s) in 0.03s
+[08:30:28] $ file /tmp/v29-work/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /tmp/v29-work/prior/cloud-hypervisor /tmp/v29-work/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /tmp/v29-work/prior/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[08:30:28]     /tmp/v29-work/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=95e010c04a275d44b294e3fa5edc8c94b8e9e2d3, with debug_info, not stripped
+[08:30:28]     /tmp/v29-work/prior/cloud-hypervisor:                                ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[08:30:28]     /tmp/v29-work/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[08:30:28]     cloud-hypervisor v53.0.0
+[08:30:28]     Migration Protocol Versions: 0
+[08:30:28]     bpf-linker 0.0.0
+[08:30:28]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[08:30:28]     rustc 1.95.0 (59807616e 2026-04-14)
+[08:30:28] === guest image
+[08:30:29] $ cd /tmp/v29-work/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /tmp/v29-work/out/initramfs.cpio.gz  (rc=0)
+[08:30:31] launch VM: /tmp/v29-work/prior/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v29-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park,--declare,7300,7301,7302 --cpus boot=2 --memory size=1024M --serial file=/tmp/v29-work/out/vm-increment-d-1791707431/serial.log --console off --vsock cid=3329,backend=vhost-kernel --log-file /tmp/v29-work/out/vm-increment-d-1791707431/ch.log -v
+[08:30:33] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.62
+net.ipv4.tcp_fwmark_accept = 1
+net.ipv4.fwmark_reflect = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33m42:7e:5e:ac:8d:25 [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+
+thread 'main' (112) panicked at src/owner.rs:251:18:
+unknown arg 7301
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+   2: vfwd::owner::parse_cfg
+             at ./tmp/v29-work/vfwd/src/owner.rs:251:18
+   3: vfwd::owner::run
+             at ./tmp/v29-work/vfwd/src/owner.rs:728:13
+   4: vfwd::main
+             at ./tmp/v29-work/vfwd/src/main.rs:36:29
+   5: core::ops::function::FnOnce::call_once
+             at ./home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+GUEST_READY
+
+[08:30:34] guest$ uname -r  (rc=0, 0.0s)
+[08:30:34]     7.0.0-29-generic
+[08:30:34] $ ip netns add v29-p  (rc=0)
+[08:30:34] $ ip link add v29-h type veth peer name v29-p0  (rc=0)
+[08:30:34] $ ip link set v29-p0 netns v29-p  (rc=0)
+[08:30:34] $ ip addr add 10.250.229.1/24 dev v29-h  (rc=0)
+[08:30:34] $ ip link set v29-h mtu 1500 up  (rc=0)
+[08:30:34] $ ip -n v29-p addr add 10.250.229.2/24 dev v29-p0  (rc=0)
+[08:30:34] $ ip -n v29-p link set v29-p0 mtu 1500 up  (rc=0)
+[08:30:34] $ ip -n v29-p link set lo up  (rc=0)
+[08:30:34] $ ip netns exec v29-p sysctl -w net.core.rmem_max=33554432  (rc=0)
+[08:30:34]     sysctl: setting key "net.core.rmem_max": Operation not permitted
+[08:30:34] $ ip -d link show v29-h; ip -n v29-p -br addr; ethtool -k v29-h | grep -E 'udp|frag|segment|generic-receive|tcp-seg'; ip netns exec v29-p ss -lun  (rc=0)
+[08:30:34]     63095: v29-h@if63094: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+[08:30:34]         link/ether 9a:3b:db:6f:aa:ff brd ff:ff:ff:ff:ff:ff link-netns v29-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 
+[08:30:34]         veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+[08:30:34]     lo               UNKNOWN        127.0.0.1/8 ::1/128 
+[08:30:34]     v29-p0@if63095   UP             10.250.229.2/24 fe80::ecad:61ff:fec9:6895/64 
+[08:30:34]     	tx-scatter-gather-fraglist: on
+[08:30:34]     tcp-segmentation-offload: on
+[08:30:34]     	tx-tcp-segmentation: on
+[08:30:34]     	tx-tcp-ecn-segmentation: on
+[08:30:34]     	tx-tcp-mangleid-segmentation: on
+[08:30:34]     	tx-tcp6-segmentation: on
+[08:30:34]     	tx-tcp-accecn-segmentation: on
+[08:30:34]     generic-segmentation-offload: on
+[08:30:34]     generic-receive-offload: off
+[08:30:34]     tx-fcoe-segmentation: off [fixed]
+[08:30:34]     tx-gre-segmentation: on
+[08:30:34]     tx-gre-csum-segmentation: on
+[08:30:34]     tx-ipxip4-segmentation: on
+[08:30:34]     tx-ipxip6-segmentation: on
+[08:30:34]     tx-udp_tnl-segmentation: on
+[08:30:34]     tx-udp_tnl-csum-segmentation: on
+[08:30:34]     tx-tunnel-remcsum-segmentation: off [fixed]
+[08:30:34]     tx-sctp-segmentation: on
+[08:30:34]     tx-esp-segmentation: off [fixed]
+[08:30:34]     tx-udp-segmentation: on
+[08:30:34]     rx-udp_tunnel-port-offload: off [fixed]
+[08:30:34]     rx-udp-gro-forwarding: off
+[08:30:34]     State  Recv-Q Send-Q Local Address:Port Peer Address:Port
+[08:30:34]     UNCONN 0      0       10.250.229.2:7229      0.0.0.0:*
+[08:30:34] $ tc qdisc del dev v29-h root  (rc=2)
+[08:30:34]     Error: Cannot delete qdisc with handle of zero.
+[08:30:37] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:30:37]     OWNER_READY role=guest pid=125
+[08:30:42] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 0 --reps 3000 --gap-us 200 --linger-ms 1000   (rc=0, 1.8s, 3002 lines)
+[08:30:48] PHASE h1_empties_only_gap200: peer sent_data=0 sent_empty=3000 rx_empty=3000 tiny_ok=True X=0 split=0 host={'verdict_empty_seen': 3000, 'notice_ok': 3000, 'ctl_bytes_written': 8, 'empty_sent': 3000, 'notice_lat_us_max': 783, 'notice_lat_us_sum': 84823, 'notices_read': 3000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:30:53] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 0,1,0,0,8,0,100,0,1431,0,1472,0,1473,0,4096,0,0,59000,0,7 --reps 40 --gap-us 2000 --linger-ms 1000   (rc=0, 2.7s, 802 lines)
+[08:30:59] PHASE h1_mixed_sizes: peer sent_data=280 sent_empty=440 rx_empty=440 tiny_ok=True X=0 split=0 host={'redirect_ok': 360, 'sent_calls': 360, 'vstrip': 360, 'verdict_empty_seen': 440, 'notice_ok': 440, 'verdict_queued': 360, 'ctl_bytes_written': 8, 'empty_sent': 440, 'notice_lat_us_max': 928, 'notice_lat_us_sum': 33433, 'notices_read': 440, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:31:03] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:31:10] PHASE h1_after_empties_k1_gap200: wire(E=4000/4000 early=2060 late=21 dmiss=0) peer(E=4000 early=2057 late=21 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_sent': 4000, 'notice_lat_us_sum': 114727, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:31:13] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:31:13]     OWNER_READY role=guest pid=159
+[08:31:17] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 100,0,100,100,100,1400,100 --reps 1 --gap-us 20000 --linger-ms 1000   (rc=0, 1.1s, 9 lines)
+[08:31:23] PHASE h2_naive_control: peer sent_data=6 sent_empty=1 rx_empty=0 tiny_ok=True X=0 split=0 host={'redirect_ok': 7, 'sent_calls': 1, 'vstrip': 7, 'vstrip_empty_fwd': 1, 'sent_zero': 1, 'ctl_bytes_written': 8, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:31:27] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 100,100 --reps 1 --gap-us 20000 --linger-ms 1000   (rc=0, 1.0s, 4 lines)
+[08:31:32] PHASE h2_naive_control_second_assoc: peer sent_data=2 sent_empty=0 rx_empty=0 tiny_ok=True X=0 split=0 host={'redirect_ok': 2, 'sent_calls': 2, 'vstrip': 2, 'ctl_bytes_written': 8, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:31:35] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:31:35]     OWNER_READY role=guest pid=181
+[08:31:44] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 1000 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 5.6s, 2 lines)
+[08:31:51] PHASE h3_noload_gateno_k1_gap1000: wire(E=4000/4000 early=2619 late=3 dmiss=0) peer(E=4000 early=2600 late=3 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_sent': 4000, 'notice_lat_us_max': 466, 'notice_lat_us_sum': 164214, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:31:57] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 3.6s, 2 lines)
+[08:32:04] PHASE h3_noload_gateno_k1_gap500: wire(E=4000/4000 early=2815 late=0 dmiss=0) peer(E=4000 early=2801 late=0 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_sent': 4000, 'notice_lat_us_sum': 93210, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:32:08] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:32:15] PHASE h3_noload_gateno_k1_gap200: wire(E=4000/4000 early=2215 late=4 dmiss=0) peer(E=4000 early=2204 late=4 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_sent': 4000, 'notice_lat_us_sum': 84723, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:32:19] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 100 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.0s, 2 lines)
+[08:32:26] PHASE h3_noload_gateno_k1_gap100: wire(E=4000/4000 early=2618 late=20 dmiss=0) peer(E=4000 early=2620 late=22 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_sent': 4000, 'notice_lat_us_sum': 99025, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:32:31] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:32:37] PHASE h3_noload_gateno_k1_gap200_rep2: wire(E=4000/4000 early=1374 late=15 dmiss=0) peer(E=4000 early=1354 late=15 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_sent': 4000, 'notice_lat_us_sum': 97939, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:32:42] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 8 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:32:48] PHASE h3_noload_gateno_k8_gap200: wire(E=500/500 early=154 late=0 dmiss=0) peer(E=500 early=150 late=0 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 500, 'notice_ok': 500, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_sent': 500, 'notice_lat_us_max': 1285, 'notice_lat_us_sum': 20449, 'notices_read': 500, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:32:53] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 64 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:32:59] PHASE h3_noload_gateno_k1_small64_gap200: wire(E=4000/4000 early=1509 late=2 dmiss=0) peer(E=4000 early=1505 late=2 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_sent': 4000, 'notice_lat_us_sum': 80701, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:33:03] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:33:03]     OWNER_READY role=guest pid=230
+[08:33:11] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 1000 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 5.6s, 2 lines)
+[08:33:17] PHASE h3_noload_gateyes_k1_gap1000: wire(E=4000/4000 early=0 late=646 dmiss=0) peer(E=4000 early=0 late=712 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 2263, 'empty_sent': 4000, 'notice_lat_us_max': 1385, 'notice_lat_us_sum': 2447396, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:33:23] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 3.6s, 2 lines)
+[08:33:30] PHASE h3_noload_gateyes_k1_gap500: wire(E=4000/4000 early=0 late=1742 dmiss=0) peer(E=4000 early=0 late=1742 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 2171, 'empty_sent': 4000, 'notice_lat_us_sum': 1521071, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:33:35] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:33:41] PHASE h3_noload_gateyes_k1_gap200: wire(E=4000/4000 early=0 late=1326 dmiss=0) peer(E=4000 early=0 late=1340 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 1193, 'empty_sent': 4000, 'notice_lat_us_max': 1774, 'notice_lat_us_sum': 851316, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:33:46] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 100 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.0s, 2 lines)
+[08:33:52] PHASE h3_noload_gateyes_k1_gap100: wire(E=4000/4000 early=0 late=2269 dmiss=0) peer(E=4000 early=0 late=2264 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 1598, 'empty_sent': 4000, 'notice_lat_us_sum': 1031624, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:33:57] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:34:04] PHASE h3_noload_gateyes_k1_gap200_rep2: wire(E=4000/4000 early=0 late=1142 dmiss=0) peer(E=4000 early=0 late=1150 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 1020, 'empty_sent': 4000, 'notice_lat_us_sum': 431246, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:34:08] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 8 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:34:15] PHASE h3_noload_gateyes_k8_gap200: wire(E=500/500 early=0 late=138 dmiss=0) peer(E=500 early=0 late=138 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 500, 'notice_ok': 500, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 146, 'empty_sent': 500, 'notice_lat_us_sum': 164921, 'notices_read': 500, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:34:19] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 64 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:34:25] PHASE h3_noload_gateyes_k1_small64_gap200: wire(E=4000/4000 early=0 late=1150 dmiss=0) peer(E=4000 early=0 late=1169 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 984, 'empty_sent': 4000, 'notice_lat_us_sum': 456599, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:34:29] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:34:29]     OWNER_READY role=guest pid=278
+[08:34:37] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 1000 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 5.6s, 2 lines)
+[08:34:43] PHASE h3_noload_gatespin_k1_gap1000: wire(E=4000/4000 early=0 late=5 dmiss=0) peer(E=4000 early=0 late=5 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 18805, 'empty_sent': 4000, 'notice_lat_us_max': 401, 'notice_lat_us_sum': 192674, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:34:49] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 3.6s, 2 lines)
+[08:34:55] PHASE h3_noload_gatespin_k1_gap500: wire(E=4000/4000 early=0 late=153 dmiss=0) peer(E=4000 early=0 late=151 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 4258, 'empty_sent': 4000, 'notice_lat_us_max': 1819, 'notice_lat_us_sum': 254492, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:35:00] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:35:07] PHASE h3_noload_gatespin_k1_gap200: wire(E=4000/4000 early=0 late=751 dmiss=0) peer(E=4000 early=0 late=728 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 4950, 'empty_sent': 4000, 'notice_lat_us_max': 743, 'notice_lat_us_sum': 356878, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:35:11] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 100 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.0s, 2 lines)
+[08:35:18] PHASE h3_noload_gatespin_k1_gap100: wire(E=4000/4000 early=0 late=2185 dmiss=0) peer(E=4000 early=0 late=2200 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 3184, 'empty_sent': 4000, 'notice_lat_us_sum': 738908, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:35:22] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:35:29] PHASE h3_noload_gatespin_k1_gap200_rep2: wire(E=4000/4000 early=0 late=659 dmiss=0) peer(E=4000 early=0 late=649 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 5758, 'empty_sent': 4000, 'notice_lat_us_max': 480, 'notice_lat_us_sum': 301373, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:35:33] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 8 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:35:40] PHASE h3_noload_gatespin_k8_gap200: wire(E=500/500 early=0 late=31 dmiss=0) peer(E=500 early=0 late=29 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 500, 'notice_ok': 500, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 449, 'empty_sent': 500, 'notice_lat_us_sum': 75678, 'notices_read': 500, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:35:44] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 64 --k 1 --gap-us 200 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.4s, 2 lines)
+[08:35:50] PHASE h3_noload_gatespin_k1_small64_gap200: wire(E=4000/4000 early=0 late=794 dmiss=0) peer(E=4000 early=0 late=795 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_empty_seen': 4000, 'notice_ok': 4000, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'empty_gate_waits': 4433, 'empty_sent': 4000, 'notice_lat_us_sum': 374459, 'notices_read': 4000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:35:54] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:35:54]     OWNER_READY role=guest pid=326
+[08:35:59] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 4000 --size 1400 --k 0 --gap-us 100 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 2.0s, 2 lines)
+[08:36:05] PHASE h3_noload_datanly_control_gap100: wire(E=0/0 early=0 late=0 dmiss=0) peer(E=0 early=0 late=0 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 4001, 'sent_calls': 4001, 'vstrip': 4001, 'verdict_queued': 4001, 'ctl_bytes_written': 8, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:36:09] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 2000 --size 1400 --k 1 --gap-us 0 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 1.6s, 2 lines)
+[08:36:15] PHASE h3_leglimit_gate_no_k1_gap0: wire(E=2000/2000 early=1708 late=50 dmiss=0) peer(E=2000 early=1698 late=63 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 2001, 'sent_calls': 2001, 'vstrip': 2001, 'verdict_empty_seen': 2000, 'notice_ok': 2000, 'verdict_queued': 2001, 'ctl_bytes_written': 8, 'empty_sent': 2000, 'notice_lat_us_max': 427, 'notice_lat_us_sum': 119505, 'notices_read': 2000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:36:19] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 2000 --size 1400 --k 0 --gap-us 0 --burst 1 --lead-empties 0 --warm --linger-ms 1000  (rc=0, 1.6s, 2 lines)
+[08:36:25] PHASE h3_leglimit_datanly_gap0: wire(E=0/0 early=0 late=0 dmiss=0) peer(E=0 early=0 late=0 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 2001, 'sent_calls': 2001, 'vstrip': 2001, 'verdict_queued': 2001, 'ctl_bytes_written': 8, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:36:25] $ tc qdisc replace dev v29-h root tbf rate 5mbit burst 3000 limit 4000000  (rc=0)
+[08:36:28] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:36:28]     OWNER_READY role=guest pid=350
+[08:36:47] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 3000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 14000  (rc=0, 16.1s, 2 lines)
+[08:36:54] PHASE h3_throttle5m_gateno_k1_gap500: wire(E=3000/3000 early=2965 late=0 dmiss=0) peer(E=3000 early=2965 late=0 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 3001, 'sent_calls': 3001, 'vstrip': 3001, 'verdict_empty_seen': 3000, 'notice_ok': 3000, 'verdict_queued': 3001, 'ctl_bytes_written': 8, 'empty_sent': 3000, 'notice_lat_us_max': 81, 'notice_lat_us_sum': 43003, 'notices_read': 3000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:36:57] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:36:57]     OWNER_READY role=guest pid=363
+[08:37:16] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 3000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 14000  (rc=0, 16.1s, 2 lines)
+[08:37:22] PHASE h3_throttle5m_gateyes_k1_gap500: wire(E=3000/3000 early=0 late=307 dmiss=0) peer(E=3000 early=0 late=307 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 3001, 'sent_calls': 3001, 'vstrip': 3001, 'verdict_empty_seen': 3000, 'notice_ok': 3000, 'verdict_queued': 3001, 'ctl_bytes_written': 8, 'empty_gate_waits': 8248, 'empty_sent': 3000, 'notice_lat_us_max': 5544628, 'notice_lat_us_sum': 8202406080, 'notices_read': 3000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:37:25] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:37:25]     OWNER_READY role=guest pid=375
+[08:37:44] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 3000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 14000  (rc=0, 16.1s, 2 lines)
+[08:37:50] PHASE h3_throttle5m_gatespin_k1_gap500: wire(E=3000/3000 early=0 late=24 dmiss=0) peer(E=3000 early=0 late=24 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 3001, 'sent_calls': 3001, 'vstrip': 3001, 'verdict_empty_seen': 3000, 'notice_ok': 3000, 'verdict_queued': 3001, 'ctl_bytes_written': 8, 'empty_gate_waits': 1795600, 'empty_sent': 3000, 'notice_lat_us_max': 5543979, 'notice_lat_us_sum': 8198926150, 'notices_read': 3000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:37:53] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:37:53]     OWNER_READY role=guest pid=388
+[08:38:12] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 3000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 14000  (rc=0, 16.1s, 2 lines)
+[08:38:19] PHASE h3_throttle5m_gateno_noretry_k1_gap500: wire(E=3000/3000 early=2964 late=0 dmiss=0) peer(E=3000 early=2963 late=0 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 3001, 'sent_calls': 3001, 'vstrip': 3001, 'verdict_empty_seen': 3000, 'notice_ok': 3000, 'verdict_queued': 3001, 'ctl_bytes_written': 8, 'empty_sent': 3000, 'notice_lat_us_max': 103, 'notice_lat_us_sum': 31638, 'notices_read': 3000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:38:22] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:38:22]     OWNER_READY role=guest pid=400
+[08:38:41] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 3000 --size 1400 --k 0 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 14000  (rc=0, 16.1s, 2 lines)
+[08:38:47] PHASE h3_throttle5m_datanly_control_gap500: wire(E=0/0 early=0 late=0 dmiss=0) peer(E=0 early=0 late=0 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 3001, 'sent_calls': 3001, 'vstrip': 3001, 'verdict_queued': 3001, 'ctl_bytes_written': 8, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:38:51] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:38:51]     OWNER_READY role=guest pid=412
+[08:39:10] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 3000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm --linger-ms 14000  (rc=0, 16.1s, 2 lines)
+[08:39:16] PHASE h3_throttle5m_gatespin_sndbuf16k_k1_gap500: wire(E=3000/3000 early=0 late=505 dmiss=0) peer(E=3000 early=0 late=505 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 3001, 'sent_calls': 3001, 'vstrip': 3001, 'verdict_empty_seen': 3000, 'notice_ok': 3000, 'verdict_queued': 3001, 'ctl_bytes_written': 8, 'empty_gate_waits': 1799364, 'empty_sent': 3000, 'notice_lat_us_max': 5607319, 'notice_lat_us_sum': 8389701138, 'notices_read': 3000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:39:16] $ tc qdisc del dev v29-h root  (rc=0)
+[08:39:19] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:39:19]     OWNER_READY role=guest pid=424
+[08:39:29] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 0 --reps 1000 --gap-us 100 --warm --linger-ms 9000  (rc=0, 9.8s, 1002 lines)
+[08:39:34] H4 h4_ring4k_nocomp: sent=1000 peer_rx=102 invariants={'seen_eq_ok_plus_lost': True, 'owner_lost_seen_eq_kernel_lost': True, 'peer_rx_eq_ok_plus_compensated': True, 'all_empties_on_wire_or_counted_lost': True} {'redirect_ok': 1, 'sent_calls': 1, 'vstrip': 1, 'verdict_empty_seen': 1000, 'notice_ok': 102, 'notice_lost': 898, 'verdict_queued': 1, 'ctl_bytes_written': 8, 'empty_sent': 102, 'notice_lat_us_max': 3797835, 'notice_lat_us_sum': 386420131, 'notice_lost_seen': 898, 'notice_paused_ticks': 1692984, 'notices_read': 102, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:39:37] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:39:37]     OWNER_READY role=guest pid=432
+[08:39:48] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 0 --reps 1000 --gap-us 100 --warm --linger-ms 9000  (rc=0, 9.8s, 1002 lines)
+[08:39:52] H4 h4_ring4k_comp: sent=1000 peer_rx=1000 invariants={'seen_eq_ok_plus_lost': True, 'owner_lost_seen_eq_kernel_lost': True, 'peer_rx_eq_ok_plus_compensated': True, 'all_empties_on_wire_or_counted_lost': True} {'redirect_ok': 1, 'sent_calls': 1, 'vstrip': 1, 'verdict_empty_seen': 1000, 'notice_ok': 102, 'notice_lost': 898, 'verdict_queued': 1, 'ctl_bytes_written': 8, 'empty_compensated': 898, 'empty_sent': 102, 'notice_lat_us_max': 3798967, 'notice_lat_us_sum': 386676273, 'notice_lost_seen': 898, 'notice_paused_ticks': 1694634, 'notices_read': 102, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:39:56] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:39:56]     OWNER_READY role=guest pid=440
+[08:40:06] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 0 --reps 1000 --gap-us 100 --warm --linger-ms 9000  (rc=0, 9.8s, 1002 lines)
+[08:40:11] H4 h4_ring64k_paused_fits: sent=1000 peer_rx=1000 invariants={'seen_eq_ok_plus_lost': True, 'owner_lost_seen_eq_kernel_lost': True, 'peer_rx_eq_ok_plus_compensated': True, 'all_empties_on_wire_or_counted_lost': True} {'redirect_ok': 1, 'sent_calls': 1, 'vstrip': 1, 'verdict_empty_seen': 1000, 'notice_ok': 1000, 'verdict_queued': 1, 'ctl_bytes_written': 8, 'empty_sent': 1000, 'notice_lat_us_max': 3797897, 'notice_lat_us_sum': 3716442512, 'notice_paused_ticks': 1626264, 'notices_read': 1000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:40:14] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:40:14]     OWNER_READY role=guest pid=448
+[08:40:18] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:40:18]     OWNER_READY role=guest pid=454
+[08:40:23] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 1024,2048,4096,8192,16384,24576,32000,32768,32769,40000,49152,59000,65507 --reps 5 --gap-us 30000 --linger-ms 1000   (rc=0, 3.0s, 67 lines)
+[08:40:29] PHASE h5_sizes_linearise: peer sent_data=65 sent_empty=0 rx_empty=0 tiny_ok=True X=0 split=0 host={'redirect_ok': 65, 'sent_calls': 65, 'vstrip': 65, 'verdict_queued': 65, 'ctl_bytes_written': 8, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:40:32] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:40:32]     OWNER_READY role=guest pid=466
+[08:40:38] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 1024,2048,4096,8192,16384,24576,32000,32768,32769,40000,49152,59000,65507 --reps 5 --gap-us 30000 --linger-ms 1000   (rc=0, 3.0s, 67 lines)
+[08:40:44] PHASE h5_sizes_NO_linearise_control: peer sent_data=65 sent_empty=0 rx_empty=0 tiny_ok=True X=45 split=30 host={'redirect_ok': 65, 'sent_calls': 65, 'vstrip': 65, 'verdict_nolinear': 65, 'verdict_queued': 65, 'ctl_bytes_written': 8, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:40:47] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:40:47]     OWNER_READY role=guest pid=478
+[08:40:48] guest$ cat /tmp/owner.out; tail -c 30000 /tmp/owner.log; cat /tmp/owner-stats.json; tail -60 /tmp/sshd.log; tail -20 /tmp/srv7100.log /tmp/srv7101.log  (rc=0, 0.0s)
+[08:40:48]     OWNER_READY role=guest pid=478
+[08:40:48]     {"ack_oob":true,"arm":true,"declare":[7300,7301,7302],"egress_ifs":[],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":478,"programs":[{"id":368,"name":"verdict","tag":"10eb4482b2049ca7","verified_insns":1185},{"id":369,"name":"strp_parse","tag":"2abd9169f6e90deb","verified_insns":62},{"id":370,"name":"strp_verdict","tag":"43bb1ec76775fce6","verified_insns":1196},{"id":371,"name":"lo_decode(tcx lo egress)","tag":"df202353afc0c231","verified_insns":465},{"id":372,"name":"sent(fexit skb_send_sock)","tag":"3a11f30c5a8ab4b7","verified_insns":109},{"id":373,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":374,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":375,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":376,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":377,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":378,"name":"sockops(root cgroup)","tag":"76815629f15442aa","verified_insns":342},{"id":379,"name":"listen_start(fexit inet_csk_listen_start)","tag":"4198b5e2f7485261","verified_insns":215},{"id":380,"name":"listen_stop(fexit inet_csk_listen_stop)","tag":"baa4f715ec1b955e","verified_insns":136}],"role":"guest","tuple_from_peer":true,"udp_park":true,"unframe":"tc"}
+[08:40:48]     {"ev":"park_pool","slots":256}
+[08:40:48]     {"ev":"ctl_open","t_us":615693537}
+[08:40:48]     {"ev":"lset_seeded","lset":"{}"}
+[08:40:48]     {"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7300,"reason":"session_open","seq":1,"t_us":615693630}
+[08:40:48]     {"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7301,"reason":"session_open","seq":2,"t_us":615693693}
+[08:40:48]     {"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7302,"reason":"session_open","seq":3,"t_us":615693755}
+[08:40:48]     {"ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+[08:40:48]     {"counters":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"ctl_sessions_opened":1,"flows_open":0,"listen_events":5,"listen_state_sent":3,"t_ms":1791708047936.521}Server listening on 0.0.0.0 port 22.
+[08:40:48]     ==> /tmp/srv7100.log <==
+[08:40:48]     {"banner":false,"bind":"0.0.0.0:7100","ev":"tcp_server_ready","rst":false}
+[08:40:48]     
+[08:40:48]     ==> /tmp/srv7101.log <==
+[08:40:48]     {"banner":true,"bind":"0.0.0.0:7101","ev":"tcp_server_ready","rst":false}
+[08:40:48] === done

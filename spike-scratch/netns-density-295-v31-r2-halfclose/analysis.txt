@@ -1,0 +1,573 @@
+## A. cumulative counters vs per-call counters, level backstop ablation (injected recursion misses; loopback; 3000 trials of 256 KiB unless noted)
+a1-incr-skip30-off                 trials=  3000 pass=     0 reset=     0 fail={'no_server_result_client_error': 1743, 'srv_recv_err:TIMEOUT': 1257} | started=4257 clean=1558 aborted=1743 completions=4072 (owner_cas=2589 rec_fexit=226 rec_poke=1257) stale_epoch_discards=0 | viol={} | live_end=0/956
+                                     args: incr=yes skip_a=300 skip_b=300 backstop=off conc=256 n=262144 | injected_misses=64661 poke_runs=2213 fire_poke=2213 fire_fexit=226 arm_pokes=0 backstop_pokes=0 rises=0 owner_waits=2439
+a2-cum-skip30-off                  trials=  3000 pass=  1936 reset=     0 fail={'cli_recv_err:TIMEOUT': 381, 'no_server_result_client_error': 223, 'srv_recv_err:TIMEOUT': 460} | started=5554 clean=4941 aborted=0 completions=10495 (owner_cas=4109 rec_fexit=5926 rec_poke=460) stale_epoch_discards=0 | viol={} | live_end=381/232
+                                     args: incr=None skip_a=300 skip_b=300 backstop=off conc=256 n=262144 | injected_misses=159907 poke_runs=862 fire_poke=862 fire_fexit=5926 arm_pokes=0 backstop_pokes=0 rises=0 owner_waits=6787
+a5b-incr-skipA70-off               trials=  3000 pass=  3000 reset=     0 fail={} | started=6000 clean=6000 aborted=0 completions=12000 (owner_cas=7247 rec_fexit=4753 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=yes skip_a=700 skip_b=0 backstop=off conc=256 n=262144 | injected_misses=208668 poke_runs=0 fire_poke=0 fire_fexit=4753 arm_pokes=0 backstop_pokes=0 rises=0 owner_waits=4753
+a5-cum-skipA70-off                 trials=  3000 pass=  3000 reset=     0 fail={} | started=6000 clean=6000 aborted=0 completions=12000 (owner_cas=6966 rec_fexit=5034 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=700 skip_b=0 backstop=off conc=256 n=262144 | injected_misses=208443 poke_runs=0 fire_poke=0 fire_fexit=5034 arm_pokes=0 backstop_pokes=0 rises=0 owner_waits=5034
+a3-cum-skip30-rise                 trials=  3000 pass=  3000 reset=     0 fail={} | started=6000 clean=6000 aborted=0 completions=12000 (owner_cas=6368 rec_fexit=4552 rec_poke=1080) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=300 skip_b=300 backstop=rise conc=256 n=262144 | injected_misses=179232 poke_runs=8048 fire_poke=1080 fire_fexit=4552 arm_pokes=0 backstop_pokes=8074 rises=162 owner_waits=5632
+a8-cum-skip30-rise-c1              trials=   600 pass=   600 reset=     0 fail={} | started=1200 clean=1200 aborted=0 completions=2400 (owner_cas=760 rec_fexit=1393 rec_poke=247) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=300 skip_b=300 backstop=rise conc=1 n=262144 | injected_misses=36028 poke_runs=505 fire_poke=247 fire_fexit=1393 arm_pokes=0 backstop_pokes=619 rises=619 owner_waits=1640
+a4-cum-skip30-full                 trials=  3000 pass=  3000 reset=     0 fail={} | started=6000 clean=6000 aborted=0 completions=12000 (owner_cas=5933 rec_fexit=4961 rec_poke=1106) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=300 skip_b=300 backstop=full conc=256 n=262144 | injected_misses=179575 poke_runs=14748 fire_poke=1106 fire_fexit=4961 arm_pokes=6067 backstop_pokes=8716 rises=154 owner_waits=5451
+a6-cum-skip70-full                 trials=  3000 pass=  3000 reset=     0 fail={} | started=6000 clean=6000 aborted=0 completions=12000 (owner_cas=3513 rec_fexit=2552 rec_poke=5935) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=700 skip_b=700 backstop=full conc=256 n=262144 | injected_misses=417468 poke_runs=17815 fire_poke=5935 fire_fexit=2552 arm_pokes=8487 backstop_pokes=9346 rises=185 owner_waits=4987
+a7-cum-skip90-full                 trials=  3000 pass=  3000 reset=     0 fail={} | started=6000 clean=6000 aborted=0 completions=12000 (owner_cas=1401 rec_fexit=915 rec_poke=9684) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=900 skip_b=900 backstop=full conc=256 n=262144 | injected_misses=535712 poke_runs=21715 fire_poke=9684 fire_fexit=915 arm_pokes=10599 backstop_pokes=11124 rises=192 owner_waits=4736
+a9-cum-skip90-full-big             trials=  3000 pass=  3000 reset=     0 fail={} | started=6000 clean=6000 aborted=0 completions=12000 (owner_cas=1464 rec_fexit=816 rec_poke=9720) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=900 skip_b=900 backstop=full conc=256 n=2097152 | injected_misses=4326047 poke_runs=47949 fire_poke=9720 fire_fexit=816 arm_pokes=10536 backstop_pokes=37415 rises=439 owner_waits=4236
+a10-cum-noinj-off                  trials=  6000 pass=  6000 reset=     0 fail={} | started=12000 clean=12000 aborted=0 completions=24000 (owner_cas=14781 rec_fexit=9219 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=None skip_b=None backstop=off conc=256 n=262144 | injected_misses=0 poke_runs=0 fire_poke=0 fire_fexit=9219 arm_pokes=0 backstop_pokes=0 rises=0 owner_waits=9219
+a11-cum-noinj-full                 trials=  6000 pass=  6000 reset=     0 fail={} | started=12000 clean=12000 aborted=0 completions=24000 (owner_cas=15602 rec_fexit=8398 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     args: incr=None skip_a=None skip_b=None backstop=full conc=256 n=262144 | injected_misses=0 poke_runs=8398 fire_poke=0 fire_fexit=8398 arm_pokes=8398 backstop_pokes=0 rises=0 owner_waits=8391
+
+## B. clean half-close volume, loopback (owners in one process, flow vsocks over vsock_loopback, no control-session half-close)
+b-findata-p0                       trials= 10000 pass= 10000 reset=     0 fail={} | started=20000 clean=20000 aborted=0 completions=40000 (owner_cas=9820 rec_fexit=30180 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=200 directions_compared=400 equal=400 unequal=0 []
+b-findata-p300                     trials= 10000 pass= 10000 reset=     0 fail={} | started=20000 clean=20000 aborted=0 completions=40000 (owner_cas=17371 rec_fexit=22629 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=200 directions_compared=400 equal=400 unequal=0 []
+b-findata-p3000                    trials= 10000 pass= 10000 reset=     0 fail={} | started=20000 clean=20000 aborted=0 completions=40000 (owner_cas=13553 rec_fexit=26426 rec_poke=21) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=200 directions_compared=400 equal=400 unequal=0 []
+b-finonly-p0                       trials= 10000 pass= 10000 reset=     0 fail={} | started=20000 clean=20000 aborted=0 completions=40000 (owner_cas=24233 rec_fexit=15767 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=200 directions_compared=400 equal=400 unequal=0 []
+b-finonly-p300                     trials= 10000 pass= 10000 reset=     0 fail={} | started=20000 clean=20000 aborted=0 completions=40000 (owner_cas=26458 rec_fexit=13542 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=200 directions_compared=400 equal=400 unequal=0 []
+b-finonly-p3000                    trials= 10000 pass= 10000 reset=     0 fail={} | started=20000 clean=20000 aborted=0 completions=40000 (owner_cas=11397 rec_fexit=28549 rec_poke=54) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=200 directions_compared=400 equal=400 unequal=0 []
+b-mix                              trials= 20000 pass= 20000 reset=     0 fail={} | started=40000 clean=40000 aborted=0 completions=80000 (owner_cas=67184 rec_fexit=12811 rec_poke=5) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=400 directions_compared=800 equal=800 unequal=0 []
+b-reponly-data                     trials=  5000 pass=  5000 reset=     0 fail={} | started=10000 clean=10000 aborted=0 completions=20000 (owner_cas=13350 rec_fexit=6649 rec_poke=1) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=100 directions_compared=200 equal=200 unequal=0 []
+b-reponly-only                     trials=  5000 pass=  5000 reset=     0 fail={} | started=10000 clean=10000 aborted=0 completions=20000 (owner_cas=13051 rec_fexit=6949 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=100 directions_compared=200 equal=200 unequal=0 []
+b-reqonly-data                     trials=  5000 pass=  5000 reset=     0 fail={} | started=10000 clean=10000 aborted=0 completions=20000 (owner_cas=18478 rec_fexit=1522 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=100 directions_compared=200 equal=200 unequal=0 []
+b-reqonly-only                     trials=  5000 pass=  5000 reset=     0 fail={} | started=10000 clean=10000 aborted=0 completions=20000 (owner_cas=18858 rec_fexit=1142 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=100 directions_compared=200 equal=200 unequal=0 []
+b-small-findata                    trials= 10000 pass= 10000 reset=     0 fail={} | started=20000 clean=20000 aborted=0 completions=40000 (owner_cas=36778 rec_fexit=3222 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=200 directions_compared=400 equal=400 unequal=0 []
+b-small-finonly                    trials= 10000 pass= 10000 reset=     0 fail={} | started=20000 clean=20000 aborted=0 completions=40000 (owner_cas=37751 rec_fexit=2249 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+                                     flows_in_both=200 directions_compared=400 equal=400 unequal=0 []
+TOTAL loopback clean: trials=120000 pass=120000 | {'shut_0x2': 240000, 'shut_0x3': 10241, 'shut_rst': 0, 'shut_other': 0, 'rdhup_v_without_record': 0, 'shut_late_after_finish': 350432, 'flows_aborted': 0, 'flows_clean': 240000, 'flows_started': 240000}
+
+## C. control-session loss at seeded random points (loopback, in-process control channel)
+c2-loss-*: {'runs': 40, 'trials': 100000, 'pass': 24754, 'reset': 75246, 'ctl_lost': 80, 'paired_at_ctl_loss': 5021, 'paired_flows_clean_after_ctl_loss': 5021, 'intake_after_ctl_loss': 74024, 'flows_clean': 49508, 'flows_aborted': 2444, 'abort_ctl_lost_unpaired': 1223, 'abort_peer_close_while_open': 1221, 'abort_ctl_lost_all': 0, 'epoch_discarded_stale_completion': 0, 'live_end_nonzero': 0}
+c2-lossall-*: {'runs': 6, 'trials': 15000, 'pass': 2893, 'reset': 12107, 'ctl_lost': 12, 'paired_at_ctl_loss': 765, 'paired_flows_clean_after_ctl_loss': 0, 'intake_after_ctl_loss': 11468, 'flows_clean': 5798, 'flows_aborted': 1266, 'abort_ctl_lost_unpaired': 74, 'abort_peer_close_while_open': 427, 'abort_ctl_lost_all': 765, 'epoch_discarded_stale_completion': 134, 'live_end_nonzero': 0}
+c-loss-*: {'runs': 40, 'trials': 100000, 'pass': 28878, 'reset': 52794, 'FAIL:cli_clean_short_eof': 18314, 'ctl_lost': 80, 'paired_at_ctl_loss': 7395, 'paired_flows_clean_after_ctl_loss': 7395, 'intake_after_ctl_loss': 70612, 'flows_clean': 57760, 'flows_aborted': 1016, 'abort_ctl_lost_unpaired': 510, 'abort_peer_close_while_open': 506, 'abort_ctl_lost_all': 0, 'epoch_discarded_stale_completion': 0, 'live_end_nonzero': 0, 'FAIL:cli_payload_corrupt': 12, 'FAIL:srv_excess_bytes': 2, 'VIOLATION_sent_ne_goal_at_completion': 2}
+
+## D. real recursion misses at volume (4000 flows x 2 MiB x 2 directions per run)
+d-full-*: {'runs': 24, 'flows': 96000, 'pass': 96000, 'stuck_or_failed': 0, 'fexit_calls': 76929196, 'recursion_misses_A': 8, 'recursion_misses_B': 71, 'counter_a_short_of_b': 4, 'counter_b_short_of_a': 28, 'rec_poke': 1, 'backstop_pokes': 1322, 'backstop_rises': 18, 'live_end': 0}
+d-off-*: {'runs': 12, 'flows': 48000, 'pass': 48000, 'stuck_or_failed': 0, 'fexit_calls': 38465503, 'recursion_misses_A': 2, 'recursion_misses_B': 6, 'counter_a_short_of_b': 3, 'counter_b_short_of_a': 21, 'rec_poke': 0, 'backstop_pokes': 0, 'backstop_rises': 0, 'live_end': 0}
+d-incr1-*: {'runs': 12, 'flows': 48000, 'pass': 47999, 'stuck_or_failed': 1, 'fexit_calls': 38401018, 'recursion_misses_A': 4, 'recursion_misses_B': 0, 'counter_a_short_of_b': 0, 'counter_b_short_of_a': 191996, 'rec_poke': 0, 'backstop_pokes': 0, 'backstop_rises': 0, 'live_end': 2}
+
+## E. flows larger than 2^32 bytes per direction
+e-wrap-5GiB-x4                     trials=     4 pass=     4 reset=     0 fail={} | started=8 clean=8 aborted=0 completions=16 (owner_cas=6 rec_fexit=10 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+e-wrap-5GiB-pause                  trials=     2 pass=     2 reset=     0 fail={} | started=4 clean=4 aborted=0 completions=8 (owner_cas=4 rec_fexit=4 rec_poke=0) stale_epoch_discards=0 | viol={} | live_end=0/0
+
+## K. split-process matrices (kill / control loss / app crash / destination reset); one line per scenario family
+### env=loop plan=cf6perf dir=vm-loop-cf6perf-20261011T165711Z reps=120
+  k-crash-fin-perf6                  reps=120 trials=36000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 25123, 'crash:pass_faithful_fin': 10877}
+      ends={'cli:complete': 25123, 'srv:complete': 25123}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=loop plan=cf7perf dir=vm-loop-cf7perf-20261011T170529Z reps=353
+  k-crash-fin-perf7                  reps=353 trials=105900 violations=4 errors=0 live_at_end_total=0
+      cats={'pass': 74069, 'crash:pass_faithful_fin': 31827, 'violation:hang': 3, 'crash:violation:no_server_result': 1}
+      ends={'cli:complete': 74069, 'srv:complete': 74069, 'cli:hang': 3, 'srv:no_result': 3}
+      survivor_aborts={'host_:peer_close_while_open': 4} owner_VIOLATIONs={}
+### env=loop plan=crashfin dir=vm-loop-crashfin-20261011T155255Z reps=32
+  k-crash-fin-ev                     reps=16 trials=4800 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 3331, 'crash:pass_faithful_fin': 1469}
+      ends={'cli:complete': 3331, 'srv:complete': 3331}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-crash-fin-noev                   reps=16 trials=4800 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 3358, 'crash:pass_faithful_fin': 1442}
+      ends={'cli:complete': 3358, 'srv:complete': 3358}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=loop plan=crashfin2 dir=vm-loop-crashfin2-20261011T155551Z reps=150
+  k-crash-fin-ev2                    reps=150 trials=45000 violations=11 errors=0 live_at_end_total=0
+      cats={'pass': 31421, 'crash:pass_faithful_fin': 13568, 'violation:hang': 9, 'crash:violation:no_server_result': 2}
+      ends={'cli:complete': 31421, 'srv:complete': 31421, 'cli:hang': 9, 'srv:no_result': 9}
+      survivor_aborts={'host_:peer_close_while_open': 11} owner_VIOLATIONs={}
+### env=loop plan=crashfin3 dir=vm-loop-crashfin3-20261011T160836Z reps=300
+  k-crash-fin-ev3                    reps=300 trials=90000 violations=24 errors=0 live_at_end_total=1
+      cats={'pass': 62981, 'crash:pass_faithful_fin': 26995, 'violation:hang': 23, 'crash:violation:no_server_result': 1}
+      ends={'cli:complete': 62981, 'srv:complete': 62982, 'cli:hang': 23, 'srv:no_result': 22}
+      survivor_aborts={'host_:peer_close_while_open': 23} owner_VIOLATIONs={}
+### env=loop plan=crashfinperf dir=vm-loop-crashfinperf-20261011T164215Z reps=200
+  k-crash-fin-perf                   reps=200 trials=60000 violations=0 errors=0 live_at_end_total=3
+      cats={'pass': 41900, 'crash:pass_faithful_fin': 18100}
+      ends={'cli:complete': 41900, 'srv:complete': 41900}
+      survivor_aborts={'guest:peer_close_while_open': 1} owner_VIOLATIONs={}
+### env=loop plan=crashfinraw dir=vm-loop-crashfinraw-20261011T162834Z reps=300
+  k-crash-fin-raw                    reps=300 trials=90000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 63013, 'crash:pass_faithful_fin': 26987}
+      ends={'cli:complete': 63013, 'srv:complete': 63013}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=loop plan=crashfinraw1000 dir=vm-loop-crashfinraw1000-20261011T172427Z reps=1000
+  k-crash-fin-raw1000                reps=1000 trials=300000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 210119, 'crash:pass_faithful_fin': 89881}
+      ends={'cli:complete': 210119, 'srv:complete': 210119}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=loop plan=hunt2 dir=vm-loop-hunt2-20261011T120512Z reps=40
+  h2-dest-rst                        reps=40 trials=12000 violations=6 errors=0 live_at_end_total=0
+      cats={'reset': 6022, 'pass': 5972, 'violation:cli_clean_eof_after_dest_rst': 6}
+      ends={'cli:complete': 5972, 'srv:complete': 5972}
+      survivor_aborts={'guest:peer_close_while_open': 6028, 'host_:epollerr': 6028} owner_VIOLATIONs={}
+### env=loop plan=hunt3 dir=vm-loop-hunt3-20261011T152335Z reps=40
+  h3-dest-rst                        reps=40 trials=12000 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 5931, 'pass': 6069}
+      ends={'cli:complete': 6069, 'srv:complete': 6069}
+      survivor_aborts={'guest:peer_close_while_open': 5931, 'host_:epollerr': 5930, 'host_:tcp_closed_without_fin': 1} owner_VIOLATIONs={}
+### env=loop plan=loopkill dir=vm-loop-loopkill-20261011T095452Z reps=104
+  k-crash-fin                        reps=10 trials=3000 violations=3 errors=0 live_at_end_total=0
+      cats={'pass': 2095, 'crash:pass_faithful_fin': 902, 'violation:srv_excess_bytes': 3}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={'VIOLATION_sent_ne_goal_at_completion': 3}
+  k-crash-rst                        reps=10 trials=3000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2086, 'crash:reset': 914}
+      ends={}
+      survivor_aborts={'guest:epollerr': 914, 'host_:peer_close_while_open': 914} owner_VIOLATIONs={}
+  k-ctl-loss-busy                    reps=10 trials=30000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 3560, 'reset': 26440}
+      ends={}
+      survivor_aborts={'guest:ctl_lost_unpaired': 96, 'guest:peer_close_while_open': 124, 'host_:ctl_lost_unpaired': 126, 'host_:peer_close_while_open': 94} owner_VIOLATIONs={}
+  k-ctl-loss-held                    reps=10 trials=8000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 4002, 'reset': 3998}
+      ends={}
+      survivor_aborts={'guest:ctl_lost_unpaired': 2, 'host_:ctl_lost_unpaired': 3, 'guest:peer_close_while_open': 1} owner_VIOLATIONs={}
+  k-dest-rst                         reps=6 trials=1800 violations=2 errors=0 live_at_end_total=0
+      cats={'reset': 900, 'pass': 898, 'violation:cli_clean_eof_after_dest_rst': 2}
+      ends={}
+      survivor_aborts={'guest:peer_close_while_open': 902, 'host_:epollerr': 902} owner_VIOLATIONs={}
+  k-guest-owner-busy                 reps=12 trials=36000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 3981, 'reset': 32019}
+      ends={}
+      survivor_aborts={'host_:peer_close_while_open': 1170} owner_VIOLATIONs={}
+  k-guest-owner-held                 reps=12 trials=9600 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 9599, 'pass': 1}
+      ends={}
+      survivor_aborts={'host_:peer_close_while_open': 4646} owner_VIOLATIONs={}
+  k-host-owner-busy                  reps=12 trials=36000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 3045, 'reset': 32955}
+      ends={}
+      survivor_aborts={'guest:peer_close_while_open': 1290} owner_VIOLATIONs={}
+  k-host-owner-held                  reps=12 trials=9600 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 9592, 'pass': 8}
+      ends={}
+      survivor_aborts={'guest:peer_close_while_open': 4795} owner_VIOLATIONs={}
+  k-none                             reps=2 trials=2000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1998, 'srv_excess_bytes': 2}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={'VIOLATION_sent_ne_goal_at_completion': 2}
+  n-guest-owner-held-noclassify      reps=4 trials=3200 violations=249 errors=0 live_at_end_total=0
+      cats={'reset': 2942, 'violation:srv_clean_short_eof': 249, 'pass': 9}
+      ends={}
+      survivor_aborts={'host_:epollerr': 386, 'host_:redirect_dropped': 1200} owner_VIOLATIONs={}
+  n-host-owner-held-noclassify       reps=4 trials=3200 violations=1534 errors=0 live_at_end_total=0
+      cats={'pass': 72, 'violation:cli_clean_short_eof': 1528, 'violation:no_server_result_no_reset': 6, 'reset': 1594}
+      ends={}
+      survivor_aborts={'guest:ctl_lost_unpaired': 6, 'guest:epollerr': 849} owner_VIOLATIONs={}
+### env=loop plan=loopkill2 dir=vm-loop-loopkill2-20261011T120733Z reps=58
+  k-crash-fin                        reps=6 trials=1800 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1259, 'crash:pass_faithful_fin': 541}
+      ends={'cli:complete': 1259, 'srv:complete': 1259}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-crash-rst                        reps=6 trials=1800 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1284, 'crash:reset': 516}
+      ends={'cli:complete': 1284, 'srv:complete': 1284}
+      survivor_aborts={'guest:epollerr': 516, 'host_:peer_close_while_open': 516} owner_VIOLATIONs={}
+  k-ctl-loss-busy                    reps=5 trials=15000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2275, 'reset': 12725}
+      ends={'cli:complete': 2275, 'srv:complete': 2275, 'cli:reset': 12725, 'srv:no_result': 12725}
+      survivor_aborts={'guest:ctl_lost_unpaired': 108, 'host_:peer_close_while_open': 107, 'guest:peer_close_while_open': 46, 'host_:ctl_lost_unpaired': 47} owner_VIOLATIONs={}
+  k-ctl-loss-held                    reps=5 trials=4000 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 2650, 'pass': 1350}
+      ends={'cli:reset': 2650, 'srv:no_result': 2650, 'cli:complete': 1350, 'srv:complete': 1350}
+      survivor_aborts={'guest:ctl_lost_unpaired': 282, 'guest:peer_close_while_open': 370, 'host_:ctl_lost_unpaired': 371, 'host_:peer_close_while_open': 281} owner_VIOLATIONs={}
+  k-dest-rst                         reps=6 trials=1800 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 874, 'pass': 926}
+      ends={'cli:complete': 926, 'srv:complete': 926}
+      survivor_aborts={'guest:peer_close_while_open': 874, 'host_:epollerr': 874} owner_VIOLATIONs={}
+  k-guest-owner-busy                 reps=6 trials=18000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1074, 'reset': 16926}
+      ends={'cli:complete': 1074, 'srv:complete': 1275, 'cli:reset': 16926, 'srv:reset': 322, 'srv:no_result': 16403}
+      survivor_aborts={'host_:peer_close_while_open': 468} owner_VIOLATIONs={}
+  k-guest-owner-held                 reps=6 trials=4800 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 4800}
+      ends={'cli:reset': 4800, 'srv:reset': 1930, 'srv:complete': 276, 'srv:no_result': 2594}
+      survivor_aborts={'host_:peer_close_while_open': 2378} owner_VIOLATIONs={}
+  k-host-owner-busy                  reps=6 trials=18000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2108, 'reset': 15892}
+      ends={'cli:complete': 2108, 'srv:complete': 2202, 'cli:reset': 15892, 'srv:no_result': 15540, 'srv:reset': 258}
+      survivor_aborts={'guest:peer_close_while_open': 418} owner_VIOLATIONs={}
+  k-host-owner-held                  reps=6 trials=4800 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 4778, 'pass': 22}
+      ends={'cli:reset': 4778, 'srv:reset': 1649, 'srv:complete': 229, 'srv:no_result': 2922, 'cli:complete': 22}
+      survivor_aborts={'guest:peer_close_while_open': 2238} owner_VIOLATIONs={}
+  k-none                             reps=2 trials=2000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2000}
+      ends={'cli:complete': 2000, 'srv:complete': 2000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  n-guest-owner-held-noclassify      reps=2 trials=1600 violations=327 errors=0 live_at_end_total=0
+      cats={'pass': 5, 'reset': 1268, 'violation:srv_clean_short_eof': 327}
+      ends={'cli:complete': 5, 'srv:complete': 362, 'cli:reset': 1595, 'srv:reset': 111, 'srv:no_result': 800, 'srv:CLEAN_SHORT_EOF': 327}
+      survivor_aborts={'host_:epollerr': 266, 'host_:redirect_dropped': 492} owner_VIOLATIONs={}
+  n-host-owner-held-noclassify       reps=2 trials=1600 violations=759 errors=0 live_at_end_total=0
+      cats={'pass': 42, 'violation:cli_clean_short_eof': 749, 'violation:no_server_result_no_reset': 10, 'reset': 799}
+      ends={'cli:complete': 42, 'srv:complete': 220, 'cli:CLEAN_SHORT_EOF': 759, 'srv:reset': 571, 'srv:no_result': 809, 'cli:reset': 799}
+      survivor_aborts={'guest:ctl_lost_unpaired': 1, 'guest:epollerr': 375, 'guest:redirect_dropped': 18} owner_VIOLATIONs={}
+### env=loop plan=loopkill3 dir=vm-loop-loopkill3-20261011T152751Z reps=58
+  k-crash-fin                        reps=6 trials=1800 violations=15 errors=0 live_at_end_total=0
+      cats={'pass': 1245, 'crash:pass_faithful_fin': 540, 'violation:hang': 14, 'crash:violation:no_server_result': 1}
+      ends={'cli:complete': 1245, 'srv:complete': 1245, 'cli:hang': 14, 'srv:no_result': 14}
+      survivor_aborts={'host_:peer_close_while_open': 15} owner_VIOLATIONs={}
+  k-crash-rst                        reps=6 trials=1800 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1284, 'crash:reset': 516}
+      ends={'cli:complete': 1284, 'srv:complete': 1284}
+      survivor_aborts={'guest:epollerr': 513, 'host_:peer_close_while_open': 516, 'guest:tcp_closed_without_fin': 3} owner_VIOLATIONs={}
+  k-ctl-loss-busy                    reps=5 trials=15000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2291, 'reset': 12709}
+      ends={'cli:complete': 2291, 'srv:complete': 2291, 'cli:reset': 12709, 'srv:no_result': 12709}
+      survivor_aborts={'guest:ctl_lost_unpaired': 18, 'guest:peer_close_while_open': 56, 'host_:ctl_lost_unpaired': 57, 'host_:peer_close_while_open': 17} owner_VIOLATIONs={}
+  k-ctl-loss-held                    reps=5 trials=4000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2000, 'reset': 2000}
+      ends={'cli:complete': 2000, 'srv:complete': 2000, 'cli:reset': 2000, 'srv:no_result': 2000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-dest-rst                         reps=6 trials=1800 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 874, 'pass': 926}
+      ends={'cli:complete': 926, 'srv:complete': 926}
+      survivor_aborts={'guest:peer_close_while_open': 874, 'host_:epollerr': 874} owner_VIOLATIONs={}
+  k-guest-owner-busy                 reps=6 trials=18000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1133, 'reset': 16867}
+      ends={'cli:complete': 1133, 'srv:complete': 1307, 'cli:reset': 16867, 'srv:reset': 211, 'srv:no_result': 16482}
+      survivor_aborts={'host_:peer_close_while_open': 429} owner_VIOLATIONs={}
+  k-guest-owner-held                 reps=6 trials=4800 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 4800}
+      ends={'cli:reset': 4800, 'srv:reset': 1829, 'srv:complete': 214, 'srv:no_result': 2757}
+      survivor_aborts={'host_:peer_close_while_open': 2374} owner_VIOLATIONs={}
+  k-host-owner-busy                  reps=6 trials=18000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1863, 'reset': 16137}
+      ends={'cli:complete': 1863, 'srv:complete': 2099, 'cli:reset': 16137, 'srv:no_result': 15602, 'srv:reset': 299}
+      survivor_aborts={'guest:peer_close_while_open': 607} owner_VIOLATIONs={}
+  k-host-owner-held                  reps=6 trials=4800 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 4789, 'pass': 11}
+      ends={'cli:reset': 4789, 'srv:reset': 1810, 'srv:complete': 233, 'srv:no_result': 2757, 'cli:complete': 11}
+      survivor_aborts={'guest:peer_close_while_open': 2389} owner_VIOLATIONs={}
+  k-none                             reps=2 trials=2000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2000}
+      ends={'cli:complete': 2000, 'srv:complete': 2000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  n-guest-owner-held-noclassify      reps=2 trials=1600 violations=90 errors=0 live_at_end_total=0
+      cats={'pass': 42, 'reset': 1468, 'violation:srv_clean_short_eof': 90}
+      ends={'cli:complete': 42, 'srv:complete': 400, 'cli:reset': 1558, 'srv:no_result': 800, 'srv:reset': 310, 'srv:CLEAN_SHORT_EOF': 90}
+      survivor_aborts={'host_:epollerr': 354, 'host_:redirect_dropped': 404} owner_VIOLATIONs={}
+  n-host-owner-held-noclassify       reps=2 trials=1600 violations=781 errors=0 live_at_end_total=0
+      cats={'violation:cli_clean_short_eof': 781, 'pass': 19, 'reset': 800}
+      ends={'cli:CLEAN_SHORT_EOF': 781, 'srv:reset': 727, 'srv:complete': 73, 'cli:complete': 19, 'cli:reset': 800, 'srv:no_result': 800}
+      survivor_aborts={'guest:epollerr': 556, 'guest:redirect_dropped': 104} owner_VIOLATIONs={}
+### env=loop plan=smoke dir=vm-loop-smoke-20261011T084414Z reps=11
+  s-crash-fin                        reps=1 trials=200 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 141, 'crash:pass_faithful_fin': 59}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  s-crash-rst                        reps=1 trials=200 violations=11 errors=0 live_at_end_total=0
+      cats={'pass': 141, 'crash:reset': 47, 'crash:violation:srv_clean_short_eof_after_rst_crash': 11, 'crash:reset_or_unconnected': 1}
+      ends={}
+      survivor_aborts={'guest:epollerr': 58, 'host_:peer_close_while_open': 50} owner_VIOLATIONs={'VIOLATION_completion_record_after_recycle': 2}
+  s-ctl-loss                         reps=2 trials=600 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 600}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  s-dest-rst                         reps=1 trials=300 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 130, 'reset': 170}
+      ends={}
+      survivor_aborts={'guest:peer_close_while_open': 170, 'host_:epollerr': 170} owner_VIOLATIONs={'VIOLATION_completion_record_after_recycle': 16}
+  s-kill-guest                       reps=2 trials=600 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 600}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  s-kill-host                        reps=2 trials=600 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 600}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  s-none                             reps=2 trials=600 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 600}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=loop plan=smoke3 dir=vm-loop-smoke3-20261011T085735Z reps=19
+  k-crash-fin                        reps=2 trials=600 violations=428 errors=0 live_at_end_total=0
+      cats={'violation:other_error:connect:Connection refused (os error 111)': 428, 'crash:reset_or_unconnected': 172}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-crash-rst                        reps=2 trials=600 violations=408 errors=0 live_at_end_total=0
+      cats={'violation:other_error:connect:Connection refused (os error 111)': 408, 'crash:reset_or_unconnected': 192}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-ctl-loss-busy                    reps=2 trials=6000 violations=6000 errors=0 live_at_end_total=0
+      cats={'violation:other_error:connect:Connection refused (os error 111)': 6000}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-ctl-loss-held                    reps=2 trials=1600 violations=1600 errors=0 live_at_end_total=0
+      cats={'violation:other_error:connect:Connection refused (os error 111)': 1600}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-dest-rst                         reps=2 trials=600 violations=600 errors=0 live_at_end_total=0
+      cats={'violation:cli_no_reset_no_eof': 285, 'violation:other_error:connect:Connection refused (os error 111)': 315}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-guest-owner-busy                 reps=2 trials=6000 violations=6000 errors=0 live_at_end_total=0
+      cats={'violation:other_error:connect:Connection refused (os error 111)': 6000}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-guest-owner-held                 reps=2 trials=1600 violations=1600 errors=0 live_at_end_total=0
+      cats={'violation:other_error:connect:Connection refused (os error 111)': 1600}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-host-owner-busy                  reps=2 trials=6000 violations=6000 errors=0 live_at_end_total=0
+      cats={'violation:other_error:connect:Connection refused (os error 111)': 6000}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-host-owner-held                  reps=2 trials=1600 violations=1600 errors=0 live_at_end_total=0
+      cats={'violation:other_error:connect:Connection refused (os error 111)': 1600}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-none                             reps=1 trials=1000 violations=0 errors=0 live_at_end_total=0
+      cats={'no_server_result': 1000}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=loop plan=smokeA dir=vm-loop-smokeA-20261011T095344Z reps=10
+  k-crash-fin                        reps=1 trials=300 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 207, 'crash:pass_faithful_fin': 93}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-crash-rst                        reps=1 trials=300 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 199, 'crash:reset': 101}
+      ends={}
+      survivor_aborts={'guest:epollerr': 101, 'host_:peer_close_while_open': 101} owner_VIOLATIONs={}
+  k-ctl-loss-busy                    reps=1 trials=3000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 602, 'reset': 2398}
+      ends={}
+      survivor_aborts={'guest:ctl_lost_unpaired': 9, 'guest:peer_close_while_open': 21, 'host_:ctl_lost_unpaired': 21, 'host_:peer_close_while_open': 9} owner_VIOLATIONs={}
+  k-ctl-loss-held                    reps=1 trials=800 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 400, 'reset': 400}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-dest-rst                         reps=1 trials=300 violations=2 errors=0 live_at_end_total=0
+      cats={'reset': 140, 'pass': 158, 'violation:cli_clean_eof_after_dest_rst': 2}
+      ends={}
+      survivor_aborts={'guest:peer_close_while_open': 142, 'host_:epollerr': 142} owner_VIOLATIONs={}
+  k-guest-owner-busy                 reps=1 trials=3000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 398, 'reset': 2602}
+      ends={}
+      survivor_aborts={'host_:peer_close_while_open': 93} owner_VIOLATIONs={}
+  k-guest-owner-held                 reps=1 trials=800 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 800}
+      ends={}
+      survivor_aborts={'host_:peer_close_while_open': 400} owner_VIOLATIONs={}
+  k-host-owner-busy                  reps=1 trials=3000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 225, 'reset': 2775}
+      ends={}
+      survivor_aborts={'guest:peer_close_while_open': 100} owner_VIOLATIONs={}
+  k-host-owner-held                  reps=1 trials=800 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 800}
+      ends={}
+      survivor_aborts={'guest:peer_close_while_open': 400} owner_VIOLATIONs={}
+  k-none                             reps=1 trials=1000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1000}
+      ends={}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=loop plan=stressperf dir=vm-loop-stressperf-20261011T165443Z reps=12
+  k-crash-fin-stress-perf            reps=12 trials=3600 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2545, 'crash:pass_faithful_fin': 1055}
+      ends={'cli:complete': 2545, 'srv:complete': 2545}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=loop plan=stressraw dir=vm-loop-stressraw-20261011T165411Z reps=12
+  k-crash-fin-stress-raw             reps=12 trials=3600 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2549, 'crash:pass_faithful_fin': 1051}
+      ends={'cli:complete': 2549, 'srv:complete': 2549}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=vm plan=vmclean dir=vm-vm-vmclean-20261011T104759Z reps=11
+  v-clean-data-p0                    reps=1 trials=2500 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2500}
+      ends={'cli:complete': 2500, 'srv:complete': 2500}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-data-p300                  reps=1 trials=2500 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2500}
+      ends={'cli:complete': 2500, 'srv:complete': 2500}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-data-p3000                 reps=1 trials=2500 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2500}
+      ends={'cli:complete': 2500, 'srv:complete': 2500}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-mix                        reps=1 trials=8000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 8000}
+      ends={'cli:complete': 8000, 'srv:complete': 8000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-only-p0                    reps=1 trials=2500 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2500}
+      ends={'cli:complete': 2500, 'srv:complete': 2500}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-only-p300                  reps=1 trials=2500 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2500}
+      ends={'cli:complete': 2500, 'srv:complete': 2500}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-only-p3000                 reps=1 trials=2500 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2500}
+      ends={'cli:complete': 2500, 'srv:complete': 2500}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-reponly                    reps=1 trials=2000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2000}
+      ends={'cli:complete': 2000, 'srv:complete': 2000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-reqonly                    reps=1 trials=2000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2000}
+      ends={'cli:complete': 2000, 'srv:complete': 2000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-small-data                 reps=1 trials=3000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 3000}
+      ends={'cli:complete': 3000, 'srv:complete': 3000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v-clean-small-only                 reps=1 trials=3000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 3000}
+      ends={'cli:complete': 3000, 'srv:complete': 3000}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=vm plan=vmclean3 dir=vm-vm-vmclean3-20261011T154357Z reps=4
+  v3-clean-data-p3000                reps=1 trials=1500 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1500}
+      ends={'cli:complete': 1500, 'srv:complete': 1500}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v3-clean-mix                       reps=1 trials=8000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 8000}
+      ends={'cli:complete': 8000, 'srv:complete': 8000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v3-clean-only-p300                 reps=1 trials=2500 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2500}
+      ends={'cli:complete': 2500, 'srv:complete': 2500}
+      survivor_aborts={} owner_VIOLATIONs={}
+  v3-clean-small                     reps=1 trials=3000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 3000}
+      ends={'cli:complete': 3000, 'srv:complete': 3000}
+      survivor_aborts={} owner_VIOLATIONs={}
+### env=vm plan=vmkill dir=vm-vm-vmkill-20261011T115943Z reps=73
+  k-crash-fin                        reps=8 trials=2400 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1674, 'crash:pass_faithful_fin': 726}
+      ends={'cli:complete': 1674, 'srv:complete': 1674}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-crash-rst                        reps=8 trials=2400 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1647, 'crash:reset': 753}
+      ends={'cli:complete': 1647, 'srv:complete': 1647}
+      survivor_aborts={'guest:epollerr': 753, 'host_:peer_close_while_open': 753} owner_VIOLATIONs={}
+  k-ctl-loss-busy                    reps=8 trials=24000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2423, 'reset': 21577}
+      ends={'cli:complete': 2423, 'srv:complete': 2423, 'cli:reset': 21577, 'srv:no_result': 21577}
+      survivor_aborts={'guest:peer_close_while_open': 223, 'host_:ctl_lost_unpaired': 224, 'guest:ctl_lost_unpaired': 15, 'host_:peer_close_while_open': 14} owner_VIOLATIONs={}
+  k-ctl-loss-held                    reps=8 trials=6400 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 4339, 'pass': 2061}
+      ends={'cli:reset': 4339, 'srv:no_result': 4339, 'cli:complete': 2061, 'srv:complete': 2061}
+      survivor_aborts={'guest:ctl_lost_unpaired': 1, 'host_:ctl_lost_unpaired': 1} owner_VIOLATIONs={}
+  k-dest-rst                         reps=4 trials=1200 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 558, 'pass': 642}
+      ends={'cli:complete': 642, 'srv:complete': 642}
+      survivor_aborts={'guest:peer_close_while_open': 558, 'host_:epollerr': 558} owner_VIOLATIONs={}
+  k-guest-owner-busy                 reps=8 trials=24000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1011, 'reset': 22989}
+      ends={'cli:complete': 1011, 'srv:complete': 1377, 'cli:reset': 22989, 'srv:reset': 339, 'srv:no_result': 22284}
+      survivor_aborts={'host_:peer_close_while_open': 486} owner_VIOLATIONs={}
+  k-guest-owner-held                 reps=8 trials=6400 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 6360, 'pass': 40}
+      ends={'cli:reset': 6360, 'srv:reset': 1511, 'srv:no_result': 4349, 'cli:complete': 40, 'srv:complete': 540}
+      survivor_aborts={'host_:peer_close_while_open': 1942} owner_VIOLATIONs={}
+  k-host-owner-busy                  reps=8 trials=24000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 853, 'reset': 23147}
+      ends={'cli:complete': 853, 'srv:complete': 1001, 'cli:reset': 23147, 'srv:no_result': 22578, 'srv:reset': 421}
+      survivor_aborts={'guest:peer_close_while_open': 705} owner_VIOLATIONs={}
+  k-host-owner-held                  reps=8 trials=6400 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 6333, 'pass': 67}
+      ends={'cli:reset': 6333, 'srv:no_result': 4337, 'cli:complete': 67, 'srv:complete': 962, 'srv:reset': 1101}
+      survivor_aborts={'guest:peer_close_while_open': 1997} owner_VIOLATIONs={}
+  k-none                             reps=1 trials=1000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1000}
+      ends={'cli:complete': 1000, 'srv:complete': 1000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  n-guest-owner-held-noclassify      reps=2 trials=1600 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 1340, 'pass': 260}
+      ends={'cli:reset': 1340, 'srv:no_result': 1084, 'cli:complete': 260, 'srv:complete': 516}
+      survivor_aborts={'host_:epollerr': 252} owner_VIOLATIONs={}
+  n-host-owner-held-noclassify       reps=2 trials=1600 violations=512 errors=0 live_at_end_total=0
+      cats={'reset': 1086, 'pass': 2, 'violation:cli_clean_short_eof': 512}
+      ends={'cli:reset': 1086, 'srv:no_result': 1086, 'cli:complete': 2, 'srv:complete': 256, 'cli:CLEAN_SHORT_EOF': 512, 'srv:reset': 258}
+      survivor_aborts={'guest:epollerr': 241, 'guest:redirect_dropped': 17} owner_VIOLATIONs={}
+### env=vm plan=vmkill3 dir=vm-vm-vmkill3-20261011T154512Z reps=73
+  k-crash-fin                        reps=8 trials=2400 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1674, 'crash:pass_faithful_fin': 726}
+      ends={'cli:complete': 1674, 'srv:complete': 1674}
+      survivor_aborts={} owner_VIOLATIONs={}
+  k-crash-rst                        reps=8 trials=2400 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1647, 'crash:reset': 753}
+      ends={'cli:complete': 1647, 'srv:complete': 1647}
+      survivor_aborts={'guest:epollerr': 753, 'host_:peer_close_while_open': 753} owner_VIOLATIONs={}
+  k-ctl-loss-busy                    reps=8 trials=24000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 2283, 'reset': 21717}
+      ends={'cli:complete': 2283, 'srv:complete': 2283, 'cli:reset': 21717, 'srv:no_result': 21717}
+      survivor_aborts={'guest:ctl_lost_unpaired': 93, 'host_:peer_close_while_open': 93, 'guest:peer_close_while_open': 136, 'host_:ctl_lost_unpaired': 136} owner_VIOLATIONs={}
+  k-ctl-loss-held                    reps=8 trials=6400 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 4348, 'pass': 2052}
+      ends={'cli:reset': 4348, 'srv:no_result': 4348, 'cli:complete': 2052, 'srv:complete': 2052}
+      survivor_aborts={'guest:ctl_lost_unpaired': 1, 'host_:ctl_lost_unpaired': 1} owner_VIOLATIONs={}
+  k-dest-rst                         reps=4 trials=1200 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 558, 'pass': 642}
+      ends={'cli:complete': 642, 'srv:complete': 642}
+      survivor_aborts={'guest:peer_close_while_open': 558, 'host_:epollerr': 558} owner_VIOLATIONs={}
+  k-guest-owner-busy                 reps=8 trials=24000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 974, 'reset': 23026}
+      ends={'cli:complete': 974, 'srv:complete': 1414, 'cli:reset': 23026, 'srv:reset': 407, 'srv:no_result': 22179}
+      survivor_aborts={'host_:peer_close_while_open': 547} owner_VIOLATIONs={}
+  k-guest-owner-held                 reps=8 trials=6400 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 6367, 'pass': 33}
+      ends={'cli:reset': 6367, 'srv:reset': 1523, 'srv:no_result': 4343, 'cli:complete': 33, 'srv:complete': 534}
+      survivor_aborts={'host_:peer_close_while_open': 1950} owner_VIOLATIONs={}
+  k-host-owner-busy                  reps=8 trials=24000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 968, 'reset': 23032}
+      ends={'cli:complete': 968, 'srv:complete': 1081, 'cli:reset': 23032, 'srv:no_result': 22558, 'srv:reset': 361}
+      survivor_aborts={'guest:peer_close_while_open': 627} owner_VIOLATIONs={}
+  k-host-owner-held                  reps=8 trials=6400 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 6015, 'pass': 385}
+      ends={'cli:reset': 6015, 'srv:no_result': 4332, 'cli:complete': 385, 'srv:complete': 1025, 'srv:reset': 1043}
+      survivor_aborts={'guest:peer_close_while_open': 1683} owner_VIOLATIONs={}
+  k-none                             reps=1 trials=1000 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 1000}
+      ends={'cli:complete': 1000, 'srv:complete': 1000}
+      survivor_aborts={} owner_VIOLATIONs={}
+  n-guest-owner-held-noclassify      reps=2 trials=1600 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 1334, 'pass': 266}
+      ends={'cli:reset': 1334, 'srv:no_result': 1087, 'cli:complete': 266, 'srv:complete': 512, 'srv:reset': 1}
+      survivor_aborts={'host_:epollerr': 202, 'host_:redirect_dropped': 1} owner_VIOLATIONs={}
+  n-host-owner-held-noclassify       reps=2 trials=1600 violations=512 errors=0 live_at_end_total=0
+      cats={'reset': 1087, 'pass': 1, 'violation:cli_clean_short_eof': 512}
+      ends={'cli:reset': 1087, 'srv:no_result': 1087, 'cli:complete': 1, 'srv:complete': 256, 'cli:CLEAN_SHORT_EOF': 512, 'srv:reset': 257}
+      survivor_aborts={'guest:epollerr': 173, 'guest:redirect_dropped': 84} owner_VIOLATIONs={}
+### env=vm plan=vmsmoke dir=vm-vm-vmsmoke-20261011T115912Z reps=5
+  vs-crash-rst                       reps=1 trials=200 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 138, 'crash:reset': 62}
+      ends={'cli:complete': 138, 'srv:complete': 138}
+      survivor_aborts={'guest:epollerr': 62, 'host_:peer_close_while_open': 62} owner_VIOLATIONs={}
+  vs-ctl-loss                        reps=1 trials=400 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 200, 'reset': 200}
+      ends={'cli:complete': 200, 'srv:complete': 200, 'cli:reset': 200, 'srv:no_result': 200}
+      survivor_aborts={'guest:ctl_lost_unpaired': 1, 'host_:ctl_lost_unpaired': 1} owner_VIOLATIONs={}
+  vs-kill-guest                      reps=1 trials=400 violations=0 errors=0 live_at_end_total=0
+      cats={'reset': 400}
+      ends={'cli:reset': 400, 'srv:reset': 200, 'srv:no_result': 200}
+      survivor_aborts={'host_:peer_close_while_open': 200} owner_VIOLATIONs={}
+  vs-kill-host                       reps=1 trials=400 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 68, 'reset': 332}
+      ends={'cli:complete': 68, 'srv:complete': 110, 'cli:reset': 332, 'srv:reset': 90, 'srv:no_result': 200}
+      survivor_aborts={'guest:peer_close_while_open': 136} owner_VIOLATIONs={}
+  vs-none                            reps=1 trials=300 violations=0 errors=0 live_at_end_total=0
+      cats={'pass': 300}
+      ends={'cli:complete': 300, 'srv:complete': 300}
+      survivor_aborts={} owner_VIOLATIONs={}

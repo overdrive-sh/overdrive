@@ -1,0 +1,15 @@
+[package]
+name = "legs"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[dependencies]
+libc = "0.2"
+serde_json = "1"
+aya = "=0.13.1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+[[bin]]
+name = "legs"
+path = "src/main.rs"
+[profile.release]
+debug = 1

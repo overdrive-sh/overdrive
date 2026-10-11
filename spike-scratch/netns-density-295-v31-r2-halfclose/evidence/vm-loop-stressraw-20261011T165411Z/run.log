@@ -1,0 +1,4 @@
+[16:54:11] === v31 loop stressraw: 1 scenarios
+[16:54:11] $ modprobe vhost_vsock; modprobe vsock_loopback (rc=0)
+[16:54:43] $ pgrep -af 'cloud-hypervisor|drainprobe' | grep -v pgrep | head; ls -d /sys/fs/cgroup/v31-* 2>&1 | head -3; true (rc=0)
+[16:54:43]     ls: cannot access '/sys/fs/cgroup/v31-*': No such file or directory

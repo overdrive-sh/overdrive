@@ -1,0 +1,1199 @@
+{
+ "substrate": {
+  "host_uname": "7.0.0-29-generic",
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "H1-client-fin-then-reply-vsock": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:55605",
+   "ok": true,
+   "t_first_us": 13338,
+   "t_hs_us": 1650,
+   "t_sent_us": 4627,
+   "t_total_us": 16392,
+   "tag": "H1-client-fin-then-reply-vsock",
+   "up_err": 0,
+   "up_sent": 3000001,
+   "wall_s": 0.03
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "close",
+    "ev": "conn",
+    "local": "10.77.0.2:8080",
+    "ms": 22,
+    "peer": "198.18.28.254:54457",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 3000001,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1214,
+    "id": 1,
+    "legs_open_us": 1316,
+    "peer_c": "198.18.28.1:55605"
+   },
+   {
+    "bytes": 3000001,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706432846710
+   },
+   {
+    "dir": "s2c",
+    "ev": "vsock_eof_classify",
+    "id": 1,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706432850185
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 27096
+   }
+  ],
+  "gagent": [
+   {
+    "connect_us": 444,
+    "ev": "gagent_paired",
+    "id": 1,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:54457"
+   },
+   {
+    "ev": "gagent_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 24892
+   }
+  ]
+ },
+ "H1b-client-close-notify-vsock": {
+  "error": "app not listening"
+ },
+ "H2-app-fin-first-client-continues-vsock": {
+  "error": "app not listening"
+ },
+ "H3-simultaneous-vsock": {
+  "error": "app not listening"
+ },
+ "H4-app-close-after-reply-vsock": {
+  "error": "app not listening"
+ },
+ "H5-server-speaks-first-vsock": {
+  "error": "app not listening"
+ },
+ "A1-tls-peer-rst-mid-upload-vsock": {
+  "error": "app not listening"
+ },
+ "A2-app-rst-mid-download-vsock": {
+  "error": "app not listening"
+ },
+ "A2b-app-rst-after-partial-reply-vsock": {
+  "error": "app not listening"
+ },
+ "A3-app-close-with-unread-vsock": {
+  "error": "app not listening"
+ },
+ "H1-client-fin-then-reply-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:40357",
+   "ok": true,
+   "t_first_us": 12056,
+   "t_hs_us": 1792,
+   "t_sent_us": 8591,
+   "t_total_us": 14115,
+   "tag": "H1-client-fin-then-reply-tcp",
+   "up_err": 0,
+   "up_sent": 3000001,
+   "wall_s": 0.028
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "close",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 22,
+    "peer": "127.0.0.1:37450",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 3000001,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1287,
+    "id": 1,
+    "legs_open_us": 103,
+    "peer_c": "198.18.28.1:40357"
+   },
+   {
+    "bytes": 3000001,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706438300700
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706438302677
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 24402
+   }
+  ],
+  "gagent": []
+ },
+ "H1b-client-close-notify-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:40059",
+   "ok": true,
+   "t_first_us": 8441,
+   "t_hs_us": 1630,
+   "t_sent_us": 6846,
+   "t_total_us": 10837,
+   "tag": "H1b-client-close-notify-tcp",
+   "up_err": 0,
+   "up_sent": 3000001,
+   "wall_s": 0.024
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "close",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 18,
+    "peer": "127.0.0.1:37454",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 3000001,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1221,
+    "id": 1,
+    "legs_open_us": 101,
+    "peer_c": "198.18.28.1:40059"
+   },
+   {
+    "bytes": 3000001,
+    "dir": "c2s",
+    "end": "close_notify",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 1,
+    "t_us": 1791706438930449
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706438932815
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "close_notify"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 21424
+   }
+  ],
+  "gagent": []
+ },
+ "H2-app-fin-first-client-continues-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:56741",
+   "ok": true,
+   "t_first_us": 464,
+   "t_hs_us": 1674,
+   "t_sent_us": 13169,
+   "t_total_us": 6100,
+   "tag": "H2-app-fin-first-client-continues-tcp",
+   "up_err": 0,
+   "up_sent": 3000001,
+   "wall_s": 0.026
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "fin",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 24,
+    "peer": "127.0.0.1:37470",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 3000001,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1265,
+    "id": 1,
+    "legs_open_us": 117,
+    "peer_c": "198.18.28.1:56741"
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706439547626
+   },
+   {
+    "bytes": 3000001,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706439567320
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 26434
+   }
+  ],
+  "gagent": []
+ },
+ "H3-simultaneous-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:34867",
+   "ok": true,
+   "t_first_us": 476,
+   "t_hs_us": 1831,
+   "t_sent_us": 10451,
+   "t_total_us": 9763,
+   "tag": "H3-simultaneous-tcp",
+   "up_err": 0,
+   "up_sent": 3000001,
+   "wall_s": 0.024
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "fin",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 20,
+    "peer": "127.0.0.1:37472",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 3000001,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1357,
+    "id": 1,
+    "legs_open_us": 114,
+    "peer_c": "198.18.28.1:34867"
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706440180353
+   },
+   {
+    "bytes": 3000001,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706440195174
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 22077
+   }
+  ],
+  "gagent": []
+ },
+ "H4-app-close-after-reply-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:37317",
+   "ok": true,
+   "t_first_us": 8962,
+   "t_hs_us": 1687,
+   "t_sent_us": 5524,
+   "t_total_us": 13432,
+   "tag": "H4-app-close-after-reply-tcp",
+   "up_err": 0,
+   "up_sent": 1000,
+   "wall_s": 0.027
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "close",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 18,
+    "peer": "127.0.0.1:37484",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 1000,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1215,
+    "id": 1,
+    "legs_open_us": 117,
+    "peer_c": "198.18.28.1:37317"
+   },
+   {
+    "bytes": 1000,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706440819894
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706440825079
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 1000,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 22342
+   }
+  ],
+  "gagent": []
+ },
+ "H5-server-speaks-first-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:40379",
+   "ok": true,
+   "t_first_us": 441,
+   "t_hs_us": 1760,
+   "t_sent_us": 102,
+   "t_total_us": 5796,
+   "tag": "H5-server-speaks-first-tcp",
+   "up_err": 0,
+   "up_sent": 0,
+   "wall_s": 0.02
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "fin",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 15,
+    "peer": "127.0.0.1:37500",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 0,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1288,
+    "id": 1,
+    "legs_open_us": 106,
+    "peer_c": "198.18.28.1:40379"
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706441442943
+   },
+   {
+    "bytes": 0,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706441452945
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 0,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 17453
+   }
+  ],
+  "gagent": []
+ },
+ "A1-tls-peer-rst-mid-upload-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "n/a",
+   "down_expected": 0,
+   "down_ok": true,
+   "down_recv": 0,
+   "local": "198.18.28.1:60549",
+   "ok": true,
+   "rst_sent": true,
+   "t_first_us": 0,
+   "t_hs_us": 1668,
+   "t_sent_us": 6744,
+   "t_total_us": 6752,
+   "tag": "A1-tls-peer-rst-mid-upload-tcp",
+   "up_err": 0,
+   "up_sent": 1000000,
+   "wall_s": 0.02
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 0,
+    "end_action": "fin",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 19,
+    "peer": "127.0.0.1:37510",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 119296,
+    "up_end": "err:ECONNRESET",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1232,
+    "id": 1,
+    "legs_open_us": 93,
+    "peer_c": "198.18.28.1:60549"
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706442062446
+   },
+   {
+    "bytes": 622592,
+    "dir": "c2s",
+    "end": "read_err:104",
+    "errno": 104,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706442079054
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 622592,
+      "end": "read_err:104"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "eof_clean"
+     }
+    },
+    "us": 18472
+   }
+  ],
+  "gagent": []
+ },
+ "A2-app-rst-mid-download-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "reset",
+   "down_expected": 16777216,
+   "down_ok": true,
+   "down_recv": 291840,
+   "local": "198.18.28.1:40441",
+   "ok": true,
+   "t_first_us": 7610,
+   "t_hs_us": 1757,
+   "t_sent_us": 4086,
+   "t_total_us": 8338,
+   "tag": "A2-app-rst-mid-download-tcp",
+   "up_err": 0,
+   "up_sent": 1000,
+   "wall_s": 0.022
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 1000000,
+    "end_action": "rst",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 17,
+    "peer": "127.0.0.1:37512",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 1000,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1295,
+    "id": 1,
+    "legs_open_us": 132,
+    "peer_c": "198.18.28.1:40441"
+   },
+   {
+    "bytes": 1000,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706442702416
+   },
+   {
+    "bytes": 615371,
+    "dir": "s2c",
+    "end": "read_err:104",
+    "errno": 104,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706442706204
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 1000,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 615371,
+      "end": "read_err:104"
+     }
+    },
+    "us": 19472
+   }
+  ],
+  "gagent": []
+ },
+ "A2b-app-rst-after-partial-reply-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "reset",
+   "down_expected": 16777216,
+   "down_ok": true,
+   "down_recv": 413696,
+   "local": "198.18.28.1:37731",
+   "ok": true,
+   "t_first_us": 290,
+   "t_hs_us": 1698,
+   "t_sent_us": 97,
+   "t_total_us": 90905,
+   "tag": "A2b-app-rst-after-partial-reply-tcp",
+   "up_err": 0,
+   "up_sent": 0,
+   "wall_s": 0.105
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 500000,
+    "end_action": "rst",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 4,
+    "peer": "127.0.0.1:37524",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 0,
+    "up_end": "none",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1253,
+    "id": 1,
+    "legs_open_us": 104,
+    "peer_c": "198.18.28.1:37731"
+   },
+   {
+    "bytes": 413696,
+    "dir": "s2c",
+    "end": "read_err:104",
+    "errno": 104,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706443320680
+   },
+   {
+    "bytes": 0,
+    "dir": "c2s",
+    "end": "stopped_by_abort",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706443416521
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 0,
+      "end": "stopped_by_abort"
+     },
+     "s2c": {
+      "bytes": 413696,
+      "end": "read_err:104"
+     }
+    },
+    "us": 102143
+   }
+  ],
+  "gagent": []
+ },
+ "A3-app-close-with-unread-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 1000,
+   "down_ok": true,
+   "down_recv": 1000,
+   "local": "198.18.28.1:60837",
+   "ok": true,
+   "t_first_us": 269,
+   "t_hs_us": 1325,
+   "t_sent_us": 5159,
+   "t_total_us": 4495,
+   "tag": "A3-app-close-with-unread-tcp",
+   "up_err": 32,
+   "up_sent": 524288,
+   "wall_s": 0.018
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 1000,
+    "end_action": "close",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 4,
+    "peer": "127.0.0.1:37532",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 0,
+    "up_end": "none",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 950,
+    "id": 1,
+    "legs_open_us": 71,
+    "peer_c": "198.18.28.1:60837"
+   },
+   {
+    "bytes": 1000,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706444029972
+   },
+   {
+    "bytes": 16384,
+    "dir": "c2s",
+    "end": "write_err:32",
+    "errno": 32,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706444040258
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 16384,
+      "end": "write_err:32"
+     },
+     "s2c": {
+      "bytes": 1000,
+      "end": "eof_clean"
+     }
+    },
+    "us": 15963
+   }
+  ],
+  "gagent": []
+ },
+ "A4-app-crash-with-unread-vsock": {
+  "hung": false,
+  "client": {
+   "down_bad_at": null,
+   "down_end": "timeout",
+   "down_expected": 0,
+   "down_ok": true,
+   "down_recv": 0,
+   "local": "198.18.28.1:47251",
+   "ok": true,
+   "t_first_us": 0,
+   "t_hs_us": 1420,
+   "t_sent_us": 145589,
+   "t_total_us": 25238710,
+   "tag": "A4-app-crash-with-unread-vsock",
+   "up_err": 0,
+   "up_sent": 67108864,
+   "killed_at_to_client_done_s": 9.74
+  },
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1003,
+    "id": 1,
+    "legs_open_us": 693,
+    "peer_c": "198.18.28.1:47251"
+   },
+   {
+    "bytes": 67108864,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706470310073
+   }
+  ],
+  "gagent": [
+   {
+    "connect_us": 157,
+    "ev": "gagent_paired",
+    "id": 2,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:60903"
+   }
+  ]
+ },
+ "A5-app-crash-idle-no-unread-vsock": {
+  "hung": false,
+  "client": {
+   "down_bad_at": null,
+   "down_end": "timeout",
+   "down_expected": 0,
+   "down_ok": true,
+   "down_recv": 0,
+   "local": "198.18.28.1:53063",
+   "ok": true,
+   "t_first_us": 0,
+   "t_hs_us": 1491,
+   "t_sent_us": 2831,
+   "t_total_us": 25272362,
+   "tag": "A5-app-crash-idle-no-unread-vsock",
+   "up_err": 0,
+   "up_sent": 100000,
+   "killed_at_to_client_done_s": 9.77
+  },
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1083,
+    "id": 1,
+    "legs_open_us": 615,
+    "peer_c": "198.18.28.1:53063"
+   },
+   {
+    "bytes": 100000,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706496421926
+   }
+  ],
+  "gagent": [
+   {
+    "connect_us": 144,
+    "ev": "gagent_paired",
+    "id": 3,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:48757"
+   }
+  ]
+ },
+ "A4-app-crash-with-unread-tcp": {
+  "hung": true,
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 0,
+   "down_ok": true,
+   "down_recv": 0,
+   "local": "198.18.28.1:60787",
+   "ok": true,
+   "t_first_us": 0,
+   "t_hs_us": 1737,
+   "t_sent_us": 736468,
+   "t_total_us": 173,
+   "tag": "A4-app-crash-with-unread-tcp",
+   "up_err": 0,
+   "up_sent": 67108864,
+   "killed_at_to_client_done_s": 0.05
+  },
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1279,
+    "id": 1,
+    "legs_open_us": 149,
+    "peer_c": "198.18.28.1:60787"
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706496837810
+   },
+   {
+    "bytes": 2719744,
+    "dir": "c2s",
+    "end": "write_err:32",
+    "errno": 32,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706497536066
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 2719744,
+      "end": "write_err:32"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "eof_clean"
+     }
+    },
+    "us": 700216
+   }
+  ],
+  "gagent": []
+ },
+ "A5-app-crash-idle-no-unread-tcp": {
+  "hung": true,
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 0,
+   "down_ok": true,
+   "down_recv": 0,
+   "local": "198.18.28.1:34059",
+   "ok": true,
+   "t_first_us": 0,
+   "t_hs_us": 1623,
+   "t_sent_us": 2748,
+   "t_total_us": 175,
+   "tag": "A5-app-crash-idle-no-unread-tcp",
+   "up_err": 0,
+   "up_sent": 100000,
+   "killed_at_to_client_done_s": 0.0
+  },
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1174,
+    "id": 1,
+    "legs_open_us": 136,
+    "peer_c": "198.18.28.1:34059"
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706497795944
+   },
+   {
+    "bytes": 100000,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791706497808468
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 100000,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "eof_clean"
+     }
+    },
+    "us": 14340
+   }
+  ],
+  "gagent": []
+ }
+}

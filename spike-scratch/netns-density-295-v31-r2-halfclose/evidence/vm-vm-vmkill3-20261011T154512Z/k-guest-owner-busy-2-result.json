@@ -1,0 +1,51 @@
+{
+ "tag": "k-guest-owner-busy-2",
+ "seed": 20152,
+ "action": "kill-guest-owner",
+ "action_delay_ms": 671,
+ "action_done_at_ms_after_clients_start": 688,
+ "clients_wall_s": 5.7,
+ "trials": 3000,
+ "cats": {
+  "pass": 324,
+  "reset": 2676
+ },
+ "ends": {
+  "cli:complete": 324,
+  "srv:complete": 379,
+  "cli:reset": 2676,
+  "srv:reset": 44,
+  "srv:no_result": 2577
+ },
+ "examples": [],
+ "clients_rc": 0,
+ "guest_owner": null,
+ "host_owner": {
+  "live_at_end": 0,
+  "clean": 369,
+  "aborted": 60,
+  "aborts": {
+   "peer_close_while_open": 60
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 379,
+   "shut_0x3": 60,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 0,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 227,
+   "fire_poke": 0,
+   "fire_fexit": 217,
+   "level_unreadable": 0
+  }
+ }
+}

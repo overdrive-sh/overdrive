@@ -1,0 +1,8 @@
+{"dir":1,"ev":"eof","flow":1,"fwd":5368709176,"goal":5368709176,"role":"host","sent":5368653503,"t_ns":5002124029407129}
+{"dir":1,"eof_to_done_ns":179240,"ev":"complete","flow":1,"fwd":5368709176,"goal":5368709176,"how":"owner_cas","role":"host","sent":5368709176,"t_ns":5002124029583755}
+{"dir":1,"ev":"eof","flow":2,"fwd":5368709176,"goal":5368709176,"role":"host","sent":5368709176,"t_ns":5002124751270400}
+{"dir":1,"eof_to_done_ns":60712,"ev":"complete","flow":2,"fwd":5368709176,"goal":5368709176,"how":"owner_cas","role":"host","sent":5368709176,"t_ns":5002124751330490}
+{"bytes_received":5368709121,"dir":0,"ev":"eof","flow":1,"fwd":5368709120,"goal":5368709120,"role":"host","sent":2314076107,"t_ns":5002126086312109}
+{"bytes_received":5368709121,"dir":0,"ev":"eof","flow":2,"fwd":5368709120,"goal":5368709120,"role":"host","sent":3374383051,"t_ns":5002126700818336}
+{"dir":0,"eof_to_done_ns":31201302130,"ev":"complete","flow":2,"fwd":5368709120,"goal":5368709120,"how":"record_fexit","role":"host","sent":5368709120,"t_ns":5002157902150572}
+{"dir":0,"eof_to_done_ns":47529738909,"ev":"complete","flow":1,"fwd":5368709120,"goal":5368709120,"how":"record_fexit","role":"host","sent":5368709120,"t_ns":5002173616045810}

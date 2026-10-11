@@ -1,0 +1,76 @@
+[    0.003048] KHO: Failed to reserve nid 0 scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=b9b9232b-4b1f-4a18-b512-2fa5a78b5d19
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO pid1exit
+GUEST_ACT pid1exit
+GUEST_PID1_EXITING
+[    1.452525] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+[    1.454762] CPU: 0 UID: 0 PID: 1 Comm: init Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.457349] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.459242] Call Trace:
+[    1.460037]  <TASK>
+[    1.460721]  show_stack+0x49/0x60
+[    1.461761]  dump_stack_lvl+0x5f/0x90
+[    1.462883]  dump_stack+0x10/0x18
+[    1.463914]  vpanic+0x262/0x4b0
+[    1.464903]  panic+0x67/0x70
+[    1.465814]  ? acct_update_integrals+0x5e/0xa0
+[    1.467165]  do_exit.cold+0x15/0x15
+[    1.468244]  ? ktime_get_mono_fast_ns+0x36/0xe0
+[    1.469603]  do_group_exit+0x2d/0xb0
+[    1.470707]  __x64_sys_exit_group+0x18/0x20
+[    1.471977]  x64_sys_call+0x14a0/0x2390
+[    1.473161]  do_syscall_64+0x105/0x5a0
+[    1.474308]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.475734]  ? __pm_runtime_suspend+0x4c/0x100
+[    1.477091]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.478517]  ? __uart_start+0xe9/0x130
+[    1.479672]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.481113]  ? _raw_spin_lock_irqsave+0xe/0x20
+[    1.482445]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.483869]  ? remove_wait_queue+0x62/0x80
+[    1.485125]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.486547]  ? n_tty_write+0x22e/0x3d0
+[    1.487698]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.489135]  ? update_cfs_rq_load_avg+0x1e/0x260
+[    1.490506]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.491631]  ? update_load_avg+0x79/0x260
+[    1.492597]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.493726]  ? set_next_entity+0xeb/0x290
+[    1.494685]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.495811]  ? ptep_set_access_flags+0x4a/0x70
+[    1.496865]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.497995]  ? wp_page_reuse+0x97/0xc0
+[    1.498903]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.500039]  ? do_wp_page+0x4ee/0x6f0
+[    1.500916]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.502052]  ? handle_pte_fault+0x1d8/0x1f0
+[    1.503050]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.504177]  ? __handle_mm_fault+0x493/0x720
+[    1.504926]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.505638]  ? count_memcg_events+0x103/0x250
+[    1.506294]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.506998]  ? handle_mm_fault+0x1be/0x2e0
+[    1.507618]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.508330]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[    1.509195]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.509901]  ? irqentry_exit+0x97/0x6f0
+[    1.510488]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.511199]  ? exc_page_fault+0x94/0x1e0
+[    1.511786]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.512500]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.513251] RIP: 0033:0x4df928
+[    1.513725] Code: ff ff ff 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 f3 0f 1e fa 48 c7 c6 e8 ff ff ff eb 04 0f 1f 00 f4 b8 e7 00 00 00 0f 05 <48> 3d 00 f0 ff ff 76 f0 f7 d8 64 89 06 eb e9 66 0f 1f 84 00 00 00
+[    1.516370] RSP: 002b:00007ffd7d4c2b68 EFLAGS: 00000202 ORIG_RAX: 00000000000000e7
+[    1.517467] RAX: ffffffffffffffda RBX: 00007ffd7d4c3f04 RCX: 00000000004df928
+[    1.518508] RDX: 00000000174969f0 RSI: ffffffffffffffe8 RDI: 0000000000000000
+[    1.519548] RBP: 00007ffd7d4c2c60 R08: 0000000000000000 R09: 00007ffd7d4c2d90
+[    1.520585] R10: 0000000000000000 R11: 0000000000000202 R12: 0000000000000004
+[    1.521623] R13: 00007ffd7d4c2f80 R14: 0000000000000002 R15: 0000000000000000
+[    1.522663]  </TASK>
+[    1.523126] Kernel Offset: 0x1a200000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.524659] Rebooting in 1 seconds..
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

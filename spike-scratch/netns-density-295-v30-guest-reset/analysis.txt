@@ -1,0 +1,40 @@
+mode      case           n VMM exited     rc     exit t(s) 2nd incarnation                                old flows end (t after GO, s) new inc via h2g
+stock     pid1exit       4       0/4       -             -          4/4                           {'ECONNRESET': 8}        1.095..1.116          4/4
+stock     sysrq-c        4       0/4       -             -          4/4                           {'ECONNRESET': 8}        1.096..1.115          4/4
+stock     reboot         4       0/4       -             -          4/4              {'recv()==0 (orderly EOF)': 8}        0.022..0.043          4/4
+stock     rebootf        5       0/5       -             -          5/5                          {'ECONNRESET': 10}        0.043..0.045          5/5
+stock     sysrq-b        4       0/4       -             -          4/4                           {'ECONNRESET': 8}        0.022..0.044          4/4
+stock     triple         4       0/4       -             -          4/4                           {'ECONNRESET': 8}        0.022..0.045          4/4
+stock     triple-panic   4       0/4       -             -          4/4                           {'ECONNRESET': 8}        1.093..1.117          4/4
+stock     poweroff       4       4/4     0x4  0.063..0.064          0/4                           {'ECONNRESET': 8}        0.043..0.044          0/4
+fd-keep   pid1exit       4       4/4     1x4  1.136..1.160          0/4                                 {'open': 8}                   -          0/4
+fd-keep   sysrq-c        4       4/4     1x4  1.134..1.158          0/4                                 {'open': 8}                   -          0/4
+fd-keep   reboot         4       4/4     1x4  2.079..2.082          0/4              {'recv()==0 (orderly EOF)': 8}        0.022..0.044          0/4
+fd-keep   rebootf        4       4/4     1x4  0.042..0.086          0/4                                 {'open': 8}                   -          0/4
+fd-keep   sysrq-b        4       4/4     1x4  0.043..0.086          0/4                                 {'open': 8}                   -          0/4
+fd-keep   triple         4       4/4     1x4  0.064..0.085          0/4                                 {'open': 8}                   -          0/4
+fd-keep   triple-panic   4       4/4     1x4  1.116..1.138          0/4                                 {'open': 8}                   -          0/4
+fd-keep   poweroff       4       4/4     0x4  0.042..0.066          0/4                                 {'open': 8}                   -          0/4
+fd-close  pid1exit       4       4/4     1x4  1.136..1.180          0/4                           {'ECONNRESET': 8}        1.111..1.138          0/4
+fd-close  sysrq-c        4       4/4     1x4  1.135..1.136          0/4                           {'ECONNRESET': 8}        1.095..1.115          0/4
+fd-close  reboot         4       4/4     1x4  2.080..2.102          0/4              {'recv()==0 (orderly EOF)': 8}        0.022..0.044          0/4
+fd-close  rebootf        4       4/4     1x4  0.085..0.087          0/4                           {'ECONNRESET': 8}        0.043..0.045          0/4
+fd-close  sysrq-b        4       4/4     1x4  0.042..0.085          0/4                           {'ECONNRESET': 8}        0.022..0.044          0/4
+fd-close  triple         4       4/4     1x4  0.084..0.086          0/4                           {'ECONNRESET': 8}        0.043..0.045          0/4
+fd-close  triple-panic   4       4/4     1x4  1.116..1.156          0/4                           {'ECONNRESET': 8}        1.094..1.115          0/4
+fd-close  poweroff       4       4/4     0x4  0.063..0.064          0/4                           {'ECONNRESET': 8}        0.043..0.044          0/4
+
+fd-keep: flows state while the launcher still holds its fd copy (VMM already exited), then after the launcher closes
+  pid1exit      while launcher holds: {'open': 8}  after launcher close: {'recv: ECONNRESET': 8}  claim(while holds, after close)={('EADDRINUSE', 'OK'): 4}
+  sysrq-c       while launcher holds: {'open': 8}  after launcher close: {'recv: ECONNRESET': 8}  claim(while holds, after close)={('EADDRINUSE', 'OK'): 4}
+  reboot        while launcher holds: {'eof': 8}  after launcher close: {'recv()==0 (orderly EOF)': 8}  claim(while holds, after close)={('EADDRINUSE', 'OK'): 4}
+  rebootf       while launcher holds: {'open': 8}  after launcher close: {'recv: ECONNRESET': 8}  claim(while holds, after close)={('EADDRINUSE', 'OK'): 4}
+  sysrq-b       while launcher holds: {'open': 8}  after launcher close: {'recv: ECONNRESET': 8}  claim(while holds, after close)={('EADDRINUSE', 'OK'): 4}
+  triple        while launcher holds: {'open': 8}  after launcher close: {'recv: ECONNRESET': 8}  claim(while holds, after close)={('EADDRINUSE', 'OK'): 4}
+  triple-panic  while launcher holds: {'open': 8}  after launcher close: {'recv: ECONNRESET': 8}  claim(while holds, after close)={('EADDRINUSE', 'OK'): 4}
+  poweroff      while launcher holds: {'open': 8}  after launcher close: {'recv: ECONNRESET': 8}  claim(while holds, after close)={('EADDRINUSE', 'OK'): 4}
+
+fd-close: claim after VMM exit: {'OK': 32}
+stock: CH rebooting->rebooted window (CH event timestamps, ms): 21.300..40.600
+stock: before-trigger second-claim of the CID (same host): {'EADDRINUSE': 33}
+stock: CH holds exactly one /dev/vhost-vsock fd before and after reboot: True

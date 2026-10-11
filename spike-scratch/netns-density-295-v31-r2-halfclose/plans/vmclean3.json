@@ -1,0 +1,74 @@
+[
+ {
+  "name": "v3-clean-mix",
+  "action": "none",
+  "repeat": 1,
+  "trials": 8000,
+  "conc": 128,
+  "flows": 256,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n mix --m mix --fin mix --srv-pause mix --cli-pause mix --io-timeout 40",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": true,
+  "seed": 32001,
+  "settle_s": 30,
+  "client_timeout": 900
+ },
+ {
+  "name": "v3-clean-only-p300",
+  "action": "none",
+  "repeat": 1,
+  "trials": 2500,
+  "conc": 128,
+  "flows": 256,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n 1048576 --m 1048576 --fin only --srv-pause 300 --cli-pause 300 --io-timeout 40",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": true,
+  "seed": 32002,
+  "settle_s": 30,
+  "client_timeout": 900
+ },
+ {
+  "name": "v3-clean-data-p3000",
+  "action": "none",
+  "repeat": 1,
+  "trials": 1500,
+  "conc": 128,
+  "flows": 256,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n 1048576 --m 1048576 --fin data --srv-pause 3000 --cli-pause 3000 --io-timeout 40",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": true,
+  "seed": 32003,
+  "settle_s": 30,
+  "client_timeout": 900
+ },
+ {
+  "name": "v3-clean-small",
+  "action": "none",
+  "repeat": 1,
+  "trials": 3000,
+  "conc": 128,
+  "flows": 256,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n 2000 --m 2000 --fin mix --io-timeout 40",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": true,
+  "seed": 32004,
+  "settle_s": 30,
+  "client_timeout": 900
+ }
+]

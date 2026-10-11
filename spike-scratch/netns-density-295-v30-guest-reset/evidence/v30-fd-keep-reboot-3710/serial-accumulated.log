@@ -1,0 +1,14 @@
+[    0.003033] KHO: Failed to reserve nid 0 scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4 v30init=busybox
+[   0.000] GUEST_BOOT boot_id=0f8b29ad-d590-4767-9e42-5f6b245caf96
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO reboot
+GUEST_ACT reboot
+The system is going down NOW!
+Sent SIGTERM to all processes
+Sent SIGKILL to all processes
+Requesting system reboot
+[    3.439592] reboot: Restarting system
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

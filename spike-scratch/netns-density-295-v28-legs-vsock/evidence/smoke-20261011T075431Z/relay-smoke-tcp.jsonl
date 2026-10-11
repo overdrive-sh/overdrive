@@ -1,0 +1,2 @@
+{"ev":"relay_ready","fwd":"Splice","legs":"tcp","native":false,"peer_mode":"gateway","uname":"7.0.0-29-generic"}
+{"err":"received fatal alert: CertificateUnknown","ev":"relay_hs_fail","id":1}

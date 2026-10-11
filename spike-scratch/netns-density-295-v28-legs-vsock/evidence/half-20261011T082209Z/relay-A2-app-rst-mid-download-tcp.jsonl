@@ -1,0 +1,5 @@
+{"ev":"relay_ready","fwd":"Splice","legs":"tcp","native":false,"peer_mode":"gateway","uname":"7.0.0-29-generic"}
+{"early":0,"ev":"relay_paired","hs_us":1163,"id":1,"legs_open_us":128,"peer_c":"198.18.28.1:48481"}
+{"bytes":1000,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791706948959577}
+{"bytes":842487,"dir":"s2c","end":"read_err:104","errno":104,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791706948965377}
+{"ev":"relay_done","id":1,"r":{"aborted":true,"c2s":{"bytes":1000,"end":"eof_clean"},"s2c":{"bytes":842487,"end":"read_err:104"}},"us":21487}

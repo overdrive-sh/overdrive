@@ -1,0 +1,7663 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic",
+  "detail": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\n\n/sys/kernel/tracing/events/vsock/virtio_transport_alloc_pkt:\n44985\t59980\t89970\n4194304\nBusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.\n\nUsage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]\n\nOPTIONS := -f[amily] inet|inet6|link | -o[neline]\n\nip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]\nip route list|flush|add|del|change|append|replace|test ROUTE\nip link set IFACE [up|down] [arp on|off] [multicast on|off]\n\t[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]\n\t[master IFACE | nomaster] [netns PID] [type TYPE ARGS]\nip tunnel add|change|del|show [NAME]\n\t[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]\nip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]\nip rule [list] | add|del SELECTOR ACTION\n"
+ },
+ "cells": [
+  {
+   "label": "F-seq-direct-1024",
+   "cell": {
+    "label": "F-seq-direct-1024",
+    "variant": "seq",
+    "size": 1024,
+    "n": 100000,
+    "cell": "direct"
+   },
+   "wall_s": 10.022318363189697,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 100000,
+     "rx_ok": 100000,
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 103200000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 100000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 103200000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 100000,
+     "frames_verified_ok": 100000
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 9.951880528
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 103200000,
+     "fexit_calls": 100000,
+     "guest_encoded": 100000,
+     "redirect_ok": 100000,
+     "tx_alloc_seq_noeom": 100000,
+     "tx_alloc_seq_noeom_bytes": 103200000
+    },
+    "cell": "direct",
+    "drain_wall_s": 6.300384817,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 3.8959423319999997,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "F-seq-direct-mix",
+   "cell": {
+    "label": "F-seq-direct-mix",
+    "variant": "seq",
+    "size": "mix",
+    "n": 100000,
+    "cell": "direct"
+   },
+   "wall_s": 58.840980052948,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 100000,
+     "rx_ok": 100000,
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 2949391933
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 100000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 2949391933,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 100000,
+     "frames_verified_ok": 100000
+    },
+    "size": "mix",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 58.771944697
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 2949391933,
+     "fexit_calls": 100000,
+     "guest_encoded": 100000,
+     "redirect_ok": 100000,
+     "tx_alloc_seq_noeom": 100000,
+     "tx_alloc_seq_noeom_bytes": 2949391933
+    },
+    "cell": "direct",
+    "drain_wall_s": 55.122901636,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 52.918689912,
+    "sender_stalled": false,
+    "size": "mix",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "F-seq-direct-59000",
+   "cell": {
+    "label": "F-seq-direct-59000",
+    "variant": "seq",
+    "size": 59000,
+    "n": 100000,
+    "cell": "direct"
+   },
+   "wall_s": 105.18011164665222,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 100000,
+     "rx_ok": 100000,
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 5900800000,
+     "rx_pkt_seq_noeom": 2,
+     "rx_pkt_seq_noeom_bytes": 52224,
+     "rx_short": 2
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000602",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 1538
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "00000000000067f3",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 26611
+      }
+     ],
+     "short": 2
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 100000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 5900800000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 100000,
+     "frames_verified_ok": 100000
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 105.116800396
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 5900800000,
+     "fexit_calls": 100002,
+     "guest_encoded": 100000,
+     "redirect_ok": 100000,
+     "tx_alloc_seq_noeom": 100002,
+     "tx_alloc_seq_noeom_bytes": 5900852224
+    },
+    "cell": "direct",
+    "drain_wall_s": 101.471934846,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 99.267925176,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 2,
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "F-seq-unix-1024",
+   "cell": {
+    "label": "F-seq-unix-1024",
+    "variant": "seq",
+    "size": 1024,
+    "n": 100000,
+    "cell": "unix"
+   },
+   "wall_s": 25.699729442596436,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":8160,\"stalled\":true}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 100000,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 25.637216153
+   },
+   "guest": {
+    "app_sent_ok": 8160,
+    "bound": 59000,
+    "bpf_counters": {
+     "guest_encoded": 8160,
+     "noroute": 8160,
+     "redirect_ok": 8160
+    },
+    "cell": "unix",
+    "drain_wall_s": 22.309571602,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 20.105688592,
+    "sender_stalled": true,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 8160
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=8160 stalled=true\n"
+  },
+  {
+   "label": "F-seq-unix-mix",
+   "cell": {
+    "label": "F-seq-unix-mix",
+    "variant": "seq",
+    "size": "mix",
+    "n": 100000,
+    "cell": "unix"
+   },
+   "wall_s": 25.6039981842041,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":288,\"stalled\":true}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 100000,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "mix",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 25.534333938
+   },
+   "guest": {
+    "app_sent_ok": 288,
+    "bound": 59000,
+    "bpf_counters": {
+     "guest_encoded": 288,
+     "noroute": 288,
+     "redirect_ok": 288
+    },
+    "cell": "unix",
+    "drain_wall_s": 22.210383377,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 20.006261848,
+    "sender_stalled": true,
+    "size": "mix",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 288
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=288 stalled=true\n"
+  },
+  {
+   "label": "F-seq-unix-59000",
+   "cell": {
+    "label": "F-seq-unix-59000",
+    "variant": "seq",
+    "size": 59000,
+    "n": 100000,
+    "cell": "unix"
+   },
+   "wall_s": 25.619641065597534,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":160,\"stalled\":true}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 100000,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 25.556828485
+   },
+   "guest": {
+    "app_sent_ok": 160,
+    "bound": 59000,
+    "bpf_counters": {
+     "guest_encoded": 160,
+     "noroute": 160,
+     "redirect_ok": 160
+    },
+    "cell": "unix",
+    "drain_wall_s": 22.209086886,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 20.005101833,
+    "sender_stalled": true,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 160
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=160 stalled=true\n"
+  },
+  {
+   "label": "F-seq-unix-k1",
+   "cell": {
+    "label": "F-seq-unix-k1",
+    "variant": "seq",
+    "size": 1024,
+    "n": 200,
+    "cell": "unix",
+    "k1": 100
+   },
+   "wall_s": 5.768728256225586,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":200,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 200,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 200,
+     "n": 200
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 5.703461408
+   },
+   "guest": {
+    "app_sent_ok": 200,
+    "bound": 59000,
+    "bpf_counters": {
+     "guest_encoded": 200,
+     "redirect_ok": 200
+    },
+    "cell": "unix",
+    "drain_wall_s": 2.403553277,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 100,
+    "n": 200,
+    "role": "guest",
+    "send_wall_s": 0.202027865,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 200
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=200 stalled=false\n"
+  },
+  {
+   "label": "F-seq-unix-k1-rearm",
+   "cell": {
+    "label": "F-seq-unix-k1-rearm",
+    "variant": "seq",
+    "size": 1024,
+    "n": 200,
+    "cell": "unix",
+    "k1": 100,
+    "k1rearm": 1
+   },
+   "wall_s": 5.875524044036865,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":200,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 200,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 200,
+     "n": 200
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 5.803874528
+   },
+   "guest": {
+    "app_sent_ok": 200,
+    "bound": 59000,
+    "bpf_counters": {
+     "guest_encoded": 200,
+     "redirect_ok": 200
+    },
+    "cell": "unix",
+    "drain_wall_s": 2.404448504,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 100,
+    "n": 200,
+    "role": "guest",
+    "send_wall_s": 0.202072071,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 200
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=200 stalled=false\nk1 rearm SO_RCVLOWAT: Ok(())\n"
+  },
+  {
+   "label": "F-seq-direct-16384-hb64k",
+   "cell": {
+    "label": "F-seq-direct-16384-hb64k",
+    "variant": "seq",
+    "size": 16384,
+    "n": 100000,
+    "cell": "direct",
+    "hostbuf": 65536
+   },
+   "wall_s": 57.63746190071106,
+   "host": {
+    "accepted_child_buffer_size": 65536,
+    "bpf_counters": {
+     "redirect_ok": 100000,
+     "rx_ok": 100000,
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 1639200000,
+     "rx_pkt_seq_noeom": 25458,
+     "rx_pkt_seq_noeom_bytes": 416492880,
+     "rx_short": 25458
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000005",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 5
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000008",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 8
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000000b",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 11
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000000e",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 14
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000011",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 17
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000014",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 20
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000017",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 23
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000001a",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 26
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000001d",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 29
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000020",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 32
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000023",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 35
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000026",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 38
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000029",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 41
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000002c",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 44
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000002f",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 47
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000032",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 50
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000035",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 53
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000038",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 56
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000003b",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 59
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000003e",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 62
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000041",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 65
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000044",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 68
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "0000000000000047",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 71
+      },
+      {
+       "declared": 16384,
+       "first8_hex": "000000000000004a",
+       "kind": "short",
+       "n": 16360,
+       "second_magic": 0,
+       "seq": 74
+      }
+     ],
+     "short": 25458
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 65536,
+    "listener_buffer_size": 65536,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 100000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 1639200000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 100000,
+     "frames_verified_ok": 100000
+    },
+    "size": "16384",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 57.569966018
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 1639200000,
+     "fexit_calls": 125679,
+     "guest_encoded": 100000,
+     "redirect_ok": 100000,
+     "tx_alloc_seq_noeom": 125458,
+     "tx_alloc_seq_noeom_bytes": 2055692880
+    },
+    "cell": "direct",
+    "drain_wall_s": 53.926019478,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 51.521742432,
+    "sender_stalled": false,
+    "size": "16384",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 25679,
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "F-seq-unix-16384-hb64k",
+   "cell": {
+    "label": "F-seq-unix-16384-hb64k",
+    "variant": "seq",
+    "size": 16384,
+    "n": 100000,
+    "cell": "unix",
+    "hostbuf": 65536
+   },
+   "wall_s": 25.5993812084198,
+   "host": {
+    "accepted_child_buffer_size": 65536,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":512,\"stalled\":true}",
+    "hostbuf_arg": 65536,
+    "listener_buffer_size": 65536,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 100000,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "16384",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 25.53394752
+   },
+   "guest": {
+    "app_sent_ok": 512,
+    "bound": 59000,
+    "bpf_counters": {
+     "guest_encoded": 512,
+     "noroute": 512,
+     "redirect_ok": 512
+    },
+    "cell": "unix",
+    "drain_wall_s": 22.214460113,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 20.010109609,
+    "sender_stalled": true,
+    "size": "16384",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 512
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=512 stalled=true\n"
+  },
+  {
+   "label": "E-seq-1024-p2mode0-control",
+   "cell": {
+    "label": "E-seq-1024-p2mode0-control",
+    "variant": "seq",
+    "size": 1024,
+    "n": 20000,
+    "p2mode": 0,
+    "nodelay": 1
+   },
+   "wall_s": 6.580759048461914,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 19529,
+     "rx_badmagic": 471,
+     "rx_ok": 19529,
+     "rx_pkt_seq_eom": 20471,
+     "rx_pkt_seq_eom_bytes": 20640000,
+     "rx_pkt_seq_noeom": 1,
+     "rx_pkt_seq_noeom_bytes": 16,
+     "rx_short": 472
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 471,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 1024,
+       "first8_hex": "0000000000000068",
+       "kind": "short",
+       "n": 776,
+       "second_magic": 0,
+       "seq": 104
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 256,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "0000000000000088",
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 136
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 512,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "00000000000000a8",
+       "kind": "short",
+       "n": 264,
+       "second_magic": 0,
+       "seq": 168
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "00000000000000e7",
+       "kind": "short",
+       "n": 776,
+       "second_magic": 0,
+       "seq": 231
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 256,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "0000000000000107",
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 263
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 512,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "0000000000000127",
+       "kind": "short",
+       "n": 264,
+       "second_magic": 0,
+       "seq": 295
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "000000000000015f",
+       "kind": "short",
+       "n": 776,
+       "second_magic": 0,
+       "seq": 351
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 256,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "000000000000017f",
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 383
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 512,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "000000000000019f",
+       "kind": "short",
+       "n": 264,
+       "second_magic": 0,
+       "seq": 415
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "00000000000001de",
+       "kind": "short",
+       "n": 776,
+       "second_magic": 0,
+       "seq": 478
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 256,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "00000000000001fe",
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 510
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 512,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "first8_hex": "000000000000021e",
+       "kind": "short",
+       "n": 264,
+       "second_magic": 0,
+       "seq": 542
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 768,
+       "second_magic": 0,
+       "seq": null
+      }
+     ],
+     "short": 472
+    },
+    "guest_done": "{\"sent\":20000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 20000,
+    "outcome": {
+     "delivered_once": 19529,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 471,
+     "n": 20000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 20153928,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 19529,
+     "frames_verified_ok": 19529
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 6.520286766
+   },
+   "guest": {
+    "app_sent_ok": 20000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 20640000,
+     "fexit_calls": 20003,
+     "guest_encoded": 20000,
+     "redirect_ok": 40000,
+     "strp_frames": 20000,
+     "strp_parse_calls": 20000,
+     "tx_alloc_seq_noeom": 20472,
+     "tx_alloc_seq_noeom_bytes": 20640016
+    },
+    "cell": "tcp",
+    "drain_wall_s": 2.880040454,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 20000,
+    "role": "guest",
+    "send_wall_s": 0.475871341,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 3,
+     "ok_full": 20000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 20000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=20000 stalled=false\n"
+  },
+  {
+   "label": "E-seq-59000-p2mode0-control",
+   "cell": {
+    "label": "E-seq-59000-p2mode0-control",
+    "variant": "seq",
+    "size": 59000,
+    "n": 20000,
+    "p2mode": 0,
+    "nodelay": 1
+   },
+   "wall_s": 25.70186758041382,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "rx_badmagic": 35932,
+     "rx_pkt_seq_eom": 55932,
+     "rx_pkt_seq_eom_bytes": 1180160000,
+     "rx_short": 20000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 35932,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000000",
+       "kind": "short",
+       "n": 32741,
+       "second_magic": 0,
+       "seq": 0
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 26267,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000001",
+       "kind": "short",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": 1
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 17536,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 8704,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000002",
+       "kind": "short",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": 2
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 26240,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000003",
+       "kind": "short",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": 3
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 26240,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000004",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 4
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 19712,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000005",
+       "kind": "short",
+       "n": 13056,
+       "second_magic": 0,
+       "seq": 5
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 13184,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000006",
+       "kind": "short",
+       "n": 19584,
+       "second_magic": 0,
+       "seq": 6
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 6656,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000007",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 7
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 128,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000008",
+       "kind": "short",
+       "n": 32640,
+       "second_magic": 0,
+       "seq": 8
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 26368,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000009",
+       "kind": "short",
+       "n": 6400,
+       "second_magic": 0,
+       "seq": 9
+      }
+     ],
+     "short": 20000
+    },
+    "guest_done": "{\"sent\":20000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 20000,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 20000,
+     "n": 20000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 25.637005544
+   },
+   "guest": {
+    "app_sent_ok": 20000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 1180160000,
+     "fexit_calls": 20000,
+     "guest_encoded": 20000,
+     "redirect_ok": 40000,
+     "strp_frames": 20000,
+     "strp_parse_calls": 20000,
+     "tx_alloc_seq_noeom": 55932,
+     "tx_alloc_seq_noeom_bytes": 1180160000
+    },
+    "cell": "tcp",
+    "drain_wall_s": 22.020565157,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 20000,
+    "role": "guest",
+    "send_wall_s": 19.816050207,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 20000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 20000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=20000 stalled=false\n"
+  },
+  {
+   "label": "E-seq-59000-hb64k-check-off",
+   "cell": {
+    "label": "E-seq-59000-hb64k-check-off",
+    "variant": "seq",
+    "size": 59000,
+    "n": 20000,
+    "hostbuf": 65536,
+    "check": 0,
+    "nodelay": 1
+   },
+   "wall_s": 45.7345290184021,
+   "host": {
+    "accepted_child_buffer_size": 65536,
+    "bpf_counters": {
+     "redirect_ok": 39994,
+     "rx_mismatch_passed_check_off": 19994,
+     "rx_ok": 20000,
+     "rx_pkt_seq_eom": 20000,
+     "rx_pkt_seq_eom_bytes": 1180160000,
+     "rx_pkt_seq_noeom": 19994,
+     "rx_pkt_seq_noeom_bytes": 130520832,
+     "rx_short": 19994
+    },
+    "check": 0,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000001",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 1
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000002",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 2
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000003",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 3
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000004",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 4
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000005",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 5
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000006",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 6
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000007",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 7
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000008",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 8
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000009",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 9
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000000a",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 10
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000000b",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 11
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000000c",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 12
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000000d",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 13
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000000e",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 14
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000000f",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 15
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000010",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 16
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000011",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 17
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000012",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 18
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000013",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 19
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000014",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 20
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000015",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 21
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000016",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 22
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000017",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 23
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "0000000000000018",
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 24
+      }
+     ],
+     "short": 19994
+    },
+    "guest_done": "{\"sent\":20000,\"stalled\":false}",
+    "hostbuf_arg": 65536,
+    "listener_buffer_size": 65536,
+    "n": 20000,
+    "outcome": {
+     "delivered_once": 6,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 19994,
+     "n": 20000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 59979,
+     "bad_reasons": {
+      "pattern_corrupt": 19994,
+      "stream_desync": 39985
+     },
+     "bytes": 1310680832,
+     "desync_bytes_skipped": 130520829,
+     "frames_parsed": 20000,
+     "frames_verified_ok": 6
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 45.669230722
+   },
+   "guest": {
+    "app_sent_ok": 20000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 1180160000,
+     "fexit_calls": 40321,
+     "guest_encoded": 20000,
+     "redirect_ok": 40000,
+     "strp_frames": 20000,
+     "strp_parse_calls": 20000,
+     "tx_alloc_seq_noeom": 39994,
+     "tx_alloc_seq_noeom_bytes": 1310680832
+    },
+    "cell": "tcp",
+    "drain_wall_s": 42.084093049,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 20000,
+    "role": "guest",
+    "send_wall_s": 39.679655131,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 20321,
+     "ok_full": 20000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 20000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=20000 stalled=false\n"
+  },
+  {
+   "label": "E-seq-synth",
+   "cell": {
+    "label": "E-seq-synth",
+    "variant": "seq",
+    "size": "any",
+    "n": 8,
+    "synth": 1
+   },
+   "wall_s": 6.3733508586883545,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 4,
+     "rx_badmagic": 1,
+     "rx_long": 2,
+     "rx_long_second_magic": 1,
+     "rx_ok": 4,
+     "rx_pkt_seq_eom": 11,
+     "rx_pkt_seq_eom_bytes": 63045,
+     "rx_short": 4
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 1,
+     "long": 2,
+     "long_with_second_magic": 1,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 100,
+       "first8_hex": "0000000000000001",
+       "kind": "long",
+       "n": 316,
+       "second_magic": 1,
+       "seq": 1
+      },
+      {
+       "declared": 300,
+       "first8_hex": "0000000000000003",
+       "kind": "short",
+       "n": 150,
+       "second_magic": 0,
+       "seq": 3
+      },
+      {
+       "declared": 100,
+       "first8_hex": "0000000000000004",
+       "kind": "long",
+       "n": 111,
+       "second_magic": 0,
+       "seq": 4
+      },
+      {
+       "declared": 500,
+       "first8_hex": "0000000000000006",
+       "kind": "short",
+       "n": 28,
+       "second_magic": 0,
+       "seq": 6
+      },
+      {
+       "declared": 3000,
+       "first8_hex": "0000000000000008",
+       "kind": "short",
+       "n": 1000,
+       "second_magic": 0,
+       "seq": 8
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 2008,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 200,
+       "first8_hex": "eeeeeeeeeeeeeeee",
+       "kind": "short",
+       "n": 100,
+       "second_magic": 0,
+       "seq": 17216961135462248174
+      }
+     ],
+     "short": 4
+    },
+    "guest_done": "{\"sent\":0,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 8,
+    "outcome": {
+     "delivered_once": 3,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 5,
+     "n": 8
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 1,
+     "bad_reasons": {
+      "seq_out_of_range": 1
+     },
+     "bytes": 59332,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 4,
+     "frames_verified_ok": 3
+    },
+    "size": "any",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 6.310160074
+   },
+   "guest": {
+    "app_sent_ok": 0,
+    "bound": 59000,
+    "bpf_counters": {
+     "tx_alloc_seq_noeom": 11,
+     "tx_alloc_seq_noeom_bytes": 63045
+    },
+    "cell": "tcp",
+    "drain_wall_s": 2.756582613,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 8,
+    "role": "guest",
+    "send_wall_s": 0.552640455,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 1,
+    "udp_snmp_delta": {},
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=0 stalled=false\n"
+  },
+  {
+   "label": "E-seq-synth-check-off",
+   "cell": {
+    "label": "E-seq-synth-check-off",
+    "variant": "seq",
+    "size": "any",
+    "n": 8,
+    "synth": 1,
+    "check": 0
+   },
+   "wall_s": 6.378254413604736,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 11,
+     "rx_badmagic": 1,
+     "rx_long": 2,
+     "rx_long_second_magic": 1,
+     "rx_mismatch_passed_check_off": 7,
+     "rx_ok": 4,
+     "rx_pkt_seq_eom": 11,
+     "rx_pkt_seq_eom_bytes": 63045,
+     "rx_short": 4
+    },
+    "check": 0,
+    "events": {
+     "badmagic": 1,
+     "long": 2,
+     "long_with_second_magic": 1,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 100,
+       "first8_hex": "0000000000000001",
+       "kind": "long",
+       "n": 316,
+       "second_magic": 1,
+       "seq": 1
+      },
+      {
+       "declared": 300,
+       "first8_hex": "0000000000000003",
+       "kind": "short",
+       "n": 150,
+       "second_magic": 0,
+       "seq": 3
+      },
+      {
+       "declared": 100,
+       "first8_hex": "0000000000000004",
+       "kind": "long",
+       "n": 111,
+       "second_magic": 0,
+       "seq": 4
+      },
+      {
+       "declared": 500,
+       "first8_hex": "0000000000000006",
+       "kind": "short",
+       "n": 28,
+       "second_magic": 0,
+       "seq": 6
+      },
+      {
+       "declared": 3000,
+       "first8_hex": "0000000000000008",
+       "kind": "short",
+       "n": 1000,
+       "second_magic": 0,
+       "seq": 8
+      },
+      {
+       "declared": 0,
+       "first8_hex": "ffffffffffffffff",
+       "kind": "badmagic",
+       "n": 2008,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 200,
+       "first8_hex": "eeeeeeeeeeeeeeee",
+       "kind": "short",
+       "n": 100,
+       "second_magic": 0,
+       "seq": 17216961135462248174
+      }
+     ],
+     "short": 4
+    },
+    "guest_done": "{\"sent\":0,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 8,
+    "outcome": {
+     "delivered_once": 3,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 5,
+     "n": 8
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 8,
+     "bad_reasons": {
+      "pattern_corrupt": 2,
+      "seq_out_of_range": 1,
+      "size_field_mismatch": 1,
+      "stream_desync": 4
+     },
+     "bytes": 63045,
+     "desync_bytes_skipped": 58589,
+     "frames_parsed": 7,
+     "frames_verified_ok": 3
+    },
+    "size": "any",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 6.309454872
+   },
+   "guest": {
+    "app_sent_ok": 0,
+    "bound": 59000,
+    "bpf_counters": {
+     "tx_alloc_seq_noeom": 11,
+     "tx_alloc_seq_noeom_bytes": 63045
+    },
+    "cell": "tcp",
+    "drain_wall_s": 2.756809936,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 8,
+    "role": "guest",
+    "send_wall_s": 0.552644441,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 1,
+    "udp_snmp_delta": {},
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=0 stalled=false\n"
+  },
+  {
+   "label": "E-seq-59000-hb32k-emsgsize",
+   "cell": {
+    "label": "E-seq-59000-hb32k-emsgsize",
+    "variant": "seq",
+    "size": 59000,
+    "n": 300,
+    "hostbuf": 32768,
+    "nodelay": 1
+   },
+   "wall_s": 25.596017599105835,
+   "host": {
+    "accepted_child_buffer_size": 32768,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":160,\"stalled\":true}",
+    "hostbuf_arg": 32768,
+    "listener_buffer_size": 32768,
+    "n": 300,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 300,
+     "n": 300
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 25.530312935
+   },
+   "guest": {
+    "app_sent_ok": 160,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_calls": 1,
+     "guest_encoded": 160,
+     "redirect_ok": 320,
+     "strp_frames": 160,
+     "strp_parse_calls": 160
+    },
+    "cell": "tcp",
+    "drain_wall_s": 22.210203546,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 300,
+    "role": "guest",
+    "send_wall_s": 20.006260006,
+    "sender_stalled": true,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno90": 1
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 160
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=160 stalled=true\n"
+  },
+  {
+   "label": "E-stream-59000-hb32k",
+   "cell": {
+    "label": "E-stream-59000-hb32k",
+    "variant": "stream",
+    "size": 59000,
+    "n": 20000,
+    "hostbuf": 32768,
+    "nodelay": 1
+   },
+   "wall_s": 77.77655291557312,
+   "host": {
+    "accepted_child_buffer_size": 32768,
+    "bpf_counters": {
+     "redirect_ok": 75939,
+     "rx_ok": 20000,
+     "rx_pkt_stream": 55939,
+     "rx_pkt_stream_bytes": 1180160000,
+     "strp_frames": 20000,
+     "strp_parse_calls": 20000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32741,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 13056,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19584,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32640,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6400,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12928,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19456,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25984,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32512,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6272,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12800,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19328,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25856,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32384,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6144,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12672,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19200,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25728,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32256,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6016,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12544,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19072,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25600,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32128,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5888,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12416,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18944,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25472,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32000,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5760,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12288,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18816,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25344,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 31872,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5632,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12160,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18688,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25216,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 31744,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5504,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12032,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18560,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25088,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 31616,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5376,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 11904,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18432,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 24960,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 31488,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5248,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 11776,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18304,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 24832,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 31360,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5120,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 11648,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18176,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 24704,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 31232,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 4992,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 11520,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18048,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 24576,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 31104,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 13056,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19584,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32640,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6400,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12928,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19456,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25984,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32512,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6272,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12800,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19328,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25856,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25728,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32256,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 6016,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12544,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 19072,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25600,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32128,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5888,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12416,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18944,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 25472,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32000,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 5760,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 12288,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 18816,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 21120,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 27648,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 1408,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 7936,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 14464,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 20992,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 27520,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 1280,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 7808,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 14336,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 20864,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 27392,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 1152,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 7680,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 14208,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 20736,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 27264,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 1024,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 7552,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 14080,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 20608,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 27136,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 896,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 7424,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      }
+     ],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":20000,\"stalled\":false}",
+    "hostbuf_arg": 32768,
+    "listener_buffer_size": 32768,
+    "n": 20000,
+    "outcome": {
+     "delivered_once": 20000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 20000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 1180160000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 20000,
+     "frames_verified_ok": 20000
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "stream",
+    "wall_s": 77.710472034
+   },
+   "guest": {
+    "app_sent_ok": 20000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 1180160000,
+     "fexit_calls": 92028,
+     "guest_encoded": 20000,
+     "redirect_ok": 40000,
+     "strp_frames": 20000,
+     "strp_parse_calls": 20000,
+     "tx_alloc_stream": 55939,
+     "tx_alloc_stream_bytes": 1180160000
+    },
+    "cell": "tcp",
+    "drain_wall_s": 74.095548639,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 20000,
+    "role": "guest",
+    "send_wall_s": 71.491293133,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 36096,
+     "ok_full": 20000,
+     "ok_partial": 35932
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 20000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "stream"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=20000 stalled=false\n"
+  },
+  {
+   "label": "E-seq-61440-bound65536",
+   "cell": {
+    "label": "E-seq-61440-bound65536",
+    "variant": "seq",
+    "size": 61440,
+    "n": 20000,
+    "bound": 65536,
+    "nodelay": 1
+   },
+   "wall_s": 25.766461849212646,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 20000,
+     "rx_ok": 20000,
+     "rx_pkt_seq_eom": 20000,
+     "rx_pkt_seq_eom_bytes": 1228960000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":20000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 20000,
+    "outcome": {
+     "delivered_once": 20000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 20000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 1228960000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 20000,
+     "frames_verified_ok": 20000
+    },
+    "size": "61440",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 25.70613706
+   },
+   "guest": {
+    "app_sent_ok": 20000,
+    "bound": 65536,
+    "bpf_counters": {
+     "fexit_bytes": 1228960000,
+     "fexit_calls": 20000,
+     "guest_encoded": 20000,
+     "redirect_ok": 40000,
+     "strp_frames": 20000,
+     "strp_parse_calls": 20000,
+     "tx_alloc_seq_noeom": 20000,
+     "tx_alloc_seq_noeom_bytes": 1228960000
+    },
+    "cell": "tcp",
+    "drain_wall_s": 22.066603763,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 20000,
+    "role": "guest",
+    "send_wall_s": 19.862401053,
+    "sender_stalled": false,
+    "size": "61440",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 20000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 20000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=20000 stalled=false\n"
+  },
+  {
+   "label": "E-stream-61440-bound65536",
+   "cell": {
+    "label": "E-stream-61440-bound65536",
+    "variant": "stream",
+    "size": 61440,
+    "n": 20000,
+    "bound": 65536,
+    "nodelay": 1
+   },
+   "wall_s": 25.770309448242188,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 40000,
+     "rx_ok": 20000,
+     "rx_pkt_stream": 20000,
+     "rx_pkt_stream_bytes": 1228960000,
+     "strp_frames": 20000,
+     "strp_parse_calls": 20000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 32741,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 49152,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000f000",
+       "kind": "parse",
+       "n": 61448,
+       "second_magic": 0,
+       "seq": 6509183813678067712
+      }
+     ],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":20000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 20000,
+    "outcome": {
+     "delivered_once": 20000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 20000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 1228960000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 20000,
+     "frames_verified_ok": 20000
+    },
+    "size": "61440",
+    "uname": "7.0.0-29-generic",
+    "variant": "stream",
+    "wall_s": 25.707648436
+   },
+   "guest": {
+    "app_sent_ok": 20000,
+    "bound": 65536,
+    "bpf_counters": {
+     "fexit_bytes": 1228960000,
+     "fexit_calls": 20000,
+     "guest_encoded": 20000,
+     "redirect_ok": 40000,
+     "strp_frames": 20000,
+     "strp_parse_calls": 20000,
+     "tx_alloc_stream": 20000,
+     "tx_alloc_stream_bytes": 1228960000
+    },
+    "cell": "tcp",
+    "drain_wall_s": 22.066120797,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 20000,
+    "role": "guest",
+    "send_wall_s": 19.862156996,
+    "sender_stalled": false,
+    "size": "61440",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 20000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 20000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "stream"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=20000 stalled=false\n"
+  },
+  {
+   "label": "E-seq-61440-adr-bound",
+   "cell": {
+    "label": "E-seq-61440-adr-bound",
+    "variant": "seq",
+    "size": 61440,
+    "n": 2000,
+    "nodelay": 1
+   },
+   "wall_s": 5.6691155433654785,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":2000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 2000,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 2000,
+     "n": 2000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "61440",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 5.607276752
+   },
+   "guest": {
+    "app_sent_ok": 2000,
+    "bound": 59000,
+    "bpf_counters": {
+     "guest_over_bound_drop": 2000
+    },
+    "cell": "tcp",
+    "drain_wall_s": 2.2262379230000002,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 2000,
+    "role": "guest",
+    "send_wall_s": 0.022232429,
+    "sender_stalled": false,
+    "size": "61440",
+    "skb_send_sock_outcomes_on_vsock_leg": {},
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 2000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=2000 stalled=false\n"
+  },
+  {
+   "label": "B-seq-1024-pause3s",
+   "cell": {
+    "label": "B-seq-1024-pause3s",
+    "variant": "seq",
+    "size": 1024,
+    "n": 100000,
+    "pause_ms": 3000,
+    "nodelay": 1
+   },
+   "wall_s": 10.029108762741089,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 100000,
+     "rx_ok": 100000,
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 103200000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 100000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 100000
+    },
+    "pause_ms": 3000,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 103200000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 100000,
+     "frames_verified_ok": 100000
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 9.964062414
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 103200000,
+     "fexit_calls": 100000,
+     "guest_encoded": 100000,
+     "redirect_ok": 200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000,
+     "tx_alloc_seq_noeom": 100000,
+     "tx_alloc_seq_noeom_bytes": 103200000
+    },
+    "cell": "tcp",
+    "drain_wall_s": 6.376216451,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 3.97215527,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "B-seq-59000-pause3s",
+   "cell": {
+    "label": "B-seq-59000-pause3s",
+    "variant": "seq",
+    "size": 59000,
+    "n": 100000,
+    "pause_ms": 3000,
+    "nodelay": 1
+   },
+   "wall_s": 105.56857633590698,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 100000,
+     "rx_ok": 100000,
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 5900800000,
+     "rx_pkt_seq_noeom": 12,
+     "rx_pkt_seq_noeom_bytes": 313344,
+     "rx_short": 12
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f0cb",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61643
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f0d0",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61648
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f0d4",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61652
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f0d8",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61656
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f0ec",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61676
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f0fd",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61693
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f101",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61697
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f10a",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61706
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f113",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61715
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f117",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61719
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f134",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61748
+      },
+      {
+       "declared": 59000,
+       "first8_hex": "000000000000f138",
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 61752
+      }
+     ],
+     "short": 12
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 100000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 100000
+    },
+    "pause_ms": 3000,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 5900800000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 100000,
+     "frames_verified_ok": 100000
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 105.499495927
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 5900800000,
+     "fexit_calls": 100017,
+     "guest_encoded": 100000,
+     "redirect_ok": 200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000,
+     "tx_alloc_seq_noeom": 100012,
+     "tx_alloc_seq_noeom_bytes": 5901113344
+    },
+    "cell": "tcp",
+    "drain_wall_s": 101.861702973,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 99.65755824,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 17,
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "B-stream-1024-pause3s",
+   "cell": {
+    "label": "B-stream-1024-pause3s",
+    "variant": "stream",
+    "size": 1024,
+    "n": 100000,
+    "pause_ms": 3000,
+    "nodelay": 1
+   },
+   "wall_s": 10.172500371932983,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 200000,
+     "rx_ok": 100000,
+     "rx_pkt_stream": 100000,
+     "rx_pkt_stream_bytes": 103200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a55443100000400",
+       "kind": "parse",
+       "n": 1032,
+       "second_magic": 0,
+       "seq": 6509183813678007296
+      }
+     ],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 100000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 100000
+    },
+    "pause_ms": 3000,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 103200000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 100000,
+     "frames_verified_ok": 100000
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "stream",
+    "wall_s": 10.099311559
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 103200000,
+     "fexit_calls": 100000,
+     "guest_encoded": 100000,
+     "redirect_ok": 200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000,
+     "tx_alloc_stream": 100000,
+     "tx_alloc_stream_bytes": 103200000
+    },
+    "cell": "tcp",
+    "drain_wall_s": 6.449772239,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 4.045279939,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "stream"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "B-stream-59000-pause3s",
+   "cell": {
+    "label": "B-stream-59000-pause3s",
+    "variant": "stream",
+    "size": 59000,
+    "n": 100000,
+    "pause_ms": 3000,
+    "nodelay": 1
+   },
+   "wall_s": 105.75365543365479,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 200003,
+     "rx_ok": 100000,
+     "rx_pkt_stream": 100003,
+     "rx_pkt_stream_bytes": 5900800000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 32741,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 50688,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      },
+      {
+       "declared": 0,
+       "first8_hex": "5a5544310000e678",
+       "kind": "parse",
+       "n": 59008,
+       "second_magic": 0,
+       "seq": 6509183813678065272
+      }
+     ],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 100000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 100000
+    },
+    "pause_ms": 3000,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 5900800000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 100000,
+     "frames_verified_ok": 100000
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "stream",
+    "wall_s": 105.691486307
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 5900800000,
+     "fexit_calls": 100010,
+     "guest_encoded": 100000,
+     "redirect_ok": 200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000,
+     "tx_alloc_stream": 100003,
+     "tx_alloc_stream_bytes": 5900800000
+    },
+    "cell": "tcp",
+    "drain_wall_s": 102.044533718,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 99.840273701,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 7,
+     "ok_full": 100000,
+     "ok_partial": 3
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "stream"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "D-seqrecv-1024-pause3s",
+   "cell": {
+    "label": "D-seqrecv-1024-pause3s",
+    "variant": "seqrecv",
+    "size": 1024,
+    "n": 100000,
+    "pause_ms": 3000,
+    "nodelay": 1
+   },
+   "wall_s": 13.261978387832642,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 103200000,
+     "rx_pkt_seq_noeom": 1,
+     "rx_pkt_seq_noeom_bytes": 16
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 99999,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 1,
+     "n": 100000
+    },
+    "pause_ms": 3000,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 103200016,
+     "long": 1,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 99999,
+     "records": 100000,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seqrecv",
+    "wall_s": 13.185714649
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 103200000,
+     "fexit_calls": 101509,
+     "guest_encoded": 100000,
+     "redirect_ok": 200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000,
+     "tx_alloc_seq_noeom": 100001,
+     "tx_alloc_seq_noeom_bytes": 103200016
+    },
+    "cell": "tcp",
+    "drain_wall_s": 9.538219098,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 7.133703463,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 1509,
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seqrecv"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "D-seqrecv-16384-pause3s",
+   "cell": {
+    "label": "D-seqrecv-16384-pause3s",
+    "variant": "seqrecv",
+    "size": 16384,
+    "n": 100000,
+    "pause_ms": 3000,
+    "nodelay": 1
+   },
+   "wall_s": 31.6891987323761,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 1639200000,
+     "rx_pkt_seq_noeom": 187,
+     "rx_pkt_seq_noeom_bytes": 3041368
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 99813,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 187,
+     "n": 100000
+    },
+    "pause_ms": 3000,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 1642241368,
+     "long": 187,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 99813,
+     "records": 100000,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "16384",
+    "uname": "7.0.0-29-generic",
+    "variant": "seqrecv",
+    "wall_s": 31.626358886
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 1639200000,
+     "fexit_calls": 101807,
+     "guest_encoded": 100000,
+     "redirect_ok": 200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000,
+     "tx_alloc_seq_noeom": 100187,
+     "tx_alloc_seq_noeom_bytes": 1642241368
+    },
+    "cell": "tcp",
+    "drain_wall_s": 27.992073375,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 25.788109694,
+    "sender_stalled": false,
+    "size": "16384",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 1807,
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seqrecv"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "D-seqrecv-59000-pause3s",
+   "cell": {
+    "label": "D-seqrecv-59000-pause3s",
+    "variant": "seqrecv",
+    "size": 59000,
+    "n": 100000,
+    "pause_ms": 3000,
+    "nodelay": 1
+   },
+   "wall_s": 105.36010098457336,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 5900800000,
+     "rx_pkt_seq_noeom": 307,
+     "rx_pkt_seq_noeom_bytes": 8016384
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 99693,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 307,
+     "n": 100000
+    },
+    "pause_ms": 3000,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 5908816384,
+     "long": 307,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 99693,
+     "records": 100000,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seqrecv",
+    "wall_s": 105.298174938
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 5900800000,
+     "fexit_calls": 101915,
+     "guest_encoded": 100000,
+     "redirect_ok": 200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000,
+     "tx_alloc_seq_noeom": 100307,
+     "tx_alloc_seq_noeom_bytes": 5908816384
+    },
+    "cell": "tcp",
+    "drain_wall_s": 101.660700101,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 99.456682389,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 1915,
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seqrecv"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  },
+  {
+   "label": "D-seqrecv-59000-hb64k",
+   "cell": {
+    "label": "D-seqrecv-59000-hb64k",
+    "variant": "seqrecv",
+    "size": 59000,
+    "n": 100000,
+    "hostbuf": 65536,
+    "nodelay": 1
+   },
+   "wall_s": 205.69870448112488,
+   "host": {
+    "accepted_child_buffer_size": 65536,
+    "bpf_counters": {
+     "rx_pkt_seq_eom": 100000,
+     "rx_pkt_seq_eom_bytes": 5900800000,
+     "rx_pkt_seq_noeom": 49976,
+     "rx_pkt_seq_noeom_bytes": 326243328
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":100000,\"stalled\":false}",
+    "hostbuf_arg": 65536,
+    "listener_buffer_size": 65536,
+    "n": 100000,
+    "outcome": {
+     "delivered_once": 50024,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 49976,
+     "n": 100000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 6227043328,
+     "long": 49976,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 50024,
+     "records": 100000,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seqrecv",
+    "wall_s": 205.628189662
+   },
+   "guest": {
+    "app_sent_ok": 100000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 5900800000,
+     "fexit_calls": 201608,
+     "guest_encoded": 100000,
+     "redirect_ok": 200000,
+     "strp_frames": 100000,
+     "strp_parse_calls": 100000,
+     "tx_alloc_seq_noeom": 149975,
+     "tx_alloc_seq_noeom_bytes": 6226984320
+    },
+    "cell": "tcp",
+    "drain_wall_s": 202.040553401,
+    "guest_events": {
+     "parse_bad": 0,
+     "sample": []
+    },
+    "guest_vsock_buffer_size": 262144,
+    "k1": 0,
+    "n": 100000,
+    "role": "guest",
+    "send_wall_s": 199.636220751,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 101608,
+     "ok_full": 100000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 100000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seqrecv"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=100000 stalled=false\n"
+  }
+ ]
+}

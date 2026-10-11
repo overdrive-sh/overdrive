@@ -1,0 +1,14 @@
+{"t": 1791708061.2733634, "cmd": "uname -r", "rc": 0, "out": "7.0.0-29-generic\n"}
+{"t": 1791708061.2752995, "cmd": "ip addr add 10.77.0.2/32 dev lo", "rc": 0, "out": ""}
+{"t": 1791708061.2769318, "cmd": "echo 1 > /proc/sys/net/ipv4/tcp_fwmark_accept", "rc": 0, "out": ""}
+{"t": 1791708061.278352, "cmd": "echo 1 > /proc/sys/net/ipv4/fwmark_reflect", "rc": 0, "out": ""}
+{"t": 1791708061.2797952, "cmd": "for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > $f; done", "rc": 0, "out": ""}
+{"t": 1791708061.2813463, "cmd": "ip rule add fwmark 1 lookup 100", "rc": 0, "out": ""}
+{"t": 1791708061.282885, "cmd": "ip route add local 0.0.0.0/0 dev lo table 100", "rc": 0, "out": ""}
+{"t": 1791708061.2899718, "cmd": "ip -br addr; ip rule; ip route show table 100; uname -r", "rc": 0, "out": "0:\tfrom all lookup local \n32765:\tfrom all fwmark 0x1 lookup 100 \n32766:\tfrom all lookup main \n32767:\tfrom all lookup default \nlocal default dev lo scope host \n7.0.0-29-generic\nBusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.\n\nUsage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]\n\nOPTIONS := -f[amily] inet|inet6|link | -o[neline]\n\nip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]\nip route list|flush|add|del|change|append|replace|test ROUTE\nip link set IFACE [up|down] [arp on|off] [multicast on|off]\n\t[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]\n\t[master IFACE | nomaster] [netns PID] [type TYPE ARGS]\nip tunnel add|change|del|show [NAME]\n\t[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]\nip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]\nip rule [list] | add|del SELECTOR ACTION\n"}
+{"t": 1791708061.4957683, "cmd": "/legs pk 9 gagent; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791708062.0005744, "cmd": "(setsid /legs gagent --eof-class tp --log /tmp/gagent.jsonl > /tmp/gagent.out 2>&1 < /dev/null &) ; sleep 0.5; : > /tmp/gagent.jsonl; cat /tmp/gagent.out", "rc": 0, "out": "\nthread 'main' (133) panicked at src/main.rs:75:59:\ntp init: \"load: ParseError(ElfError(Error(\\\"Invalid ELF header size or alignment\\\")))\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n"}
+{"t": 1791708062.0022428, "cmd": ": > /tmp/gagent.jsonl", "rc": 0, "out": ""}
+{"t": 1791708062.20787, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791708062.5121145, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 2000003 --send-after-read --end close > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791708062.5145204, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}

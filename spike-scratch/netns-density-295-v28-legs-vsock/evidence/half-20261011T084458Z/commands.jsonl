@@ -1,0 +1,6 @@
+{"t": 1791708298.9138415, "cmd": "modprobe vhost_vsock; modprobe vsock_loopback; modprobe tls; lsmod | grep -E '^(tls|vsock|vhost_vsock)' | head", "rc": 0, "out": "vsock_diag             12288  0\nvhost_vsock            28672  0\nvsock_loopback         12288  1\nvsock                  73728  6 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport\ntls                   163840  0\n"}
+{"t": 1791708298.917726, "cmd": "ip addr show dev lo | grep -q 198.18.28.1 || ip addr add 198.18.28.1/32 dev lo", "rc": 0, "out": ""}
+{"t": 1791708298.9710236, "cmd": ["modprobe", "--show-depends", "vmw_vsock_virtio_transport"], "rc": 0, "out": "insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst \ninsmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst \ninsmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst \n"}
+{"t": 1791708299.4740748, "cmd": "cd /tmp/v28-work/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /tmp/v28-work/out/initramfs.cpio.gz", "rc": 0, "out": ""}
+{"t": 1791708326.780887, "cmd": "ip addr del 198.18.28.1/32 dev lo", "rc": 0, "out": ""}
+{"t": 1791708326.7987237, "cmd": "pgrep -af cloud-hypervisor | grep -v pgrep; true", "rc": 0, "out": ""}

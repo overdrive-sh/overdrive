@@ -1,0 +1,219 @@
+[
+ {
+  "label": "F2-seq-unix-1024",
+  "variant": "seq",
+  "size": 1024,
+  "n": 100000,
+  "cell": "unix"
+ },
+ {
+  "label": "F2-seq-unix-mix",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "cell": "unix"
+ },
+ {
+  "label": "F2-seq-unix-59000",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "cell": "unix"
+ },
+ {
+  "label": "F2-seq-unix-k1",
+  "variant": "seq",
+  "size": 1024,
+  "n": 200,
+  "cell": "unix",
+  "k1": 100
+ },
+ {
+  "label": "F2-seq-unix-k1-rearm",
+  "variant": "seq",
+  "size": 1024,
+  "n": 200,
+  "cell": "unix",
+  "k1": 100,
+  "k1rearm": 1
+ },
+ {
+  "label": "F2-seq-unix-16384-hb64k",
+  "variant": "seq",
+  "size": 16384,
+  "n": 100000,
+  "cell": "unix",
+  "hostbuf": 65536
+ },
+ {
+  "label": "F2-seq-direct-mix-hb64k",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "cell": "direct",
+  "hostbuf": 65536
+ },
+ {
+  "label": "A3-seq-mixs-default-r1",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000
+ },
+ {
+  "label": "A3-seq-mixs-default-r2",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000
+ },
+ {
+  "label": "A3-stream-mix-default-r1",
+  "variant": "stream",
+  "size": "mix",
+  "n": 100000
+ },
+ {
+  "label": "A3-seq-mixs-nodelay-r1",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A3-seq-mixs-nodelay-r2",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A3-seq-mixs-nodelay-r3",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A3-stream-mixs-nodelay-r1",
+  "variant": "stream",
+  "size": "mixs",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A3-stream-mixs-nodelay-r2",
+  "variant": "stream",
+  "size": "mixs",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A3-seq-mix-nodelay-r1",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A3-seq-mix-nodelay-r2",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-16384-hb64k",
+  "variant": "stream",
+  "size": 16384,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-mixs-hb64k",
+  "variant": "stream",
+  "size": "mixs",
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-32768-hb64k",
+  "variant": "seq",
+  "size": 32768,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-59000-hb64k",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-mix-hb64k",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-32768-hb64k",
+  "variant": "stream",
+  "size": 32768,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-59000-hb64k",
+  "variant": "stream",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-mix-hb64k",
+  "variant": "stream",
+  "size": "mix",
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-16384-hb128k",
+  "variant": "seq",
+  "size": 16384,
+  "n": 100000,
+  "hostbuf": 131072,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-59000-hb128k",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 131072,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-16384-hb128k",
+  "variant": "stream",
+  "size": 16384,
+  "n": 100000,
+  "hostbuf": 131072,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-59000-hb128k",
+  "variant": "stream",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 131072,
+  "nodelay": 1
+ }
+]

@@ -1,0 +1,9 @@
+{"addr":"127.0.0.1:19428","backlog":128,"ev":"listening","mode":"serve"}
+{"down_err":0,"down_sent":67108864,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":70,"peer":"127.0.0.1:49702","tag":"","up_bad_at":null,"up_bytes":0,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":67108864,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":43,"peer":"127.0.0.1:49706","tag":"","up_bad_at":null,"up_bytes":0,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":67108864,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":43,"peer":"127.0.0.1:49708","tag":"","up_bad_at":null,"up_bytes":0,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":67108864,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":71,"peer":"127.0.0.1:49720","tag":"","up_bad_at":null,"up_bytes":0,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":67108864,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":47,"peer":"127.0.0.1:49736","tag":"","up_bad_at":null,"up_bytes":0,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":67108864,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":66,"peer":"127.0.0.1:49750","tag":"","up_bad_at":null,"up_bytes":0,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":67108864,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":38,"peer":"127.0.0.1:49756","tag":"","up_bad_at":null,"up_bytes":0,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":67108864,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":71,"peer":"127.0.0.1:49758","tag":"","up_bad_at":null,"up_bytes":0,"up_end":"eof","up_ok":true}

@@ -1,0 +1,1017 @@
+{
+  "accepted_child_buffer_size": 65536,
+  "bpf_counters": {
+    "redirect_ok": 200000,
+    "rx_ok": 100000,
+    "rx_pkt_stream": 100000,
+    "rx_pkt_stream_bytes": 7200000,
+    "strp_frames": 100000,
+    "strp_parse_calls": 100000
+  },
+  "check": 1,
+  "events": {
+    "badmagic": 0,
+    "long": 0,
+    "long_with_second_magic": 0,
+    "lt8": 0,
+    "sample": [
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a55443100000040",
+        "kind": "parse",
+        "n": 72,
+        "second_magic": 0,
+        "seq": 6509183813678006336
+      }
+    ],
+    "short": 0
+  },
+  "guest_done": "{\"sent\":100000,\"stalled\":false}",
+  "hostbuf_arg": 65536,
+  "listener_buffer_size": 65536,
+  "n": 100000,
+  "outcome": {
+    "delivered_once": 100000,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 0,
+    "n": 100000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 0,
+    "bad_reasons": {},
+    "bytes": 7200000,
+    "desync_bytes_skipped": 0,
+    "frames_parsed": 100000,
+    "frames_verified_ok": 100000
+  },
+  "size": "64",
+  "uname": "7.0.0-29-generic",
+  "variant": "stream",
+  "wall_s": 7.704016493
+}

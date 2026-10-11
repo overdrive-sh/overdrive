@@ -1,0 +1,227 @@
+{
+ "tag": "n-host-owner-held-noclassify-1",
+ "seed": 40801,
+ "action": "kill-host-owner",
+ "action_delay_ms": 335,
+ "action_done_at_ms_after_clients_start": 336,
+ "clients_wall_s": 0.7,
+ "trials": 800,
+ "cats": {
+  "violation:cli_clean_short_eof": 400,
+  "reset": 400
+ },
+ "ends": {
+  "cli:CLEAN_SHORT_EOF": 400,
+  "srv:reset": 358,
+  "srv:complete": 42,
+  "cli:reset": 400,
+  "srv:no_result": 400
+ },
+ "examples": [
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    169,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    357,
+    300,
+    false,
+    null,
+    37536
+   ],
+   "srv": [
+    169,
+    32685,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    176,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    357,
+    300,
+    true,
+    null,
+    37522
+   ],
+   "srv": [
+    176,
+    32685,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    217,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    356,
+    300,
+    false,
+    null,
+    37512
+   ],
+   "srv": [
+    217,
+    32685,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    156,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    357,
+    300,
+    true,
+    null,
+    37500
+   ],
+   "srv": [
+    156,
+    36807,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    280,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    354,
+    300,
+    false,
+    null,
+    37466
+   ],
+   "srv": [
+    280,
+    69576,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    266,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    354,
+    300,
+    true,
+    null,
+    37560
+   ],
+   "srv": [
+    266,
+    32685,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  }
+ ],
+ "clients_rc": 0,
+ "guest_owner": {
+  "live_at_end": 0,
+  "clean": 42,
+  "aborted": 358,
+  "aborts": {
+   "epollerr": 254,
+   "redirect_dropped": 104
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 0,
+   "shut_0x3": 400,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 66,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 689,
+   "fire_poke": 0,
+   "fire_fexit": 42,
+   "level_unreadable": 0
+  }
+ },
+ "host_owner": null
+}

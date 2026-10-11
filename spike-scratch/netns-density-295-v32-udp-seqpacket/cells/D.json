@@ -1,0 +1,34 @@
+[
+ {
+  "label": "D-seqrecv-1024-pause3s",
+  "variant": "seqrecv",
+  "size": 1024,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "D-seqrecv-16384-pause3s",
+  "variant": "seqrecv",
+  "size": 16384,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "D-seqrecv-59000-pause3s",
+  "variant": "seqrecv",
+  "size": 59000,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "D-seqrecv-59000-hb64k",
+  "variant": "seqrecv",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ }
+]

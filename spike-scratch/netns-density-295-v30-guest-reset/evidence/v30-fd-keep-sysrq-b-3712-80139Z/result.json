@@ -1,0 +1,189 @@
+{
+ "name": "v30-fd-keep-sysrq-b-3712-80139Z",
+ "mode": "fd-keep",
+ "case": "sysrq-b",
+ "cid": 3712,
+ "cmdline": "console=ttyS0 panic=1 loglevel=4",
+ "vsock_arg": "cid=3712,backend=vhost-kernel,fd=4",
+ "ch_pid": 3992463,
+ "before": {
+  "incarnation_1": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802782 3712:5000     ",
+   "v_str LISTEN 0      0      *:6000          *:*        ",
+   "v_str ESTAB  0      0      2:6000       3712:877248668"
+  ],
+  "ch_vhost_fds": {
+   "4": "/dev/vhost-vsock"
+  },
+  "claim_attempt_from_host_probe": "EADDRINUSE"
+ },
+ "after": {
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "send_probe_on_open_conns": {
+   "g2h#1": "send ok",
+   "h2g#1": "send ok"
+  },
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802782 3712:5000     ",
+   "v_str LISTEN 0      0      *:6000          *:*        ",
+   "v_str ESTAB  0      0      2:6000       3712:877248668"
+  ],
+  "ch_alive": false,
+  "ch_rc": 1,
+  "ch_vhost_fds": null,
+  "claim_cid_while_launcher_holds": "EADDRINUSE",
+  "fd_keep_flows_before_launcher_closes": [
+   {
+    "name": "g2h#1",
+    "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "fd_keep_ss_before_launcher_closes": [
+   "v_str ESTAB  0      0      *:1367802782 3712:5000     ",
+   "v_str LISTEN 0      0      *:6000          *:*        ",
+   "v_str ESTAB  0      0      2:6000       3712:877248668"
+  ],
+  "launcher_closed_at_s": 7.063,
+  "fd_keep_flows_after_launcher_closes": [
+   {
+    "name": "g2h#1",
+    "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+    "state": "error",
+    "t_end_s": 7.574,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+    "state": "error",
+    "t_end_s": 7.574,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 0
+   }
+  ],
+  "claim_cid_after_launcher_close": "OK"
+ },
+ "ch_exit_t_s": 0.043,
+ "ch_rc": 1,
+ "second_incarnation_first_hello_s": null,
+ "incarnations_seen": [
+  "ee1080ed-a233-4f33-a1a4-f2d626f02740"
+ ],
+ "connect_attempts": [],
+ "supervisor_kill_at_s": null,
+ "supervisor_kill_latency_after_event_rx_ms": null,
+ "ch_events": [
+  {
+   "event": "booting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 3041279
+   },
+   "host_t_s": -1.5749
+  },
+  {
+   "event": "booted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 13395219
+   },
+   "host_t_s": -1.5749
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 549729323
+   },
+   "host_t_s": -1.0639
+  },
+  {
+   "event": "rebooting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 1,
+    "nanos": 642217982
+   },
+   "host_t_s": 0.0231
+  }
+ ],
+ "timeline": [
+  {
+   "t_s": 0.5632,
+   "wall": 1791705795.515916,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "ee1080ed-a233-4f33-a1a4-f2d626f02740",
+   "hello": "HELLO ee1080ed-a233-4f33-a1a4-f2d626f02740"
+  },
+  {
+   "t_s": 0.0004,
+   "wall": 1791705795.5672352,
+   "ev": "host_connected_to_guest",
+   "greeting": "INC ee1080ed-a233-4f33-a1a4-f2d626f02740"
+  },
+  {
+   "t_s": 0.0,
+   "wall": 1791705796.5806332,
+   "ev": "GO",
+   "case": "sysrq-b"
+  },
+  {
+   "t_s": 0.0452,
+   "wall": 1791705796.6258545,
+   "ev": "ch_exited",
+   "rc": 1
+  }
+ ]
+}

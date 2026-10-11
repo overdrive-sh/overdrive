@@ -1,0 +1,79 @@
+{
+ "tag": "k-ctl-loss-busy-1",
+ "seed": 40351,
+ "action": "ctl-loss",
+ "action_delay_ms": 688,
+ "action_done_at_ms_after_clients_start": 688,
+ "clients_wall_s": 1.1,
+ "trials": 3000,
+ "cats": {
+  "pass": 609,
+  "reset": 2391
+ },
+ "ends": {
+  "cli:complete": 609,
+  "srv:complete": 609,
+  "cli:reset": 2391,
+  "srv:no_result": 2391
+ },
+ "examples": [],
+ "clients_rc": 0,
+ "guest_owner": {
+  "live_at_end": 0,
+  "clean": 609,
+  "aborted": 17,
+  "aborts": {
+   "ctl_lost_unpaired": 12,
+   "peer_close_while_open": 5
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 609,
+   "shut_0x3": 63,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 62,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 326,
+   "fire_poke": 0,
+   "fire_fexit": 325,
+   "level_unreadable": 0
+  }
+ },
+ "host_owner": {
+  "live_at_end": 0,
+  "clean": 609,
+  "aborted": 17,
+  "aborts": {
+   "ctl_lost_unpaired": 5,
+   "peer_close_while_open": 12
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 609,
+   "shut_0x3": 12,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 95,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 321,
+   "fire_poke": 0,
+   "fire_fexit": 321,
+   "level_unreadable": 0
+  }
+ }
+}

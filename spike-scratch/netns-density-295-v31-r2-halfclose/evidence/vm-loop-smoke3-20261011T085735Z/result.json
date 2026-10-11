@@ -1,0 +1,2872 @@
+[
+ {
+  "tag": "k-none-0",
+  "seed": 9001,
+  "action": "none",
+  "action_delay_ms": 0,
+  "action_done_at_ms_after_clients_start": 0,
+  "clients_wall_s": 0.0,
+  "trials": 1000,
+  "cats": {
+   "no_server_result": 1000
+  },
+  "examples": [
+   {
+    "why": "no_server_result",
+    "row": [
+     1,
+     1896927,
+     161267,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "no_server_result",
+    "row": [
+     3,
+     0,
+     147926,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "no_server_result",
+    "row": [
+     2,
+     17354,
+     44396,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "no_server_result",
+    "row": [
+     5,
+     8699,
+     0,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "no_server_result",
+    "row": [
+     7,
+     59750,
+     1996285,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "no_server_result",
+    "row": [
+     6,
+     1377059,
+     14651,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 0,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-guest-owner-held-0",
+  "seed": 9100,
+  "action": "kill-guest-owner",
+  "action_delay_ms": 1030,
+  "action_done_at_ms_after_clients_start": 1030,
+  "clients_wall_s": 0.0,
+  "trials": 800,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 800
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-guest-owner-held-1",
+  "seed": 9101,
+  "action": "kill-guest-owner",
+  "action_delay_ms": 322,
+  "action_done_at_ms_after_clients_start": 322,
+  "clients_wall_s": 0.0,
+  "trials": 800,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 800
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     6,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-guest-owner-busy-0",
+  "seed": 9150,
+  "action": "kill-guest-owner",
+  "action_delay_ms": 530,
+  "action_done_at_ms_after_clients_start": 530,
+  "clients_wall_s": 0.0,
+  "trials": 3000,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 3000
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     446171,
+     48955,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     64537,
+     55,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     36244,
+     0,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     6,
+     99,
+     322,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     0,
+     23760,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     50,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     236063,
+     53962,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-guest-owner-busy-1",
+  "seed": 9151,
+  "action": "kill-guest-owner",
+  "action_delay_ms": 437,
+  "action_done_at_ms_after_clients_start": 438,
+  "clients_wall_s": 0.0,
+  "trials": 3000,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 3000
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     456613,
+     679032,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     50,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     29399,
+     51987,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     172286,
+     1803493,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     57,
+     11458,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     0,
+     343796,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     83,
+     47,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-host-owner-held-0",
+  "seed": 9200,
+  "action": "kill-host-owner",
+  "action_delay_ms": 592,
+  "action_done_at_ms_after_clients_start": 592,
+  "clients_wall_s": 0.0,
+  "trials": 800,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 800
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     6,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": null
+ },
+ {
+  "tag": "k-host-owner-held-1",
+  "seed": 9201,
+  "action": "kill-host-owner",
+  "action_delay_ms": 283,
+  "action_done_at_ms_after_clients_start": 283,
+  "clients_wall_s": 0.0,
+  "trials": 800,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 800
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     6,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": null
+ },
+ {
+  "tag": "k-host-owner-busy-0",
+  "seed": 9250,
+  "action": "kill-host-owner",
+  "action_delay_ms": 310,
+  "action_done_at_ms_after_clients_start": 310,
+  "clients_wall_s": 0.0,
+  "trials": 3000,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 3000
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     502320,
+     208741,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     328115,
+     187605,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     1403396,
+     0,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     30086,
+     92,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     8,
+     283662,
+     0,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     906562,
+     26853,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     false,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": null
+ },
+ {
+  "tag": "k-host-owner-busy-1",
+  "seed": 9251,
+  "action": "kill-host-owner",
+  "action_delay_ms": 296,
+  "action_done_at_ms_after_clients_start": 296,
+  "clients_wall_s": 0.0,
+  "trials": 3000,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 3000
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     0,
+     50295,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     457260,
+     1460066,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     5434,
+     1781208,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     7999,
+     312787,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     6,
+     11245,
+     263691,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     707887,
+     370388,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": null
+ },
+ {
+  "tag": "k-ctl-loss-held-0",
+  "seed": 9300,
+  "action": "ctl-loss",
+  "action_delay_ms": 401,
+  "action_done_at_ms_after_clients_start": 401,
+  "clients_wall_s": 0.0,
+  "trials": 800,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 800
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     6,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 0,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-ctl-loss-held-1",
+  "seed": 9301,
+  "action": "ctl-loss",
+  "action_delay_ms": 1373,
+  "action_done_at_ms_after_clients_start": 1373,
+  "clients_wall_s": 0.0,
+  "trials": 800,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 800
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     8,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     9,
+     1048576,
+     1048576,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     300,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 0,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-ctl-loss-busy-0",
+  "seed": 9350,
+  "action": "ctl-loss",
+  "action_delay_ms": 629,
+  "action_done_at_ms_after_clients_start": 629,
+  "clients_wall_s": 0.0,
+  "trials": 3000,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 3000
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     150600,
+     152672,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     28207,
+     840039,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     0,
+     1175938,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     249382,
+     0,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     0,
+     776261,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     0,
+     2736,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-ctl-loss-busy-1",
+  "seed": 9351,
+  "action": "ctl-loss",
+  "action_delay_ms": 466,
+  "action_done_at_ms_after_clients_start": 467,
+  "clients_wall_s": 0.0,
+  "trials": 3000,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 3000
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     496417,
+     0,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     50,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     60684,
+     414803,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     2082885,
+     377217,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     515099,
+     12024,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     567622,
+     8471,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     6,
+     43309,
+     36935,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-crash-fin-0",
+  "seed": 9400,
+  "action": "none",
+  "action_delay_ms": 0,
+  "action_done_at_ms_after_clients_start": 0,
+  "clients_wall_s": 16.0,
+  "trials": 300,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 207,
+   "crash:reset_or_unconnected": 93
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     1843194,
+     1728106,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     486931,
+     1775196,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     519530,
+     50750,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     6,
+     272770,
+     43910,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     8,
+     22467,
+     1644666,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     11,
+     0,
+     2060363,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     50,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-crash-fin-1",
+  "seed": 9401,
+  "action": "none",
+  "action_delay_ms": 0,
+  "action_done_at_ms_after_clients_start": 0,
+  "clients_wall_s": 16.0,
+  "trials": 300,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 221,
+   "crash:reset_or_unconnected": 79
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     0,
+     1086480,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     408682,
+     47572,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     8895,
+     100,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     82,
+     2003115,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     9,
+     87,
+     54,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     8,
+     850872,
+     46398,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-crash-rst-0",
+  "seed": 9500,
+  "action": "none",
+  "action_delay_ms": 1,
+  "action_done_at_ms_after_clients_start": 1,
+  "clients_wall_s": 16.0,
+  "trials": 300,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 199,
+   "crash:reset_or_unconnected": 101
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     440534,
+     15618,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     92,
+     21,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     83,
+     158988,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     63460,
+     265253,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     8,
+     63337,
+     474201,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     50,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     9,
+     30768,
+     36864,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-crash-rst-1",
+  "seed": 9501,
+  "action": "none",
+  "action_delay_ms": 1,
+  "action_done_at_ms_after_clients_start": 1,
+  "clients_wall_s": 16.0,
+  "trials": 300,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 209,
+   "crash:reset_or_unconnected": 91
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     0,
+     1507290,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     269797,
+     1391302,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     5,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     429955,
+     276842,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     420306,
+     20230,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     50,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     0,
+     77335,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     10,
+     1525869,
+     138630,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     0,
+     false,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 1,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-dest-rst-0",
+  "seed": 9600,
+  "action": "none",
+  "action_delay_ms": 1,
+  "action_done_at_ms_after_clients_start": 1,
+  "clients_wall_s": 0.0,
+  "trials": 300,
+  "cats": {
+   "violation:cli_no_reset_no_eof": 142,
+   "violation:other_error:connect:Connection refused (os error 111)": 158
+  },
+  "examples": [
+   {
+    "why": "violation:cli_no_reset_no_eof",
+    "row": [
+     2,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     true,
+     1048576
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     4,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:cli_no_reset_no_eof",
+    "row": [
+     3,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     true,
+     1048576
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 0,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ },
+ {
+  "tag": "k-dest-rst-1",
+  "seed": 9601,
+  "action": "none",
+  "action_delay_ms": 1,
+  "action_done_at_ms_after_clients_start": 1,
+  "clients_wall_s": 0.0,
+  "trials": 300,
+  "cats": {
+   "violation:other_error:connect:Connection refused (os error 111)": 157,
+   "violation:cli_no_reset_no_eof": 143
+  },
+  "examples": [
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     2,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     3,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     1,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     false,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     5,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     true,
+     null
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:cli_no_reset_no_eof",
+    "row": [
+     4,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     false,
+     1048576
+    ],
+    "srv": null
+   },
+   {
+    "why": "violation:other_error:connect:Connection refused (os error 111)",
+    "row": [
+     7,
+     2097152,
+     1000,
+     0,
+     "connect:Connection refused (os error 111)",
+     0,
+     false,
+     false,
+     null,
+     0,
+     100,
+     true,
+     null
+    ],
+    "srv": null
+   }
+  ],
+  "clients_rc": 0,
+  "guest_owner": null,
+  "host_owner": {
+   "live_at_end": 0,
+   "clean": 0,
+   "aborted": 0,
+   "aborts": {},
+   "viol": {},
+   "shut": {
+    "shut_0x2": 0,
+    "shut_0x3": 0,
+    "shut_rst": 0,
+    "shut_other": 0,
+    "rdhup_v_without_record": 0
+   },
+   "ctl_lost": 0,
+   "paired_at_loss": 0,
+   "stuck": [],
+   "bpf": {
+    "fexit_recursion_misses": 0,
+    "fexit_b_recursion_misses": 0,
+    "injected_misses": 0,
+    "poke_runs": 0,
+    "fire_poke": 0,
+    "fire_fexit": 0,
+    "level_unreadable": 0
+   }
+  }
+ }
+]

@@ -1,0 +1,34 @@
+[
+ {
+  "label": "B-seq-1024-pause3s",
+  "variant": "seq",
+  "size": 1024,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "B-seq-59000-pause3s",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "B-stream-1024-pause3s",
+  "variant": "stream",
+  "size": 1024,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "B-stream-59000-pause3s",
+  "variant": "stream",
+  "size": 59000,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ }
+]

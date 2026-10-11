@@ -1,0 +1,8 @@
+[    0.002907] KHO: Failed to reserve nid 0 scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=f3ce2837-1dd4-4a36-965e-5839532cc194
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO poweroff
+GUEST_ACT poweroff
+[    1.434671] reboot: Power down

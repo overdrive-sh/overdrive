@@ -1,0 +1,233 @@
+{
+ "tag": "k-crash-fin-perf-22",
+ "seed": 45422,
+ "action": "none",
+ "action_delay_ms": 1,
+ "action_done_at_ms_after_clients_start": 1,
+ "clients_wall_s": 0.8,
+ "trials": 300,
+ "cats": {
+  "pass": 219,
+  "crash:pass_faithful_fin": 81
+ },
+ "ends": {
+  "cli:complete": 219,
+  "srv:complete": 219
+ },
+ "examples": [],
+ "clients_rc": 0,
+ "guest_owner": {
+  "live_at_end": 3,
+  "clean": 296,
+  "aborted": 1,
+  "aborts": {
+   "peer_close_while_open": 1
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 296,
+   "shut_0x3": 19,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 3
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 3,
+  "stuck": [
+   {
+    "age_ms": 26223,
+    "armed": [
+     true,
+     false
+    ],
+    "cells": [
+     98,
+     99
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     false
+    ],
+    "flow": 50,
+    "fwd": [
+     1572920,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     1572920,
+     null
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "rdhup_v": true,
+    "rst": false,
+    "s2": false,
+    "s3": false,
+    "sent": [
+     1572920,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 26221,
+    "armed": [
+     true,
+     false
+    ],
+    "cells": [
+     118,
+     119
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     false
+    ],
+    "flow": 60,
+    "fwd": [
+     655416,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     655416,
+     null
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "rdhup_v": true,
+    "rst": false,
+    "s2": false,
+    "s3": false,
+    "sent": [
+     655416,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 26191,
+    "armed": [
+     true,
+     false
+    ],
+    "cells": [
+     178,
+     179
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     false
+    ],
+    "flow": 90,
+    "fwd": [
+     770104,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     770104,
+     null
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "rdhup_v": true,
+    "rst": false,
+    "s2": false,
+    "s3": false,
+    "sent": [
+     770104,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   }
+  ],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 194,
+   "fire_poke": 0,
+   "fire_fexit": 194,
+   "level_unreadable": 0
+  }
+ },
+ "host_owner": {
+  "live_at_end": 0,
+  "clean": 300,
+  "aborted": 0,
+  "aborts": {},
+  "viol": {},
+  "shut": {
+   "shut_0x2": 300,
+   "shut_0x3": 0,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 0,
+  "paired_at_loss": 0,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 143,
+   "fire_poke": 1,
+   "fire_fexit": 142,
+   "level_unreadable": 0
+  }
+ }
+}

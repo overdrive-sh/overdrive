@@ -1,0 +1,58 @@
+[08:22:41] === v32 vm stage matrix ['cells/smoke3.json']
+[08:22:41] === preflight (fail closed)
+[08:22:41] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[08:22:41] $ modprobe vhost_vsock; modprobe vsock_loopback; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[08:22:41]     vsock_diag             12288  0
+[08:22:41]     vhost_vsock            28672  0
+[08:22:41]     vhost                  69632  1 vhost_vsock
+[08:22:41]     vhost_iotlb            16384  1 vhost
+[08:22:41]     vsock_loopback         12288  0
+[08:22:41]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[08:22:41]     vmw_vsock_vmci_transport    53248  0
+[08:22:41]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[08:22:41]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[08:22:41] === guest image
+[08:22:41] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "fcb1e7d76f67", "v32probe": "674daa8fe2e1", "bpf_obj": "cf5b28463645", "cloud_hypervisor": "eadddf1bbcdc"}
+[08:22:41] launch VM: /tmp/v32-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v32-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v32-work/out/vm-matrix-20261011T082241Z/serial.log --console off --vsock cid=3232,backend=vhost-kernel --log-file /tmp/v32-work/out/vm-matrix-20261011T082241Z/ch.log -v
+[08:22:42] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[08:22:42] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+
+/sys/kernel/tracing/events/vsock/virtio_transport_alloc_pkt:
+44985	59980	89970
+4194304
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[08:22:42] --- cell s3-stream-59000: {'label': 's3-stream-59000', 'variant': 'stream', 'size': 59000, 'n': 3000}
+[08:22:51] guest rc=0 GUEST_DONE sent=3000 stalled=false
+
+[08:22:51] --- cell s3-seq-59000-hb64k: {'label': 's3-seq-59000-hb64k', 'variant': 'seq', 'size': 59000, 'n': 3000, 'hostbuf': 65536}
+[08:23:02] guest rc=0 GUEST_DONE sent=3000 stalled=false
+
+[08:23:02] --- cell s3-stream-59000-hb64k: {'label': 's3-stream-59000-hb64k', 'variant': 'stream', 'size': 59000, 'n': 3000, 'hostbuf': 65536}
+[08:23:13] guest rc=0 GUEST_DONE sent=3000 stalled=false
+
+[08:23:13] --- cell s3-seq-1024-hb64k: {'label': 's3-seq-1024-hb64k', 'variant': 'seq', 'size': 1024, 'n': 20000, 'hostbuf': 65536}
+[08:23:20] guest rc=0 GUEST_DONE sent=20000 stalled=false
+
+[08:23:20] --- cell s3-seq-59000-hb1m: {'label': 's3-seq-59000-hb1m', 'variant': 'seq', 'size': 59000, 'n': 3000, 'hostbuf': 1048576}
+[08:23:29] guest rc=0 GUEST_DONE sent=3000 stalled=false
+
+[08:23:29] --- cell s3-seq-59000-hb32k-emsgsize: {'label': 's3-seq-59000-hb32k-emsgsize', 'variant': 'seq', 'size': 59000, 'n': 300, 'hostbuf': 32768, 'drain_s': 20}
+[08:23:54] guest rc=0 GUEST_DONE sent=160 stalled=true
+
+[08:23:54] $ pgrep -af cloud-hypervisor | grep -v pgrep; true (rc=0)

@@ -1,0 +1,118 @@
+{
+ "label": "s2-seq-synth",
+ "cell": {
+  "label": "s2-seq-synth",
+  "variant": "seq",
+  "size": "any",
+  "n": 8,
+  "synth": 1
+ },
+ "wall_s": 6.170804500579834,
+ "host": {
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+   "redirect_ok": 3,
+   "rx_long": 2,
+   "rx_long_second_magic": 1,
+   "rx_ok": 3,
+   "rx_pkt_seq_eom": 7,
+   "rx_pkt_seq_eom_bytes": 59829,
+   "rx_short": 2
+  },
+  "check": 1,
+  "events": {
+   "badmagic": 0,
+   "long": 2,
+   "long_with_second_magic": 1,
+   "lt8": 0,
+   "sample": [
+    {
+     "declared": 100,
+     "kind": "long",
+     "n": 316,
+     "second_magic": 1,
+     "seq": 1
+    },
+    {
+     "declared": 300,
+     "kind": "short",
+     "n": 150,
+     "second_magic": 0,
+     "seq": 3
+    },
+    {
+     "declared": 100,
+     "kind": "long",
+     "n": 111,
+     "second_magic": 0,
+     "seq": 4
+    },
+    {
+     "declared": 500,
+     "kind": "short",
+     "n": 28,
+     "second_magic": 0,
+     "seq": 6
+    }
+   ],
+   "short": 2
+  },
+  "guest_done": "{\"sent\":0,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 8,
+  "outcome": {
+   "delivered_once": 3,
+   "duplicate_extra_copies": 0,
+   "duplicated_seqs": 0,
+   "lost": 5,
+   "n": 8
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+   "badmagic": 0,
+   "bytes": 0,
+   "long": 0,
+   "long_second_magic": 0,
+   "lt8": 0,
+   "ok": 0,
+   "records": 0,
+   "short": 0
+  },
+  "sink": {
+   "bad": 0,
+   "bad_reasons": {},
+   "bytes": 59224,
+   "desync_bytes_skipped": 0,
+   "frames_parsed": 3,
+   "frames_verified_ok": 3
+  },
+  "size": "any",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 6.1085776880000004
+ },
+ "guest": {
+  "app_sent_ok": 0,
+  "bound": 59000,
+  "bpf_counters": {
+   "tx_alloc_seq_noeom": 7,
+   "tx_alloc_seq_noeom_bytes": 59829
+  },
+  "drain_wall_s": 2.555795046,
+  "guest_vsock_buffer_size": 262144,
+  "n": 8,
+  "role": "guest",
+  "send_wall_s": 0.351822411,
+  "sender_stalled": false,
+  "size": "1024",
+  "skb_send_sock_outcomes_on_vsock_leg": {},
+  "synth": 1,
+  "udp_snmp_delta": {},
+  "uname": "7.0.0-29-generic",
+  "variant": "seq"
+ },
+ "guest_stdout_tail": "GUEST_DONE sent=0 stalled=false\n"
+}

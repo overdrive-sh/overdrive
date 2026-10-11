@@ -1,0 +1,2 @@
+{"t": 1791732215.3349352, "cmd": "modprobe vhost_vsock; modprobe vsock_loopback", "rc": 0, "out": ""}
+{"t": 1791732357.6195104, "cmd": "pgrep -af 'cloud-hypervisor|drainprobe' | grep -v pgrep | head; ls -d /sys/fs/cgroup/v31-* 2>&1 | head -3; true", "rc": 0, "out": "ls: cannot access '/sys/fs/cgroup/v31-*': No such file or directory\n"}

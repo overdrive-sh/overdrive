@@ -1,0 +1,106 @@
+{"t": 1791713295.2562451, "cmd": "uname -r", "rc": 0, "out": "7.0.0-29-generic\n"}
+{"t": 1791713295.2579205, "cmd": "ip addr add 10.77.0.2/32 dev lo", "rc": 0, "out": ""}
+{"t": 1791713295.2593708, "cmd": "echo 1 > /proc/sys/net/ipv4/tcp_fwmark_accept", "rc": 0, "out": ""}
+{"t": 1791713295.2606928, "cmd": "echo 1 > /proc/sys/net/ipv4/fwmark_reflect", "rc": 0, "out": ""}
+{"t": 1791713295.2621565, "cmd": "for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > $f; done", "rc": 0, "out": ""}
+{"t": 1791713295.2636175, "cmd": "ip rule add fwmark 1 lookup 100", "rc": 0, "out": ""}
+{"t": 1791713295.265092, "cmd": "ip route add local 0.0.0.0/0 dev lo table 100", "rc": 0, "out": ""}
+{"t": 1791713295.2720656, "cmd": "ip -br addr; ip rule; ip route show table 100; uname -r", "rc": 0, "out": "0:\tfrom all lookup local \n32765:\tfrom all fwmark 0x1 lookup 100 \n32766:\tfrom all lookup main \n32767:\tfrom all lookup default \nlocal default dev lo scope host \n7.0.0-29-generic\nBusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.\n\nUsage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]\n\nOPTIONS := -f[amily] inet|inet6|link | -o[neline]\n\nip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]\nip route list|flush|add|del|change|append|replace|test ROUTE\nip link set IFACE [up|down] [arp on|off] [multicast on|off]\n\t[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]\n\t[master IFACE | nomaster] [netns PID] [type TYPE ARGS]\nip tunnel add|change|del|show [NAME]\n\t[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]\nip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]\nip rule [list] | add|del SELECTOR ACTION\n"}
+{"t": 1791713295.4780025, "cmd": "/legs pk 9 gagent; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713295.9828575, "cmd": "(setsid /legs gagent --eof-class tp --log /tmp/gagent.jsonl > /tmp/gagent.out 2>&1 < /dev/null &) ; sleep 0.5; : > /tmp/gagent.jsonl; cat /tmp/gagent.out", "rc": 0, "out": ""}
+{"t": 1791713360.8825822, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713361.186208, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 0 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713361.1884215, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713363.5333495, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713363.740368, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713364.0441635, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 1024 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713364.046359, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713366.369813, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713366.5770102, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713366.8807895, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 1024 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713366.882865, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713369.2256925, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713369.4326797, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713369.7367477, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 0 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713369.7389615, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713371.369369, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713371.5759108, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713371.879755, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 65536 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713371.8819878, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713373.5985994, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713373.805823, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713374.1100585, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 65536 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713374.1122997, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713375.8502655, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713376.0574026, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713376.361377, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 0 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713376.3636365, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713377.2416651, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713377.449084, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713377.7530034, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 1048576 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713377.7552075, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713378.600873, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713378.8084686, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713379.1124969, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 1048576 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713379.1148314, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713380.0517867, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713380.2590206, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713380.5630457, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 0 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713380.5652845, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713382.181803, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713382.3888512, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713382.6928043, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 67108864 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713382.6951683, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713383.71427, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713383.9213462, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713384.225135, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 67108864 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713384.227314, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713385.7971873, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713386.004486, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713386.3088686, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 0 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713386.311314, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713388.5796444, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713388.7870274, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713389.0907362, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 1024 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713389.0929554, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713391.4137545, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713391.6214614, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713391.92534, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 1024 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713391.9276156, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713394.2638102, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713394.4715261, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713394.7754972, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 0 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713394.777777, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713396.4897943, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713396.6978977, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713397.001847, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 65536 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713397.0040853, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713398.6492736, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713398.8569255, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713399.1609697, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 65536 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713399.163284, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713400.8855054, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713401.0930958, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713401.397277, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 0 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713401.3994966, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713402.3670332, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713402.5745318, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713402.8783975, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 1048576 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713402.8806176, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713403.6694643, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713403.8771796, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713404.1808155, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 1048576 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713404.1831594, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713405.092951, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713405.3005052, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713405.6044264, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 0 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713405.6067016, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713406.6957502, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713406.903041, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713407.2069206, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 67108864 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713407.2092042, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713408.1287048, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}
+{"t": 1791713408.3365123, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 0\n"}
+{"t": 1791713408.6402779, "cmd": "rm -f /tmp/app.jsonl; (setsid /legs gapp --listen 10.77.0.2:8080 --log /tmp/app.jsonl --send 67108864 --end fin --end-after-read > /tmp/app.out 2>&1 < /dev/null &) ; sleep 0.3", "rc": 0, "out": ""}
+{"t": 1791713408.6426582, "cmd": "cat /tmp/app.jsonl /tmp/app.out", "rc": 0, "out": "{\"addr\":\"10.77.0.2:8080\",\"backlog\":128,\"ev\":\"listening\",\"mode\":\"serve\"}\n"}
+{"t": 1791713410.2503865, "cmd": "/legs pk 9 gapp; sleep 0.2; true", "rc": 0, "out": "pk signalled 1\n"}

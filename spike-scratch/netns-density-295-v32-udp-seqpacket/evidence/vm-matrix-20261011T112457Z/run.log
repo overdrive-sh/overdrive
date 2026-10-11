@@ -1,0 +1,128 @@
+[11:24:57] === v32 vm stage matrix ['cells/R2.json']
+[11:24:57] === preflight (fail closed)
+[11:24:57] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[11:24:57] $ modprobe vhost_vsock; modprobe vsock_loopback; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[11:24:57]     vsock_diag             12288  0
+[11:24:57]     vhost_vsock            28672  0
+[11:24:57]     vhost                  69632  1 vhost_vsock
+[11:24:57]     vhost_iotlb            16384  1 vhost
+[11:24:57]     vsock_loopback         12288  0
+[11:24:57]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[11:24:57]     vmw_vsock_vmci_transport    53248  0
+[11:24:57]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[11:24:57]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[11:24:57] === guest image
+[11:24:57] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "0a10ec45d98f", "v32probe": "ef8bca15a6fd", "bpf_obj": "ec1ae5b05414", "cloud_hypervisor": "eadddf1bbcdc"}
+[11:24:57] launch VM: /tmp/v32-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v32-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v32-work/out/vm-matrix-20261011T112457Z/serial.log --console off --vsock cid=3232,backend=vhost-kernel --log-file /tmp/v32-work/out/vm-matrix-20261011T112457Z/ch.log -v
+[11:24:58] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[11:24:58] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+
+/sys/kernel/tracing/events/vsock/virtio_transport_alloc_pkt:
+44985	59980	89970
+4194304
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[11:24:58] --- cell F2-seq-unix-1024: {'label': 'F2-seq-unix-1024', 'variant': 'seq', 'size': 1024, 'n': 100000, 'cell': 'unix'}
+[11:25:08] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:25:08] --- cell F2-seq-unix-mix: {'label': 'F2-seq-unix-mix', 'variant': 'seq', 'size': 'mix', 'n': 100000, 'cell': 'unix'}
+[11:26:06] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:26:06] --- cell F2-seq-unix-59000: {'label': 'F2-seq-unix-59000', 'variant': 'seq', 'size': 59000, 'n': 100000, 'cell': 'unix'}
+[11:27:51] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:27:51] --- cell F2-seq-unix-k1: {'label': 'F2-seq-unix-k1', 'variant': 'seq', 'size': 1024, 'n': 200, 'cell': 'unix', 'k1': 100}
+[11:27:57] guest rc=0 GUEST_DONE sent=200 stalled=false
+
+[11:27:57] --- cell F2-seq-unix-k1-rearm: {'label': 'F2-seq-unix-k1-rearm', 'variant': 'seq', 'size': 1024, 'n': 200, 'cell': 'unix', 'k1': 100, 'k1rearm': 1}
+[11:28:03] guest rc=0 GUEST_DONE sent=200 stalled=false
+k1 rearm SO_RCVLOWAT: Ok(())
+
+[11:28:03] --- cell F2-seq-unix-16384-hb64k: {'label': 'F2-seq-unix-16384-hb64k', 'variant': 'seq', 'size': 16384, 'n': 100000, 'cell': 'unix', 'hostbuf': 65536}
+[11:29:15] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:29:15] --- cell F2-seq-direct-mix-hb64k: {'label': 'F2-seq-direct-mix-hb64k', 'variant': 'seq', 'size': 'mix', 'n': 100000, 'cell': 'direct', 'hostbuf': 65536}
+[11:31:08] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:31:08] --- cell A3-seq-mixs-default-r1: {'label': 'A3-seq-mixs-default-r1', 'variant': 'seq', 'size': 'mixs', 'n': 100000}
+[11:31:35] guest rc=0 GUEST_DONE sent=15264 stalled=true
+
+[11:31:35] --- cell A3-seq-mixs-default-r2: {'label': 'A3-seq-mixs-default-r2', 'variant': 'seq', 'size': 'mixs', 'n': 100000}
+[11:32:01] guest rc=0 GUEST_DONE sent=15264 stalled=true
+
+[11:32:01] --- cell A3-stream-mix-default-r1: {'label': 'A3-stream-mix-default-r1', 'variant': 'stream', 'size': 'mix', 'n': 100000}
+[11:32:31] guest rc=0 GUEST_DONE sent=8960 stalled=true
+
+[11:32:31] --- cell A3-seq-mixs-nodelay-r1: {'label': 'A3-seq-mixs-nodelay-r1', 'variant': 'seq', 'size': 'mixs', 'n': 100000, 'nodelay': 1}
+[11:32:42] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:32:42] --- cell A3-seq-mixs-nodelay-r2: {'label': 'A3-seq-mixs-nodelay-r2', 'variant': 'seq', 'size': 'mixs', 'n': 100000, 'nodelay': 1}
+[11:32:52] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:32:52] --- cell A3-seq-mixs-nodelay-r3: {'label': 'A3-seq-mixs-nodelay-r3', 'variant': 'seq', 'size': 'mixs', 'n': 100000, 'nodelay': 1}
+[11:33:02] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:33:02] --- cell A3-stream-mixs-nodelay-r1: {'label': 'A3-stream-mixs-nodelay-r1', 'variant': 'stream', 'size': 'mixs', 'n': 100000, 'nodelay': 1}
+[11:33:12] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:33:12] --- cell A3-stream-mixs-nodelay-r2: {'label': 'A3-stream-mixs-nodelay-r2', 'variant': 'stream', 'size': 'mixs', 'n': 100000, 'nodelay': 1}
+[11:33:22] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:33:22] --- cell A3-seq-mix-nodelay-r1: {'label': 'A3-seq-mix-nodelay-r1', 'variant': 'seq', 'size': 'mix', 'n': 100000, 'nodelay': 1}
+[11:34:21] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:34:21] --- cell A3-seq-mix-nodelay-r2: {'label': 'A3-seq-mix-nodelay-r2', 'variant': 'seq', 'size': 'mix', 'n': 100000, 'nodelay': 1}
+[11:35:20] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:35:20] --- cell C-stream-16384-hb64k: {'label': 'C-stream-16384-hb64k', 'variant': 'stream', 'size': 16384, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[11:36:16] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:36:16] --- cell C-stream-mixs-hb64k: {'label': 'C-stream-mixs-hb64k', 'variant': 'stream', 'size': 'mixs', 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[11:36:26] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:36:26] --- cell C-seq-32768-hb64k: {'label': 'C-seq-32768-hb64k', 'variant': 'seq', 'size': 32768, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[11:39:52] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:39:52] --- cell C-seq-59000-hb64k: {'label': 'C-seq-59000-hb64k', 'variant': 'seq', 'size': 59000, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[11:43:18] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:43:18] --- cell C-seq-mix-hb64k: {'label': 'C-seq-mix-hb64k', 'variant': 'seq', 'size': 'mix', 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[11:45:24] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:45:24] --- cell C-stream-32768-hb64k: {'label': 'C-stream-32768-hb64k', 'variant': 'stream', 'size': 32768, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[11:47:09] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:47:09] --- cell C-stream-59000-hb64k: {'label': 'C-stream-59000-hb64k', 'variant': 'stream', 'size': 59000, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[11:50:14] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:50:14] --- cell C-stream-mix-hb64k: {'label': 'C-stream-mix-hb64k', 'variant': 'stream', 'size': 'mix', 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[11:51:50] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:51:50] --- cell C-seq-16384-hb128k: {'label': 'C-seq-16384-hb128k', 'variant': 'seq', 'size': 16384, 'n': 100000, 'hostbuf': 131072, 'nodelay': 1}
+[11:52:45] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:52:45] --- cell C-seq-59000-hb128k: {'label': 'C-seq-59000-hb128k', 'variant': 'seq', 'size': 59000, 'n': 100000, 'hostbuf': 131072, 'nodelay': 1}
+[11:54:31] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:54:31] --- cell C-stream-16384-hb128k: {'label': 'C-stream-16384-hb128k', 'variant': 'stream', 'size': 16384, 'n': 100000, 'hostbuf': 131072, 'nodelay': 1}
+[11:55:27] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:55:27] --- cell C-stream-59000-hb128k: {'label': 'C-stream-59000-hb128k', 'variant': 'stream', 'size': 59000, 'n': 100000, 'hostbuf': 131072, 'nodelay': 1}
+[11:57:12] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[11:57:12] $ pgrep -af cloud-hypervisor | grep -v pgrep; true (rc=0)

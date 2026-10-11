@@ -1,0 +1,44 @@
+[
+ {
+  "label": "A2-seq-mix-nodelay",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A2-seq-mixs-nodelay",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A2-seq-1024-nodelay",
+  "variant": "seq",
+  "size": 1024,
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A2-stream-mix-nodelay",
+  "variant": "stream",
+  "size": "mix",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A2-stream-mixs-nodelay",
+  "variant": "stream",
+  "size": "mixs",
+  "n": 100000,
+  "nodelay": 1
+ },
+ {
+  "label": "A2-stream-1024-nodelay",
+  "variant": "stream",
+  "size": 1024,
+  "n": 100000,
+  "nodelay": 1
+ }
+]

@@ -1,0 +1,250 @@
+{
+  "accepted_child_buffer_size": 65536,
+  "bpf_counters": {
+    "redirect_ok": 100000,
+    "rx_ok": 100000,
+    "rx_pkt_seq_eom": 100000,
+    "rx_pkt_seq_eom_bytes": 106341727,
+    "rx_pkt_seq_noeom": 43,
+    "rx_pkt_seq_noeom_bytes": 25704,
+    "rx_short": 43
+  },
+  "check": 1,
+  "events": {
+    "badmagic": 0,
+    "long": 0,
+    "long_with_second_magic": 0,
+    "lt8": 0,
+    "sample": [
+      {
+        "declared": 1428,
+        "first8_hex": "0000000000002a8d",
+        "kind": "short",
+        "n": 930,
+        "second_magic": 0,
+        "seq": 10893
+      },
+      {
+        "declared": 745,
+        "first8_hex": "0000000000005d02",
+        "kind": "short",
+        "n": 123,
+        "second_magic": 0,
+        "seq": 23810
+      },
+      {
+        "declared": 1841,
+        "first8_hex": "0000000000007847",
+        "kind": "short",
+        "n": 564,
+        "second_magic": 0,
+        "seq": 30791
+      },
+      {
+        "declared": 1688,
+        "first8_hex": "0000000000008316",
+        "kind": "short",
+        "n": 118,
+        "second_magic": 0,
+        "seq": 33558
+      },
+      {
+        "declared": 899,
+        "first8_hex": "0000000000008676",
+        "kind": "short",
+        "n": 281,
+        "second_magic": 0,
+        "seq": 34422
+      },
+      {
+        "declared": 1065,
+        "first8_hex": "000000000000acba",
+        "kind": "short",
+        "n": 224,
+        "second_magic": 0,
+        "seq": 44218
+      },
+      {
+        "declared": 2016,
+        "first8_hex": "000000000000b12c",
+        "kind": "short",
+        "n": 1333,
+        "second_magic": 0,
+        "seq": 45356
+      },
+      {
+        "declared": 794,
+        "first8_hex": "000000000000b161",
+        "kind": "short",
+        "n": 198,
+        "second_magic": 0,
+        "seq": 45409
+      },
+      {
+        "declared": 1913,
+        "first8_hex": "000000000000b647",
+        "kind": "short",
+        "n": 311,
+        "second_magic": 0,
+        "seq": 46663
+      },
+      {
+        "declared": 1283,
+        "first8_hex": "000000000000b6ae",
+        "kind": "short",
+        "n": 641,
+        "second_magic": 0,
+        "seq": 46766
+      },
+      {
+        "declared": 420,
+        "first8_hex": "000000000000b6e6",
+        "kind": "short",
+        "n": 84,
+        "second_magic": 0,
+        "seq": 46822
+      },
+      {
+        "declared": 1389,
+        "first8_hex": "000000000000bcd2",
+        "kind": "short",
+        "n": 568,
+        "second_magic": 0,
+        "seq": 48338
+      },
+      {
+        "declared": 1712,
+        "first8_hex": "000000000000c18c",
+        "kind": "short",
+        "n": 265,
+        "second_magic": 0,
+        "seq": 49548
+      },
+      {
+        "declared": 143,
+        "first8_hex": "000000000000c645",
+        "kind": "short",
+        "n": 73,
+        "second_magic": 0,
+        "seq": 50757
+      },
+      {
+        "declared": 1615,
+        "first8_hex": "000000000000ccc3",
+        "kind": "short",
+        "n": 404,
+        "second_magic": 0,
+        "seq": 52419
+      },
+      {
+        "declared": 1903,
+        "first8_hex": "000000000000dd64",
+        "kind": "short",
+        "n": 842,
+        "second_magic": 0,
+        "seq": 56676
+      },
+      {
+        "declared": 462,
+        "first8_hex": "000000000000e78b",
+        "kind": "short",
+        "n": 208,
+        "second_magic": 0,
+        "seq": 59275
+      },
+      {
+        "declared": 1664,
+        "first8_hex": "000000000000eaa4",
+        "kind": "short",
+        "n": 1381,
+        "second_magic": 0,
+        "seq": 60068
+      },
+      {
+        "declared": 1563,
+        "first8_hex": "000000000000eb0e",
+        "kind": "short",
+        "n": 518,
+        "second_magic": 0,
+        "seq": 60174
+      },
+      {
+        "declared": 1939,
+        "first8_hex": "000000000000eb47",
+        "kind": "short",
+        "n": 1750,
+        "second_magic": 0,
+        "seq": 60231
+      },
+      {
+        "declared": 1777,
+        "first8_hex": "000000000000ebb5",
+        "kind": "short",
+        "n": 123,
+        "second_magic": 0,
+        "seq": 60341
+      },
+      {
+        "declared": 1098,
+        "first8_hex": "000000000000ebef",
+        "kind": "short",
+        "n": 1093,
+        "second_magic": 0,
+        "seq": 60399
+      },
+      {
+        "declared": 1905,
+        "first8_hex": "000000000000ed2c",
+        "kind": "short",
+        "n": 1818,
+        "second_magic": 0,
+        "seq": 60716
+      },
+      {
+        "declared": 1673,
+        "first8_hex": "000000000000ed6b",
+        "kind": "short",
+        "n": 414,
+        "second_magic": 0,
+        "seq": 60779
+      }
+    ],
+    "short": 43
+  },
+  "guest_done": "{\"sent\":100000,\"stalled\":false}",
+  "hostbuf_arg": 65536,
+  "listener_buffer_size": 65536,
+  "n": 100000,
+  "outcome": {
+    "delivered_once": 100000,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 0,
+    "n": 100000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 0,
+    "bad_reasons": {},
+    "bytes": 106341727,
+    "desync_bytes_skipped": 0,
+    "frames_parsed": 100000,
+    "frames_verified_ok": 100000
+  },
+  "size": "mixs",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 10.113325393
+}

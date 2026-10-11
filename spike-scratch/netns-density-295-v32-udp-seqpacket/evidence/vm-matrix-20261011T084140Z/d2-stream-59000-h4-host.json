@@ -1,0 +1,1017 @@
+{
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+    "redirect_ok": 40024,
+    "rx_ok": 20000,
+    "rx_pkt_stream": 20024,
+    "rx_pkt_stream_bytes": 1180160000,
+    "strp_frames": 20000,
+    "strp_parse_calls": 20000
+  },
+  "check": 1,
+  "events": {
+    "badmagic": 0,
+    "long": 0,
+    "long_with_second_magic": 0,
+    "lt8": 0,
+    "sample": [
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 32741,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 50688,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 26112,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 59008,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      }
+    ],
+    "short": 0
+  },
+  "guest_done": "{\"sent\":20000,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 20000,
+  "outcome": {
+    "delivered_once": 20000,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 0,
+    "n": 20000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 0,
+    "bad_reasons": {},
+    "bytes": 1180160000,
+    "desync_bytes_skipped": 0,
+    "frames_parsed": 20000,
+    "frames_verified_ok": 20000
+  },
+  "size": "59000",
+  "uname": "7.0.0-29-generic",
+  "variant": "stream",
+  "wall_s": 24.249654821
+}

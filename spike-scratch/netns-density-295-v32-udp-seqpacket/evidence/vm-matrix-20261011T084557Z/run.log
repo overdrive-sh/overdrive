@@ -1,0 +1,88 @@
+[08:45:57] === v32 vm stage matrix ['cells/A.json']
+[08:45:57] === preflight (fail closed)
+[08:45:57] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[08:45:57] $ modprobe vhost_vsock; modprobe vsock_loopback; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[08:45:57]     vsock_diag             12288  0
+[08:45:57]     vhost_vsock            28672  0
+[08:45:57]     vhost                  69632  1 vhost_vsock
+[08:45:57]     vhost_iotlb            16384  1 vhost
+[08:45:57]     vsock_loopback         12288  0
+[08:45:57]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[08:45:57]     vmw_vsock_vmci_transport    53248  0
+[08:45:57]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[08:45:57]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[08:45:57] === guest image
+[08:45:58] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "960bfc884699", "v32probe": "69ecc32d5a76", "bpf_obj": "ec1ae5b05414", "cloud_hypervisor": "eadddf1bbcdc"}
+[08:45:58] launch VM: /tmp/v32-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v32-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v32-work/out/vm-matrix-20261011T084557Z/serial.log --console off --vsock cid=3232,backend=vhost-kernel --log-file /tmp/v32-work/out/vm-matrix-20261011T084557Z/ch.log -v
+[08:45:58] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[08:45:58] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+
+/sys/kernel/tracing/events/vsock/virtio_transport_alloc_pkt:
+44985	59980	89970
+4194304
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[08:45:58] --- cell A-seq-64: {'label': 'A-seq-64', 'variant': 'seq', 'size': 64, 'n': 100000}
+[08:46:06] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:46:06] --- cell A-seq-1024: {'label': 'A-seq-1024', 'variant': 'seq', 'size': 1024, 'n': 100000}
+[08:46:17] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:46:17] --- cell A-seq-4096: {'label': 'A-seq-4096', 'variant': 'seq', 'size': 4096, 'n': 100000}
+[08:46:38] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:46:38] --- cell A-seq-16384: {'label': 'A-seq-16384', 'variant': 'seq', 'size': 16384, 'n': 100000}
+[08:47:33] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:47:33] --- cell A-seq-32768: {'label': 'A-seq-32768', 'variant': 'seq', 'size': 32768, 'n': 100000}
+[08:48:46] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:48:46] --- cell A-seq-59000: {'label': 'A-seq-59000', 'variant': 'seq', 'size': 59000, 'n': 100000}
+[08:50:32] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:50:32] --- cell A-seq-mix: {'label': 'A-seq-mix', 'variant': 'seq', 'size': 'mix', 'n': 100000}
+[08:51:02] guest rc=0 GUEST_DONE sent=8960 stalled=true
+
+[08:51:02] --- cell A-seq-mixs: {'label': 'A-seq-mixs', 'variant': 'seq', 'size': 'mixs', 'n': 100000}
+[08:51:28] guest rc=0 GUEST_DONE sent=15264 stalled=true
+
+[08:51:28] --- cell A-stream-64: {'label': 'A-stream-64', 'variant': 'stream', 'size': 64, 'n': 100000}
+[08:51:37] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:51:37] --- cell A-stream-1024: {'label': 'A-stream-1024', 'variant': 'stream', 'size': 1024, 'n': 100000}
+[08:51:47] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:51:47] --- cell A-stream-4096: {'label': 'A-stream-4096', 'variant': 'stream', 'size': 4096, 'n': 100000}
+[08:52:08] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:52:08] --- cell A-stream-16384: {'label': 'A-stream-16384', 'variant': 'stream', 'size': 16384, 'n': 100000}
+[08:53:04] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:53:04] --- cell A-stream-32768: {'label': 'A-stream-32768', 'variant': 'stream', 'size': 32768, 'n': 100000}
+[08:54:14] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:54:14] --- cell A-stream-59000: {'label': 'A-stream-59000', 'variant': 'stream', 'size': 59000, 'n': 100000}
+[08:56:00] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[08:56:00] --- cell A-stream-mix: {'label': 'A-stream-mix', 'variant': 'stream', 'size': 'mix', 'n': 100000}
+[08:56:31] guest rc=0 GUEST_DONE sent=8960 stalled=true
+
+[08:56:31] --- cell A-stream-mixs: {'label': 'A-stream-mixs', 'variant': 'stream', 'size': 'mixs', 'n': 100000}
+[08:56:57] guest rc=0 GUEST_DONE sent=15264 stalled=true
+
+[08:56:57] $ pgrep -af cloud-hypervisor | grep -v pgrep; true (rc=0)

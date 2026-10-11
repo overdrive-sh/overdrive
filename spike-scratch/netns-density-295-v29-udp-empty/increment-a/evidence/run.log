@@ -1,0 +1,168 @@
+[08:00:38] === preflight
+[08:00:38] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[08:00:38]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[08:00:38]     none
+[08:00:38]     model name	: AMD EPYC 8024P 8-Core Processor
+[08:00:38]     16
+[08:00:38]     crw-rw---- 1 root kvm 10, 232 Oct 11 08:00 /dev/kvm
+[08:00:38] substrate probes: {"machine": "x86_64", "virt": "none", "kvm_chardev": true, "kvm_api": 12, "kvm_create_vm": true, "cpu_virt_ext": true, "uname_r": "7.0.0-29-generic"}
+[08:00:38] === build
+[08:00:38] $ sha256sum /tmp/v29-work/prior/cloud-hypervisor; /tmp/v29-work/prior/cloud-hypervisor --version  (rc=0)
+[08:00:38]     bb8f79275fd85a2ff89de33f247e90af6523c6b2db1f7c7de566a14aa8b512a8  /tmp/v29-work/prior/cloud-hypervisor
+[08:00:38]     cloud-hypervisor v53.0.0
+[08:00:38]     Migration Protocol Versions: 0
+[08:00:39] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --offline --manifest-path /tmp/v29-work/bpf/Cargo.toml  (rc=0)
+[08:00:39]         Finished `release` profile [optimized] target(s) in 0.05s
+[08:00:39] $ cargo build --release --target x86_64-unknown-linux-gnu --offline --manifest-path /tmp/v29-work/vfwd/Cargo.toml  (rc=0)
+[08:00:39]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[08:00:39]         |            ^^^^^^
+[08:00:39]     
+[08:00:39]     warning: `vfwd` (bin "vfwd") generated 5 warnings (run `cargo fix --bin "vfwd" -p vfwd` to apply 2 suggestions)
+[08:00:39]         Finished `release` profile [optimized + debuginfo] target(s) in 0.02s
+[08:00:39] $ file /tmp/v29-work/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /tmp/v29-work/prior/cloud-hypervisor /tmp/v29-work/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /tmp/v29-work/prior/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[08:00:39]     /tmp/v29-work/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=e15a3bd819b8cf35d63af71e6c26c8c615a03235, with debug_info, not stripped
+[08:00:39]     /tmp/v29-work/prior/cloud-hypervisor:                                ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=6455e7664cd89d38068ec4b28c00999e1c195455, stripped
+[08:00:39]     /tmp/v29-work/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[08:00:39]     cloud-hypervisor v53.0.0
+[08:00:39]     Migration Protocol Versions: 0
+[08:00:39]     bpf-linker 0.0.0
+[08:00:39]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[08:00:39]     rustc 1.95.0 (59807616e 2026-04-14)
+[08:00:39] === guest image
+[08:00:40] $ cd /tmp/v29-work/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /tmp/v29-work/out/initramfs.cpio.gz  (rc=0)
+[08:00:41] launch VM: /tmp/v29-work/prior/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v29-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner=--ack,oob,--intake-mode,park,--arm,yes,--flush,yes,--udp,park,--declare,7300,7301,7302 --cpus boot=2 --memory size=1024M --serial file=/tmp/v29-work/out/vm-increment-a-1791705641/serial.log --console off --vsock cid=3329,backend=vhost-kernel --log-file /tmp/v29-work/out/vm-increment-a-1791705641/ch.log -v
+[08:00:43] GUEST_BOOT uname_r=7.0.0-29-generic uptime=0.62
+net.ipv4.tcp_fwmark_accept = 1
+net.ipv4.fwmark_reflect = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33mde:9a:9f:0c:c7:ba [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+
+thread 'main' (112) panicked at src/owner.rs:245:18:
+unknown arg 7301
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at ./rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+   2: vfwd::owner::parse_cfg
+             at ./tmp/v29-work/vfwd/src/owner.rs:245:18
+   3: vfwd::owner::run
+             at ./tmp/v29-work/vfwd/src/owner.rs:722:13
+   4: vfwd::main
+             at ./tmp/v29-work/vfwd/src/main.rs:36:29
+   5: core::ops::function::FnOnce::call_once
+             at ./home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+GUEST_READY
+
+[08:00:44] guest$ uname -r  (rc=0, 0.0s)
+[08:00:44]     7.0.0-29-generic
+[08:00:44] $ ip netns add v29-p  (rc=0)
+[08:00:44] $ ip link add v29-h type veth peer name v29-p0  (rc=0)
+[08:00:44] $ ip link set v29-p0 netns v29-p  (rc=0)
+[08:00:44] $ ip addr add 10.250.229.1/24 dev v29-h  (rc=0)
+[08:00:44] $ ip link set v29-h mtu 1500 up  (rc=0)
+[08:00:44] $ ip -n v29-p addr add 10.250.229.2/24 dev v29-p0  (rc=0)
+[08:00:44] $ ip -n v29-p link set v29-p0 mtu 1500 up  (rc=0)
+[08:00:44] $ ip -n v29-p link set lo up  (rc=0)
+[08:00:44] $ ip netns exec v29-p sysctl -w net.core.rmem_max=33554432  (rc=0)
+[08:00:44]     sysctl: setting key "net.core.rmem_max": Operation not permitted
+[08:00:45] $ ip -d link show v29-h; ip -n v29-p -br addr; ethtool -k v29-h | grep -E 'udp|frag|segment|generic-receive|tcp-seg'; ip netns exec v29-p ss -lun  (rc=0)
+[08:00:45]     63091: v29-h@if63090: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+[08:00:45]         link/ether 9a:3b:db:6f:aa:ff brd ff:ff:ff:ff:ff:ff link-netns v29-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 
+[08:00:45]         veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+[08:00:45]     lo               UNKNOWN        127.0.0.1/8 ::1/128 
+[08:00:45]     v29-p0@if63091   UP             10.250.229.2/24 fe80::3c41:71ff:fef3:e615/64 
+[08:00:45]     	tx-scatter-gather-fraglist: on
+[08:00:45]     tcp-segmentation-offload: on
+[08:00:45]     	tx-tcp-segmentation: on
+[08:00:45]     	tx-tcp-ecn-segmentation: on
+[08:00:45]     	tx-tcp-mangleid-segmentation: on
+[08:00:45]     	tx-tcp6-segmentation: on
+[08:00:45]     	tx-tcp-accecn-segmentation: on
+[08:00:45]     generic-segmentation-offload: on
+[08:00:45]     generic-receive-offload: off
+[08:00:45]     tx-fcoe-segmentation: off [fixed]
+[08:00:45]     tx-gre-segmentation: on
+[08:00:45]     tx-gre-csum-segmentation: on
+[08:00:45]     tx-ipxip4-segmentation: on
+[08:00:45]     tx-ipxip6-segmentation: on
+[08:00:45]     tx-udp_tnl-segmentation: on
+[08:00:45]     tx-udp_tnl-csum-segmentation: on
+[08:00:45]     tx-tunnel-remcsum-segmentation: off [fixed]
+[08:00:45]     tx-sctp-segmentation: on
+[08:00:45]     tx-esp-segmentation: off [fixed]
+[08:00:45]     tx-udp-segmentation: on
+[08:00:45]     rx-udp_tunnel-port-offload: off [fixed]
+[08:00:45]     rx-udp-gro-forwarding: off
+[08:00:45]     State  Recv-Q Send-Q Local Address:Port Peer Address:Port
+[08:00:45]     UNCONN 0      0       10.250.229.2:7229      0.0.0.0:*
+[08:00:48] guest$ kill $(cat /tmp/owner.pid) 2>/dev/null; sleep 0.5; RUST_BACKTRACE=1 /vfwd guest --ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302 > /tmp/owner.out 2>&1 </dev/null & echo $! > /tmp/owner.pid; sleep 1.5; cat /tmp/owner.out  (rc=0, 2.0s)
+[08:00:48]     OWNER_READY role=guest pid=125
+[08:00:51] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --sizes 0 --reps 50 --gap-us 0   (rc=0, 0.0s, 52 lines)
+[08:00:55] PHASE smoke_empties: peer sent_data=0 sent_empty=50 rx_empty=50 X=0 split=0 host={'verdict_empty_seen': 50, 'notice_ok': 50, 'ctl_bytes_written': 16, 'empty_sent': 50, 'notice_lat_us_max': 728, 'notice_lat_us_sum': 31254, 'notices_read': 50, 'request_bytes_read': 64, 'udp_associations': 2, 'udp_teardowns': 1}
+[08:00:59] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 2000 --size 1400 --k 1 --gap-us 500 --burst 1 --lead-empties 0 --warm  (rc=0, 1.6s, 2 lines)
+[08:01:04] PHASE sweep_k1_gap500: wire(E=2000/2000 early=1745 late=0 dmiss=0) peer(E=2000 early=1742 late=0 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 2001, 'sent_calls': 2001, 'vstrip': 2001, 'verdict_empty_seen': 2000, 'notice_ok': 2000, 'verdict_queued': 2001, 'ctl_bytes_written': 8, 'empty_sent': 2000, 'notice_lat_us_sum': 47254, 'notices_read': 2000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:01:07] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 2000 --size 1400 --k 1 --gap-us 100 --burst 1 --lead-empties 0 --warm  (rc=0, 0.8s, 2 lines)
+[08:01:11] PHASE sweep_k1_gap100: wire(E=2000/2000 early=928 late=2 dmiss=0) peer(E=2000 early=906 late=9 dmiss=0 dup=0 ooo=0 badsha=0) host={'redirect_ok': 2001, 'sent_calls': 2001, 'vstrip': 2001, 'verdict_empty_seen': 2000, 'notice_ok': 2000, 'verdict_queued': 2001, 'ctl_bytes_written': 8, 'empty_sent': 2000, 'notice_lat_us_sum': 67126, 'notices_read': 2000, 'request_bytes_read': 32, 'udp_associations': 1, 'udp_teardowns': 1}
+[08:01:14] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 2000 --size 1400 --k 1 --gap-us 20 --burst 1 --lead-empties 0 --warm  (rc=0, 0.7s, 2 lines)
+[08:01:19] PHASE sweep_k1_gap20: wire(E=375/2000 early=179 late=1 dmiss=1622) peer(E=375 early=178 late=7 dmiss=1622 dup=0 ooo=0 badsha=0) host={'noroute': 3, 'bad_frame': 186, 'redirect_ok': 379, 'sent_calls': 379, 'vstrip': 379, 'verdict_empty_seen': 377, 'notice_ok': 377, 'verdict_queued': 379, 'ctl_bytes_written': 16, 'empty_sent': 375, 'notice_lat_us_sum': 11337, 'notice_stale_flow': 2, 'notices_read': 377, 'request_bytes_read': 64, 'udp_associations': 2, 'udp_teardowns': 1}
+[08:01:22] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 2000 --size 1400 --k 1 --gap-us 0 --burst 1 --lead-empties 0 --warm  (rc=0, 0.7s, 2 lines)
+[08:01:26] PHASE sweep_k1_gap0: wire(E=254/2000 early=49 late=1 dmiss=1745) peer(E=254 early=49 late=1 dmiss=1745 dup=0 ooo=0 badsha=0) host={'bad_frame': 186, 'redirect_ok': 256, 'sent_calls': 256, 'vstrip': 256, 'verdict_empty_seen': 254, 'notice_ok': 254, 'verdict_queued': 256, 'ctl_bytes_written': 16, 'empty_sent': 254, 'notice_lat_us_sum': 11044, 'notices_read': 254, 'request_bytes_read': 64, 'udp_associations': 2, 'udp_teardowns': 1}
+[08:01:29] guest(stream)$ /vfwd v29-send --dst 10.250.229.2:7229 --n 2000 --size 1400 --k 0 --gap-us 0 --burst 1 --lead-empties 0 --warm  (rc=0, 0.6s, 2 lines)
+[08:01:33] PHASE sweep_datanly_gap0: wire(E=0/0 early=0 late=0 dmiss=1717) peer(E=0 early=0 late=0 dmiss=1717 dup=0 ooo=0 badsha=0) host={'redirect_ok': 284, 'sent_calls': 284, 'vstrip': 284, 'verdict_queued': 284, 'ctl_bytes_written': 16, 'request_bytes_read': 64, 'udp_associations': 2, 'udp_teardowns': 1}
+[08:01:33] guest$ cat /tmp/owner.out; tail -c 30000 /tmp/owner.log; cat /tmp/owner-stats.json; tail -60 /tmp/sshd.log; tail -20 /tmp/srv7100.log /tmp/srv7101.log  (rc=0, 0.0s)
+[08:01:33]     OWNER_READY role=guest pid=125
+[08:01:33]     {"ack_oob":true,"arm":true,"declare":[7300,7301,7302],"egress_ifs":[],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":125,"programs":[{"id":8,"name":"verdict","tag":"10eb4482b2049ca7","verified_insns":1185},{"id":9,"name":"strp_parse","tag":"2abd9169f6e90deb","verified_insns":62},{"id":10,"name":"strp_verdict","tag":"43bb1ec76775fce6","verified_insns":1196},{"id":11,"name":"lo_decode(tcx lo egress)","tag":"df202353afc0c231","verified_insns":465},{"id":12,"name":"sent(fexit skb_send_sock)","tag":"3a11f30c5a8ab4b7","verified_insns":109},{"id":13,"name":"connect4","tag":"ad52658a44f6fc01","verified_insns":234},{"id":14,"name":"sendmsg4","tag":"25313d2a991262c4","verified_insns":204},{"id":15,"name":"recvmsg4","tag":"5924dfd9424078bf","verified_insns":82},{"id":16,"name":"getpeername4","tag":"90774192d60dfced","verified_insns":127},{"id":17,"name":"sock_release","tag":"e4511879b8661ea8","verified_insns":69},{"id":18,"name":"sockops(root cgroup)","tag":"76815629f15442aa","verified_insns":342},{"id":19,"name":"listen_start(fexit inet_csk_listen_start)","tag":"4198b5e2f7485261","verified_insns":215},{"id":20,"name":"listen_stop(fexit inet_csk_listen_stop)","tag":"baa4f715ec1b955e","verified_insns":136}],"role":"guest","tuple_from_peer":true,"udp_park":true,"unframe":"tc"}
+[08:01:33]     {"ev":"park_pool","slots":256}
+[08:01:33]     {"ev":"ctl_open","t_us":5994074}
+[08:01:33]     {"ev":"lset_seeded","lset":"{}"}
+[08:01:33]     {"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7300,"reason":"session_open","seq":1,"t_us":5994170}
+[08:01:33]     {"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7301,"reason":"session_open","seq":2,"t_us":5994235}
+[08:01:33]     {"ev":"listen_state_sent","event_to_send_us":null,"listeners":0,"listening":false,"mode":"event","port":7302,"reason":"session_open","seq":3,"t_us":5994299}
+[08:01:33]     {"ev":"guest_ready","slots":64,"w":"10.99.7.2"}
+[08:01:33]     {"app":"10.99.7.2:33230","dst":"10.250.229.2:7229","ev":"udp_associate","flow":1,"queued_on_trigger":136,"slot":0}
+[08:01:33]     {"ev":"udp_teardown","flow":1,"slot":0,"why":"app_socket_released"}
+[08:01:33]     {"app":"10.99.7.2:33230","dst":"10.250.229.2:7229","ev":"udp_associate","flow":3,"queued_on_trigger":136,"slot":0}
+[08:01:33]     {"ev":"udp_paired","flow":3,"slot":0}
+[08:01:33]     {"app":"10.99.7.2:34519","dst":"10.250.229.2:7229","ev":"udp_associate","flow":5,"queued_on_trigger":72,"slot":1}
+[08:01:33]     {"ev":"udp_paired","flow":5,"slot":1}
+[08:01:33]     {"ev":"udp_teardown","flow":5,"slot":1,"why":"app_socket_released"}
+[08:01:33]     {"app":"10.99.7.2:35460","dst":"10.250.229.2:7229","ev":"udp_associate","flow":7,"queued_on_trigger":72,"slot":2}
+[08:01:33]     {"ev":"udp_paired","flow":7,"slot":2}
+[08:01:33]     {"ev":"udp_teardown","flow":7,"slot":2,"why":"app_socket_released"}
+[08:01:33]     {"app":"10.99.7.2:33863","dst":"10.250.229.2:7229","ev":"udp_associate","flow":9,"queued_on_trigger":72,"slot":3}
+[08:01:33]     {"ev":"udp_paired","flow":9,"slot":3}
+[08:01:33]     {"ev":"udp_teardown","flow":9,"slot":3,"why":"app_socket_released"}
+[08:01:33]     {"app":"10.99.7.2:33863","dst":"10.250.229.2:7229","ev":"udp_associate","flow":11,"queued_on_trigger":66560,"slot":3}
+[08:01:33]     {"ev":"udp_paired","flow":11,"slot":3}
+[08:01:33]     {"app":"10.99.7.2:47790","dst":"10.250.229.2:7229","ev":"udp_associate","flow":13,"queued_on_trigger":72,"slot":4}
+[08:01:33]     {"ev":"udp_paired","flow":13,"slot":4}
+[08:01:33]     {"ev":"udp_teardown","flow":13,"slot":4,"why":"app_socket_released"}
+[08:01:33]     {"app":"10.99.7.2:47790","dst":"10.250.229.2:7229","ev":"udp_associate","flow":15,"queued_on_trigger":66560,"slot":4}
+[08:01:33]     {"ev":"udp_paired","flow":15,"slot":4}
+[08:01:33]     {"app":"10.99.7.2:42714","dst":"10.250.229.2:7229","ev":"udp_associate","flow":17,"queued_on_trigger":72,"slot":5}
+[08:01:33]     {"ev":"udp_paired","flow":17,"slot":5}
+[08:01:33]     {"ev":"udp_teardown","flow":17,"slot":5,"why":"app_socket_released"}
+[08:01:33]     {"app":"10.99.7.2:42714","dst":"10.250.229.2:7229","ev":"udp_associate","flow":19,"queued_on_trigger":134475,"slot":5}
+[08:01:33]     {"ev":"udp_paired","flow":19,"slot":5}
+[08:01:33]     {"counters":[0,6,0,0,0,0,0,0,1,0,6,72,18055,0,8050,0,32400,14418,6,0,0,6,28033,0,0,0,0,0,0,0,0,0,0,0,0,5,0,0,0,0,0,0,0,0,2,0,32,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"ctl_bytes_read":80,"ctl_sessions_opened":1,"flows_open":0,"listen_events":5,"listen_state_sent":3,"paired_received":10,"park_flush":9,"requests_written":20,"t_ms":1791705693356.7874,"udp_associations":10,"udp_slot_released":6,"udp_teardowns":6}Server listening on 0.0.0.0 port 22.
+[08:01:33]     ==> /tmp/srv7100.log <==
+[08:01:33]     {"banner":false,"bind":"0.0.0.0:7100","ev":"tcp_server_ready","rst":false}
+[08:01:33]     
+[08:01:33]     ==> /tmp/srv7101.log <==
+[08:01:33]     {"banner":true,"bind":"0.0.0.0:7101","ev":"tcp_server_ready","rst":false}
+[08:01:33] === done

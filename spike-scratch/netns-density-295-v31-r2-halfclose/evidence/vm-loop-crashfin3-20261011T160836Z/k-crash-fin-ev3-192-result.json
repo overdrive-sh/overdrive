@@ -1,0 +1,157 @@
+{
+ "tag": "k-crash-fin-ev3-192",
+ "seed": 43592,
+ "action": "none",
+ "action_delay_ms": 1,
+ "action_done_at_ms_after_clients_start": 1,
+ "clients_wall_s": 15.7,
+ "trials": 300,
+ "cats": {
+  "pass": 197,
+  "violation:hang": 1,
+  "crash:pass_faithful_fin": 102
+ },
+ "ends": {
+  "cli:complete": 197,
+  "srv:complete": 198,
+  "cli:hang": 1
+ },
+ "examples": [
+  {
+   "why": "violation:hang",
+   "row": [
+    189,
+    4,
+    1059908,
+    4,
+    null,
+    1059908,
+    true,
+    false,
+    "TIMEOUT",
+    15477,
+    0,
+    false,
+    null,
+    57246
+   ],
+   "srv": [
+    189,
+    4,
+    true,
+    true,
+    null,
+    1059908,
+    null,
+    false
+   ]
+  }
+ ],
+ "clients_rc": 0,
+ "guest_owner": {
+  "live_at_end": 1,
+  "clean": 299,
+  "aborted": 0,
+  "aborts": {},
+  "viol": {},
+  "shut": {
+   "shut_0x2": 299,
+   "shut_0x3": 7,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 1
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 1,
+  "stuck": [
+   {
+    "age_ms": 40903,
+    "armed": [
+     true,
+     false
+    ],
+    "cells": [
+     376,
+     377
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     false
+    ],
+    "flow": 189,
+    "fwd": [
+     60,
+     1059908
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     60,
+     null
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "rdhup_v": true,
+    "rst": false,
+    "s2": false,
+    "s3": false,
+    "sent": [
+     60,
+     1059908
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   }
+  ],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 201,
+   "fire_poke": 0,
+   "fire_fexit": 201,
+   "level_unreadable": 0
+  }
+ },
+ "host_owner": {
+  "live_at_end": 0,
+  "clean": 300,
+  "aborted": 0,
+  "aborts": {},
+  "viol": {},
+  "shut": {
+   "shut_0x2": 300,
+   "shut_0x3": 0,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 0,
+  "paired_at_loss": 0,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 95,
+   "fire_poke": 0,
+   "fire_fexit": 95,
+   "level_unreadable": 0
+  }
+ }
+}

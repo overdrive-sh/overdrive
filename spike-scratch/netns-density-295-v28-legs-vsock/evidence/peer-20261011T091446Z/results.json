@@ -1,0 +1,75 @@
+{
+ "substrate": {
+  "host_uname": "7.0.0-29-generic",
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "P-legc": {
+  "client_local": "198.18.28.1:47371",
+  "client_ok": true,
+  "client_down": 1000,
+  "relay_peer_c": "198.18.28.1:47371",
+  "app_peer": [
+   "198.18.28.1:47371"
+  ],
+  "app_local": [
+   "10.77.0.2:8080"
+  ],
+  "gagent": [
+   {
+    "connect_us": 158,
+    "ev": "gagent_paired",
+    "id": 1,
+    "peer_req": "198.18.28.1:47371",
+    "tcp_local": "198.18.28.1:47371"
+   }
+  ]
+ },
+ "P-gateway": {
+  "client_local": "198.18.28.1:36089",
+  "client_ok": true,
+  "client_down": 1000,
+  "relay_peer_c": "198.18.28.1:36089",
+  "app_peer": [
+   "198.18.28.254:49425"
+  ],
+  "app_local": [
+   "10.77.0.2:8080"
+  ],
+  "gagent": [
+   {
+    "connect_us": 138,
+    "ev": "gagent_paired",
+    "id": 2,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:49425"
+   }
+  ]
+ },
+ "P-none": {
+  "client_local": "198.18.28.1:39125",
+  "client_ok": true,
+  "client_down": 1000,
+  "relay_peer_c": "198.18.28.1:39125",
+  "app_peer": [
+   "10.77.0.2:34784"
+  ],
+  "app_local": [
+   "10.77.0.2:8080"
+  ],
+  "gagent": [
+   {
+    "connect_us": 1383,
+    "ev": "gagent_paired",
+    "id": 3,
+    "peer_req": "0.0.0.0:0",
+    "tcp_local": "10.77.0.2:34784"
+   }
+  ]
+ },
+ "P-concurrent-40": {
+  "ok": 40,
+  "app_conns": 40,
+  "distinct_peers": 40,
+  "peers_match_client_locals": true
+ }
+}

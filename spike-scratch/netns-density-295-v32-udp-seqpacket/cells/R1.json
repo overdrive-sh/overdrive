@@ -1,0 +1,220 @@
+[
+ {
+  "label": "F-seq-direct-1024",
+  "variant": "seq",
+  "size": 1024,
+  "n": 100000,
+  "cell": "direct"
+ },
+ {
+  "label": "F-seq-direct-mix",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "cell": "direct"
+ },
+ {
+  "label": "F-seq-direct-59000",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "cell": "direct"
+ },
+ {
+  "label": "F-seq-unix-1024",
+  "variant": "seq",
+  "size": 1024,
+  "n": 100000,
+  "cell": "unix"
+ },
+ {
+  "label": "F-seq-unix-mix",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "cell": "unix"
+ },
+ {
+  "label": "F-seq-unix-59000",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "cell": "unix"
+ },
+ {
+  "label": "F-seq-unix-k1",
+  "variant": "seq",
+  "size": 1024,
+  "n": 200,
+  "cell": "unix",
+  "k1": 100
+ },
+ {
+  "label": "F-seq-unix-k1-rearm",
+  "variant": "seq",
+  "size": 1024,
+  "n": 200,
+  "cell": "unix",
+  "k1": 100,
+  "k1rearm": 1
+ },
+ {
+  "label": "F-seq-direct-16384-hb64k",
+  "variant": "seq",
+  "size": 16384,
+  "n": 100000,
+  "cell": "direct",
+  "hostbuf": 65536
+ },
+ {
+  "label": "F-seq-unix-16384-hb64k",
+  "variant": "seq",
+  "size": 16384,
+  "n": 100000,
+  "cell": "unix",
+  "hostbuf": 65536
+ },
+ {
+  "label": "E-seq-1024-p2mode0-control",
+  "variant": "seq",
+  "size": 1024,
+  "n": 20000,
+  "p2mode": 0,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-59000-p2mode0-control",
+  "variant": "seq",
+  "size": 59000,
+  "n": 20000,
+  "p2mode": 0,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-59000-hb64k-check-off",
+  "variant": "seq",
+  "size": 59000,
+  "n": 20000,
+  "hostbuf": 65536,
+  "check": 0,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-synth",
+  "variant": "seq",
+  "size": "any",
+  "n": 8,
+  "synth": 1
+ },
+ {
+  "label": "E-seq-synth-check-off",
+  "variant": "seq",
+  "size": "any",
+  "n": 8,
+  "synth": 1,
+  "check": 0
+ },
+ {
+  "label": "E-seq-59000-hb32k-emsgsize",
+  "variant": "seq",
+  "size": 59000,
+  "n": 300,
+  "hostbuf": 32768,
+  "nodelay": 1
+ },
+ {
+  "label": "E-stream-59000-hb32k",
+  "variant": "stream",
+  "size": 59000,
+  "n": 20000,
+  "hostbuf": 32768,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-61440-bound65536",
+  "variant": "seq",
+  "size": 61440,
+  "n": 20000,
+  "bound": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "E-stream-61440-bound65536",
+  "variant": "stream",
+  "size": 61440,
+  "n": 20000,
+  "bound": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-61440-adr-bound",
+  "variant": "seq",
+  "size": 61440,
+  "n": 2000,
+  "nodelay": 1
+ },
+ {
+  "label": "B-seq-1024-pause3s",
+  "variant": "seq",
+  "size": 1024,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "B-seq-59000-pause3s",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "B-stream-1024-pause3s",
+  "variant": "stream",
+  "size": 1024,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "B-stream-59000-pause3s",
+  "variant": "stream",
+  "size": 59000,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "D-seqrecv-1024-pause3s",
+  "variant": "seqrecv",
+  "size": 1024,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "D-seqrecv-16384-pause3s",
+  "variant": "seqrecv",
+  "size": 16384,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "D-seqrecv-59000-pause3s",
+  "variant": "seqrecv",
+  "size": 59000,
+  "n": 100000,
+  "pause_ms": 3000,
+  "nodelay": 1
+ },
+ {
+  "label": "D-seqrecv-59000-hb64k",
+  "variant": "seqrecv",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ }
+]

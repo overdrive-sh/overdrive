@@ -1,0 +1,15 @@
+[    0.003034] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=9a58aa75-b9dc-46c2-bb28-746bf11f13e0
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO sysrq-b
+GUEST_ACT sysrq-b
+[    1.436403] sysrq: Resetting
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====
+[    0.002986] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.001] GUEST_BOOT boot_id=80f667cd-9cdc-4d77-a67f-fd3ad2afe451
+[   0.002] GUEST_HELLO_SENT
+GUEST_LISTEN_READY

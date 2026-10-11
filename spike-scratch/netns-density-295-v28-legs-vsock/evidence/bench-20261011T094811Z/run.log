@@ -1,0 +1,56 @@
+[09:48:11] === v28 stage bench ['tcp-splice,vsock-native-splice', '1048576,67108864']
+[09:48:11] === preflight (fail closed)
+[09:48:11] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[09:48:11] $ modprobe vhost_vsock; modprobe vsock_loopback; modprobe tls; lsmod | grep -E '^(tls|vsock|vhost_vsock)' | head (rc=0)
+[09:48:11]     vsock_diag             12288  0
+[09:48:11]     vhost_vsock            28672  4
+[09:48:11]     vsock_loopback         12288  0
+[09:48:11]     vsock                  73728  15 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[09:48:11]     tls                   163840  0
+[09:48:11] $ ip addr show dev lo | grep -q 198.18.28.1 || ip addr add 198.18.28.1/32 dev lo (rc=0)
+[09:48:11] === guest image
+[09:48:12] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "e15685e6d9a8", "legs": "c185537c3027", "cloud_hypervisor": "eadddf1bbcdc"}
+[09:48:12] launch VM: /tmp/v28-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v28-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v28-work/out/vm-bench-20261011T094811Z/serial.log --console off --vsock cid=4280,backend=vhost-kernel --log-file /tmp/v28-work/out/vm-bench-20261011T094811Z/ch.log -v
+[09:48:13] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[09:48:13] guest uname -r: 7.0.0-29-generic  host uname -r: 7.0.0-29-generic
+[09:48:13] guest$ ip addr add 10.77.0.2/32 dev lo rc=0 
+[09:48:13] guest$ echo 1 > /proc/sys/net/ipv4/tcp_fwmark_accept rc=0 
+[09:48:13] guest$ echo 1 > /proc/sys/net/ipv4/fwmark_reflect rc=0 
+[09:48:13] guest$ for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > $f; done rc=0 
+[09:48:13] guest$ ip rule add fwmark 1 lookup 100 rc=0 
+[09:48:13] guest$ ip route add local 0.0.0.0/0 dev lo table 100 rc=0 
+[09:48:13] guest$ ip -br addr; ip rule; ip route show table 100; uname -r rc=0 0:	from all lookup local 
+32765:	from all fwmark 0x1 lookup 100 
+32766:	from all lookup main 
+32767:	from all lookup default 
+local default dev lo scope host 
+7.0.0-29-generic
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARG
+[09:48:13] gagent eof-class=tp started 
+[09:48:14] BENCH tcp-splice-1048576-up: ok=60/60 median_ms=1.808 MB/s=580.0
+[09:48:14] RESULT tcp-splice-1048576-up: {"ok": 60, "fail": 0, "fail_examples": [], "t_total_us": [8675, 1898, 1586, 1528, 1831, 1621, 1802, 1768, 1810, 1771, 1658, 1821, 1773, 1932, 1769, 1708, 1639, 1732, 2747, 1808, 2819, 1652, 1624, 1557, 1650, 1742, 1652, 1715, 1694, 6392, 1818, 1821, 2237, 1412, 1559, 1516, 4187, 1622, 2700, 2407, 1526, 1733, 2787, 2023, 1750, 1754, 1741, 1590, 1894, 2700, 2480, 1976, 2452, 2747, 3221, 2657, 2123, 2786, 2835, 2502], "t_first_us": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "wall_us": 479722, "bytes": 1048576}
+[09:48:15] BENCH tcp-splice-1048576-down: ok=60/60 median_ms=0.817 MB/s=1283.4
+[09:48:15] RESULT tcp-splice-1048576-down: {"ok": 60, "fail": 0, "fail_examples": [], "t_total_us": [4266, 1747, 826, 846, 941, 792, 803, 800, 749, 792, 745, 754, 696, 798, 1511, 741, 938, 749, 699, 821, 813, 798, 838, 723, 859, 773, 827, 691, 857, 894, 857, 799, 817, 731, 909, 780, 800, 756, 788, 905, 854, 804, 809, 1731, 889, 841, 833, 863, 1356, 849, 784, 851, 821, 828, 760, 831, 860, 786, 789, 758], "t_first_us": [285, 460, 167, 152, 203, 153, 156, 142, 136, 161, 127, 135, 134, 154, 333, 161, 186, 156, 132, 157, 200, 153, 193, 115, 158, 151, 201, 125, 137, 194, 156, 131, 130, 129, 199, 171, 136, 132, 143, 241, 167, 132, 143, 269, 166, 187, 159, 196, 221, 168, 132, 160, 171, 134, 149, 159, 225, 171, 132, 157], "wall_us": 402587, "bytes": 1048576}
+[09:48:15] BENCH tcp-splice-1048576-both: ok=60/60 median_ms=1.866 MB/s=1123.9
+[09:48:15] RESULT tcp-splice-1048576-both: {"ok": 60, "fail": 0, "fail_examples": [], "t_total_us": [6157, 2370, 1970, 1672, 1699, 1660, 1881, 1647, 2983, 1619, 2887, 1991, 1731, 1864, 1970, 2515, 1803, 2427, 2260, 2072, 2609, 2145, 1724, 1563, 1440, 1571, 2442, 3429, 1452, 1992, 1550, 1613, 2527, 1597, 1816, 2650, 1838, 1722, 1853, 2013, 1661, 2665, 1433, 1470, 2137, 1836, 1866, 2014, 1664, 1602, 1684, 2083, 2076, 1956, 1605, 1856, 2469, 2424, 2644, 1491], "t_first_us": [309, 225, 151, 295, 201, 349, 181, 189, 312, 361, 178, 320, 475, 434, 252, 180, 410, 171, 157, 155, 388, 394, 304, 273, 263, 280, 291, 267, 272, 387, 309, 271, 271, 289, 292, 271, 416, 287, 308, 371, 277, 504, 267, 290, 418, 381, 409, 398, 281, 284, 260, 320, 341, 426, 277, 316, 438, 290, 392, 273], "wall_us": 472154, "bytes": 2097152}
+[09:48:16] BENCH tcp-splice-67108864-up: ok=8/8 median_ms=90.207 MB/s=743.9
+[09:48:16] RESULT tcp-splice-67108864-up: {"ok": 8, "fail": 0, "fail_examples": [], "t_total_us": [73454, 79494, 90210, 106581, 72275, 90207, 77965, 96599], "t_first_us": [0, 0, 0, 0, 0, 0, 0, 0], "wall_us": 736561, "bytes": 67108864}
+[09:48:17] BENCH tcp-splice-67108864-down: ok=8/8 median_ms=54.897 MB/s=1222.5
+[09:48:17] RESULT tcp-splice-67108864-down: {"ok": 8, "fail": 0, "fail_examples": [], "t_total_us": [63172, 62029, 54897, 45612, 42997, 41342, 76391, 53075], "t_first_us": [273, 543, 212, 304, 240, 163, 189, 264], "wall_us": 488728, "bytes": 67108864}
+[09:48:19] BENCH tcp-splice-67108864-both: ok=8/8 median_ms=150.607 MB/s=891.2
+[09:48:19] RESULT tcp-splice-67108864-both: {"ok": 8, "fail": 0, "fail_examples": [], "t_total_us": [145294, 136592, 118536, 125739, 151705, 150607, 163301, 156952], "t_first_us": [552, 252, 407, 409, 444, 412, 436, 343], "wall_us": 1199191, "bytes": 134217728}
+[09:48:19] BENCH vsock-native-splice-1048576-up: ok=60/60 median_ms=2.38 MB/s=440.6
+[09:48:19] RESULT vsock-native-splice-1048576-up: {"ok": 60, "fail": 0, "fail_examples": [], "t_total_us": [10504, 3171, 2652, 2904, 2422, 3072, 6234, 2883, 3514, 2394, 3674, 3976, 2636, 2286, 2577, 2347, 2925, 2063, 2258, 2373, 2005, 2148, 2362, 1955, 2252, 2083, 2032, 2652, 2138, 2323, 2445, 2328, 2551, 2727, 2749, 2563, 2291, 2154, 2205, 2225, 2317, 2881, 2662, 2443, 2380, 2570, 2880, 2684, 2296, 2332, 2246, 2083, 2494, 2364, 1890, 2196, 2205, 2451, 2162, 2163], "t_first_us": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "wall_us": 512778, "bytes": 1048576}
+[09:48:20] BENCH vsock-native-splice-1048576-down: ok=60/60 median_ms=0.835 MB/s=1255.8
+[09:48:20] RESULT vsock-native-splice-1048576-down: {"ok": 60, "fail": 0, "fail_examples": [], "t_total_us": [4675, 1771, 1021, 841, 1253, 851, 814, 997, 811, 1020, 811, 797, 805, 821, 817, 1040, 839, 840, 807, 900, 875, 1607, 842, 807, 896, 831, 801, 2018, 820, 877, 840, 839, 830, 835, 836, 822, 829, 869, 854, 835, 835, 852, 793, 848, 831, 831, 755, 825, 827, 820, 765, 844, 823, 822, 852, 1268, 839, 835, 820, 831], "t_first_us": [759, 374, 191, 207, 267, 215, 187, 303, 189, 317, 185, 183, 194, 204, 191, 346, 215, 206, 179, 180, 175, 177, 205, 176, 177, 202, 190, 476, 198, 168, 153, 140, 137, 134, 146, 134, 134, 131, 156, 135, 140, 153, 160, 153, 140, 143, 130, 138, 134, 141, 130, 153, 131, 134, 155, 165, 140, 131, 139, 137], "wall_us": 408887, "bytes": 1048576}
+[09:48:21] BENCH vsock-native-splice-1048576-both: ok=60/60 median_ms=2.478 MB/s=846.3
+[09:48:21] RESULT vsock-native-splice-1048576-both: {"ok": 60, "fail": 0, "fail_examples": [], "t_total_us": [5710, 5818, 2818, 6392, 3163, 3872, 6518, 5089, 3790, 5942, 3500, 3185, 3244, 5999, 3328, 5105, 5406, 2389, 3260, 2437, 2442, 2514, 2927, 2045, 2256, 2437, 2161, 2562, 2618, 2757, 2183, 2359, 2608, 2993, 2450, 2090, 2305, 2483, 2428, 2351, 2385, 2246, 2067, 2435, 2190, 2273, 2165, 2220, 2194, 2184, 2393, 2179, 2309, 2133, 3145, 2563, 2774, 2478, 2285, 2272], "t_first_us": [435, 560, 606, 546, 168, 144, 490, 123, 113, 114, 602, 576, 114, 115, 141, 130, 553, 443, 165, 358, 502, 386, 702, 439, 311, 764, 307, 393, 678, 498, 433, 312, 493, 636, 432, 237, 341, 393, 385, 319, 317, 302, 343, 467, 307, 296, 295, 277, 286, 291, 298, 310, 256, 260, 292, 463, 461, 513, 335, 285], "wall_us": 532865, "bytes": 2097152}
+[09:48:22] BENCH vsock-native-splice-67108864-up: ok=8/8 median_ms=126.03 MB/s=532.5
+[09:48:22] RESULT vsock-native-splice-67108864-up: {"ok": 8, "fail": 0, "fail_examples": [], "t_total_us": [126030, 125241, 204720, 223776, 247205, 114501, 108045, 112184], "t_first_us": [0, 0, 0, 0, 0, 0, 0, 0], "wall_us": 1311505, "bytes": 67108864}
+[09:48:23] BENCH vsock-native-splice-67108864-down: ok=8/8 median_ms=69.554 MB/s=964.8
+[09:48:23] RESULT vsock-native-splice-67108864-down: {"ok": 8, "fail": 0, "fail_examples": [], "t_total_us": [76364, 74211, 69554, 67783, 66660, 61303, 59161, 77055], "t_first_us": [450, 320, 179, 141, 164, 295, 144, 269], "wall_us": 601248, "bytes": 67108864}
+[09:48:24] BENCH vsock-native-splice-67108864-both: ok=8/8 median_ms=155.215 MB/s=864.7
+[09:48:24] RESULT vsock-native-splice-67108864-both: {"ok": 8, "fail": 0, "fail_examples": [], "t_total_us": [176530, 173557, 146148, 148478, 155215, 120193, 191513, 137276], "t_first_us": [390, 309, 180, 478, 478, 648, 410, 366], "wall_us": 1298610, "bytes": 134217728}
+[09:48:24] $ pgrep -af cloud-hypervisor | grep -v pgrep; true (rc=0)

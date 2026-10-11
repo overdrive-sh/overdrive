@@ -1,0 +1,50 @@
+[
+ {
+  "label": "C-seq-32768-hb64k",
+  "variant": "seq",
+  "size": 32768,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-59000-hb64k",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-mix-hb64k",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-32768-hb64k",
+  "variant": "stream",
+  "size": 32768,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-59000-hb64k",
+  "variant": "stream",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-mix-hb64k",
+  "variant": "stream",
+  "size": "mix",
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ }
+]

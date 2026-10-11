@@ -1,0 +1,226 @@
+{
+ "substrate": {
+  "host_uname": "7.0.0-29-generic",
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "smoke-tcp": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:40067",
+   "ok": true,
+   "t_first_us": 339,
+   "t_hs_us": 1640,
+   "t_sent_us": 8900,
+   "t_total_us": 6836,
+   "tag": "smoke-tcp",
+   "up_err": 0,
+   "up_sent": 3000001,
+   "wall_s": 0.022
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "fin",
+    "ev": "conn",
+    "local": "127.0.0.1:19428",
+    "ms": 23,
+    "peer": "127.0.0.1:50638",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 3000001,
+    "up_end": "eof",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1173,
+    "id": 1,
+    "legs_open_us": 120,
+    "peer_c": "198.18.28.1:40067"
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791705633561520
+   },
+   {
+    "bytes": 3000001,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791705633579722
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 24819
+   }
+  ],
+  "gagent": []
+ },
+ "smoke-vsock": {
+  "client": {
+   "down_bad_at": null,
+   "down_end": "eof",
+   "down_expected": 2000003,
+   "down_ok": true,
+   "down_recv": 2000003,
+   "local": "198.18.28.1:36161",
+   "ok": true,
+   "t_first_us": 329,
+   "t_hs_us": 1708,
+   "t_sent_us": 16111,
+   "t_total_us": 13135,
+   "tag": "smoke-vsock",
+   "up_err": 0,
+   "up_sent": 3000001,
+   "wall_s": 0.031
+  },
+  "app": [
+   {
+    "down_err": 0,
+    "down_sent": 2000003,
+    "end_action": "fin",
+    "ev": "conn",
+    "local": "10.77.0.2:8080",
+    "ms": 27,
+    "peer": "198.18.28.254:38269",
+    "tag": "",
+    "up_bad_at": null,
+    "up_bytes": 3000001,
+    "up_end": "err:ECONNRESET",
+    "up_ok": true
+   }
+  ],
+  "relay": [
+   {
+    "early": 0,
+    "ev": "relay_paired",
+    "hs_us": 1261,
+    "id": 1,
+    "legs_open_us": 842,
+    "peer_c": "198.18.28.1:36161"
+   },
+   {
+    "dir": "s2c",
+    "ev": "vsock_eof_classify",
+    "id": 1,
+    "zero_send_errno": 0
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791705634603796
+   },
+   {
+    "bytes": 3000001,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791705634623817
+   },
+   {
+    "ev": "relay_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 29441
+   }
+  ],
+  "gagent": [
+   {
+    "connect_us": 177,
+    "ev": "gagent_paired",
+    "id": 1,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:38269"
+   },
+   {
+    "bytes": 2000003,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791705634560099
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 1,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 3000001,
+    "dir": "c2s",
+    "end": "eof_abort",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791705634580685
+   },
+   {
+    "ev": "gagent_done",
+    "id": 1,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 3000001,
+      "end": "eof_abort"
+     },
+     "s2c": {
+      "bytes": 2000003,
+      "end": "eof_clean"
+     }
+    },
+    "us": 28023
+   }
+  ]
+ }
+}

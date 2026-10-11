@@ -1,0 +1,225 @@
+{
+ "tag": "n-guest-owner-held-noclassify-1",
+ "seed": 40701,
+ "action": "kill-guest-owner",
+ "action_delay_ms": 683,
+ "action_done_at_ms_after_clients_start": 684,
+ "clients_wall_s": 1.0,
+ "trials": 800,
+ "cats": {
+  "reset": 710,
+  "violation:srv_clean_short_eof": 90
+ },
+ "ends": {
+  "cli:reset": 800,
+  "srv:reset": 310,
+  "srv:CLEAN_SHORT_EOF": 90,
+  "srv:no_result": 400
+ },
+ "examples": [
+  {
+   "why": "violation:srv_clean_short_eof",
+   "row": [
+    326,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    false,
+    "ECONNRESET",
+    691,
+    300,
+    false,
+    null,
+    56782
+   ],
+   "srv": [
+    326,
+    863179,
+    true,
+    true,
+    null,
+    1048576,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:srv_clean_short_eof",
+   "row": [
+    313,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    false,
+    "ECONNRESET",
+    692,
+    300,
+    true,
+    null,
+    56222
+   ],
+   "srv": [
+    313,
+    750022,
+    true,
+    true,
+    null,
+    1048576,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:srv_clean_short_eof",
+   "row": [
+    364,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    false,
+    "ECONNRESET",
+    692,
+    300,
+    true,
+    null,
+    56030
+   ],
+   "srv": [
+    364,
+    702406,
+    true,
+    true,
+    null,
+    1048576,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:srv_clean_short_eof",
+   "row": [
+    387,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    false,
+    "ECONNRESET",
+    692,
+    300,
+    false,
+    null,
+    55992
+   ],
+   "srv": [
+    387,
+    750080,
+    true,
+    true,
+    null,
+    1048576,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:srv_clean_short_eof",
+   "row": [
+    84,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    false,
+    "ECONNRESET",
+    703,
+    300,
+    true,
+    null,
+    55944
+   ],
+   "srv": [
+    84,
+    702406,
+    true,
+    true,
+    null,
+    1048576,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:srv_clean_short_eof",
+   "row": [
+    273,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    false,
+    "ECONNRESET",
+    695,
+    300,
+    false,
+    null,
+    55978
+   ],
+   "srv": [
+    273,
+    750080,
+    true,
+    true,
+    null,
+    1048576,
+    null,
+    false
+   ]
+  }
+ ],
+ "clients_rc": 0,
+ "guest_owner": null,
+ "host_owner": {
+  "live_at_end": 0,
+  "clean": 0,
+  "aborted": 400,
+  "aborts": {
+   "redirect_dropped": 400
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 0,
+   "shut_0x3": 400,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 97,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 147,
+   "fire_poke": 0,
+   "fire_fexit": 147,
+   "level_unreadable": 0
+  }
+ }
+}

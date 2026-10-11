@@ -1,0 +1,4 @@
+[12:05:12] === v31 loop hunt2: 1 scenarios
+[12:05:12] $ modprobe vhost_vsock; modprobe vsock_loopback (rc=0)
+[12:07:33] $ pgrep -af 'cloud-hypervisor|drainprobe' | grep -v pgrep | head; ls -d /sys/fs/cgroup/v31-* 2>&1 | head -3; true (rc=0)
+[12:07:33]     ls: cannot access '/sys/fs/cgroup/v31-*': No such file or directory

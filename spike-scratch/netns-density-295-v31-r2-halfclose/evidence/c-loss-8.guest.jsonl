@@ -1,0 +1,1 @@
+{"detail":{"eof1":false,"s2":false,"shut0":false},"ev":"abort","flow":593,"reason":"peer_close_while_open","role":"guest","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996749636671971}

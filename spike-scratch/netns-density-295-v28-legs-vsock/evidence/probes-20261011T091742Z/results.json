@@ -1,0 +1,696 @@
+{
+ "substrate": {
+  "host_uname": "7.0.0-29-generic",
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "probes": {
+  "http200_http": {
+   "flow": "P",
+   "http_status": 200,
+   "latency_ms": 1.189,
+   "read_errno": 0,
+   "result": "healthy",
+   "status_line": "HTTP/1.1 200 X",
+   "write": "Ok(())"
+  },
+  "http200_tcp": {
+   "flow": "P",
+   "latency_ms": 0.415,
+   "result": "healthy"
+  },
+  "http500_http": {
+   "flow": "P",
+   "http_status": 500,
+   "latency_ms": 1.171,
+   "read_errno": 0,
+   "result": "unhealthy",
+   "status_line": "HTTP/1.1 500 X",
+   "write": "Ok(())"
+  },
+  "http500_tcp": {
+   "flow": "P",
+   "latency_ms": 0.352,
+   "result": "healthy"
+  },
+  "nolistener_tcp": {
+   "flow": "R:111",
+   "latency_ms": 0.581,
+   "result": "unhealthy"
+  },
+  "nolistener_http": {
+   "flow": "R:111",
+   "latency_ms": 0.314,
+   "result": "unhealthy"
+  },
+  "noaccept_tcp": {
+   "flow": "P",
+   "latency_ms": 0.541,
+   "result": "healthy"
+  },
+  "noaccept_http": {
+   "flow": "P",
+   "http_status": 0,
+   "latency_ms": 2028.18,
+   "read_errno": 11,
+   "result": "unhealthy",
+   "status_line": "",
+   "write": "Ok(())"
+  },
+  "noaccept_backlog1_tcp_sequence": [
+   {
+    "flow": "P",
+    "latency_ms": 0.569,
+    "result": "healthy"
+   },
+   {
+    "flow": "P",
+    "latency_ms": 0.395,
+    "result": "healthy"
+   },
+   {
+    "flow": "T:110",
+    "latency_ms": 1502.177,
+    "result": "unhealthy"
+   },
+   {
+    "flow": "T:110",
+    "latency_ms": 1502.233,
+    "result": "unhealthy"
+   },
+   {
+    "flow": "T:110",
+    "latency_ms": 1502.308,
+    "result": "unhealthy"
+   },
+   {
+    "flow": "T:110",
+    "latency_ms": 1502.349,
+    "result": "unhealthy"
+   }
+  ],
+  "silent_tcp": {
+   "flow": "P",
+   "latency_ms": 0.53,
+   "result": "healthy"
+  },
+  "silent_http": {
+   "flow": "P",
+   "http_status": 0,
+   "latency_ms": 2009.436,
+   "read_errno": 11,
+   "result": "unhealthy",
+   "status_line": "",
+   "write": "Ok(())"
+  },
+  "goes_away": {
+   "before": {
+    "flow": "P",
+    "http_status": 200,
+    "latency_ms": 0.915,
+    "read_errno": 0,
+    "result": "healthy",
+    "status_line": "HTTP/1.1 200 X",
+    "write": "Ok(())"
+   },
+   "after": {
+    "flow": "R:111",
+    "latency_ms": 0.905,
+    "result": "unhealthy"
+   }
+  }
+ },
+ "probes-gagent": {
+  "gagent": [
+   {
+    "connect_us": 158,
+    "ev": "gagent_paired",
+    "id": 1,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:43311"
+   },
+   {
+    "bytes": 58,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791710265121912
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 1,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 57,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 1,
+    "splice_einval": 0,
+    "t_us": 1791710265122076
+   },
+   {
+    "ev": "gagent_done",
+    "id": 1,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 57,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 58,
+      "end": "eof_clean"
+     }
+    },
+    "us": 1135
+   },
+   {
+    "connect_us": 97,
+    "ev": "gagent_paired",
+    "id": 2,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:57339"
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 2,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 0,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 2,
+    "splice_einval": 0,
+    "t_us": 1791710265124276
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "write_err:32",
+    "errno": 32,
+    "ev": "pump_end",
+    "id": 2,
+    "splice_einval": 0,
+    "t_us": 1791710265124366
+   },
+   {
+    "ev": "gagent_done",
+    "id": 2,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 0,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "write_err:32"
+     }
+    },
+    "us": 639
+   },
+   {
+    "connect_us": 162,
+    "ev": "gagent_paired",
+    "id": 3,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:60151"
+   },
+   {
+    "bytes": 58,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 3,
+    "splice_einval": 0,
+    "t_us": 1791710265844808
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 3,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 57,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 3,
+    "splice_einval": 0,
+    "t_us": 1791710265844917
+   },
+   {
+    "ev": "gagent_done",
+    "id": 3,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 57,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 58,
+      "end": "eof_clean"
+     }
+    },
+    "us": 998
+   },
+   {
+    "connect_us": 80,
+    "ev": "gagent_paired",
+    "id": 4,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:41189"
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 4,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 0,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 4,
+    "splice_einval": 0,
+    "t_us": 1791710265847159
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "write_err:32",
+    "errno": 32,
+    "ev": "pump_end",
+    "id": 4,
+    "splice_einval": 0,
+    "t_us": 1791710265847212
+   },
+   {
+    "ev": "gagent_done",
+    "id": 4,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 0,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "write_err:32"
+     }
+    },
+    "us": 393
+   },
+   {
+    "connect_us": 84,
+    "errno": 111,
+    "ev": "gagent_not_paired",
+    "id": 5
+   },
+   {
+    "connect_us": 40,
+    "errno": 111,
+    "ev": "gagent_not_paired",
+    "id": 6
+   },
+   {
+    "connect_us": 165,
+    "ev": "gagent_paired",
+    "id": 7,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:56773"
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 7,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 0,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 7,
+    "splice_einval": 0,
+    "t_us": 1791710266571852
+   },
+   {
+    "connect_us": 122,
+    "ev": "gagent_paired",
+    "id": 8,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:39261"
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 8,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 57,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 8,
+    "splice_einval": 0,
+    "t_us": 1791710268602087
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "read_err:104",
+    "errno": 104,
+    "ev": "pump_end",
+    "id": 8,
+    "splice_einval": 0,
+    "t_us": 1791710268606265
+   },
+   {
+    "ev": "gagent_done",
+    "id": 8,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 57,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "read_err:104"
+     }
+    },
+    "us": 2032643
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "read_err:104",
+    "errno": 104,
+    "ev": "pump_end",
+    "id": 7,
+    "splice_einval": 0,
+    "t_us": 1791710268606345
+   },
+   {
+    "ev": "gagent_done",
+    "id": 7,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 0,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "read_err:104"
+     }
+    },
+    "us": 2035102
+   },
+   {
+    "connect_us": 163,
+    "ev": "gagent_paired",
+    "id": 9,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:50341"
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 9,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 0,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 9,
+    "splice_einval": 0,
+    "t_us": 1791710269322955
+   },
+   {
+    "connect_us": 97,
+    "ev": "gagent_paired",
+    "id": 10,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:42701"
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 10,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 0,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 10,
+    "splice_einval": 0,
+    "t_us": 1791710269325372
+   },
+   {
+    "connect_us": 1501614,
+    "errno": 110,
+    "ev": "gagent_not_paired",
+    "id": 11
+   },
+   {
+    "connect_us": 1501585,
+    "errno": 110,
+    "ev": "gagent_not_paired",
+    "id": 12
+   },
+   {
+    "connect_us": 1501710,
+    "errno": 110,
+    "ev": "gagent_not_paired",
+    "id": 13
+   },
+   {
+    "connect_us": 1501700,
+    "errno": 110,
+    "ev": "gagent_not_paired",
+    "id": 14
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "read_err:104",
+    "errno": 104,
+    "ev": "pump_end",
+    "id": 9,
+    "splice_einval": 0,
+    "t_us": 1791710275346249
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "read_err:104",
+    "errno": 104,
+    "ev": "pump_end",
+    "id": 10,
+    "splice_einval": 0,
+    "t_us": 1791710275346253
+   },
+   {
+    "ev": "gagent_done",
+    "id": 9,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 0,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "read_err:104"
+     }
+    },
+    "us": 6023882
+   },
+   {
+    "ev": "gagent_done",
+    "id": 10,
+    "r": {
+     "aborted": true,
+     "c2s": {
+      "bytes": 0,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "read_err:104"
+     }
+    },
+    "us": 6021418
+   },
+   {
+    "connect_us": 149,
+    "ev": "gagent_paired",
+    "id": 15,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:33749"
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 15,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 0,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 15,
+    "splice_einval": 0,
+    "t_us": 1791710276062722
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 15,
+    "splice_einval": 0,
+    "t_us": 1791710276062773
+   },
+   {
+    "ev": "gagent_done",
+    "id": 15,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 0,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "eof_clean"
+     }
+    },
+    "us": 657
+   },
+   {
+    "connect_us": 85,
+    "ev": "gagent_paired",
+    "id": 16,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:43487"
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 16,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 57,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 16,
+    "splice_einval": 0,
+    "t_us": 1791710278074039
+   },
+   {
+    "bytes": 0,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 16,
+    "splice_einval": 0,
+    "t_us": 1791710278074270
+   },
+   {
+    "ev": "gagent_done",
+    "id": 16,
+    "r": {
+     "aborted": false,
+     "c2s": {
+      "bytes": 57,
+      "end": "eof_clean"
+     },
+     "s2c": {
+      "bytes": 0,
+      "end": "eof_clean"
+     }
+    },
+    "us": 2010033
+   },
+   {
+    "connect_us": 125,
+    "ev": "gagent_paired",
+    "id": 17,
+    "peer_req": "198.18.28.254:0",
+    "tcp_local": "198.18.28.254:35027"
+   },
+   {
+    "bytes": 58,
+    "dir": "s2c",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 17,
+    "splice_einval": 0,
+    "t_us": 1791710278794382
+   },
+   {
+    "dir": "c2s",
+    "ev": "vsock_eof_classify",
+    "id": 17,
+    "mode": 0,
+    "zero_send_errno": 32
+   },
+   {
+    "bytes": 57,
+    "dir": "c2s",
+    "end": "eof_clean",
+    "errno": 0,
+    "ev": "pump_end",
+    "id": 17,
+    "splice_einval": 0,
+    "t_us": 1791710278794590
+   }
+  ]
+ }
+}

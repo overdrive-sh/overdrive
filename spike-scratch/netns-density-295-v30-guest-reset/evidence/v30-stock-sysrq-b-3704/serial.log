@@ -1,0 +1,5 @@
+[    0.002980] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=c705cc96-42fd-429b-bbff-b9090528f152
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT

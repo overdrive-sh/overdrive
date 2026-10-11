@@ -1,0 +1,12 @@
+[package]
+name = "v30guest"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[dependencies]
+libc = "0.2"
+[[bin]]
+name = "v30guest"
+path = "src/main.rs"
+[profile.release]
+debug = 0

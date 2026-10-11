@@ -1,0 +1,131 @@
+{
+ "tag": "k-host-owner-busy-1",
+ "seed": 9251,
+ "action": "kill-host-owner",
+ "action_delay_ms": 296,
+ "action_done_at_ms_after_clients_start": 296,
+ "clients_wall_s": 0.0,
+ "trials": 3000,
+ "cats": {
+  "violation:other_error:connect:Connection refused (os error 111)": 3000
+ },
+ "examples": [
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    1,
+    0,
+    50295,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    false,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    2,
+    457260,
+    1460066,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    true,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    3,
+    5434,
+    1781208,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    true,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    5,
+    7999,
+    312787,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    false,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    6,
+    11245,
+    263691,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    false,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    7,
+    707887,
+    370388,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    false,
+    null
+   ],
+   "srv": null
+  }
+ ],
+ "clients_rc": 0,
+ "guest_owner": null,
+ "host_owner": null
+}

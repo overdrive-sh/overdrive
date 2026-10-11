@@ -1,0 +1,198 @@
+{
+ "name": "v30-fd-keep-rebootf-3711-80846Z",
+ "mode": "fd-keep",
+ "case": "rebootf",
+ "cid": 3711,
+ "cmdline": "console=ttyS0 panic=1 loglevel=4",
+ "vsock_arg": "cid=3711,backend=vhost-kernel,fd=4",
+ "ch_pid": 3993945,
+ "before": {
+  "incarnation_1": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367803083 3711:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3711:2185696167"
+  ],
+  "ch_vhost_fds": {
+   "4": "/dev/vhost-vsock"
+  },
+  "claim_attempt_from_host_probe": "EADDRINUSE"
+ },
+ "after": {
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "send_probe_on_open_conns": {
+   "g2h#1": "send ok",
+   "h2g#1": "send ok"
+  },
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367803083 3711:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3711:2185696167"
+  ],
+  "ch_alive": false,
+  "ch_rc": 1,
+  "ch_vhost_fds": null,
+  "claim_cid_while_launcher_holds": "EADDRINUSE",
+  "fd_keep_flows_before_launcher_closes": [
+   {
+    "name": "g2h#1",
+    "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "fd_keep_ss_before_launcher_closes": [
+   "v_str ESTAB  0      0      *:1367803083 3711:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3711:2185696167"
+  ],
+  "launcher_closed_at_s": 7.096,
+  "fd_keep_flows_after_launcher_closes": [
+   {
+    "name": "g2h#1",
+    "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+    "state": "error",
+    "t_end_s": 7.602,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+    "state": "error",
+    "t_end_s": 7.602,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 0
+   }
+  ],
+  "claim_cid_after_launcher_close": "OK"
+ },
+ "ch_exit_t_s": 0.063,
+ "ch_rc": 1,
+ "second_incarnation_first_hello_s": null,
+ "incarnations_seen": [
+  "d30951b5-eddc-4ca1-8487-59be1afda3c6"
+ ],
+ "connect_attempts": [],
+ "supervisor_kill_at_s": null,
+ "supervisor_kill_latency_after_event_rx_ms": null,
+ "ch_events": [
+  {
+   "event": "booting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 3218655
+   },
+   "host_t_s": -1.5749
+  },
+  {
+   "event": "booted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 16406089
+   },
+   "host_t_s": -1.5749
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 527023372
+   },
+   "host_t_s": -1.0639
+  },
+  {
+   "event": "reset",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 1,
+    "nanos": 641104876
+   },
+   "host_t_s": 0.0221
+  },
+  {
+   "event": "rebooting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 1,
+    "nanos": 652094601
+   },
+   "host_t_s": 0.043
+  }
+ ],
+ "timeline": [
+  {
+   "t_s": 0.5614,
+   "wall": 1791706212.5979362,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "d30951b5-eddc-4ca1-8487-59be1afda3c6",
+   "hello": "HELLO d30951b5-eddc-4ca1-8487-59be1afda3c6"
+  },
+  {
+   "t_s": 0.0004,
+   "wall": 1791706212.649316,
+   "ev": "host_connected_to_guest",
+   "greeting": "INC d30951b5-eddc-4ca1-8487-59be1afda3c6"
+  },
+  {
+   "t_s": 0.0,
+   "wall": 1791706213.6626303,
+   "ev": "GO",
+   "case": "rebootf"
+  },
+  {
+   "t_s": 0.0643,
+   "wall": 1791706213.7268782,
+   "ev": "ch_exited",
+   "rc": 1
+  }
+ ]
+}

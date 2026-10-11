@@ -1,0 +1,5 @@
+{"detail":{"at":"pairing"},"ev":"abort","flow":665,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996841093146711}
+{"detail":{"at":"pairing"},"ev":"abort","flow":666,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996841096211476}
+{"detail":{"at":"pairing"},"ev":"abort","flow":667,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996841098601945}
+{"detail":{"at":"pairing"},"ev":"abort","flow":668,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996841100563388}
+{"detail":{"at":"pairing"},"ev":"abort","flow":669,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996841102259391}

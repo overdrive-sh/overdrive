@@ -1,0 +1,51 @@
+{
+ "tag": "k-host-owner-busy-2",
+ "seed": 20252,
+ "action": "kill-host-owner",
+ "action_delay_ms": 156,
+ "action_done_at_ms_after_clients_start": 157,
+ "clients_wall_s": 0.6,
+ "trials": 3000,
+ "cats": {
+  "pass": 38,
+  "reset": 2962
+ },
+ "ends": {
+  "cli:complete": 38,
+  "srv:complete": 81,
+  "cli:reset": 2962,
+  "srv:no_result": 2870,
+  "srv:reset": 49
+ },
+ "examples": [],
+ "clients_rc": 0,
+ "guest_owner": {
+  "live_at_end": 0,
+  "clean": 38,
+  "aborted": 96,
+  "aborts": {
+   "peer_close_while_open": 96
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 38,
+   "shut_0x3": 96,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 0,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 96,
+   "fire_poke": 0,
+   "fire_fexit": 75,
+   "level_unreadable": 0
+  }
+ },
+ "host_owner": null
+}

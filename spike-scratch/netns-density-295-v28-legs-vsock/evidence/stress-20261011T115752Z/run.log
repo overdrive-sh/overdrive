@@ -1,0 +1,56 @@
+[11:57:52] === v28 stage stress []
+[11:57:52] === preflight (fail closed)
+[11:57:52] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[11:57:52] $ modprobe vhost_vsock; modprobe vsock_loopback; modprobe tls; lsmod | grep -E '^(tls|vsock|vhost_vsock)' | head (rc=0)
+[11:57:52]     vsock_diag             12288  0
+[11:57:52]     vhost_vsock            28672  0
+[11:57:52]     vsock_loopback         12288  0
+[11:57:52]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[11:57:52]     tls                   163840  0
+[11:57:52] $ ip addr show dev lo | grep -q 198.18.28.1 || ip addr add 198.18.28.1/32 dev lo (rc=0)
+[11:57:52] === guest image
+[11:57:53] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "764f58113135", "legs": "c185537c3027", "cloud_hypervisor": "eadddf1bbcdc"}
+[11:57:53] launch VM: /tmp/v28-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v28-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v28-work/out/vm-stress-20261011T115752Z/serial.log --console off --vsock cid=4280,backend=vhost-kernel --log-file /tmp/v28-work/out/vm-stress-20261011T115752Z/ch.log -v
+[11:57:54] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[11:57:54] guest uname -r: 7.0.0-29-generic  host uname -r: 7.0.0-29-generic
+[11:57:54] guest$ ip addr add 10.77.0.2/32 dev lo rc=0 
+[11:57:54] guest$ echo 1 > /proc/sys/net/ipv4/tcp_fwmark_accept rc=0 
+[11:57:54] guest$ echo 1 > /proc/sys/net/ipv4/fwmark_reflect rc=0 
+[11:57:54] guest$ for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > $f; done rc=0 
+[11:57:54] guest$ ip rule add fwmark 1 lookup 100 rc=0 
+[11:57:54] guest$ ip route add local 0.0.0.0/0 dev lo table 100 rc=0 
+[11:57:54] guest$ ip -br addr; ip rule; ip route show table 100; uname -r rc=0 0:	from all lookup local 
+32765:	from all fwmark 0x1 lookup 100 
+32766:	from all lookup main 
+32767:	from all lookup default 
+local default dev lo scope host 
+7.0.0-29-generic
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARG
+[11:57:55] gagent eof-class=clean started 
+[11:57:55] gapp[S-H1-fin-then-reply-vsock] listening
+[11:57:57] RESULT S-H1-fin-then-reply-vsock: {"expect": "all clean", "client_bad": 0, "app_bad": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 1.5, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:57:57] gapp[S-H3-simultaneous-vsock] listening
+[11:57:59] RESULT S-H3-simultaneous-vsock: {"expect": "all clean", "client_bad": 0, "app_bad": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 1.5, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:57:59] gapp[S-H2-app-fin-first-vsock] listening
+[11:58:01] RESULT S-H2-app-fin-first-vsock: {"expect": "all clean", "client_bad": 0, "app_bad": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 1.5, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:02] gapp[S-H4-small-vsock] listening
+[11:58:04] RESULT S-H4-small-vsock: {"expect": "all clean", "client_bad": 0, "app_bad": 0, "flows": 480, "app_conns_logged": 480, "wall_s": 1.9, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:04] gapp[S-A1-client-rst-vsock] listening
+[11:58:06] RESULT S-A1-client-rst-vsock: {"expect": "app sees reset, never clean EOF", "app_up_end": {"eof": 192}, "silent_truncation": 192, "flows": 192, "app_conns_logged": 192, "wall_s": 1.5, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:06] gapp[S-A2-app-rst-vsock] listening
+[11:58:08] RESULT S-A2-app-rst-vsock: {"expect": "client sees reset, never clean EOF short of M", "client_down_end": {"eof": 192}, "silent_truncation": 192, "flows": 192, "app_conns_logged": 192, "wall_s": 1.5, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:08] gapp[S-A2b-app-rst-idle-vsock] listening
+[11:58:11] RESULT S-A2b-app-rst-idle-vsock: {"expect": "client sees reset, never clean EOF short of M", "client_down_end": {"eof": 186, "reset": 6}, "silent_truncation": 186, "flows": 192, "app_conns_logged": 192, "wall_s": 2.6, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 6, "gagent_bind_fail": 0, "gagent_not_paired": 6, "tp_none_records": 0}
+[11:58:11] gapp[S-A3-app-close-unread-vsock] listening
+[11:58:13] RESULT S-A3-app-close-unread-vsock: {"expect": "same distribution as tcp baseline", "outcomes": {"up_err=0 down_end=eof recv=1000": 137, "up_err=32 down_end=eof recv=1000": 54, "up_err=0 down_end=err:32 recv=1000": 1}, "flows": 192, "app_conns_logged": 192, "wall_s": 1.5, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:15] RESULT S-H1-fin-then-reply-tcp: {"expect": "all clean", "client_bad": 0, "app_bad": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 1.3, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:16] RESULT S-H3-simultaneous-tcp: {"expect": "all clean", "client_bad": 0, "app_bad": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 1.3, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:18] RESULT S-H2-app-fin-first-tcp: {"expect": "all clean", "client_bad": 0, "app_bad": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 1.3, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:19] RESULT S-H4-small-tcp: {"expect": "all clean", "client_bad": 0, "app_bad": 0, "flows": 480, "app_conns_logged": 480, "wall_s": 1.6, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:21] RESULT S-A1-client-rst-tcp: {"expect": "app sees reset, never clean EOF", "app_up_end": {"err:ECONNRESET": 192}, "silent_truncation": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 1.3, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:22] RESULT S-A2-app-rst-tcp: {"expect": "client sees reset, never clean EOF short of M", "client_down_end": {"reset": 192}, "silent_truncation": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 1.3, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:25] RESULT S-A2b-app-rst-idle-tcp: {"expect": "client sees reset, never clean EOF short of M", "client_down_end": {"reset": 192}, "silent_truncation": 0, "flows": 192, "app_conns_logged": 192, "wall_s": 2.3, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:26] RESULT S-A3-app-close-unread-tcp: {"expect": "same distribution as tcp baseline", "outcomes": {"up_err=32 down_end=eof recv=1000": 168, "up_err=0 down_end=eof recv=1000": 22, "up_err=0 down_end=err:32 recv=1000": 2}, "flows": 192, "app_conns_logged": 192, "wall_s": 1.3, "hang_clients": 0, "setup_errs": 0, "relay_not_paired": 0, "gagent_bind_fail": 0, "gagent_not_paired": 0, "tp_none_records": 0}
+[11:58:26] $ pgrep -af cloud-hypervisor | grep -v pgrep; true (rc=0)

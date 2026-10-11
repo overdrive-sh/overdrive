@@ -1,0 +1,3 @@
+{"detail":{"at":"pairing"},"ev":"abort","flow":1182,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996910624691938}
+{"detail":{"at":"pairing"},"ev":"abort","flow":1183,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996910626534752}
+{"detail":{"at":"pairing"},"ev":"abort","flow":1184,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4996910627956112}

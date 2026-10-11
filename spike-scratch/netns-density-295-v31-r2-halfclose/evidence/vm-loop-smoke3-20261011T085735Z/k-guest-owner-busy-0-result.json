@@ -1,0 +1,156 @@
+{
+ "tag": "k-guest-owner-busy-0",
+ "seed": 9150,
+ "action": "kill-guest-owner",
+ "action_delay_ms": 530,
+ "action_done_at_ms_after_clients_start": 530,
+ "clients_wall_s": 0.0,
+ "trials": 3000,
+ "cats": {
+  "violation:other_error:connect:Connection refused (os error 111)": 3000
+ },
+ "examples": [
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    1,
+    446171,
+    48955,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    true,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    3,
+    64537,
+    55,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    5,
+    false,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    5,
+    36244,
+    0,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    5,
+    true,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    6,
+    99,
+    322,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    true,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    2,
+    0,
+    23760,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    50,
+    false,
+    null
+   ],
+   "srv": null
+  },
+  {
+   "why": "violation:other_error:connect:Connection refused (os error 111)",
+   "row": [
+    7,
+    236063,
+    53962,
+    0,
+    "connect:Connection refused (os error 111)",
+    0,
+    false,
+    false,
+    null,
+    0,
+    0,
+    true,
+    null
+   ],
+   "srv": null
+  }
+ ],
+ "clients_rc": 0,
+ "guest_owner": null,
+ "host_owner": {
+  "live_at_end": 0,
+  "clean": 0,
+  "aborted": 0,
+  "aborts": {},
+  "viol": {},
+  "shut": {
+   "shut_0x2": 0,
+   "shut_0x3": 0,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 0,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 0,
+   "fire_poke": 0,
+   "fire_fexit": 0,
+   "level_unreadable": 0
+  }
+ }
+}

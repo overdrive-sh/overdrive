@@ -1,0 +1,35 @@
+[11:59:02] === v28 stage death []
+[11:59:02] === preflight (fail closed)
+[11:59:02] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[11:59:02] $ modprobe vhost_vsock; modprobe vsock_loopback; modprobe tls; lsmod | grep -E '^(tls|vsock|vhost_vsock)' | head (rc=0)
+[11:59:02]     vsock_diag             12288  0
+[11:59:02]     vhost_vsock            28672  0
+[11:59:02]     vsock_loopback         12288  0
+[11:59:02]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[11:59:02]     tls                   163840  0
+[11:59:02] $ ip addr show dev lo | grep -q 198.18.28.1 || ip addr add 198.18.28.1/32 dev lo (rc=0)
+[11:59:02] === guest image
+[11:59:02] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "65233047c72f", "legs": "c185537c3027", "cloud_hypervisor": "eadddf1bbcdc"}
+[11:59:02] launch VM: /tmp/v28-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v28-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v28-work/out/vm-death-20261011T115902Z/serial.log --console off --vsock cid=4280,backend=vhost-kernel --log-file /tmp/v28-work/out/vm-death-20261011T115902Z/ch.log -v
+[11:59:03] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[11:59:03] guest uname -r: 7.0.0-29-generic  host uname -r: 7.0.0-29-generic
+[11:59:03] guest$ ip addr add 10.77.0.2/32 dev lo rc=0 
+[11:59:03] guest$ echo 1 > /proc/sys/net/ipv4/tcp_fwmark_accept rc=0 
+[11:59:03] guest$ echo 1 > /proc/sys/net/ipv4/fwmark_reflect rc=0 
+[11:59:03] guest$ for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > $f; done rc=0 
+[11:59:03] guest$ ip rule add fwmark 1 lookup 100 rc=0 
+[11:59:03] guest$ ip route add local 0.0.0.0/0 dev lo table 100 rc=0 
+[11:59:03] guest$ ip -br addr; ip rule; ip route show table 100; uname -r rc=0 0:	from all lookup local 
+32765:	from all fwmark 0x1 lookup 100 
+32766:	from all lookup main 
+32767:	from all lookup default 
+local default dev lo scope host 
+7.0.0-29-generic
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARG
+[11:59:04] gagent eof-class=tp started 
+[11:59:04] gapp[death] listening
+[11:59:06] RESULT D2-probe-after-vmm-death: {"tcp": {"flow": "vsock_connect_err:19", "latency_ms": 0.039, "result": "unhealthy", "wall_s": 0.0}, "http": {"flow": "vsock_connect_err:19", "latency_ms": 0.037, "result": "unhealthy", "wall_s": 0.0}}
+[11:59:06] RESULT D1-vmm-killed-mid-upload: {"client": {"down_bad_at": null, "down_end": "eof", "down_expected": 0, "down_ok": true, "down_recv": 0, "local": "198.18.28.1:40597", "ok": true, "t_first_us": 0, "t_hs_us": 1434, "t_sent_us": 928364, "t_total_us": 249, "tag": "death", "up_err": 0, "up_sent": 268435456, "killed_at_to_client_done_s": 0.25}, "relay": [{"early": 0, "ev": "relay_paired", "hs_us": 1003, "id": 1, "legs_open_us": 916, "peer_c": "198.18.28.1:40597"}, {"dir": "s2c", "ev": "vsock_eof_classify", "id": 1, "mode": 2, "zero_send_errno": 0}, {"dir": "s2c", "ev": "tp_classify", "first": "Some((Half, 2))", "id": 1}, {"bytes": 0, "dir": "s2c", "end": "eof_clean", "errno": 0, "ev": "pump_end", "id": 1, "splice_einval": 0, "t_us": 1791719944970257}, {"bytes": 3014656, "dir": "c2s", "end": "write_err:104", "errno": 104, "ev": "pump_end", "id": 1, "splice_einval": 0, "t_us": 1791719945680700}, {"ev": "relay_done", "id": 1, "r": {"aborted": true, "c2s": {"bytes": 3014656, "end": "write_err:104"}, "s2c": {"bytes": 0, "end": "eof_clean"}}, "us": 713213}]}
+[11:59:06] $ pgrep -af cloud-hypervisor | grep -v pgrep; true (rc=0)

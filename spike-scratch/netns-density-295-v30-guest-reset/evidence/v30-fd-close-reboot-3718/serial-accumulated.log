@@ -1,0 +1,14 @@
+[    0.003040] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4 v30init=busybox
+[   0.000] GUEST_BOOT boot_id=205a54bd-8cde-494a-b46f-ecdbbc099bad
+GUEST_LISTEN_READY
+[   0.002] GUEST_HELLO_SENT
+GUEST_GO reboot
+GUEST_ACT reboot
+The system is going down NOW!
+Sent SIGTERM to all processes
+Sent SIGKILL to all processes
+Requesting system reboot
+[    3.441780] reboot: Restarting system
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

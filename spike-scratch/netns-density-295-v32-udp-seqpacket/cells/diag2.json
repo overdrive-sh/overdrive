@@ -1,0 +1,9 @@
+[
+ {"label":"d2-stream-59000-h4","variant":"stream","size":59000,"n":20000},
+ {"label":"d2-stream-59000-h4-nodelay","variant":"stream","size":59000,"n":20000,"nodelay":1},
+ {"label":"d2-stream-1024-h4","variant":"stream","size":1024,"n":50000},
+ {"label":"d2-stream-mix-h4","variant":"stream","size":"mix","n":20000},
+ {"label":"d2-stream-mix-h4-nodelay","variant":"stream","size":"mix","n":20000,"nodelay":1},
+ {"label":"d2-seq-mix","variant":"seq","size":"mix","n":20000},
+ {"label":"d2-seq-64","variant":"seq","size":64,"n":50000}
+]

@@ -1,0 +1,5 @@
+[
+ {"label":"d1-stream-59000","variant":"stream","size":59000,"n":200},
+ {"label":"d1-stream-1024","variant":"stream","size":1024,"n":3000},
+ {"label":"d1-stream-mix","variant":"stream","size":"mix","n":500}
+]

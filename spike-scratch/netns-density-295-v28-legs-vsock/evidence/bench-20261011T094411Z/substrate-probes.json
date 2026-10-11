@@ -1,0 +1,8 @@
+{
+ "uname_r": "7.0.0-29-generic",
+ "machine": "x86_64",
+ "systemd_detect_virt": "none",
+ "cpu": "AMD EPYC 8024P 8-Core Processor",
+ "nproc": 16,
+ "failures": []
+}

@@ -1,0 +1,161 @@
+{
+ "name": "v30-fd-close-triple-panic-3722",
+ "mode": "fd-close",
+ "case": "triple-panic",
+ "cid": 3722,
+ "cmdline": "console=ttyS0 panic=1 loglevel=4 reboot=t",
+ "vsock_arg": "cid=3722,backend=vhost-kernel,fd=4",
+ "ch_pid": 3978540,
+ "before": {
+  "incarnation_1": "4fabc72e-00b9-45e9-9c65-eb8763b71d3f",
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "4fabc72e-00b9-45e9-9c65-eb8763b71d3f",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "4fabc72e-00b9-45e9-9c65-eb8763b71d3f",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802536 3722:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3722:4217676721"
+  ],
+  "ch_vhost_fds": {
+   "4": "/dev/vhost-vsock"
+  },
+  "claim_attempt_from_host_probe": "EADDRINUSE"
+ },
+ "after": {
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "4fabc72e-00b9-45e9-9c65-eb8763b71d3f",
+    "state": "error",
+    "t_end_s": 1.096,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "4fabc72e-00b9-45e9-9c65-eb8763b71d3f",
+    "state": "error",
+    "t_end_s": 1.096,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 0
+   }
+  ],
+  "send_probe_on_open_conns": {},
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802536 3722:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3722:4217676721"
+  ],
+  "ch_alive": false,
+  "ch_rc": 1,
+  "ch_vhost_fds": null,
+  "claim_cid_after_vmm_exit": "OK"
+ },
+ "ch_exit_t_s": 1.116,
+ "ch_rc": 1,
+ "second_incarnation_first_hello_s": null,
+ "incarnations_seen": [
+  "4fabc72e-00b9-45e9-9c65-eb8763b71d3f"
+ ],
+ "connect_attempts": [
+  {
+   "label": "t=0.2",
+   "t_start_s": 0.213,
+   "result": "TimeoutError('timed out')",
+   "t_end_s": 1.715
+  },
+  {
+   "label": "t=0.5",
+   "t_start_s": 0.529,
+   "result": "TimeoutError('timed out')",
+   "t_end_s": 2.031
+  },
+  {
+   "label": "t=0.8",
+   "t_start_s": 0.844,
+   "result": "TimeoutError('timed out')",
+   "t_end_s": 2.346
+  }
+ ],
+ "supervisor_kill_at_s": null,
+ "ch_events": [
+  {
+   "event": "booting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 3261771
+   },
+   "host_t_s": -1.5738
+  },
+  {
+   "event": "booted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 14507063
+   },
+   "host_t_s": -1.5738
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 525844043
+   },
+   "host_t_s": -1.0639
+  },
+  {
+   "event": "rebooting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 2,
+    "nanos": 704471369
+   },
+   "host_t_s": 1.0961
+  }
+ ],
+ "timeline": [
+  {
+   "t_s": 0.5605,
+   "wall": 1791705158.6969411,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "4fabc72e-00b9-45e9-9c65-eb8763b71d3f",
+   "hello": "HELLO 4fabc72e-00b9-45e9-9c65-eb8763b71d3f"
+  },
+  {
+   "t_s": 0.0004,
+   "wall": 1791705158.7482903,
+   "ev": "host_connected_to_guest",
+   "greeting": "INC 4fabc72e-00b9-45e9-9c65-eb8763b71d3f"
+  },
+  {
+   "t_s": 0.0,
+   "wall": 1791705159.7616022,
+   "ev": "GO",
+   "case": "triple-panic"
+  },
+  {
+   "t_s": 1.1182,
+   "wall": 1791705160.8797703,
+   "ev": "ch_exited",
+   "rc": 1
+  }
+ ]
+}

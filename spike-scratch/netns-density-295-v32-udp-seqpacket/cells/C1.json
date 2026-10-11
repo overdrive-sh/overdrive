@@ -1,0 +1,82 @@
+[
+ {
+  "label": "C-seq-64-hb64k",
+  "variant": "seq",
+  "size": 64,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-1024-hb64k",
+  "variant": "seq",
+  "size": 1024,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-4096-hb64k",
+  "variant": "seq",
+  "size": 4096,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-16384-hb64k",
+  "variant": "seq",
+  "size": 16384,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-mixs-hb64k",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-64-hb64k",
+  "variant": "stream",
+  "size": 64,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-1024-hb64k",
+  "variant": "stream",
+  "size": 1024,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-4096-hb64k",
+  "variant": "stream",
+  "size": 4096,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-16384-hb64k",
+  "variant": "stream",
+  "size": 16384,
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-mixs-hb64k",
+  "variant": "stream",
+  "size": "mixs",
+  "n": 100000,
+  "hostbuf": 65536,
+  "nodelay": 1
+ }
+]

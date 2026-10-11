@@ -1,0 +1,151 @@
+{
+ "name": "v30-stock-rebootf-supL4-3704",
+ "mode": "stock",
+ "case": "rebootf",
+ "cid": 3704,
+ "cmdline": "console=ttyS0 panic=1 loglevel=4",
+ "vsock_arg": "cid=3704,backend=vhost-kernel",
+ "ch_pid": 3988261,
+ "before": {
+  "incarnation_1": "716702f6-d287-4e20-b4c1-8cd2f582d5a4",
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "716702f6-d287-4e20-b4c1-8cd2f582d5a4",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "716702f6-d287-4e20-b4c1-8cd2f582d5a4",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802599 3704:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3704:3480392758"
+  ],
+  "ch_vhost_fds": {
+   "63": "/dev/vhost-vsock"
+  },
+  "claim_attempt_from_host_probe": "EADDRINUSE"
+ },
+ "after": {
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "716702f6-d287-4e20-b4c1-8cd2f582d5a4",
+    "state": "error",
+    "t_end_s": 0.074,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "716702f6-d287-4e20-b4c1-8cd2f582d5a4",
+    "state": "error",
+    "t_end_s": 0.074,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 0
+   }
+  ],
+  "send_probe_on_open_conns": {},
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802599 3704:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3704:3480392758"
+  ],
+  "ch_alive": false,
+  "ch_rc": -9,
+  "ch_vhost_fds": null
+ },
+ "ch_exit_t_s": 0.094,
+ "ch_rc": -9,
+ "second_incarnation_first_hello_s": null,
+ "incarnations_seen": [
+  "716702f6-d287-4e20-b4c1-8cd2f582d5a4"
+ ],
+ "connect_attempts": [],
+ "supervisor_kill_at_s": 0.035,
+ "supervisor_kill_latency_after_event_rx_ms": 0.041,
+ "ch_events": [
+  {
+   "event": "booting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 13027395
+   },
+   "host_t_s": -3.6314
+  },
+  {
+   "event": "booted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 63990967
+   },
+   "host_t_s": -3.585
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 2,
+    "nanos": 545106500
+   },
+   "host_t_s": -1.105
+  },
+  {
+   "event": "reset",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 3,
+    "nanos": 665278670
+   },
+   "host_t_s": 0.015
+  },
+  {
+   "event": "rebooting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 3,
+    "nanos": 687398284
+   },
+   "host_t_s": 0.035
+  }
+ ],
+ "timeline": [
+  {
+   "t_s": 2.569,
+   "wall": 1791705455.6256151,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "716702f6-d287-4e20-b4c1-8cd2f582d5a4",
+   "hello": "HELLO 716702f6-d287-4e20-b4c1-8cd2f582d5a4"
+  },
+  {
+   "t_s": 0.0003,
+   "wall": 1791705455.678047,
+   "ev": "host_connected_to_guest",
+   "greeting": "INC 716702f6-d287-4e20-b4c1-8cd2f582d5a4"
+  },
+  {
+   "t_s": 0.0,
+   "wall": 1791705456.7125797,
+   "ev": "GO",
+   "case": "rebootf"
+  },
+  {
+   "t_s": 0.0962,
+   "wall": 1791705456.8087747,
+   "ev": "ch_exited",
+   "rc": -9
+  }
+ ]
+}

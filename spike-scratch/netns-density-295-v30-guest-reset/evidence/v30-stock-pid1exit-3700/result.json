@@ -1,0 +1,276 @@
+{
+ "name": "v30-stock-pid1exit-3700",
+ "mode": "stock",
+ "case": "pid1exit",
+ "cid": 3700,
+ "cmdline": "console=ttyS0 panic=1 loglevel=4",
+ "vsock_arg": "cid=3700,backend=vhost-kernel",
+ "ch_pid": 3975601,
+ "before": {
+  "incarnation_1": "7d24c97e-0565-47cd-bfa6-2ecfbda25d90",
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "7d24c97e-0565-47cd-bfa6-2ecfbda25d90",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "7d24c97e-0565-47cd-bfa6-2ecfbda25d90",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "ss_vsock": [
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      *:1367802391 3700:5000      ",
+   "v_str ESTAB  0      0      2:6000       3700:3106983915"
+  ],
+  "ch_vhost_fds": {
+   "63": "/dev/vhost-vsock"
+  },
+  "claim_attempt_from_host_probe": "EADDRINUSE"
+ },
+ "after": {
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "7d24c97e-0565-47cd-bfa6-2ecfbda25d90",
+    "state": "error",
+    "t_end_s": 1.095,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "7d24c97e-0565-47cd-bfa6-2ecfbda25d90",
+    "state": "error",
+    "t_end_s": 1.095,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 0
+   },
+   {
+    "name": "g2h#2",
+    "incarnation": "788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 30
+   }
+  ],
+  "send_probe_on_open_conns": {
+   "g2h#2": "send ok"
+  },
+  "ss_vsock": [
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      *:1367802391 3700:5000      ",
+   "v_str ESTAB  0      0      2:6000       3700:1773675582",
+   "v_str ESTAB  0      0      2:6000       3700:3106983915"
+  ],
+  "ch_alive": true,
+  "ch_rc": null,
+  "ch_vhost_fds": {
+   "61": "/dev/vhost-vsock"
+  }
+ },
+ "ch_exit_t_s": null,
+ "ch_rc": null,
+ "second_incarnation_first_hello_s": 1.64,
+ "incarnations_seen": [
+  "788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+  "7d24c97e-0565-47cd-bfa6-2ecfbda25d90"
+ ],
+ "connect_attempts": [
+  {
+   "label": "t=1.2",
+   "t_start_s": 1.158,
+   "result": "ECONNRESET",
+   "t_end_s": 1.629
+  },
+  {
+   "label": "t=1.5",
+   "t_start_s": 1.473,
+   "result": "ECONNRESET",
+   "t_end_s": 1.629
+  },
+  {
+   "label": "t=0.2",
+   "t_start_s": 0.214,
+   "result": "TimeoutError('timed out')",
+   "t_end_s": 1.715
+  },
+  {
+   "label": "t=1.8",
+   "t_start_s": 1.789,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 1.79
+  },
+  {
+   "label": "t=0.5",
+   "t_start_s": 0.529,
+   "result": "TimeoutError('timed out')",
+   "t_end_s": 2.03
+  },
+  {
+   "label": "t=2.1",
+   "t_start_s": 2.11,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 2.111
+  },
+  {
+   "label": "t=0.8",
+   "t_start_s": 0.843,
+   "result": "TimeoutError('timed out')",
+   "t_end_s": 2.345
+  },
+  {
+   "label": "t=2.4",
+   "t_start_s": 2.426,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 2.427
+  },
+  {
+   "label": "t=2.7",
+   "t_start_s": 2.746,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 2.747
+  },
+  {
+   "label": "t=3.0",
+   "t_start_s": 3.05,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 3.051
+  },
+  {
+   "label": "t=3.4",
+   "t_start_s": 3.351,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 3.353
+  },
+  {
+   "label": "t=3.7",
+   "t_start_s": 3.667,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 3.667
+  },
+  {
+   "label": "t=4.0",
+   "t_start_s": 3.97,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 3.971
+  },
+  {
+   "label": "t=4.3",
+   "t_start_s": 4.274,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 4.275
+  },
+  {
+   "label": "t=4.6",
+   "t_start_s": 4.582,
+   "result": "connected",
+   "greeting": "INC 788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "t_end_s": 4.583
+  }
+ ],
+ "supervisor_kill_at_s": null,
+ "ch_events": [
+  {
+   "event": "booting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 1896025
+   },
+   "host_t_s": -1.5719
+  },
+  {
+   "event": "booted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 14455234
+   },
+   "host_t_s": -1.5719
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 525140259
+   },
+   "host_t_s": -1.0619
+  },
+  {
+   "event": "rebooting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 2,
+    "nanos": 712407594
+   },
+   "host_t_s": 1.0951
+  },
+  {
+   "event": "rebooted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 2,
+    "nanos": 739692084
+   },
+   "host_t_s": 1.1371
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 3,
+    "nanos": 251576966
+   },
+   "host_t_s": 1.6421
+  }
+ ],
+ "ch_rebooting_to_rebooted_s": 0.0273,
+ "timeline": [
+  {
+   "t_s": 0.5624,
+   "wall": 1791704965.680982,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "7d24c97e-0565-47cd-bfa6-2ecfbda25d90",
+   "hello": "HELLO 7d24c97e-0565-47cd-bfa6-2ecfbda25d90"
+  },
+  {
+   "t_s": 0.0004,
+   "wall": 1791704965.7323055,
+   "ev": "host_connected_to_guest",
+   "greeting": "INC 7d24c97e-0565-47cd-bfa6-2ecfbda25d90"
+  },
+  {
+   "t_s": 0.0,
+   "wall": 1791704966.743596,
+   "ev": "GO",
+   "case": "pid1exit"
+  },
+  {
+   "t_s": 1.6403,
+   "wall": 1791704968.3839,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "788c1908-43ea-48a5-b6c5-ca0aaf81bc53",
+   "hello": "HELLO 788c1908-43ea-48a5-b6c5-ca0aaf81bc53"
+  }
+ ]
+}

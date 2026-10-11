@@ -1,0 +1,50 @@
+[    0.002993] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4 v30crash=1
+GUEST_PID1_CRASHING_AT_BOOT
+[    0.315379] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+[    0.316501] CPU: 0 UID: 0 PID: 1 Comm: init Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    0.317796] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    0.318742] Call Trace:
+[    0.319150]  <TASK>
+[    0.319493]  show_stack+0x49/0x60
+[    0.320015]  dump_stack_lvl+0x5f/0x90
+[    0.320574]  dump_stack+0x10/0x18
+[    0.321089]  vpanic+0x262/0x4b0
+[    0.321577]  panic+0x67/0x70
+[    0.322035]  ? acct_update_integrals+0x5e/0xa0
+[    0.322707]  do_exit.cold+0x15/0x15
+[    0.323240]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.323962]  do_group_exit+0x2d/0xb0
+[    0.324509]  __x64_sys_exit_group+0x18/0x20
+[    0.325144]  x64_sys_call+0x14a0/0x2390
+[    0.325733]  do_syscall_64+0x105/0x5a0
+[    0.326303]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.327020]  ? wp_page_reuse+0x97/0xc0
+[    0.327589]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.328305]  ? do_wp_page+0x4ee/0x6f0
+[    0.328870]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.329582]  ? handle_pte_fault+0x1d8/0x1f0
+[    0.330220]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.330937]  ? __handle_mm_fault+0x493/0x720
+[    0.331580]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.332296]  ? count_memcg_events+0x103/0x250
+[    0.332956]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.333673]  ? handle_mm_fault+0x1be/0x2e0
+[    0.334289]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.335006]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[    0.335875]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.336586]  ? irqentry_exit+0x97/0x6f0
+[    0.337175]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    0.337891]  ? exc_page_fault+0x94/0x1e0
+[    0.338484]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    0.339233] RIP: 0033:0x4df928
+[    0.339716] Code: ff ff ff 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 f3 0f 1e fa 48 c7 c6 e8 ff ff ff eb 04 0f 1f 00 f4 b8 e7 00 00 00 0f 05 <48> 3d 00 f0 ff ff 76 f0 f7 d8 64 89 06 eb e9 66 0f 1f 84 00 00 00
+[    0.342356] RSP: 002b:00007ffe42aef338 EFLAGS: 00000202 ORIG_RAX: 00000000000000e7
+[    0.343458] RAX: ffffffffffffffda RBX: 00007ffe42aeff04 RCX: 00000000004df928
+[    0.344500] RDX: 00000000214d89f0 RSI: ffffffffffffffe8 RDI: 0000000000000000
+[    0.345543] RBP: 00007ffe42aef430 R08: 0000000000000000 R09: 00007ffe42aef560
+[    0.346586] R10: 0000000000000000 R11: 0000000000000202 R12: 0000000000000004
+[    0.347636] R13: 00007ffe42aef750 R14: 0000000000000002 R15: 0000000000000000
+[    0.348681]  </TASK>
+[    0.349071] Kernel Offset: 0x23c00000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    0.350606] Rebooting in 1 seconds..

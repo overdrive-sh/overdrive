@@ -1,0 +1,635 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic",
+  "detail": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\n\n/sys/kernel/tracing/events/vsock/virtio_transport_alloc_pkt:\n44985\t59980\t89970\n4194304\nBusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.\n\nUsage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]\n\nOPTIONS := -f[amily] inet|inet6|link | -o[neline]\n\nip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]\nip route list|flush|add|del|change|append|replace|test ROUTE\nip link set IFACE [up|down] [arp on|off] [multicast on|off]\n\t[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]\n\t[master IFACE | nomaster] [netns PID] [type TYPE ARGS]\nip tunnel add|change|del|show [NAME]\n\t[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]\nip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]\nip rule [list] | add|del SELECTOR ACTION\n"
+ },
+ "cells": [
+  {
+   "label": "smoke-seq-1024",
+   "cell": {
+    "label": "smoke-seq-1024",
+    "variant": "seq",
+    "size": 1024,
+    "n": 2000
+   },
+   "wall_s": 5.868941307067871,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 1953,
+     "rx_badmagic": 47,
+     "rx_ok": 1953,
+     "rx_pkt_seq_eom": 2047,
+     "rx_pkt_seq_eom_bytes": 2064000,
+     "rx_short": 47
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 47,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 776,
+       "second_magic": 0,
+       "seq": 31
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 256,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 63
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 512,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 264,
+       "second_magic": 0,
+       "seq": 95
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 776,
+       "second_magic": 0,
+       "seq": 158
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 256,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 190
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 512,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 264,
+       "second_magic": 0,
+       "seq": 222
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 776,
+       "second_magic": 0,
+       "seq": 285
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 256,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 317
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 512,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 264,
+       "second_magic": 0,
+       "seq": 349
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 776,
+       "second_magic": 0,
+       "seq": 412
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 256,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 444
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 512,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 264,
+       "second_magic": 0,
+       "seq": 476
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 768,
+       "second_magic": 0,
+       "seq": null
+      }
+     ],
+     "short": 47
+    },
+    "guest_done": "{\"sent\":2000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 2000,
+    "outcome": {
+     "delivered_once": 1953,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 47,
+     "n": 2000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 2015496,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 1953,
+     "frames_verified_ok": 1953
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 5.802223737
+   },
+   "guest": {
+    "app_sent_ok": 2000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 2064000,
+     "fexit_calls": 2000,
+     "guest_encoded": 2000,
+     "redirect_ok": 4000,
+     "strp_frames": 2000,
+     "tx_alloc_seq_noeom": 2047,
+     "tx_alloc_seq_noeom_bytes": 2064000
+    },
+    "drain_wall_s": 2.228606017,
+    "guest_vsock_buffer_size": 262144,
+    "n": 2000,
+    "role": "guest",
+    "send_wall_s": 0.024719562,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 2000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 2000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=2000 stalled=false\n"
+  },
+  {
+   "label": "smoke-stream-1024",
+   "cell": {
+    "label": "smoke-stream-1024",
+    "variant": "stream",
+    "size": 1024,
+    "n": 2000
+   },
+   "wall_s": 5.9206342697143555,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 4048,
+     "rx_ok": 2000,
+     "rx_pkt_stream": 2048,
+     "rx_pkt_stream_bytes": 2064000,
+     "strp_frames": 2000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":2000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 2000,
+    "outcome": {
+     "delivered_once": 2000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 2000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 2064000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 2000,
+     "frames_verified_ok": 2000
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "stream",
+    "wall_s": 5.850267884
+   },
+   "guest": {
+    "app_sent_ok": 2000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 2064000,
+     "fexit_calls": 2000,
+     "guest_encoded": 2000,
+     "redirect_ok": 4000,
+     "strp_frames": 2000,
+     "tx_alloc_stream": 2048,
+     "tx_alloc_stream_bytes": 2064000
+    },
+    "drain_wall_s": 2.245367212,
+    "guest_vsock_buffer_size": 262144,
+    "n": 2000,
+    "role": "guest",
+    "send_wall_s": 0.041460386,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 2000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 2000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "stream"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=2000 stalled=false\n"
+  },
+  {
+   "label": "smoke-seq-59000",
+   "cell": {
+    "label": "smoke-seq-59000",
+    "variant": "seq",
+    "size": 59000,
+    "n": 2000
+   },
+   "wall_s": 7.675483703613281,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "rx_badmagic": 3595,
+     "rx_pkt_seq_eom": 5592,
+     "rx_pkt_seq_eom_bytes": 118016000,
+     "rx_pkt_seq_noeom": 3,
+     "rx_pkt_seq_noeom_bytes": 54272,
+     "rx_short": 2000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 3595,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 32741,
+       "second_magic": 0,
+       "seq": 0
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 26267,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": 1
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 17536,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 8704,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": 2
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 26240,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": 3
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 26240,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 4
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 19712,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 13056,
+       "second_magic": 0,
+       "seq": 5
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 13184,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 19584,
+       "second_magic": 0,
+       "seq": 6
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 6656,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 26112,
+       "second_magic": 0,
+       "seq": 7
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 32768,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 128,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 32640,
+       "second_magic": 0,
+       "seq": 8
+      },
+      {
+       "declared": 0,
+       "kind": "badmagic",
+       "n": 26368,
+       "second_magic": 0,
+       "seq": null
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6400,
+       "second_magic": 0,
+       "seq": 9
+      }
+     ],
+     "short": 2000
+    },
+    "guest_done": "{\"sent\":2000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 2000,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 2000,
+     "n": 2000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 7.607190324
+   },
+   "guest": {
+    "app_sent_ok": 2000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 118016000,
+     "fexit_calls": 2016,
+     "guest_encoded": 2000,
+     "redirect_ok": 4000,
+     "strp_frames": 2000,
+     "tx_alloc_seq_noeom": 5595,
+     "tx_alloc_seq_noeom_bytes": 118070272
+    },
+    "drain_wall_s": 3.996439397,
+    "guest_vsock_buffer_size": 262144,
+    "n": 2000,
+    "role": "guest",
+    "send_wall_s": 1.7933856750000001,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 8,
+     "ok_full": 2000,
+     "ok_partial": 8
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 2000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=2000 stalled=false\n"
+  }
+ ]
+}

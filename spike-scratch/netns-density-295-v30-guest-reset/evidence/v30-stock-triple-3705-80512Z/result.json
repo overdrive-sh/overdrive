@@ -1,0 +1,261 @@
+{
+ "name": "v30-stock-triple-3705-80512Z",
+ "mode": "stock",
+ "case": "triple",
+ "cid": 3705,
+ "cmdline": "console=ttyS0 panic=1 loglevel=4 reboot=t",
+ "vsock_arg": "cid=3705,backend=vhost-kernel",
+ "ch_pid": 3993233,
+ "before": {
+  "incarnation_1": "26d807ea-1d12-414b-af11-281ba4aa1c7e",
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "26d807ea-1d12-414b-af11-281ba4aa1c7e",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "26d807ea-1d12-414b-af11-281ba4aa1c7e",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802888 3705:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3705:2668233239"
+  ],
+  "ch_vhost_fds": {
+   "63": "/dev/vhost-vsock"
+  },
+  "claim_attempt_from_host_probe": "EADDRINUSE"
+ },
+ "after": {
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "26d807ea-1d12-414b-af11-281ba4aa1c7e",
+    "state": "error",
+    "t_end_s": 0.045,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "26d807ea-1d12-414b-af11-281ba4aa1c7e",
+    "state": "error",
+    "t_end_s": 0.045,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 0
+   },
+   {
+    "name": "g2h#2",
+    "incarnation": "f33407a3-b536-4684-9f56-62745db6fc2b",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 30
+   }
+  ],
+  "send_probe_on_open_conns": {
+   "g2h#2": "send ok"
+  },
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802888 3705:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3705:4134920482",
+   "v_str ESTAB  0      0      2:6000       3705:2668233239"
+  ],
+  "ch_alive": true,
+  "ch_rc": null,
+  "ch_vhost_fds": {
+   "62": "/dev/vhost-vsock"
+  }
+ },
+ "ch_exit_t_s": null,
+ "ch_rc": null,
+ "second_incarnation_first_hello_s": 0.591,
+ "incarnations_seen": [
+  "26d807ea-1d12-414b-af11-281ba4aa1c7e",
+  "f33407a3-b536-4684-9f56-62745db6fc2b"
+ ],
+ "connect_attempts": [
+  {
+   "label": "t=0.5",
+   "t_start_s": 0.529,
+   "result": "ECONNRESET",
+   "t_end_s": 0.573
+  },
+  {
+   "label": "t=0.2",
+   "t_start_s": 0.214,
+   "result": "ECONNRESET",
+   "t_end_s": 0.573
+  },
+  {
+   "label": "t=0.8",
+   "t_start_s": 0.844,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 0.845
+  },
+  {
+   "label": "t=1.2",
+   "t_start_s": 1.159,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 1.16
+  },
+  {
+   "label": "t=1.5",
+   "t_start_s": 1.474,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 1.475
+  },
+  {
+   "label": "t=1.8",
+   "t_start_s": 1.796,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 1.797
+  },
+  {
+   "label": "t=2.1",
+   "t_start_s": 2.112,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 2.113
+  },
+  {
+   "label": "t=2.4",
+   "t_start_s": 2.429,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 2.43
+  },
+  {
+   "label": "t=2.7",
+   "t_start_s": 2.747,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 2.748
+  },
+  {
+   "label": "t=3.1",
+   "t_start_s": 3.062,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 3.063
+  },
+  {
+   "label": "t=3.4",
+   "t_start_s": 3.368,
+   "result": "connected",
+   "greeting": "INC f33407a3-b536-4684-9f56-62745db6fc2b",
+   "t_end_s": 3.369
+  }
+ ],
+ "supervisor_kill_at_s": null,
+ "supervisor_kill_latency_after_event_rx_ms": null,
+ "ch_events": [
+  {
+   "event": "booting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 3007248
+   },
+   "host_t_s": -1.5739
+  },
+  {
+   "event": "booted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 15158755
+   },
+   "host_t_s": -1.5739
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 528835855
+   },
+   "host_t_s": -1.0639
+  },
+  {
+   "event": "reset",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 1,
+    "nanos": 647200994
+   },
+   "host_t_s": 0.0451
+  },
+  {
+   "event": "rebooting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 1,
+    "nanos": 658135067
+   },
+   "host_t_s": 0.0451
+  },
+  {
+   "event": "rebooted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 1,
+    "nanos": 683560388
+   },
+   "host_t_s": 0.0661
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 2,
+    "nanos": 196283131
+   },
+   "host_t_s": 0.5921
+  }
+ ],
+ "ch_rebooting_to_rebooted_s": 0.0254,
+ "timeline": [
+  {
+   "t_s": 0.5611,
+   "wall": 1791705945.2699158,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "26d807ea-1d12-414b-af11-281ba4aa1c7e",
+   "hello": "HELLO 26d807ea-1d12-414b-af11-281ba4aa1c7e"
+  },
+  {
+   "t_s": 0.0005,
+   "wall": 1791705945.3213174,
+   "ev": "host_connected_to_guest",
+   "greeting": "INC 26d807ea-1d12-414b-af11-281ba4aa1c7e"
+  },
+  {
+   "t_s": 0.0,
+   "wall": 1791705946.3346424,
+   "ev": "GO",
+   "case": "triple"
+  },
+  {
+   "t_s": 0.5913,
+   "wall": 1791705946.9259639,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "f33407a3-b536-4684-9f56-62745db6fc2b",
+   "hello": "HELLO f33407a3-b536-4684-9f56-62745db6fc2b"
+  }
+ ]
+}

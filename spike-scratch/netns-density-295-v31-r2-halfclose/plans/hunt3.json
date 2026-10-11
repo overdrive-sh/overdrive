@@ -1,0 +1,22 @@
+[
+ {
+  "name": "h3-dest-rst",
+  "action": "none",
+  "repeat": 40,
+  "trials": 300,
+  "conc": 128,
+  "flows": 512,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n 2097152 --m 1000 --srv-pause 100 --fin mix --io-timeout 15 --srv-rst-permille 500",
+  "owners": "--diag-seq --intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 60000,
+  "settle_s": 30,
+  "client_timeout": 300,
+  "events": true,
+  "events_sample": 1
+ }
+]

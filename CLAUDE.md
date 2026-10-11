@@ -99,6 +99,45 @@ environment, not for a general-purpose Linux host.
 When a proposed recovery, audit, fence or retry path defends only against an
 actor that cannot exist on the appliance, drop it.
 
+## Vendored components — our Cloud Hypervisor fork and the Linux 7.0 source
+
+Two upstream projects are vendored as git submodules under `vendors/`:
+
+- **`vendors/cloud-hypervisor`** — Overdrive's own Cloud Hypervisor fork
+  (`overdrive-sh/cloud-hypervisor`, branch `overdrive/vhost-kernel-vsock`).
+  Overdrive runs **only** with this fork; there is no supported path for a
+  stock or third-party Cloud Hypervisor binary. Do not design probes, error
+  variants, capability checks or fallbacks that detect or tolerate another VMM
+  build. When the platform needs VMM behaviour the fork lacks, change the fork.
+- **`vendors/linux`** — the Linux source at tag `v7.0`, the kernel Overdrive
+  runs. It is a read-only reference: every design claim about kernel behaviour
+  is read and cited there (`.claude/rules/design.md` § "Ground every kernel
+  claim in the Linux source Overdrive runs"). It is excluded from the metal
+  sync. ADR-0068 and `.claude/rules/testing.md` still name 6.18 LTS as the
+  pinned kernel until they are amended; 7.0 is authoritative.
+
+### A guest reset ends the VMM — enforced in the fork
+
+The fork must end the VMM when the guest resets, instead of rebooting the
+guest in place. Spike V-30 (`docs/feature/netns-density-295/spike/`) showed
+that without this, a guest PID-1 crash under `panic=1` reboots the guest
+inside the same VMM process with the same CID and launch token, invisibly to
+the driver, and a crash loop never charges a restart budget. The fix is a
+small fork change: route the guest-reset dispatch to the VMM exit path rather
+than `vm_reboot`. Do not rely on supervising the `vm/rebooting` event from the
+driver; that works but is a race.
+
+Two related facts from the same spike:
+
+- **Host flows are reset by the single-holder close.** When the VMM is the
+  only holder of its `/dev/vhost-vsock` fd, the fd closes at VMM exit and the
+  kernel's orphan sweep (`vhost_vsock_dev_release`, `drivers/vhost/vsock.c`)
+  resets every host flow to that guest. A kernel CID claim is not needed for
+  that.
+- **Never keep a claim-holder copy of the VMM's vhost-vsock fd past VMM
+  exit.** While another process holds a copy, the orphan sweep does not run and
+  host flows stay ESTABLISHED to a dead guest.
+
 ## Repository structure
 
 Workspace crates live under `crates/` (plus `xtask/` for build tooling).

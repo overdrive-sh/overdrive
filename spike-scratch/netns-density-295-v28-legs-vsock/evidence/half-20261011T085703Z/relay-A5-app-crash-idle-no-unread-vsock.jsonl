@@ -1,0 +1,7 @@
+{"ev":"relay_ready","fwd":"Splice","legs":"vsock","native":false,"peer_mode":"gateway","uname":"7.0.0-29-generic"}
+{"early":0,"ev":"relay_paired","hs_us":969,"id":1,"legs_open_us":605,"peer_c":"198.18.28.1:40649"}
+{"dir":"s2c","ev":"vsock_eof_classify","id":1,"mode":2,"zero_send_errno":0}
+{"dir":"s2c","ev":"tp_classify","first":"Some((Half, 2))","id":1}
+{"bytes":0,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791709048278797}
+{"bytes":100000,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791709048292294}
+{"ev":"relay_done","id":1,"r":{"aborted":false,"c2s":{"bytes":100000,"end":"eof_clean"},"s2c":{"bytes":0,"end":"eof_clean"}},"us":15799}

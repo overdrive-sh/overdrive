@@ -1,0 +1,1 @@
+{"detail":{"at":"pairing"},"ev":"abort","flow":130,"reason":"ctl_lost_unpaired","role":"host","state":{"armed":[false,false],"done":[false,false],"eof":[false,false],"goal":[null,null],"sent":[0,0]},"t_ns":4997438920947945}

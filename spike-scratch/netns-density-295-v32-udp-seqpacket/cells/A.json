@@ -1,0 +1,98 @@
+[
+ {
+  "label": "A-seq-64",
+  "variant": "seq",
+  "size": 64,
+  "n": 100000
+ },
+ {
+  "label": "A-seq-1024",
+  "variant": "seq",
+  "size": 1024,
+  "n": 100000
+ },
+ {
+  "label": "A-seq-4096",
+  "variant": "seq",
+  "size": 4096,
+  "n": 100000
+ },
+ {
+  "label": "A-seq-16384",
+  "variant": "seq",
+  "size": 16384,
+  "n": 100000
+ },
+ {
+  "label": "A-seq-32768",
+  "variant": "seq",
+  "size": 32768,
+  "n": 100000
+ },
+ {
+  "label": "A-seq-59000",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000
+ },
+ {
+  "label": "A-seq-mix",
+  "variant": "seq",
+  "size": "mix",
+  "n": 100000
+ },
+ {
+  "label": "A-seq-mixs",
+  "variant": "seq",
+  "size": "mixs",
+  "n": 100000
+ },
+ {
+  "label": "A-stream-64",
+  "variant": "stream",
+  "size": 64,
+  "n": 100000
+ },
+ {
+  "label": "A-stream-1024",
+  "variant": "stream",
+  "size": 1024,
+  "n": 100000
+ },
+ {
+  "label": "A-stream-4096",
+  "variant": "stream",
+  "size": 4096,
+  "n": 100000
+ },
+ {
+  "label": "A-stream-16384",
+  "variant": "stream",
+  "size": 16384,
+  "n": 100000
+ },
+ {
+  "label": "A-stream-32768",
+  "variant": "stream",
+  "size": 32768,
+  "n": 100000
+ },
+ {
+  "label": "A-stream-59000",
+  "variant": "stream",
+  "size": 59000,
+  "n": 100000
+ },
+ {
+  "label": "A-stream-mix",
+  "variant": "stream",
+  "size": "mix",
+  "n": 100000
+ },
+ {
+  "label": "A-stream-mixs",
+  "variant": "stream",
+  "size": "mixs",
+  "n": 100000
+ }
+]

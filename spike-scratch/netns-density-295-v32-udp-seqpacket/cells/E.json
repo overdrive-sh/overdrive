@@ -1,0 +1,81 @@
+[
+ {
+  "label": "E-seq-1024-p2mode0-control",
+  "variant": "seq",
+  "size": 1024,
+  "n": 20000,
+  "p2mode": 0,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-59000-p2mode0-control",
+  "variant": "seq",
+  "size": 59000,
+  "n": 20000,
+  "p2mode": 0,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-59000-hb64k-check-off",
+  "variant": "seq",
+  "size": 59000,
+  "n": 20000,
+  "hostbuf": 65536,
+  "check": 0,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-synth",
+  "variant": "seq",
+  "size": "any",
+  "n": 8,
+  "synth": 1
+ },
+ {
+  "label": "E-seq-synth-check-off",
+  "variant": "seq",
+  "size": "any",
+  "n": 8,
+  "synth": 1,
+  "check": 0
+ },
+ {
+  "label": "E-seq-59000-hb32k-emsgsize",
+  "variant": "seq",
+  "size": 59000,
+  "n": 300,
+  "hostbuf": 32768,
+  "nodelay": 1
+ },
+ {
+  "label": "E-stream-59000-hb32k",
+  "variant": "stream",
+  "size": 59000,
+  "n": 20000,
+  "hostbuf": 32768,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-61440-bound65536",
+  "variant": "seq",
+  "size": 61440,
+  "n": 20000,
+  "bound": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "E-stream-61440-bound65536",
+  "variant": "stream",
+  "size": 61440,
+  "n": 20000,
+  "bound": 65536,
+  "nodelay": 1
+ },
+ {
+  "label": "E-seq-61440-adr-bound",
+  "variant": "seq",
+  "size": 61440,
+  "n": 2000,
+  "nodelay": 1
+ }
+]

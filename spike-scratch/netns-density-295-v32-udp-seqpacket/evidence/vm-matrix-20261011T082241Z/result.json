@@ -1,0 +1,784 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic",
+  "detail": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\n\n/sys/kernel/tracing/events/vsock/virtio_transport_alloc_pkt:\n44985\t59980\t89970\n4194304\nBusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.\n\nUsage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]\n\nOPTIONS := -f[amily] inet|inet6|link | -o[neline]\n\nip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]\nip route list|flush|add|del|change|append|replace|test ROUTE\nip link set IFACE [up|down] [arp on|off] [multicast on|off]\n\t[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]\n\t[master IFACE | nomaster] [netns PID] [type TYPE ARGS]\nip tunnel add|change|del|show [NAME]\n\t[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]\nip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]\nip rule [list] | add|del SELECTOR ACTION\n"
+ },
+ "cells": [
+  {
+   "label": "s3-stream-59000",
+   "cell": {
+    "label": "s3-stream-59000",
+    "variant": "stream",
+    "size": 59000,
+    "n": 3000
+   },
+   "wall_s": 8.382666110992432,
+   "host": {
+    "accepted_child_buffer_size": 262144,
+    "bpf_counters": {
+     "redirect_ok": 3021,
+     "rx_ok": 1,
+     "rx_pkt_stream": 3020,
+     "rx_pkt_stream_bytes": 177024000,
+     "strp_bad_frame": 2,
+     "strp_frames": 1
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":3000,\"stalled\":false}",
+    "hostbuf_arg": 0,
+    "listener_buffer_size": 262144,
+    "n": 3000,
+    "outcome": {
+     "delivered_once": 1,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 2999,
+     "n": 3000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 59008,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 1,
+     "frames_verified_ok": 1
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "stream",
+    "wall_s": 8.309446096
+   },
+   "guest": {
+    "app_sent_ok": 3000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 177024000,
+     "fexit_calls": 3046,
+     "guest_encoded": 3000,
+     "redirect_ok": 6000,
+     "strp_frames": 3000,
+     "tx_alloc_stream": 3020,
+     "tx_alloc_stream_bytes": 177024000
+    },
+    "drain_wall_s": 4.698531902,
+    "guest_vsock_buffer_size": 262144,
+    "n": 3000,
+    "role": "guest",
+    "send_wall_s": 2.494583734,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 26,
+     "ok_full": 3000,
+     "ok_partial": 20
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 3000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "stream"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=3000 stalled=false\n"
+  },
+  {
+   "label": "s3-seq-59000-hb64k",
+   "cell": {
+    "label": "s3-seq-59000-hb64k",
+    "variant": "seq",
+    "size": 59000,
+    "n": 3000,
+    "hostbuf": 65536
+   },
+   "wall_s": 11.767612934112549,
+   "host": {
+    "accepted_child_buffer_size": 65536,
+    "bpf_counters": {
+     "redirect_ok": 3000,
+     "rx_ok": 3000,
+     "rx_pkt_seq_eom": 3000,
+     "rx_pkt_seq_eom_bytes": 177024000,
+     "rx_pkt_seq_noeom": 2999,
+     "rx_pkt_seq_noeom_bytes": 19577472,
+     "rx_short": 2999
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 1
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 2
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 3
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 4
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 5
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 6
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 7
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 8
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 9
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 10
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 11
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 12
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 13
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 14
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 15
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 16
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 17
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 18
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 19
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 20
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 21
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 22
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 23
+      },
+      {
+       "declared": 59000,
+       "kind": "short",
+       "n": 6528,
+       "second_magic": 0,
+       "seq": 24
+      }
+     ],
+     "short": 2999
+    },
+    "guest_done": "{\"sent\":3000,\"stalled\":false}",
+    "hostbuf_arg": 65536,
+    "listener_buffer_size": 65536,
+    "n": 3000,
+    "outcome": {
+     "delivered_once": 3000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 3000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 177024000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 3000,
+     "frames_verified_ok": 3000
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 11.705250681999999
+   },
+   "guest": {
+    "app_sent_ok": 3000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 177024000,
+     "fexit_calls": 6002,
+     "guest_encoded": 3000,
+     "redirect_ok": 6000,
+     "strp_frames": 3000,
+     "tx_alloc_seq_noeom": 5999,
+     "tx_alloc_seq_noeom_bytes": 196601472
+    },
+    "drain_wall_s": 8.072405037,
+    "guest_vsock_buffer_size": 262144,
+    "n": 3000,
+    "role": "guest",
+    "send_wall_s": 5.668012798,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 3002,
+     "ok_full": 3000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 3000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=3000 stalled=false\n"
+  },
+  {
+   "label": "s3-stream-59000-hb64k",
+   "cell": {
+    "label": "s3-stream-59000-hb64k",
+    "variant": "stream",
+    "size": 59000,
+    "n": 3000,
+    "hostbuf": 65536
+   },
+   "wall_s": 11.174867391586304,
+   "host": {
+    "accepted_child_buffer_size": 65536,
+    "bpf_counters": {
+     "redirect_ok": 5696,
+     "rx_ok": 1,
+     "rx_pkt_stream": 5695,
+     "rx_pkt_stream_bytes": 177024000,
+     "strp_bad_frame": 2,
+     "strp_frames": 1
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":3000,\"stalled\":false}",
+    "hostbuf_arg": 65536,
+    "listener_buffer_size": 65536,
+    "n": 3000,
+    "outcome": {
+     "delivered_once": 1,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 2999,
+     "n": 3000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 59008,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 1,
+     "frames_verified_ok": 1
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "stream",
+    "wall_s": 11.109046922
+   },
+   "guest": {
+    "app_sent_ok": 3000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 177024000,
+     "fexit_calls": 8419,
+     "guest_encoded": 3000,
+     "redirect_ok": 6000,
+     "strp_frames": 3000,
+     "tx_alloc_stream": 5695,
+     "tx_alloc_stream_bytes": 177024000
+    },
+    "drain_wall_s": 7.509241204,
+    "guest_vsock_buffer_size": 262144,
+    "n": 3000,
+    "role": "guest",
+    "send_wall_s": 5.105156518,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 2724,
+     "ok_full": 3000,
+     "ok_partial": 2695
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 3000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "stream"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=3000 stalled=false\n"
+  },
+  {
+   "label": "s3-seq-1024-hb64k",
+   "cell": {
+    "label": "s3-seq-1024-hb64k",
+    "variant": "seq",
+    "size": 1024,
+    "n": 20000,
+    "hostbuf": 65536
+   },
+   "wall_s": 6.593666076660156,
+   "host": {
+    "accepted_child_buffer_size": 65536,
+    "bpf_counters": {
+     "redirect_ok": 20000,
+     "rx_ok": 20000,
+     "rx_pkt_seq_eom": 20000,
+     "rx_pkt_seq_eom_bytes": 20640000,
+     "rx_pkt_seq_noeom": 4,
+     "rx_pkt_seq_noeom_bytes": 2080,
+     "rx_short": 4
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 5938
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 9526
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 9730
+      },
+      {
+       "declared": 1024,
+       "kind": "short",
+       "n": 520,
+       "second_magic": 0,
+       "seq": 10545
+      }
+     ],
+     "short": 4
+    },
+    "guest_done": "{\"sent\":20000,\"stalled\":false}",
+    "hostbuf_arg": 65536,
+    "listener_buffer_size": 65536,
+    "n": 20000,
+    "outcome": {
+     "delivered_once": 20000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 20000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 20640000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 20000,
+     "frames_verified_ok": 20000
+    },
+    "size": "1024",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 6.525067532
+   },
+   "guest": {
+    "app_sent_ok": 20000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 20640000,
+     "fexit_calls": 20008,
+     "guest_encoded": 20000,
+     "redirect_ok": 40000,
+     "strp_frames": 20000,
+     "tx_alloc_seq_noeom": 20004,
+     "tx_alloc_seq_noeom_bytes": 20642080
+    },
+    "drain_wall_s": 2.946209766,
+    "guest_vsock_buffer_size": 262144,
+    "n": 20000,
+    "role": "guest",
+    "send_wall_s": 0.541687701,
+    "sender_stalled": false,
+    "size": "1024",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno11": 8,
+     "ok_full": 20000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 20000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=20000 stalled=false\n"
+  },
+  {
+   "label": "s3-seq-59000-hb1m",
+   "cell": {
+    "label": "s3-seq-59000-hb1m",
+    "variant": "seq",
+    "size": 59000,
+    "n": 3000,
+    "hostbuf": 1048576
+   },
+   "wall_s": 8.67504334449768,
+   "host": {
+    "accepted_child_buffer_size": 1048576,
+    "bpf_counters": {
+     "redirect_ok": 3000,
+     "rx_ok": 3000,
+     "rx_pkt_seq_eom": 3000,
+     "rx_pkt_seq_eom_bytes": 177024000
+    },
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":3000,\"stalled\":false}",
+    "hostbuf_arg": 1048576,
+    "listener_buffer_size": 1048576,
+    "n": 3000,
+    "outcome": {
+     "delivered_once": 3000,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 0,
+     "n": 3000
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 177024000,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 3000,
+     "frames_verified_ok": 3000
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 8.609435129
+   },
+   "guest": {
+    "app_sent_ok": 3000,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_bytes": 177024000,
+     "fexit_calls": 3000,
+     "guest_encoded": 3000,
+     "redirect_ok": 6000,
+     "strp_frames": 3000,
+     "tx_alloc_seq_noeom": 3000,
+     "tx_alloc_seq_noeom_bytes": 177024000
+    },
+    "drain_wall_s": 5.043527299,
+    "guest_vsock_buffer_size": 262144,
+    "n": 3000,
+    "role": "guest",
+    "send_wall_s": 2.839162955,
+    "sender_stalled": false,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "ok_full": 3000
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 3000
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=3000 stalled=false\n"
+  },
+  {
+   "label": "s3-seq-59000-hb32k-emsgsize",
+   "cell": {
+    "label": "s3-seq-59000-hb32k-emsgsize",
+    "variant": "seq",
+    "size": 59000,
+    "n": 300,
+    "hostbuf": 32768,
+    "drain_s": 20
+   },
+   "wall_s": 25.60890769958496,
+   "host": {
+    "accepted_child_buffer_size": 32768,
+    "bpf_counters": {},
+    "check": 1,
+    "events": {
+     "badmagic": 0,
+     "long": 0,
+     "long_with_second_magic": 0,
+     "lt8": 0,
+     "sample": [],
+     "short": 0
+    },
+    "guest_done": "{\"sent\":160,\"stalled\":true}",
+    "hostbuf_arg": 32768,
+    "listener_buffer_size": 32768,
+    "n": 300,
+    "outcome": {
+     "delivered_once": 0,
+     "duplicate_extra_copies": 0,
+     "duplicated_seqs": 0,
+     "lost": 300,
+     "n": 300
+    },
+    "pause_ms": 0,
+    "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+    "role": "host",
+    "seqrecv": {
+     "badmagic": 0,
+     "bytes": 0,
+     "long": 0,
+     "long_second_magic": 0,
+     "lt8": 0,
+     "ok": 0,
+     "records": 0,
+     "short": 0
+    },
+    "sink": {
+     "bad": 0,
+     "bad_reasons": {},
+     "bytes": 0,
+     "desync_bytes_skipped": 0,
+     "frames_parsed": 0,
+     "frames_verified_ok": 0
+    },
+    "size": "59000",
+    "uname": "7.0.0-29-generic",
+    "variant": "seq",
+    "wall_s": 25.538025176
+   },
+   "guest": {
+    "app_sent_ok": 160,
+    "bound": 59000,
+    "bpf_counters": {
+     "fexit_calls": 1,
+     "guest_encoded": 160,
+     "redirect_ok": 320,
+     "strp_frames": 160
+    },
+    "drain_wall_s": 22.210399521,
+    "guest_vsock_buffer_size": 262144,
+    "n": 300,
+    "role": "guest",
+    "send_wall_s": 20.006192334,
+    "sender_stalled": true,
+    "size": "59000",
+    "skb_send_sock_outcomes_on_vsock_leg": {
+     "errno90": 1
+    },
+    "synth": 0,
+    "udp_snmp_delta": {
+     "OutDatagrams": 160
+    },
+    "uname": "7.0.0-29-generic",
+    "variant": "seq"
+   },
+   "guest_stdout_tail": "GUEST_DONE sent=160 stalled=true\n"
+  }
+ ]
+}

@@ -1,0 +1,75 @@
+cloud-hypervisor:   0.000064s: <main> INFO:cloud-hypervisor/src/main.rs:631 -- v53.0.0 starting
+cloud-hypervisor:   0.000353s: <main> INFO:event_monitor/src/lib.rs:113 -- Event: source = vmm event = starting 
+cloud-hypervisor:   0.002064s: <vmm> INFO:vmm/src/api/mod.rs:1278 -- API request event: VmCreate VmConfig { cpus: CpusConfig { boot_vcpus: 1, max_vcpus: 1, topology: None, kvm_hyperv: false, max_phys_bits: 46, affinity: None, features: CpuFeatures { amx: false }, nested: true, core_scheduling: Vm, profile: Host }, memory: MemoryConfig { size: 268435456, mergeable: false, hotplug_method: Acpi, hotplug_size: None, hotplugged_size: None, shared: false, hugepages: false, hugepage_size: None, prefault: false, reserve: false, zones: None, thp: true }, payload: Some(PayloadConfig { firmware: None, kernel: Some("/srv/vm/overdrive-testing/kernel"), cmdline: Some("console=ttyS0 panic=1 loglevel=4"), initramfs: Some("/tmp/v30-work/out/initramfs.cpio.gz") }), rate_limit_groups: None, disks: None, net: None, rng: RngConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, src: "/dev/urandom" }, balloon: None, generic_vhost_user: None, fs: None, pmem: None, serial: SerialConfig { common: CommonConsoleConfig { file: Some("/tmp/v30-work/evidence/v30-fd-close-sysrq-b-3720/serial.log"), mode: File, socket: None } }, console: ConsoleConfig { common: CommonConsoleConfig { file: None, mode: Off, socket: None }, pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None } }, debug_console: DebugConsoleConfig { file: None, mode: Off, iobase: Some(233) }, devices: None, user_devices: None, vdpa: None, vsock: Some(VsockConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, cid: 3720, socket: None, backend: VhostKernel, fd: Some(4) }), pvpanic: false, iommu: false, numa: None, watchdog: false, rtc: None, pci_segments: None, platform: None, tpm: None, preserved_fds: None, landlock_enable: false, landlock_rules: None }
+cloud-hypervisor:   0.002972s: <vmm> INFO:vmm/src/api/mod.rs:1169 -- API request event: VmBoot
+cloud-hypervisor:   0.003006s: <vmm> INFO:vmm/src/lib.rs:2230 -- Booting VM
+cloud-hypervisor:   0.003038s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = booting 
+cloud-hypervisor:   0.003479s: <vmm> INFO:vmm/src/memory_manager.rs:681 -- create ram region for zone mem0, region_start: 0x0, region_size: 0x10000000
+cloud-hypervisor:   0.003526s: <vmm> INFO:vmm/src/memory_manager.rs:2154 -- RAM region mapping at 0x702bdc000000 (size = 0x10000000)
+cloud-hypervisor:   0.003566s: <vmm> INFO:vmm/src/vm.rs:606 -- Booting VM from config: Mutex { data: VmConfig { cpus: CpusConfig { boot_vcpus: 1, max_vcpus: 1, topology: None, kvm_hyperv: false, max_phys_bits: 46, affinity: None, features: CpuFeatures { amx: false }, nested: true, core_scheduling: Vm, profile: Host }, memory: MemoryConfig { size: 268435456, mergeable: false, hotplug_method: Acpi, hotplug_size: None, hotplugged_size: None, shared: false, hugepages: false, hugepage_size: None, prefault: false, reserve: false, zones: None, thp: true }, payload: Some(PayloadConfig { firmware: None, kernel: Some("/srv/vm/overdrive-testing/kernel"), cmdline: Some("console=ttyS0 panic=1 loglevel=4"), initramfs: Some("/tmp/v30-work/out/initramfs.cpio.gz") }), rate_limit_groups: None, disks: None, net: None, rng: RngConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, src: "/dev/urandom" }, balloon: None, generic_vhost_user: None, fs: None, pmem: None, serial: SerialConfig { common: CommonConsoleConfig { file: Some("/tmp/v30-work/evidence/v30-fd-close-sysrq-b-3720/serial.log"), mode: File, socket: None } }, console: ConsoleConfig { common: CommonConsoleConfig { file: None, mode: Off, socket: None }, pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None } }, debug_console: DebugConsoleConfig { file: None, mode: Off, iobase: Some(233) }, devices: None, user_devices: None, vdpa: None, vsock: Some(VsockConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, cid: 3720, socket: None, backend: VhostKernel, fd: Some(4) }), pvpanic: false, iommu: false, numa: None, watchdog: false, rtc: None, pci_segments: None, platform: None, tpm: None, preserved_fds: None, landlock_enable: false, landlock_rules: None }, poisoned: false, .. }
+cloud-hypervisor:   0.004188s: <vmm> INFO:arch/src/x86_64/mod.rs:629 -- Generating guest CPUID with physical address size: 46
+cloud-hypervisor:   0.004265s: <vmm> INFO:vmm/src/pci_segment.rs:107 -- Adding PCI segment: id=0, PCI MMIO config address: 0xe8000000, mem32 area [0xc0000000-0xe7ffffff], mem64 area [0x100000000-0x3fffffeeffff]
+cloud-hypervisor:   0.004303s: <vmm> INFO:vmm/src/memory_manager.rs:2433 -- Creating userspace mapping: 0 -> 702bdc000000 10000000, slot 0
+cloud-hypervisor:   0.004397s: <vmm> INFO:vmm/src/memory_manager.rs:2491 -- Created userspace mapping: 0 -> 702bdc000000 10000000
+cloud-hypervisor:   0.004524s: <vmm> INFO:vmm/src/cpu.rs:1100 -- Request to create new vCPUs: desired = 1, max = 1, allocated = 0, present = 0
+cloud-hypervisor:   0.004533s: <payload_loader> INFO:vmm/src/vm.rs:1636 -- Loading kernel
+cloud-hypervisor:   0.004961s: <vmm> INFO:vmm/src/device_manager.rs:3099 -- Creating virtio-rng device: RngConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, src: "/dev/urandom" }
+cloud-hypervisor:   0.005045s: <vmm> INFO:vmm/src/device_manager.rs:3527 -- Creating virtio-vsock device: VsockConfig { pci_common: PciDeviceCommonConfig { id: Some("_vsock0"), iommu: false, pci_segment: 0, pci_device_id: None }, cid: 3720, socket: None, backend: VhostKernel, fd: Some(4) }
+cloud-hypervisor:   0.005203s: <vmm> INFO:virtio-devices/src/vsock/vhost_kernel.rs:241 -- Created vhost-kernel vsock _vsock0 with guest CID 3720
+cloud-hypervisor:   0.005420s: <vmm> INFO:vmm/src/acpi.rs:1166 -- Generated ACPI tables: took 111µs size = 5169
+cloud-hypervisor:   0.005444s: <vmm> INFO:vmm/src/vm.rs:2739 -- Created ACPI tables: rsdp_addr = 0xa0000
+cloud-hypervisor:   0.006794s: <payload_loader> INFO:vmm/src/vm.rs:1666 -- bzImage kernel loaded: entry_addr = 0x100000
+cloud-hypervisor:   0.006886s: <vmm> INFO:vmm/src/cpu.rs:556 -- Configuring vCPU: cpu_id = 0
+cloud-hypervisor:   0.006966s: <vmm> INFO:vmm/src/vm.rs:1826 -- Configuring system
+cloud-hypervisor:   0.007394s: <vmm> INFO:vmm/src/vm.rs:1495 -- Initramfs loaded: address = 0xfe0b000
+cloud-hypervisor:   0.007427s: <vmm> INFO:vmm/src/cpu.rs:1513 -- Starting vCPUs: desired = 1, allocated = 1, present = 0, paused = false
+cloud-hypervisor:   0.015519s: <vcpu0> INFO:vmm/src/cpu.rs:1314 -- vCPU 0: core scheduling cookie = 0xbdd5bb14
+cloud-hypervisor:   0.015702s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = booted 
+cloud-hypervisor:   0.360941s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x87
+cloud-hypervisor:   0.423840s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x2f9
+cloud-hypervisor:   0.423883s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x2f9
+cloud-hypervisor:   0.423915s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x2f9
+cloud-hypervisor:   0.423947s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x2f9
+cloud-hypervisor:   0.423979s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x2f9
+cloud-hypervisor:   0.424010s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x2f9
+cloud-hypervisor:   0.424183s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x3e9
+cloud-hypervisor:   0.424216s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x3e9
+cloud-hypervisor:   0.424248s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x3e9
+cloud-hypervisor:   0.424279s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x3e9
+cloud-hypervisor:   0.424321s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x3e9
+cloud-hypervisor:   0.424352s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x3e9
+cloud-hypervisor:   0.424496s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x2e9
+cloud-hypervisor:   0.424531s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x2e9
+cloud-hypervisor:   0.424562s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x2e9
+cloud-hypervisor:   0.424594s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x2e9
+cloud-hypervisor:   0.424625s: <vcpu0> INFO:vmm/src/vm.rs:500 -- Guest PIO read from unregistered address 0x2e9
+cloud-hypervisor:   0.424657s: <vcpu0> INFO:vmm/src/vm.rs:510 -- Guest PIO write to unregistered address 0x2e9
+cloud-hypervisor:   0.430842s: <vcpu0> INFO:vmm/src/vm.rs:476 -- Guest MMIO read from unregistered address 0xfed803c0
+cloud-hypervisor:   0.526422s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1288 -- _virtio-pci-_vsock0: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.526456s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1293 -- _virtio-pci-_vsock0: Needs activation; returning barrier
+cloud-hypervisor:   0.526476s: <vcpu0> INFO:vmm/src/vm.rs:488 -- Waiting for barrier
+cloud-hypervisor:   0.526520s: <vmm> INFO:vmm/src/lib.rs:2108 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.526799s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _vsock0
+cloud-hypervisor:   0.526839s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:347 -- _virtio-pci-_vsock0: Waiting for barrier
+cloud-hypervisor:   0.526864s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:349 -- _virtio-pci-_vsock0: Barrier released
+cloud-hypervisor:   0.526910s: <vcpu0> INFO:vmm/src/vm.rs:490 -- Barrier released
+cloud-hypervisor:   1.631982s: <vcpu0> INFO:devices/src/legacy/cmos.rs:80 -- CMOS reset
+cloud-hypervisor:   1.632101s: <vmm> INFO:vmm/src/lib.rs:2089 -- VM reset event
+cloud-hypervisor:   1.632160s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = rebooting 
+cloud-hypervisor:   1.632230s: <vmm> INFO:virtio-devices/src/device.rs:485 -- Resuming virtio-rng
+cloud-hypervisor:   1.632287s: <vmm> INFO:virtio-devices/src/device.rs:485 -- Resuming virtio-vsock
+cloud-hypervisor:   1.633456s: <vmm> INFO:virtio-devices/src/device.rs:485 -- Resuming virtio-rng
+cloud-hypervisor:   1.633518s: <vmm> INFO:virtio-devices/src/device.rs:485 -- Resuming virtio-vsock
+cloud-hypervisor:   1.651972s: <vmm> INFO:vmm/src/memory_manager.rs:681 -- create ram region for zone mem0, region_start: 0x0, region_size: 0x10000000
+cloud-hypervisor:   1.652048s: <vmm> INFO:vmm/src/memory_manager.rs:2154 -- RAM region mapping at 0x702bc4000000 (size = 0x10000000)
+cloud-hypervisor:   1.652109s: <vmm> INFO:vmm/src/vm.rs:606 -- Booting VM from config: Mutex { data: VmConfig { cpus: CpusConfig { boot_vcpus: 1, max_vcpus: 1, topology: None, kvm_hyperv: false, max_phys_bits: 46, affinity: None, features: CpuFeatures { amx: false }, nested: true, core_scheduling: Vm, profile: Host }, memory: MemoryConfig { size: 268435456, mergeable: false, hotplug_method: Acpi, hotplug_size: None, hotplugged_size: None, shared: false, hugepages: false, hugepage_size: None, prefault: false, reserve: false, zones: None, thp: true }, payload: Some(PayloadConfig { firmware: None, kernel: Some("/srv/vm/overdrive-testing/kernel"), cmdline: Some("console=ttyS0 panic=1 loglevel=4"), initramfs: Some("/tmp/v30-work/out/initramfs.cpio.gz") }), rate_limit_groups: None, disks: None, net: None, rng: RngConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, src: "/dev/urandom" }, balloon: None, generic_vhost_user: None, fs: None, pmem: None, serial: SerialConfig { common: CommonConsoleConfig { file: Some("/tmp/v30-work/evidence/v30-fd-close-sysrq-b-3720/serial.log"), mode: File, socket: None } }, console: ConsoleConfig { common: CommonConsoleConfig { file: None, mode: Off, socket: None }, pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None } }, debug_console: DebugConsoleConfig { file: None, mode: Off, iobase: Some(233) }, devices: None, user_devices: None, vdpa: None, vsock: Some(VsockConfig { pci_common: PciDeviceCommonConfig { id: Some("_vsock0"), iommu: false, pci_segment: 0, pci_device_id: None }, cid: 3720, socket: None, backend: VhostKernel, fd: Some(4) }), pvpanic: false, iommu: false, numa: None, watchdog: false, rtc: None, pci_segments: None, platform: None, tpm: None, preserved_fds: None, landlock_enable: false, landlock_rules: None }, poisoned: false, .. }
+cloud-hypervisor:   1.653138s: <vmm> INFO:arch/src/x86_64/mod.rs:629 -- Generating guest CPUID with physical address size: 46
+cloud-hypervisor:   1.653224s: <vmm> INFO:vmm/src/pci_segment.rs:107 -- Adding PCI segment: id=0, PCI MMIO config address: 0xe8000000, mem32 area [0xc0000000-0xe7ffffff], mem64 area [0x100000000-0x3fffffeeffff]
+cloud-hypervisor:   1.653298s: <vmm> INFO:vmm/src/memory_manager.rs:2433 -- Creating userspace mapping: 0 -> 702bc4000000 10000000, slot 0
+cloud-hypervisor:   1.653426s: <vmm> INFO:vmm/src/memory_manager.rs:2491 -- Created userspace mapping: 0 -> 702bc4000000 10000000
+cloud-hypervisor:   1.653543s: <vmm> INFO:vmm/src/cpu.rs:1100 -- Request to create new vCPUs: desired = 1, max = 1, allocated = 0, present = 0
+cloud-hypervisor:   1.653620s: <payload_loader> INFO:vmm/src/vm.rs:1636 -- Loading kernel
+cloud-hypervisor:   1.653963s: <vmm> INFO:vmm/src/device_manager.rs:3099 -- Creating virtio-rng device: RngConfig { pci_common: PciDeviceCommonConfig { id: None, iommu: false, pci_segment: 0, pci_device_id: None }, src: "/dev/urandom" }
+cloud-hypervisor:   1.654093s: <vmm> INFO:vmm/src/device_manager.rs:3527 -- Creating virtio-vsock device: VsockConfig { pci_common: PciDeviceCommonConfig { id: Some("_vsock0"), iommu: false, pci_segment: 0, pci_device_id: None }, cid: 3720, socket: None, backend: VhostKernel, fd: Some(4) }
+cloud-hypervisor:   1.654247s: <vmm> INFO:virtio-devices/src/device.rs:485 -- Resuming virtio-rng
+cloud-hypervisor:   1.654601s: <main> ERROR:cloud-hypervisor/src/lib.rs:24 -- Fatal error: VmmThread(VmReboot(DeviceManager(CreateVhostKernelVsock(ClaimedFdConsumed))))

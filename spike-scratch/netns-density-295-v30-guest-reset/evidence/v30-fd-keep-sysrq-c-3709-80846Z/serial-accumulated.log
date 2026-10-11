@@ -1,0 +1,70 @@
+[    0.003047] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=cafc9865-896f-44cc-8dee-ed1631b51635
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO sysrq-c
+GUEST_ACT sysrq-c
+[    1.436145] sysrq: Trigger a crash
+[    1.437342] Kernel panic - not syncing: sysrq triggered crash
+[    1.439295] CPU: 0 UID: 0 PID: 81 Comm: guest-run.sh Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.442409] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.444474] Call Trace:
+[    1.445265]  <TASK>
+[    1.445961]  show_stack+0x49/0x60
+[    1.446999]  dump_stack_lvl+0x5f/0x90
+[    1.448130]  dump_stack+0x10/0x18
+[    1.449159]  vpanic+0x262/0x4b0
+[    1.450145]  panic+0x67/0x70
+[    1.451058]  sysrq_handle_crash+0x1a/0x20
+[    1.452283]  __handle_sysrq.cold+0x23/0x167
+[    1.453551]  write_sysrq_trigger+0x62/0xa0
+[    1.454795]  proc_reg_write+0x6d/0xd0
+[    1.455933]  vfs_write+0xce/0x490
+[    1.456968]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.458401]  ? filp_flush+0x64/0xb0
+[    1.459479]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.460921]  ? filp_close+0x22/0x30
+[    1.462005]  ksys_write+0x71/0xf0
+[    1.463044]  __x64_sys_write+0x19/0x30
+[    1.464191]  x64_sys_call+0x22f/0x2390
+[    1.465338]  do_syscall_64+0x105/0x5a0
+[    1.466489]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.467930]  ? filp_flush+0x64/0xb0
+[    1.469010]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.470442]  ? __x64_sys_close+0x3e/0x90
+[    1.471641]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.473084]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.474450]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.475575]  ? do_syscall_64+0x140/0x5a0
+[    1.476525]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.477651]  ? putname+0x41/0x90
+[    1.478449]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.479582]  ? do_sys_openat2+0x99/0xe0
+[    1.480509]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.481640]  ? __x64_sys_openat+0x5f/0xa0
+[    1.482605]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.483734]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.485102]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.486234]  ? do_syscall_64+0x140/0x5a0
+[    1.487181]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.487911]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[    1.488770]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.489484]  ? irqentry_exit+0x97/0x6f0
+[    1.490071]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.490779]  ? exc_page_fault+0x94/0x1e0
+[    1.491375]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.492090]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.492832] RIP: 0033:0x4ccde6
+[    1.493312] Code: 47 ba 04 00 00 00 48 c7 c0 e8 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[    1.495948] RSP: 002b:00007ffc22de8d80 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[    1.497045] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00000000004ccde6
+[    1.498086] RDX: 0000000000000002 RSI: 00000000046f9900 RDI: 0000000000000001
+[    1.499123] RBP: 00007ffc22de8d90 R08: 0000000000000000 R09: 0000000000000000
+[    1.500162] R10: 0000000000000000 R11: 0000000000000202 R12: 00000000046f9900
+[    1.501204] R13: 0000000000000002 R14: 0000000000000000 R15: 00000000046f9902
+[    1.502251]  </TASK>
+[    1.502708] Kernel Offset: 0x1ae00000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.504281] Rebooting in 1 seconds..
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

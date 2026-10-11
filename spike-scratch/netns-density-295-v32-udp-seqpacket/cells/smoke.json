@@ -1,0 +1,5 @@
+[
+ {"label":"smoke-seq-1024","variant":"seq","size":1024,"n":2000},
+ {"label":"smoke-stream-1024","variant":"stream","size":1024,"n":2000},
+ {"label":"smoke-seq-59000","variant":"seq","size":59000,"n":2000}
+]

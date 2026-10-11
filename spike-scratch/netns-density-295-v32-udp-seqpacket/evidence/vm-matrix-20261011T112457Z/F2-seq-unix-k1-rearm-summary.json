@@ -1,0 +1,91 @@
+{
+ "label": "F2-seq-unix-k1-rearm",
+ "cell": {
+  "label": "F2-seq-unix-k1-rearm",
+  "variant": "seq",
+  "size": 1024,
+  "n": 200,
+  "cell": "unix",
+  "k1": 100,
+  "k1rearm": 1
+ },
+ "wall_s": 5.8618810176849365,
+ "host": {
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {},
+  "check": 1,
+  "events": {
+   "badmagic": 0,
+   "long": 0,
+   "long_with_second_magic": 0,
+   "lt8": 0,
+   "sample": [],
+   "short": 0
+  },
+  "guest_done": "{\"sent\":200,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 200,
+  "outcome": {
+   "delivered_once": 0,
+   "duplicate_extra_copies": 0,
+   "duplicated_seqs": 0,
+   "lost": 200,
+   "n": 200
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+   "badmagic": 0,
+   "bytes": 0,
+   "long": 0,
+   "long_second_magic": 0,
+   "lt8": 0,
+   "ok": 0,
+   "records": 0,
+   "short": 0
+  },
+  "sink": {
+   "bad": 0,
+   "bad_reasons": {},
+   "bytes": 0,
+   "desync_bytes_skipped": 0,
+   "frames_parsed": 0,
+   "frames_verified_ok": 0
+  },
+  "size": "1024",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 5.803520975
+ },
+ "guest": {
+  "app_sent_ok": 200,
+  "bound": 59000,
+  "bpf_counters": {
+   "guest_encoded": 200,
+   "redirect_ok": 200
+  },
+  "cell": "unix",
+  "drain_wall_s": 2.403771215,
+  "guest_events": {
+   "parse_bad": 0,
+   "sample": []
+  },
+  "guest_vsock_buffer_size": 262144,
+  "k1": 100,
+  "n": 200,
+  "role": "guest",
+  "send_wall_s": 0.202055076,
+  "sender_stalled": false,
+  "size": "1024",
+  "skb_send_sock_outcomes_on_vsock_leg": {},
+  "synth": 0,
+  "udp_snmp_delta": {
+   "OutDatagrams": 200
+  },
+  "uname": "7.0.0-29-generic",
+  "variant": "seq"
+ },
+ "guest_stdout_tail": "GUEST_DONE sent=200 stalled=false\nk1 rearm SO_RCVLOWAT: Ok(())\n"
+}

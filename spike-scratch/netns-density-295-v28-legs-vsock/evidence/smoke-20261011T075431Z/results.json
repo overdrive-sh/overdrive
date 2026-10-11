@@ -1,0 +1,28 @@
+{
+ "substrate": {
+  "host_uname": "7.0.0-29-generic",
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "smoke-tcp": {
+  "client": {
+   "ok": false,
+   "setup_err": "hs:invalid peer certificate: Other(OtherError(CaUsedAsEndEntity))",
+   "tag": "smoke-tcp",
+   "wall_s": 0.002
+  },
+  "app": [],
+  "relay": [],
+  "gagent": []
+ },
+ "smoke-vsock": {
+  "client": {
+   "ok": false,
+   "setup_err": "hs:invalid peer certificate: Other(OtherError(CaUsedAsEndEntity))",
+   "tag": "smoke-vsock",
+   "wall_s": 0.002
+  },
+  "app": [],
+  "relay": [],
+  "gagent": []
+ }
+}

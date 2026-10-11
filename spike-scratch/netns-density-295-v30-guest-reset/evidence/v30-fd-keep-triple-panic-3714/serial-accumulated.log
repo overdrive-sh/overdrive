@@ -1,0 +1,77 @@
+[    0.003047] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4 reboot=t
+[   0.000] GUEST_BOOT boot_id=ac764522-1605-4c6a-98b1-1ddd6f630483
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO triple-panic
+GUEST_ACT triple-panic
+[    1.428892] sysrq: Trigger a crash
+[    1.429986] Kernel panic - not syncing: sysrq triggered crash
+[    1.431709] CPU: 0 UID: 0 PID: 80 Comm: guest-run.sh Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.434516] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.436418] Call Trace:
+[    1.437198]  <TASK>
+[    1.437896]  show_stack+0x49/0x60
+[    1.438930]  dump_stack_lvl+0x5f/0x90
+[    1.440059]  dump_stack+0x10/0x18
+[    1.441085]  vpanic+0x262/0x4b0
+[    1.442068]  panic+0x67/0x70
+[    1.442979]  sysrq_handle_crash+0x1a/0x20
+[    1.444197]  __handle_sysrq.cold+0x23/0x167
+[    1.445476]  write_sysrq_trigger+0x62/0xa0
+[    1.446717]  proc_reg_write+0x6d/0xd0
+[    1.447842]  vfs_write+0xce/0x490
+[    1.448873]  ? do_truncate+0xc5/0xf0
+[    1.449978]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.451421]  ? do_truncate+0xd8/0xf0
+[    1.452524]  ksys_write+0x71/0xf0
+[    1.453556]  __x64_sys_write+0x19/0x30
+[    1.454700]  x64_sys_call+0x22f/0x2390
+[    1.455850]  do_syscall_64+0x105/0x5a0
+[    1.457003]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.458441]  ? do_file_open+0xdf/0x1a0
+[    1.459586]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.461014]  ? percpu_counter_add_batch+0x8a/0xe0
+[    1.462449]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.463873]  ? filp_flush+0x64/0xb0
+[    1.464952]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.466394]  ? __x64_sys_close+0x3e/0x90
+[    1.467511]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.468758]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.470249]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.471380]  ? do_syscall_64+0x140/0x5a0
+[    1.472324]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.473451]  ? __x64_sys_dup2+0x24/0x110
+[    1.474393]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.475519]  ? alloc_fd+0xd2/0x140
+[    1.476351]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.477477]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.478823]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.479948]  ? do_syscall_64+0x140/0x5a0
+[    1.480894]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.481663]  ? f_dupfd+0x57/0x90
+[    1.482159]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.482873]  ? do_fcntl+0x649/0x750
+[    1.483412]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.484119]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.484832]  ? __x64_sys_fcntl+0x90/0x130
+[    1.485444]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.486150]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.487002]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.487714]  ? do_syscall_64+0x140/0x5a0
+[    1.488311]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.489018]  ? exc_page_fault+0x94/0x1e0
+[    1.489617]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.490365] RIP: 0033:0x4ccde6
+[    1.490837] Code: 47 ba 04 00 00 00 48 c7 c0 e8 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[    1.493480] RSP: 002b:00007fff799e8790 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[    1.494579] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00000000004ccde6
+[    1.495618] RDX: 0000000000000002 RSI: 00000000039e4900 RDI: 0000000000000001
+[    1.496659] RBP: 00007fff799e87a0 R08: 0000000000000000 R09: 0000000000000000
+[    1.497696] R10: 0000000000000000 R11: 0000000000000202 R12: 00000000039e4900
+[    1.498734] R13: 0000000000000002 R14: 0000000000000000 R15: 00000000039e4902
+[    1.499775]  </TASK>
+[    1.500245] Kernel Offset: 0x34c00000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.501781] Rebooting in 1 seconds..
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

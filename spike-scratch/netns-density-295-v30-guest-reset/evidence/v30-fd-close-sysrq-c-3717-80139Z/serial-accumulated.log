@@ -1,0 +1,80 @@
+[    0.003052] KHO: Failed to reserve nid 0 scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=c4c159ba-b691-4df9-a717-4db1f2c81c15
+[   0.002] GUEST_HELLO_SENT
+GUEST_LISTEN_READY
+GUEST_GO sysrq-c
+GUEST_ACT sysrq-c
+[    1.429723] sysrq: Trigger a crash
+[    1.430816] Kernel panic - not syncing: sysrq triggered crash
+[    1.432527] CPU: 0 UID: 0 PID: 81 Comm: guest-run.sh Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.435330] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.437230] Call Trace:
+[    1.438016]  <TASK>
+[    1.438713]  show_stack+0x49/0x60
+[    1.439742]  dump_stack_lvl+0x5f/0x90
+[    1.440876]  dump_stack+0x10/0x18
+[    1.441902]  vpanic+0x262/0x4b0
+[    1.442886]  panic+0x67/0x70
+[    1.443801]  sysrq_handle_crash+0x1a/0x20
+[    1.445023]  __handle_sysrq.cold+0x23/0x167
+[    1.446289]  write_sysrq_trigger+0x62/0xa0
+[    1.447532]  proc_reg_write+0x6d/0xd0
+[    1.448671]  vfs_write+0xce/0x490
+[    1.449702]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.451126]  ? __x64_sys_close+0x3e/0x90
+[    1.452319]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.453763]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.455466]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.456910]  ? do_syscall_64+0x140/0x5a0
+[    1.458108]  ksys_write+0x71/0xf0
+[    1.459149]  __x64_sys_write+0x19/0x30
+[    1.460307]  x64_sys_call+0x22f/0x2390
+[    1.461456]  do_syscall_64+0x105/0x5a0
+[    1.462615]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.464043]  ? filp_flush+0x64/0xb0
+[    1.465128]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.466550]  ? filp_close+0x22/0x30
+[    1.467556]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.468814]  ? do_dup2+0xb2/0x150
+[    1.469717]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.470981]  ? ksys_dup3+0xa1/0x130
+[    1.471924]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.473170]  ? __x64_sys_dup2+0x24/0x110
+[    1.474211]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.475462]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.476970]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.478216]  ? do_syscall_64+0x140/0x5a0
+[    1.479258]  ? f_dupfd+0x57/0x90
+[    1.480142]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.481392]  ? do_fcntl+0x649/0x750
+[    1.482228]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.482939]  ? __x64_sys_fcntl+0x90/0x130
+[    1.483542]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.484255]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.485106]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.485818]  ? do_syscall_64+0x140/0x5a0
+[    1.486409]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.487121]  ? __x64_sys_openat+0x5f/0xa0
+[    1.487732]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.488439]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.489291]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.490003]  ? do_syscall_64+0x140/0x5a0
+[    1.490598]  ? irqentry_exit+0x97/0x6f0
+[    1.491176]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.491891]  ? exc_page_fault+0x94/0x1e0
+[    1.492480]  ? common_interrupt+0x61/0xe0
+[    1.493089]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.493836] RIP: 0033:0x4ccde6
+[    1.494309] Code: 47 ba 04 00 00 00 48 c7 c0 e8 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[    1.496950] RSP: 002b:00007ffe0fe53b50 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[    1.498048] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00000000004ccde6
+[    1.499085] RDX: 0000000000000002 RSI: 000000002eb0c900 RDI: 0000000000000001
+[    1.500122] RBP: 00007ffe0fe53b60 R08: 0000000000000000 R09: 0000000000000000
+[    1.501164] R10: 0000000000000000 R11: 0000000000000202 R12: 000000002eb0c900
+[    1.502201] R13: 0000000000000002 R14: 0000000000000000 R15: 000000002eb0c902
+[    1.503242]  </TASK>
+[    1.503714] Kernel Offset: 0x39800000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.505258] Rebooting in 1 seconds..
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

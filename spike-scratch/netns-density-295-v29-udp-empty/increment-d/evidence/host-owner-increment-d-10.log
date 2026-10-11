@@ -1,0 +1,14 @@
+{"ack_oob":true,"arm":true,"declare":[7300,7301,7302],"egress_ifs":[],"ev":"programs_loaded","flush":true,"intake_park":true,"pid":4049123,"programs":[{"id":64998,"name":"verdict","tag":"10eb4482b2049ca7","verified_insns":1185},{"id":64999,"name":"strp_parse","tag":"2abd9169f6e90deb","verified_insns":62},{"id":65000,"name":"strp_verdict","tag":"43bb1ec76775fce6","verified_insns":1196},{"id":65001,"name":"sent(fexit skb_send_sock)","tag":"3a11f30c5a8ab4b7","verified_insns":109},{"id":65002,"name":"sockops(/sys/fs/cgroup/gvc-v29-4049123)","tag":"76815629f15442aa","verified_insns":342}],"role":"host","tuple_from_peer":true,"udp_park":true,"unframe":"verdict-notify"}
+{"ev":"park_pool","slots":256}
+{"cid":3329,"ev":"host_ready","intakes":["<metal-address>:28218=7100"]}
+{"cid":3329,"ev":"hello"}
+{"ev":"listen_state_undeclared","listening":false,"port":7300}
+{"ev":"listen_state_undeclared","listening":false,"port":7301}
+{"ev":"listen_state_undeclared","listening":false,"port":7302}
+{"ev":"ctl_closed","t_us":4993622310568}
+{"cid":3329,"ev":"hello"}
+{"ev":"listen_state_undeclared","listening":false,"port":7300}
+{"ev":"listen_state_undeclared","listening":false,"port":7301}
+{"ev":"listen_state_undeclared","listening":false,"port":7302}
+{"dst":"10.250.229.2:7229","ev":"host_dg_installed","flow":1,"local":"10.250.229.1:52381","peer":"10.250.229.2:7229","smode":7,"tuple_dst":"10.250.229.2:7229","waited_ms":1}
+{"ev":"host_dg_teardown","flow":1}

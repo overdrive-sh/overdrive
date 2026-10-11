@@ -1,0 +1,9 @@
+[
+ {"label":"s2-seq-59000-m4","variant":"seq","size":59000,"n":3000},
+ {"label":"s2-seq-59000-m0-control","variant":"seq","size":59000,"n":2000,"p2mode":0},
+ {"label":"s2-seq-59000-pause","variant":"seq","size":59000,"n":3000,"pause_ms":3000},
+ {"label":"s2-seqrecv-59000-pause","variant":"seqrecv","size":59000,"n":3000,"pause_ms":3000},
+ {"label":"s2-stream-59000-pause","variant":"stream","size":59000,"n":3000,"pause_ms":3000},
+ {"label":"s2-seq-synth","variant":"seq","size":"any","n":8,"synth":1},
+ {"label":"s2-seq-mix","variant":"seq","size":"mix","n":3000}
+]

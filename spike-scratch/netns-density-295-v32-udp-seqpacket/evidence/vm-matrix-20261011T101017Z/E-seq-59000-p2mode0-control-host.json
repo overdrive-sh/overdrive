@@ -1,0 +1,247 @@
+{
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+    "rx_badmagic": 35932,
+    "rx_pkt_seq_eom": 55932,
+    "rx_pkt_seq_eom_bytes": 1180160000,
+    "rx_short": 20000
+  },
+  "check": 1,
+  "events": {
+    "badmagic": 35932,
+    "long": 0,
+    "long_with_second_magic": 0,
+    "lt8": 0,
+    "sample": [
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000000",
+        "kind": "short",
+        "n": 32741,
+        "second_magic": 0,
+        "seq": 0
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 26267,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000001",
+        "kind": "short",
+        "n": 32768,
+        "second_magic": 0,
+        "seq": 1
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 17536,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 8704,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000002",
+        "kind": "short",
+        "n": 32768,
+        "second_magic": 0,
+        "seq": 2
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 26240,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000003",
+        "kind": "short",
+        "n": 32768,
+        "second_magic": 0,
+        "seq": 3
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 26240,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000004",
+        "kind": "short",
+        "n": 6528,
+        "second_magic": 0,
+        "seq": 4
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 32768,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 19712,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000005",
+        "kind": "short",
+        "n": 13056,
+        "second_magic": 0,
+        "seq": 5
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 32768,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 13184,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000006",
+        "kind": "short",
+        "n": 19584,
+        "second_magic": 0,
+        "seq": 6
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 32768,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 6656,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000007",
+        "kind": "short",
+        "n": 26112,
+        "second_magic": 0,
+        "seq": 7
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 32768,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 128,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000008",
+        "kind": "short",
+        "n": 32640,
+        "second_magic": 0,
+        "seq": 8
+      },
+      {
+        "declared": 0,
+        "first8_hex": "ffffffffffffffff",
+        "kind": "badmagic",
+        "n": 26368,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 59000,
+        "first8_hex": "0000000000000009",
+        "kind": "short",
+        "n": 6400,
+        "second_magic": 0,
+        "seq": 9
+      }
+    ],
+    "short": 20000
+  },
+  "guest_done": "{\"sent\":20000,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 20000,
+  "outcome": {
+    "delivered_once": 0,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 20000,
+    "n": 20000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 0,
+    "bad_reasons": {},
+    "bytes": 0,
+    "desync_bytes_skipped": 0,
+    "frames_parsed": 0,
+    "frames_verified_ok": 0
+  },
+  "size": "59000",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 25.637005544
+}

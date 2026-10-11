@@ -1,0 +1,8 @@
+[
+ {"label":"s3-stream-59000","variant":"stream","size":59000,"n":3000},
+ {"label":"s3-seq-59000-hb64k","variant":"seq","size":59000,"n":3000,"hostbuf":65536},
+ {"label":"s3-stream-59000-hb64k","variant":"stream","size":59000,"n":3000,"hostbuf":65536},
+ {"label":"s3-seq-1024-hb64k","variant":"seq","size":1024,"n":20000,"hostbuf":65536},
+ {"label":"s3-seq-59000-hb1m","variant":"seq","size":59000,"n":3000,"hostbuf":1048576},
+ {"label":"s3-seq-59000-hb32k-emsgsize","variant":"seq","size":59000,"n":300,"hostbuf":32768,"drain_s":20}
+]

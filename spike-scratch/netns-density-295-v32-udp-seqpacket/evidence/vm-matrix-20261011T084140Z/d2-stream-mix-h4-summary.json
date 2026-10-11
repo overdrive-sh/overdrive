@@ -1,0 +1,1059 @@
+{
+ "label": "d2-stream-mix-h4",
+ "cell": {
+  "label": "d2-stream-mix-h4",
+  "variant": "stream",
+  "size": "mix",
+  "n": 20000
+ },
+ "wall_s": 30.562618017196655,
+ "host": {
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+   "redirect_ok": 17356,
+   "rx_ok": 8678,
+   "rx_pkt_stream": 8678,
+   "rx_pkt_stream_bytes": 255201850,
+   "strp_frames": 8678,
+   "strp_parse_calls": 8678
+  },
+  "check": 1,
+  "events": {
+   "badmagic": 0,
+   "long": 0,
+   "long_with_second_magic": 0,
+   "lt8": 0,
+   "sample": [
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100009872",
+     "kind": "parse",
+     "n": 32741,
+     "second_magic": 0,
+     "seq": 6509183813678045298
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000d37d",
+     "kind": "parse",
+     "n": 54149,
+     "second_magic": 0,
+     "seq": 6509183813678060413
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100004316",
+     "kind": "parse",
+     "n": 17182,
+     "second_magic": 0,
+     "seq": 6509183813678023446
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000070b6",
+     "kind": "parse",
+     "n": 28862,
+     "second_magic": 0,
+     "seq": 6509183813678035126
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100000bd9",
+     "kind": "parse",
+     "n": 3041,
+     "second_magic": 0,
+     "seq": 6509183813678009305
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000b699",
+     "kind": "parse",
+     "n": 46753,
+     "second_magic": 0,
+     "seq": 6509183813678053017
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100000b8a",
+     "kind": "parse",
+     "n": 2962,
+     "second_magic": 0,
+     "seq": 6509183813678009226
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100008345",
+     "kind": "parse",
+     "n": 33613,
+     "second_magic": 0,
+     "seq": 6509183813678039877
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000753d",
+     "kind": "parse",
+     "n": 30021,
+     "second_magic": 0,
+     "seq": 6509183813678036285
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000058f1",
+     "kind": "parse",
+     "n": 22777,
+     "second_magic": 0,
+     "seq": 6509183813678029041
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100004d05",
+     "kind": "parse",
+     "n": 19725,
+     "second_magic": 0,
+     "seq": 6509183813678025989
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000c28e",
+     "kind": "parse",
+     "n": 49814,
+     "second_magic": 0,
+     "seq": 6509183813678056078
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100007501",
+     "kind": "parse",
+     "n": 29961,
+     "second_magic": 0,
+     "seq": 6509183813678036225
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000090a",
+     "kind": "parse",
+     "n": 2322,
+     "second_magic": 0,
+     "seq": 6509183813678008586
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100007e6f",
+     "kind": "parse",
+     "n": 32375,
+     "second_magic": 0,
+     "seq": 6509183813678038639
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100009db3",
+     "kind": "parse",
+     "n": 40379,
+     "second_magic": 0,
+     "seq": 6509183813678046643
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000da89",
+     "kind": "parse",
+     "n": 55953,
+     "second_magic": 0,
+     "seq": 6509183813678062217
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000004d7",
+     "kind": "parse",
+     "n": 1247,
+     "second_magic": 0,
+     "seq": 6509183813678007511
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000b13c",
+     "kind": "parse",
+     "n": 45380,
+     "second_magic": 0,
+     "seq": 6509183813678051644
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000024e8",
+     "kind": "parse",
+     "n": 9456,
+     "second_magic": 0,
+     "seq": 6509183813678015720
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000056a5",
+     "kind": "parse",
+     "n": 22189,
+     "second_magic": 0,
+     "seq": 6509183813678028453
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100003a24",
+     "kind": "parse",
+     "n": 14892,
+     "second_magic": 0,
+     "seq": 6509183813678021156
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000072da",
+     "kind": "parse",
+     "n": 29410,
+     "second_magic": 0,
+     "seq": 6509183813678035674
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000076c6",
+     "kind": "parse",
+     "n": 30414,
+     "second_magic": 0,
+     "seq": 6509183813678036678
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100002845",
+     "kind": "parse",
+     "n": 10317,
+     "second_magic": 0,
+     "seq": 6509183813678016581
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000e4fb",
+     "kind": "parse",
+     "n": 58627,
+     "second_magic": 0,
+     "seq": 6509183813678064891
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000863e",
+     "kind": "parse",
+     "n": 34374,
+     "second_magic": 0,
+     "seq": 6509183813678040638
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000b318",
+     "kind": "parse",
+     "n": 45856,
+     "second_magic": 0,
+     "seq": 6509183813678052120
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000d73b",
+     "kind": "parse",
+     "n": 55107,
+     "second_magic": 0,
+     "seq": 6509183813678061371
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000057f8",
+     "kind": "parse",
+     "n": 22528,
+     "second_magic": 0,
+     "seq": 6509183813678028792
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100002e1a",
+     "kind": "parse",
+     "n": 11810,
+     "second_magic": 0,
+     "seq": 6509183813678018074
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000662d",
+     "kind": "parse",
+     "n": 26165,
+     "second_magic": 0,
+     "seq": 6509183813678032429
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100009cef",
+     "kind": "parse",
+     "n": 40183,
+     "second_magic": 0,
+     "seq": 6509183813678046447
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000c2c2",
+     "kind": "parse",
+     "n": 49866,
+     "second_magic": 0,
+     "seq": 6509183813678056130
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000b86b",
+     "kind": "parse",
+     "n": 47219,
+     "second_magic": 0,
+     "seq": 6509183813678053483
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100005c1f",
+     "kind": "parse",
+     "n": 23591,
+     "second_magic": 0,
+     "seq": 6509183813678029855
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100009cd6",
+     "kind": "parse",
+     "n": 40158,
+     "second_magic": 0,
+     "seq": 6509183813678046422
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000cedc",
+     "kind": "parse",
+     "n": 52964,
+     "second_magic": 0,
+     "seq": 6509183813678059228
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100007297",
+     "kind": "parse",
+     "n": 29343,
+     "second_magic": 0,
+     "seq": 6509183813678035607
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100008423",
+     "kind": "parse",
+     "n": 33835,
+     "second_magic": 0,
+     "seq": 6509183813678040099
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100001a1b",
+     "kind": "parse",
+     "n": 6691,
+     "second_magic": 0,
+     "seq": 6509183813678012955
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000df0b",
+     "kind": "parse",
+     "n": 57107,
+     "second_magic": 0,
+     "seq": 6509183813678063371
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100000a0b",
+     "kind": "parse",
+     "n": 2579,
+     "second_magic": 0,
+     "seq": 6509183813678008843
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100006aac",
+     "kind": "parse",
+     "n": 27316,
+     "second_magic": 0,
+     "seq": 6509183813678033580
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000d225",
+     "kind": "parse",
+     "n": 53805,
+     "second_magic": 0,
+     "seq": 6509183813678060069
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100006e7e",
+     "kind": "parse",
+     "n": 28294,
+     "second_magic": 0,
+     "seq": 6509183813678034558
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000a80f",
+     "kind": "parse",
+     "n": 43031,
+     "second_magic": 0,
+     "seq": 6509183813678049295
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100002869",
+     "kind": "parse",
+     "n": 10353,
+     "second_magic": 0,
+     "seq": 6509183813678016617
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100007825",
+     "kind": "parse",
+     "n": 30765,
+     "second_magic": 0,
+     "seq": 6509183813678037029
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100008c00",
+     "kind": "parse",
+     "n": 35848,
+     "second_magic": 0,
+     "seq": 6509183813678042112
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000081e7",
+     "kind": "parse",
+     "n": 33263,
+     "second_magic": 0,
+     "seq": 6509183813678039527
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100000456",
+     "kind": "parse",
+     "n": 1118,
+     "second_magic": 0,
+     "seq": 6509183813678007382
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100009214",
+     "kind": "parse",
+     "n": 37404,
+     "second_magic": 0,
+     "seq": 6509183813678043668
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100008277",
+     "kind": "parse",
+     "n": 33407,
+     "second_magic": 0,
+     "seq": 6509183813678039671
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100006c68",
+     "kind": "parse",
+     "n": 27760,
+     "second_magic": 0,
+     "seq": 6509183813678034024
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000c195",
+     "kind": "parse",
+     "n": 49565,
+     "second_magic": 0,
+     "seq": 6509183813678055829
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000039e8",
+     "kind": "parse",
+     "n": 14832,
+     "second_magic": 0,
+     "seq": 6509183813678021096
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000b173",
+     "kind": "parse",
+     "n": 45435,
+     "second_magic": 0,
+     "seq": 6509183813678051699
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000d880",
+     "kind": "parse",
+     "n": 55432,
+     "second_magic": 0,
+     "seq": 6509183813678061696
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100005a3e",
+     "kind": "parse",
+     "n": 23110,
+     "second_magic": 0,
+     "seq": 6509183813678029374
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100009797",
+     "kind": "parse",
+     "n": 38815,
+     "second_magic": 0,
+     "seq": 6509183813678045079
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000aa5b",
+     "kind": "parse",
+     "n": 43619,
+     "second_magic": 0,
+     "seq": 6509183813678049883
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000b7d7",
+     "kind": "parse",
+     "n": 47071,
+     "second_magic": 0,
+     "seq": 6509183813678053335
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000048b",
+     "kind": "parse",
+     "n": 1171,
+     "second_magic": 0,
+     "seq": 6509183813678007435
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100002b1a",
+     "kind": "parse",
+     "n": 11042,
+     "second_magic": 0,
+     "seq": 6509183813678017306
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100001785",
+     "kind": "parse",
+     "n": 6029,
+     "second_magic": 0,
+     "seq": 6509183813678012293
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100005117",
+     "kind": "parse",
+     "n": 20767,
+     "second_magic": 0,
+     "seq": 6509183813678027031
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000bfc3",
+     "kind": "parse",
+     "n": 49099,
+     "second_magic": 0,
+     "seq": 6509183813678055363
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100000cf5",
+     "kind": "parse",
+     "n": 3325,
+     "second_magic": 0,
+     "seq": 6509183813678009589
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100005186",
+     "kind": "parse",
+     "n": 20878,
+     "second_magic": 0,
+     "seq": 6509183813678027142
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000014b5",
+     "kind": "parse",
+     "n": 5309,
+     "second_magic": 0,
+     "seq": 6509183813678011573
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000ae7f",
+     "kind": "parse",
+     "n": 44679,
+     "second_magic": 0,
+     "seq": 6509183813678050943
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100006a14",
+     "kind": "parse",
+     "n": 27164,
+     "second_magic": 0,
+     "seq": 6509183813678033428
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000cd7b",
+     "kind": "parse",
+     "n": 52611,
+     "second_magic": 0,
+     "seq": 6509183813678058875
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000caa6",
+     "kind": "parse",
+     "n": 51886,
+     "second_magic": 0,
+     "seq": 6509183813678058150
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100008d67",
+     "kind": "parse",
+     "n": 36207,
+     "second_magic": 0,
+     "seq": 6509183813678042471
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100001b19",
+     "kind": "parse",
+     "n": 6945,
+     "second_magic": 0,
+     "seq": 6509183813678013209
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100007442",
+     "kind": "parse",
+     "n": 29770,
+     "second_magic": 0,
+     "seq": 6509183813678036034
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000066db",
+     "kind": "parse",
+     "n": 26339,
+     "second_magic": 0,
+     "seq": 6509183813678032603
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000c48b",
+     "kind": "parse",
+     "n": 50323,
+     "second_magic": 0,
+     "seq": 6509183813678056587
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000063c1",
+     "kind": "parse",
+     "n": 25545,
+     "second_magic": 0,
+     "seq": 6509183813678031809
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000013db",
+     "kind": "parse",
+     "n": 5091,
+     "second_magic": 0,
+     "seq": 6509183813678011355
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000078e0",
+     "kind": "parse",
+     "n": 30952,
+     "second_magic": 0,
+     "seq": 6509183813678037216
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000076b1",
+     "kind": "parse",
+     "n": 30393,
+     "second_magic": 0,
+     "seq": 6509183813678036657
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100001581",
+     "kind": "parse",
+     "n": 5513,
+     "second_magic": 0,
+     "seq": 6509183813678011777
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100003198",
+     "kind": "parse",
+     "n": 12704,
+     "second_magic": 0,
+     "seq": 6509183813678018968
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000de11",
+     "kind": "parse",
+     "n": 56857,
+     "second_magic": 0,
+     "seq": 6509183813678063121
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000d804",
+     "kind": "parse",
+     "n": 55308,
+     "second_magic": 0,
+     "seq": 6509183813678061572
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000002ac",
+     "kind": "parse",
+     "n": 692,
+     "second_magic": 0,
+     "seq": 6509183813678006956
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000d360",
+     "kind": "parse",
+     "n": 54120,
+     "second_magic": 0,
+     "seq": 6509183813678060384
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000bead",
+     "kind": "parse",
+     "n": 48821,
+     "second_magic": 0,
+     "seq": 6509183813678055085
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100008931",
+     "kind": "parse",
+     "n": 35129,
+     "second_magic": 0,
+     "seq": 6509183813678041393
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100003b5b",
+     "kind": "parse",
+     "n": 15203,
+     "second_magic": 0,
+     "seq": 6509183813678021467
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000d1b9",
+     "kind": "parse",
+     "n": 53697,
+     "second_magic": 0,
+     "seq": 6509183813678059961
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100008450",
+     "kind": "parse",
+     "n": 33880,
+     "second_magic": 0,
+     "seq": 6509183813678040144
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100001ac1",
+     "kind": "parse",
+     "n": 6857,
+     "second_magic": 0,
+     "seq": 6509183813678013121
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100002110",
+     "kind": "parse",
+     "n": 8472,
+     "second_magic": 0,
+     "seq": 6509183813678014736
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000692e",
+     "kind": "parse",
+     "n": 26934,
+     "second_magic": 0,
+     "seq": 6509183813678033198
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000081b9",
+     "kind": "parse",
+     "n": 33217,
+     "second_magic": 0,
+     "seq": 6509183813678039481
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100007e48",
+     "kind": "parse",
+     "n": 32336,
+     "second_magic": 0,
+     "seq": 6509183813678038600
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100004464",
+     "kind": "parse",
+     "n": 17516,
+     "second_magic": 0,
+     "seq": 6509183813678023780
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000afe2",
+     "kind": "parse",
+     "n": 45034,
+     "second_magic": 0,
+     "seq": 6509183813678051298
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000cebf",
+     "kind": "parse",
+     "n": 52935,
+     "second_magic": 0,
+     "seq": 6509183813678059199
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000d77a",
+     "kind": "parse",
+     "n": 55170,
+     "second_magic": 0,
+     "seq": 6509183813678061434
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000afde",
+     "kind": "parse",
+     "n": 45030,
+     "second_magic": 0,
+     "seq": 6509183813678051294
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000065f2",
+     "kind": "parse",
+     "n": 26106,
+     "second_magic": 0,
+     "seq": 6509183813678032370
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100005565",
+     "kind": "parse",
+     "n": 21869,
+     "second_magic": 0,
+     "seq": 6509183813678028133
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000034f5",
+     "kind": "parse",
+     "n": 13565,
+     "second_magic": 0,
+     "seq": 6509183813678019829
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000aba8",
+     "kind": "parse",
+     "n": 43952,
+     "second_magic": 0,
+     "seq": 6509183813678050216
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000048dd",
+     "kind": "parse",
+     "n": 18661,
+     "second_magic": 0,
+     "seq": 6509183813678024925
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000015d9",
+     "kind": "parse",
+     "n": 5601,
+     "second_magic": 0,
+     "seq": 6509183813678011865
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000028f2",
+     "kind": "parse",
+     "n": 10490,
+     "second_magic": 0,
+     "seq": 6509183813678016754
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000e342",
+     "kind": "parse",
+     "n": 58186,
+     "second_magic": 0,
+     "seq": 6509183813678064450
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a554431000082f9",
+     "kind": "parse",
+     "n": 33537,
+     "second_magic": 0,
+     "seq": 6509183813678039801
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100007325",
+     "kind": "parse",
+     "n": 29485,
+     "second_magic": 0,
+     "seq": 6509183813678035749
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100009553",
+     "kind": "parse",
+     "n": 38235,
+     "second_magic": 0,
+     "seq": 6509183813678044499
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000ca5a",
+     "kind": "parse",
+     "n": 51810,
+     "second_magic": 0,
+     "seq": 6509183813678058074
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a55443100006522",
+     "kind": "parse",
+     "n": 25898,
+     "second_magic": 0,
+     "seq": 6509183813678032162
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000261b",
+     "kind": "parse",
+     "n": 9763,
+     "second_magic": 0,
+     "seq": 6509183813678016027
+    },
+    {
+     "declared": 0,
+     "first8_hex": "5a5544310000c476",
+     "kind": "parse",
+     "n": 50302,
+     "second_magic": 0,
+     "seq": 6509183813678056566
+    }
+   ],
+   "short": 0
+  },
+  "guest_done": "{\"sent\":8960,\"stalled\":true}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 20000,
+  "outcome": {
+   "delivered_once": 8679,
+   "duplicate_extra_copies": 0,
+   "duplicated_seqs": 0,
+   "lost": 11321,
+   "n": 20000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+   "badmagic": 0,
+   "bytes": 0,
+   "long": 0,
+   "long_second_magic": 0,
+   "lt8": 0,
+   "ok": 0,
+   "records": 0,
+   "short": 0
+  },
+  "sink": {
+   "bad": 0,
+   "bad_reasons": {},
+   "bytes": 255201850,
+   "desync_bytes_skipped": 0,
+   "frames_parsed": 8679,
+   "frames_verified_ok": 8679
+  },
+  "size": "mix",
+  "uname": "7.0.0-29-generic",
+  "variant": "stream",
+  "wall_s": 30.469326884
+ },
+ "guest": {
+  "app_sent_ok": 8960,
+  "bound": 59000,
+  "bpf_counters": {
+   "fexit_bytes": 255201850,
+   "fexit_calls": 8678,
+   "guest_encoded": 8960,
+   "redirect_ok": 17638,
+   "strp_bad_frame": 2,
+   "strp_frames": 8678,
+   "strp_parse_calls": 8680,
+   "tx_alloc_stream": 8678,
+   "tx_alloc_stream_bytes": 255201850
+  },
+  "drain_wall_s": 26.849982247,
+  "guest_vsock_buffer_size": 262144,
+  "n": 20000,
+  "role": "guest",
+  "send_wall_s": 24.647091801,
+  "sender_stalled": true,
+  "size": "mix",
+  "skb_send_sock_outcomes_on_vsock_leg": {
+   "ok_full": 8678
+  },
+  "synth": 0,
+  "udp_snmp_delta": {
+   "OutDatagrams": 8960
+  },
+  "uname": "7.0.0-29-generic",
+  "variant": "stream"
+ },
+ "guest_stdout_tail": "GUEST_DONE sent=8960 stalled=true\n"
+}

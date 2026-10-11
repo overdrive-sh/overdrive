@@ -1,0 +1,13 @@
+{"addr":"127.0.0.1:19428","backlog":128,"ev":"listening","mode":"serve"}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":59,"peer":"127.0.0.1:36370","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":64,"peer":"127.0.0.1:36382","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":59,"peer":"127.0.0.1:36392","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":55,"peer":"127.0.0.1:36394","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":56,"peer":"127.0.0.1:36410","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":54,"peer":"127.0.0.1:36412","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":68,"peer":"127.0.0.1:36418","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":78,"peer":"127.0.0.1:36426","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":65,"peer":"127.0.0.1:36428","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":74,"peer":"127.0.0.1:36430","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":55,"peer":"127.0.0.1:36436","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}
+{"down_err":0,"down_sent":0,"end_action":"fin","ev":"conn","local":"127.0.0.1:19428","ms":68,"peer":"127.0.0.1:36450","tag":"","up_bad_at":null,"up_bytes":67108864,"up_end":"eof","up_ok":true}

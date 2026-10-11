@@ -1,0 +1,194 @@
+diff -ruN a/virtio-devices/src/vsock/vhost_kernel.rs b/virtio-devices/src/vsock/vhost_kernel.rs
+--- a/virtio-devices/src/vsock/vhost_kernel.rs	2026-10-05 16:37:54
++++ b/virtio-devices/src/vsock/vhost_kernel.rs	2026-10-09 00:22:33
+@@ -18,7 +18,8 @@
+ //! which a device emits after live migration; this device does not support
+ //! migration, so the queue is drained and left untouched.
+ 
+-use std::os::unix::io::AsRawFd;
++use std::os::unix::fs::OpenOptionsExt;
++use std::os::unix::io::{AsRawFd, FromRawFd};
+ use std::sync::atomic::AtomicBool;
+ use std::sync::{Arc, Barrier};
+ use std::{io, result};
+@@ -30,7 +31,6 @@
+ use seccompiler::SeccompAction;
+ use thiserror::Error;
+ use vhost::vhost_kern::VhostKernBackend;
+-use vhost::vhost_kern::vsock::Vsock as VhostKernVsock;
+ use vhost::vsock::VhostVsock;
+ use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
+ use virtio_queue::QueueT;
+@@ -72,6 +72,8 @@
+ 
+ #[derive(Error, Debug)]
+ pub enum Error {
++    #[error("The claimed vhost-vsock descriptor was already consumed by an earlier device")]
++    ClaimedFdConsumed,
+     #[error("Failed to open /dev/vhost-vsock")]
+     Open(#[source] vhost::Error),
+     #[error("Failed to set vhost-vsock owner")]
+@@ -177,7 +179,7 @@
+     common: VirtioCommon,
+     id: String,
+     cid: u64,
+-    vhost: VhostKernVsock<GuestMemoryAtomic<GuestMemoryMmap>>,
++    vhost: ClaimedVsock,
+     seccomp_action: SeccompAction,
+     exit_evt: EventFd,
+     /// True while the kernel backend is servicing the rings.
+@@ -192,6 +194,7 @@
+     pub fn new(
+         id: String,
+         cid: u32,
++        claimed_fd: Option<i32>,
+         mem: GuestMemoryAtomic<GuestMemoryMmap>,
+         access_platform_enabled: bool,
+         seccomp_action: SeccompAction,
+@@ -206,12 +209,34 @@
+         }
+ 
+         let cid = u64::from(cid);
+-        let vhost = VhostKernVsock::new(mem).map_err(Error::Open)?;
++        let (vhost, claimed) = match claimed_fd {
++            Some(raw) => {
++                static TAKEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++                if TAKEN.swap(true, std::sync::atomic::Ordering::SeqCst) {
++                    return Err(Error::ClaimedFdConsumed);
++                }
++                // SAFETY: the launcher passed ownership of this open
++                // /dev/vhost-vsock descriptor to this process.
++                let file = unsafe { std::fs::File::from_raw_fd(raw) };
++                (ClaimedVsock { fd: file, mem }, true)
++            }
++            None => {
++                let file = std::fs::OpenOptions::new()
++                    .read(true)
++                    .write(true)
++                    .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
++                    .open("/dev/vhost-vsock")
++                    .map_err(|e| Error::Open(vhost::Error::VhostOpen(e)))?;
++                (ClaimedVsock { fd: file, mem }, false)
++            }
++        };
+         vhost.set_owner().map_err(Error::SetOwner)?;
+         let kernel_features = vhost.get_features().map_err(Error::GetFeatures)?;
+-        vhost
+-            .set_guest_cid(cid)
+-            .map_err(|e| Error::SetGuestCid(cid, e))?;
++        if !claimed {
++            vhost
++                .set_guest_cid(cid)
++                .map_err(|e| Error::SetGuestCid(cid, e))?;
++        }
+ 
+         info!("Created vhost-kernel vsock {id} with guest CID {cid}");
+ 
+@@ -547,5 +572,51 @@
+             ),
+             Err(Error::AccessPlatformUnsupported)
+         ));
++    }
++}
++
++/// V-25 spike prototype: a vhost-vsock handle over a file the caller opened
++/// (and possibly already claimed a CID on).
++pub struct ClaimedVsock {
++    fd: std::fs::File,
++    mem: GuestMemoryAtomic<GuestMemoryMmap>,
++}
++
++impl AsRawFd for ClaimedVsock {
++    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
++        self.fd.as_raw_fd()
++    }
++}
++
++impl VhostKernBackend for ClaimedVsock {
++    type AS = GuestMemoryAtomic<GuestMemoryMmap>;
++    fn mem(&self) -> &Self::AS {
++        &self.mem
++    }
++}
++
++impl ClaimedVsock {
++    fn ioctl_val(&self, req: libc::c_ulong, arg: *const libc::c_void) -> vhost::Result<()> {
++        // SAFETY: valid fd, valid pointer to a live local, return value checked.
++        let ret = unsafe { libc::ioctl(self.fd.as_raw_fd(), req as _, arg) };
++        if ret < 0 {
++            Err(vhost::Error::IoctlError(std::io::Error::last_os_error()))
++        } else {
++            Ok(())
++        }
++    }
++}
++
++impl VhostVsock for ClaimedVsock {
++    fn set_guest_cid(&self, cid: u64) -> vhost::Result<()> {
++        self.ioctl_val(0x4008_AF60, &cid as *const u64 as *const libc::c_void)
++    }
++    fn start(&self) -> vhost::Result<()> {
++        let on: libc::c_int = 1;
++        self.ioctl_val(0x4004_AF61, &on as *const _ as *const libc::c_void)
++    }
++    fn stop(&self) -> vhost::Result<()> {
++        let on: libc::c_int = 0;
++        self.ioctl_val(0x4004_AF61, &on as *const _ as *const libc::c_void)
+     }
+ }
+diff -ruN a/vmm/src/config.rs b/vmm/src/config.rs
+--- a/vmm/src/config.rs	2026-10-05 16:37:54
++++ b/vmm/src/config.rs	2026-10-08 23:55:21
+@@ -2627,8 +2627,10 @@
+             .add("socket")
+             .add("cid")
+             .add("backend")
++            .add("fd")
+             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
+         parser.parse(vsock).map_err(Error::ParseVsock)?;
++        let fd: Option<i32> = parser.convert("fd").map_err(Error::ParseVsock)?;
+ 
+         let pci_common = PciDeviceCommonConfig::parse(vsock)?;
+         let backend = parser
+@@ -2649,6 +2651,7 @@
+             cid,
+             socket,
+             backend,
++            fd,
+         })
+     }
+ 
+diff -ruN a/vmm/src/device_manager.rs b/vmm/src/device_manager.rs
+--- a/vmm/src/device_manager.rs	2026-10-05 16:37:54
++++ b/vmm/src/device_manager.rs	2026-10-08 23:55:21
+@@ -3569,6 +3569,7 @@
+                     virtio_devices::VhostKernelVsock::new(
+                         id.clone(),
+                         vsock_cfg.cid,
++                        vsock_cfg.fd,
+                         self.memory_manager.lock().unwrap().guest_memory(),
+                         self.force_access_platform | vsock_cfg.pci_common.iommu,
+                         self.seccomp_action.clone(),
+diff -ruN a/vmm/src/vm_config.rs b/vmm/src/vm_config.rs
+--- a/vmm/src/vm_config.rs	2026-10-05 16:37:54
++++ b/vmm/src/vm_config.rs	2026-10-08 23:55:21
+@@ -893,6 +893,10 @@
+     pub socket: Option<PathBuf>,
+     #[serde(default, skip_serializing_if = "VsockBackend::is_unix")]
+     pub backend: VsockBackend,
++    /// V-25 spike prototype: an already-claimed `/dev/vhost-vsock` file
++    /// descriptor inherited from the launcher (vhost-kernel only).
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub fd: Option<i32>,
+ }
+ 
+ impl ApplyLandlock for VsockConfig {
+@@ -905,7 +909,7 @@
+             landlock.add_rule_with_access(socket, "rw")?;
+         }
+ 
+-        if self.backend == VsockBackend::VhostKernel {
++        if self.backend == VsockBackend::VhostKernel && self.fd.is_none() {
+             landlock.add_rule_with_access(Path::new(VHOST_VSOCK_DEVICE_PATH), "rw")?;
+         }
+ 

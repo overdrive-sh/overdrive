@@ -1,0 +1,10 @@
+{"cport":55162,"ev":"start","flow":1,"role":"guest","t_ns":5001972063570478}
+{"cport":55166,"ev":"start","flow":2,"role":"guest","t_ns":5001972064060305}
+{"bytes_received":5368709177,"dir":0,"ev":"eof","flow":2,"fwd":5368709176,"goal":5368709176,"role":"guest","sent":511100927,"t_ns":5001974441176794}
+{"bytes_received":5368709177,"dir":0,"ev":"eof","flow":1,"fwd":5368709176,"goal":5368709176,"role":"guest","sent":537907110,"t_ns":5001974540804349}
+{"dir":0,"eof_to_done_ns":149488353064,"ev":"complete","flow":1,"fwd":5368709176,"goal":5368709176,"how":"record_fexit","role":"guest","sent":5368709176,"t_ns":5002124029160597}
+{"dir":0,"eof_to_done_ns":150309891030,"ev":"complete","flow":2,"fwd":5368709176,"goal":5368709176,"how":"record_fexit","role":"guest","sent":5368709176,"t_ns":5002124751069818}
+{"dir":1,"ev":"eof","flow":2,"fwd":5368709120,"goal":5368709120,"role":"guest","sent":5368709120,"t_ns":5002157902446768}
+{"dir":1,"eof_to_done_ns":128063,"ev":"complete","flow":2,"fwd":5368709120,"goal":5368709120,"how":"owner_cas","role":"guest","sent":5368709120,"t_ns":5002157902572498}
+{"dir":1,"ev":"eof","flow":1,"fwd":5368709120,"goal":5368709120,"role":"guest","sent":5368709120,"t_ns":5002173616159491}
+{"dir":1,"eof_to_done_ns":60040,"ev":"complete","flow":1,"fwd":5368709120,"goal":5368709120,"how":"owner_cas","role":"guest","sent":5368709120,"t_ns":5002173616218931}

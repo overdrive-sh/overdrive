@@ -1,0 +1,51 @@
+{
+ "tag": "vs-kill-host-0",
+ "seed": 7003,
+ "action": "kill-host-owner",
+ "action_delay_ms": 747,
+ "action_done_at_ms_after_clients_start": 748,
+ "clients_wall_s": 6.1,
+ "trials": 400,
+ "cats": {
+  "pass": 68,
+  "reset": 332
+ },
+ "ends": {
+  "cli:complete": 68,
+  "srv:complete": 110,
+  "cli:reset": 332,
+  "srv:reset": 90,
+  "srv:no_result": 200
+ },
+ "examples": [],
+ "clients_rc": 0,
+ "guest_owner": {
+  "live_at_end": 0,
+  "clean": 68,
+  "aborted": 136,
+  "aborts": {
+   "peer_close_while_open": 136
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 68,
+   "shut_0x3": 137,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 0,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 202,
+   "fire_poke": 0,
+   "fire_fexit": 195,
+   "level_unreadable": 0
+  }
+ },
+ "host_owner": null
+}

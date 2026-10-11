@@ -1,0 +1,219 @@
+{
+ "tag": "n-host-owner-held-noclassify-2",
+ "seed": 10802,
+ "action": "kill-host-owner",
+ "action_delay_ms": 384,
+ "action_done_at_ms_after_clients_start": 384,
+ "clients_wall_s": 5.9,
+ "trials": 800,
+ "cats": {
+  "violation:cli_clean_short_eof": 400,
+  "reset": 400
+ },
+ "examples": [
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    393,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    410,
+    300,
+    true,
+    null,
+    41306
+   ],
+   "srv": [
+    393,
+    65426,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    392,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    410,
+    300,
+    true,
+    null,
+    41300
+   ],
+   "srv": [
+    392,
+    65426,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    394,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    410,
+    300,
+    true,
+    null,
+    41270
+   ],
+   "srv": [
+    394,
+    65426,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    389,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    410,
+    300,
+    true,
+    null,
+    41254
+   ],
+   "srv": [
+    389,
+    65426,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    270,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    417,
+    300,
+    true,
+    null,
+    41220
+   ],
+   "srv": [
+    270,
+    65426,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  },
+  {
+   "why": "violation:cli_clean_short_eof",
+   "row": [
+    267,
+    1048576,
+    1048576,
+    1048576,
+    null,
+    0,
+    true,
+    true,
+    null,
+    417,
+    300,
+    true,
+    null,
+    41216
+   ],
+   "srv": [
+    267,
+    65426,
+    true,
+    false,
+    "ECONNRESET",
+    0,
+    null,
+    false
+   ]
+  }
+ ],
+ "clients_rc": 0,
+ "guest_owner": {
+  "live_at_end": 0,
+  "clean": 5,
+  "aborted": 395,
+  "aborts": {
+   "epollerr": 395
+  },
+  "viol": {},
+  "shut": {
+   "shut_0x2": 0,
+   "shut_0x3": 400,
+   "shut_rst": 0,
+   "shut_other": 0,
+   "rdhup_v_without_record": 0
+  },
+  "ctl_lost": 1,
+  "paired_at_loss": 270,
+  "stuck": [],
+  "bpf": {
+   "fexit_recursion_misses": 0,
+   "fexit_b_recursion_misses": 0,
+   "injected_misses": 0,
+   "poke_runs": 959,
+   "fire_poke": 0,
+   "fire_fexit": 1,
+   "level_unreadable": 0
+  }
+ },
+ "host_owner": null
+}

@@ -1,0 +1,58 @@
+[    0.002995] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=50207c70-0cb0-4586-a457-ac062072021d
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO sysrq-c
+GUEST_ACT sysrq-c
+[    1.426348] sysrq: Trigger a crash
+[    1.427435] Kernel panic - not syncing: sysrq triggered crash
+[    1.429147] CPU: 0 UID: 0 PID: 81 Comm: guest-run.sh Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.431964] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.433871] Call Trace:
+[    1.434663]  <TASK>
+[    1.435363]  show_stack+0x49/0x60
+[    1.436401]  dump_stack_lvl+0x5f/0x90
+[    1.437535]  dump_stack+0x10/0x18
+[    1.438567]  vpanic+0x262/0x4b0
+[    1.439553]  panic+0x67/0x70
+[    1.440467]  sysrq_handle_crash+0x1a/0x20
+[    1.441687]  __handle_sysrq.cold+0x23/0x167
+[    1.442955]  write_sysrq_trigger+0x62/0xa0
+[    1.444199]  proc_reg_write+0x6d/0xd0
+[    1.445360]  vfs_write+0xce/0x490
+[    1.446395]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.448099]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.449540]  ? do_syscall_64+0x140/0x5a0
+[    1.450742]  ksys_write+0x71/0xf0
+[    1.451775]  __x64_sys_write+0x19/0x30
+[    1.452923]  x64_sys_call+0x22f/0x2390
+[    1.454077]  do_syscall_64+0x105/0x5a0
+[    1.455224]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.456670]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.458392]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.459823]  ? do_syscall_64+0x140/0x5a0
+[    1.461017]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.462472]  ? do_syscall_64+0x140/0x5a0
+[    1.463531]  ? irqentry_exit+0x97/0x6f0
+[    1.464558]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.465806]  ? exc_page_fault+0x94/0x1e0
+[    1.466859]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.468169] RIP: 0033:0x4ccde6
+[    1.469022] Code: 47 ba 04 00 00 00 48 c7 c0 e8 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[    1.473672] RSP: 002b:00007ffe271b1180 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[    1.475618] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00000000004ccde6
+[    1.477449] RDX: 0000000000000002 RSI: 0000000008391900 RDI: 0000000000000001
+[    1.478550] RBP: 00007ffe271b1190 R08: 0000000000000000 R09: 0000000000000000
+[    1.479586] R10: 0000000000000000 R11: 0000000000000202 R12: 0000000008391900
+[    1.480628] R13: 0000000000000002 R14: 0000000000000000 R15: 0000000008391902
+[    1.481672]  </TASK>
+[    1.482124] Kernel Offset: 0x20200000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.483664] Rebooting in 1 seconds..
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====
+[    0.003038] KHO: Failed to reserve nid 0 scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=3fd51009-42fc-4408-b4ab-ab8451ec52c3
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT

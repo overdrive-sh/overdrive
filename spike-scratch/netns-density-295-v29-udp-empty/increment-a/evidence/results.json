@@ -1,0 +1,669 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [],
+    "modules_diff": [],
+    "modules_restored": true,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": true
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=125\n"
+  },
+  "phases": {
+    "smoke_empties": {
+      "guest_counters": {
+        "encoded": 50,
+        "release": 1,
+        "strp_frames": 50,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 16,
+        "empty_sent": 50,
+        "notice_lat_us_max": 728,
+        "notice_lat_us_sum": 31254,
+        "notice_ok": 50,
+        "notices_read": 50,
+        "request_bytes_read": 64,
+        "udp_associations": 2,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 50
+      },
+      "peer": {
+        "per_size": {},
+        "rx_empty": 50,
+        "rx_headerless_X": 0,
+        "rx_total": 50,
+        "sent_data": 0,
+        "sent_empty": 50,
+        "split_examples": {},
+        "split_seqs": 0
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.001636783,
+        "sent_data": 0,
+        "sent_empty": 50
+      },
+      "tag": "smoke_empties",
+      "wire": {
+        "capture": {
+          "datagrams": 50,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 50
+        },
+        "data_on_wire": 0,
+        "empty_on_wire": 50,
+        "headerless_on_wire": 0
+      }
+    },
+    "sweep_datanly_gap0": {
+      "guest_counters": {
+        "bad_frame": 2,
+        "encoded": 2001,
+        "noroute": 1,
+        "redirect_fail": 1,
+        "release": 1,
+        "strp_frames": 1706,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 16,
+        "redirect_ok": 284,
+        "request_bytes_read": 64,
+        "sent_calls": 284,
+        "udp_associations": 2,
+        "udp_teardowns": 1,
+        "verdict_queued": 284,
+        "vstrip": 284
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm",
+        "gap_us": 0,
+        "k": 0,
+        "lead": 0,
+        "n": 2000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 283,
+        "data_dup": 0,
+        "data_missing": 1717,
+        "data_missing_examples": [
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54
+        ],
+        "data_out_of_order": 0,
+        "data_rx": 283,
+        "data_sent": 2000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": null,
+        "empties_mapped": 0,
+        "empty_early": 0,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 0,
+        "empty_sent": 0,
+        "late_dist_max": 0,
+        "late_rate": null,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.015706738,
+        "sent_data": 2000,
+        "sent_empty": 0
+      },
+      "tag": "sweep_datanly_gap0",
+      "wire": {
+        "capture": {
+          "datagrams": 283,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 284
+        },
+        "data_dup": 0,
+        "data_missing": 1717,
+        "data_missing_examples": [
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54
+        ],
+        "data_out_of_order": 0,
+        "data_rx": 283,
+        "data_sent": 2000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": null,
+        "empties_mapped": 0,
+        "empty_early": 0,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 0,
+        "empty_sent": 0,
+        "late_dist_max": 0,
+        "late_rate": null,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "284 packets captured",
+          "284 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 0
+      }
+    },
+    "sweep_k1_gap0": {
+      "guest_counters": {
+        "bad_frame": 2,
+        "encoded": 4001,
+        "redirect_fail": 70,
+        "release": 1,
+        "strp_frames": 2257,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "bad_frame": 186,
+        "ctl_bytes_written": 16,
+        "empty_sent": 254,
+        "notice_lat_us_sum": 11044,
+        "notice_ok": 254,
+        "notices_read": 254,
+        "redirect_ok": 256,
+        "request_bytes_read": 64,
+        "sent_calls": 256,
+        "udp_associations": 2,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 254,
+        "verdict_queued": 256,
+        "vstrip": 256
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm",
+        "gap_us": 0,
+        "k": 1,
+        "lead": 0,
+        "n": 2000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 255,
+        "data_dup": 0,
+        "data_missing": 1745,
+        "data_missing_examples": [
+          253,
+          254,
+          255,
+          256,
+          257,
+          258,
+          259,
+          260
+        ],
+        "data_out_of_order": 0,
+        "data_rx": 255,
+        "data_sent": 2000,
+        "early_dist_max": 32,
+        "early_dist_mean": 11.1,
+        "early_rate": 0.192913,
+        "empties_mapped": 254,
+        "empty_early": 49,
+        "empty_late": 1,
+        "empty_missing": 1746,
+        "empty_rx": 254,
+        "empty_sent": 2000,
+        "late_dist_max": 1,
+        "late_rate": 0.003937,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.04858586,
+        "sent_data": 2000,
+        "sent_empty": 2000
+      },
+      "tag": "sweep_k1_gap0",
+      "wire": {
+        "capture": {
+          "datagrams": 509,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 510
+        },
+        "data_dup": 0,
+        "data_missing": 1745,
+        "data_missing_examples": [
+          253,
+          254,
+          255,
+          256,
+          257,
+          258,
+          259,
+          260
+        ],
+        "data_out_of_order": 0,
+        "data_rx": 255,
+        "data_sent": 2000,
+        "early_dist_max": 32,
+        "early_dist_mean": 11.1,
+        "early_rate": 0.192913,
+        "empties_mapped": 254,
+        "empty_early": 49,
+        "empty_late": 1,
+        "empty_missing": 1746,
+        "empty_rx": 254,
+        "empty_sent": 2000,
+        "late_dist_max": 1,
+        "late_rate": 0.003937,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "510 packets captured",
+          "510 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 254
+      }
+    },
+    "sweep_k1_gap100": {
+      "guest_counters": {
+        "encoded": 4001,
+        "release": 1,
+        "strp_frames": 4001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 2000,
+        "notice_lat_us_sum": 67126,
+        "notice_ok": 2000,
+        "notices_read": 2000,
+        "redirect_ok": 2001,
+        "request_bytes_read": 32,
+        "sent_calls": 2001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 2000,
+        "verdict_queued": 2001,
+        "vstrip": 2001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm",
+        "gap_us": 100,
+        "k": 1,
+        "lead": 0,
+        "n": 2000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 2000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 2000,
+        "data_sent": 2000,
+        "early_dist_max": 32,
+        "early_dist_mean": 7.02,
+        "early_rate": 0.453,
+        "empties_mapped": 2000,
+        "empty_early": 906,
+        "empty_late": 9,
+        "empty_missing": 0,
+        "empty_rx": 2000,
+        "empty_sent": 2000,
+        "late_dist_max": 1,
+        "late_rate": 0.0045,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.199966643,
+        "sent_data": 2000,
+        "sent_empty": 2000
+      },
+      "tag": "sweep_k1_gap100",
+      "wire": {
+        "capture": {
+          "datagrams": 4000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 4001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 2000,
+        "data_sent": 2000,
+        "early_dist_max": 32,
+        "early_dist_mean": 6.93,
+        "early_rate": 0.464,
+        "empties_mapped": 2000,
+        "empty_early": 928,
+        "empty_late": 2,
+        "empty_missing": 0,
+        "empty_rx": 2000,
+        "empty_sent": 2000,
+        "late_dist_max": 1,
+        "late_rate": 0.001,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "4001 packets captured",
+          "4001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 2000
+      }
+    },
+    "sweep_k1_gap20": {
+      "guest_counters": {
+        "bad_frame": 2,
+        "encoded": 4001,
+        "redirect_fail": 1,
+        "release": 1,
+        "strp_frames": 2403,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "bad_frame": 186,
+        "ctl_bytes_written": 16,
+        "empty_sent": 375,
+        "noroute": 3,
+        "notice_lat_us_sum": 11337,
+        "notice_ok": 377,
+        "notice_stale_flow": 2,
+        "notices_read": 377,
+        "redirect_ok": 379,
+        "request_bytes_read": 64,
+        "sent_calls": 379,
+        "udp_associations": 2,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 377,
+        "verdict_queued": 379,
+        "vstrip": 379
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm",
+        "gap_us": 20,
+        "k": 1,
+        "lead": 0,
+        "n": 2000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 378,
+        "data_dup": 0,
+        "data_missing": 1622,
+        "data_missing_examples": [
+          376,
+          377,
+          378,
+          379,
+          380,
+          381,
+          382,
+          383
+        ],
+        "data_out_of_order": 0,
+        "data_rx": 378,
+        "data_sent": 2000,
+        "early_dist_max": 32,
+        "early_dist_mean": 14.93,
+        "early_rate": 0.474667,
+        "empties_mapped": 375,
+        "empty_early": 178,
+        "empty_late": 7,
+        "empty_missing": 1625,
+        "empty_rx": 375,
+        "empty_sent": 2000,
+        "late_dist_max": 1,
+        "late_rate": 0.018667,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.049488088,
+        "sent_data": 2000,
+        "sent_empty": 2000
+      },
+      "tag": "sweep_k1_gap20",
+      "wire": {
+        "capture": {
+          "datagrams": 753,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 754
+        },
+        "data_dup": 0,
+        "data_missing": 1622,
+        "data_missing_examples": [
+          376,
+          377,
+          378,
+          379,
+          380,
+          381,
+          382,
+          383
+        ],
+        "data_out_of_order": 0,
+        "data_rx": 378,
+        "data_sent": 2000,
+        "early_dist_max": 32,
+        "early_dist_mean": 14.85,
+        "early_rate": 0.477333,
+        "empties_mapped": 375,
+        "empty_early": 179,
+        "empty_late": 1,
+        "empty_missing": 1625,
+        "empty_rx": 375,
+        "empty_sent": 2000,
+        "late_dist_max": 1,
+        "late_rate": 0.002667,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "754 packets captured",
+          "754 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 375
+      }
+    },
+    "sweep_k1_gap500": {
+      "guest_counters": {
+        "encoded": 4001,
+        "release": 1,
+        "strp_frames": 4001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 2000,
+        "notice_lat_us_sum": 47254,
+        "notice_ok": 2000,
+        "notices_read": 2000,
+        "redirect_ok": 2001,
+        "request_bytes_read": 32,
+        "sent_calls": 2001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 2000,
+        "verdict_queued": 2001,
+        "vstrip": 2001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 2000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 2000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 2000,
+        "data_sent": 2000,
+        "early_dist_max": 5,
+        "early_dist_mean": 1.1,
+        "early_rate": 0.871,
+        "empties_mapped": 2000,
+        "empty_early": 1742,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 2000,
+        "empty_sent": 2000,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.999566994,
+        "sent_data": 2000,
+        "sent_empty": 2000
+      },
+      "tag": "sweep_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 4000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 4001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 2000,
+        "data_sent": 2000,
+        "early_dist_max": 5,
+        "early_dist_mean": 1.1,
+        "early_rate": 0.8725,
+        "empties_mapped": 2000,
+        "empty_early": 1745,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 2000,
+        "empty_sent": 2000,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "4001 packets captured",
+          "4001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 2000
+      }
+    }
+  },
+  "preflight": {
+    "blob_sha256": "6ad39e4276d6052d5122a85f6a0c2d91eb9c1b6e18d5c778f39e9e604732bb57",
+    "cid": 3329,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ]
+  },
+  "programs": {
+    "loaded": "\"programs\":[{\"id\":64298,\"name\":\"verdict\",\"tag\":\"10eb4482b2049ca7\",\"verified_insns\":1185},{\"id\":64299,\"name\":\"strp_parse\",\"tag\":\"2abd9169f6e90deb\",\"verified_insns\":62},{\"id\":64300,\"name\":\"strp_verdict\",\"tag\":\"43bb1ec76775fce6\",\"verified_insns\":1196},{\"id\":64301,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"3a11f30c5a8ab4b7\",\"verified_insns\":109},{\"id\":64302,\"name\":\"sockops(/sys/fs/cgroup/gvc-v29-3990267)\",\"tag\":\"76815629f15442aa\",\"verified_insns\":342}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"verdict-notify\"}\n",
+    "tcx_on_host": "xdp:\n\ntc:\n\nflow_dissector:\n\nnetfilter:\n\n"
+  },
+  "substrate": {
+    "guest_uname": "7.0.0-29-generic",
+    "offhost": "63091: v29-h@if63090: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 9a:3b:db:6f:aa:ff brd ff:ff:ff:ff:ff:ff link-netns v29-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv29-p0@if63091   UP             10.250.229.2/24 fe80::3c41:71ff:fef3:e615/64 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ngeneric-receive-offload: off\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nState  Recv-Q Send-Q Local Address:Port Peer Address:Port\nUNCONN 0      0       10.250.229.2:7229      0.0.0.0:*   \n"
+  }
+}

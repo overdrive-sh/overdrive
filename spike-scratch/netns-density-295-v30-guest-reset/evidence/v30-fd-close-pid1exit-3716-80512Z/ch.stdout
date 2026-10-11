@@ -1,0 +1,6 @@
+Error: Cloud Hypervisor exited with the following chain of errors:
+  0: VMM thread exited with error
+  1: Error rebooting VM
+  2: Error from device manager
+  3: Cannot create vhost-kernel virtio-vsock device
+  4: The claimed vhost-vsock descriptor was already consumed by an earlier device

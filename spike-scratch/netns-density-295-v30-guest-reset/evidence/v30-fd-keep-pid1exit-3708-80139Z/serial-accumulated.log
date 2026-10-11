@@ -1,0 +1,41 @@
+[    0.003011] KHO: Failed to reserve lowmem scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=b73758a8-df27-44ff-983a-fd6420e0173c
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO pid1exit
+GUEST_ACT pid1exit
+GUEST_PID1_EXITING
+[    1.452275] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+[    1.454748] CPU: 0 UID: 0 PID: 1 Comm: init Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.457618] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.459714] Call Trace:
+[    1.460588]  <TASK>
+[    1.461355]  show_stack+0x49/0x60
+[    1.462497]  dump_stack_lvl+0x5f/0x90
+[    1.463740]  dump_stack+0x10/0x18
+[    1.464889]  vpanic+0x262/0x4b0
+[    1.465976]  panic+0x67/0x70
+[    1.466931]  ? acct_update_integrals+0x5e/0xa0
+[    1.468271]  do_exit.cold+0x15/0x15
+[    1.469350]  do_group_exit+0x2d/0xb0
+[    1.470451]  __x64_sys_exit_group+0x18/0x20
+[    1.471712]  x64_sys_call+0x14a0/0x2390
+[    1.472899]  do_syscall_64+0x105/0x5a0
+[    1.474050]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.475479]  ? exc_page_fault+0x94/0x1e0
+[    1.476672]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.478127]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.479624] RIP: 0033:0x4df928
+[    1.480579] Code: ff ff ff 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 f3 0f 1e fa 48 c7 c6 e8 ff ff ff eb 04 0f 1f 00 f4 b8 e7 00 00 00 0f 05 <48> 3d 00 f0 ff ff 76 f0 f7 d8 64 89 06 eb e9 66 0f 1f 84 00 00 00
+[    1.485984] RSP: 002b:00007ffc93ff0fc8 EFLAGS: 00000202 ORIG_RAX: 00000000000000e7
+[    1.488201] RAX: ffffffffffffffda RBX: 00007ffc93ff1f04 RCX: 00000000004df928
+[    1.490111] RDX: 000000002a5439f0 RSI: ffffffffffffffe8 RDI: 0000000000000000
+[    1.491750] RBP: 00007ffc93ff10c0 R08: 0000000000000000 R09: 00007ffc93ff11f0
+[    1.493407] R10: 0000000000000000 R11: 0000000000000202 R12: 0000000000000004
+[    1.495060] R13: 00007ffc93ff13e0 R14: 0000000000000002 R15: 0000000000000000
+[    1.496710]  </TASK>
+[    1.497422] Kernel Offset: 0x15a00000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.499879] Rebooting in 1 seconds..
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

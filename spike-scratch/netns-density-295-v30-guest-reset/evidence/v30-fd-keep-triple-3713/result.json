@@ -1,0 +1,197 @@
+{
+ "name": "v30-fd-keep-triple-3713",
+ "mode": "fd-keep",
+ "case": "triple",
+ "cid": 3713,
+ "cmdline": "console=ttyS0 panic=1 loglevel=4 reboot=t",
+ "vsock_arg": "cid=3713,backend=vhost-kernel,fd=4",
+ "ch_pid": 3977643,
+ "before": {
+  "incarnation_1": "c33e4deb-2083-4939-804d-a8f730027501",
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 10
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802512 3713:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3713:1153907078"
+  ],
+  "ch_vhost_fds": {
+   "4": "/dev/vhost-vsock"
+  },
+  "claim_attempt_from_host_probe": "EADDRINUSE"
+ },
+ "after": {
+  "held": [
+   {
+    "name": "g2h#1",
+    "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "send_probe_on_open_conns": {
+   "g2h#1": "send ok",
+   "h2g#1": "send ok"
+  },
+  "ss_vsock": [
+   "v_str ESTAB  0      0      *:1367802512 3713:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3713:1153907078"
+  ],
+  "ch_alive": false,
+  "ch_rc": 1,
+  "ch_vhost_fds": null,
+  "claim_cid_while_launcher_holds": "EADDRINUSE",
+  "fd_keep_flows_before_launcher_closes": [
+   {
+    "name": "g2h#1",
+    "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+    "state": "open",
+    "t_end_s": null,
+    "detail": null,
+    "pings_rx": 0
+   }
+  ],
+  "fd_keep_ss_before_launcher_closes": [
+   "v_str ESTAB  0      0      *:1367802512 3713:5000      ",
+   "v_str LISTEN 0      0      *:6000          *:*         ",
+   "v_str ESTAB  0      0      2:6000       3713:1153907078"
+  ],
+  "launcher_closed_at_s": 7.113,
+  "fd_keep_flows_after_launcher_closes": [
+   {
+    "name": "g2h#1",
+    "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+    "state": "error",
+    "t_end_s": 7.619,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 11
+   },
+   {
+    "name": "h2g#1",
+    "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+    "state": "error",
+    "t_end_s": 7.619,
+    "detail": "recv: ECONNRESET",
+    "pings_rx": 0
+   }
+  ],
+  "claim_cid_after_launcher_close": "OK"
+ },
+ "ch_exit_t_s": 0.084,
+ "ch_rc": 1,
+ "second_incarnation_first_hello_s": null,
+ "incarnations_seen": [
+  "c33e4deb-2083-4939-804d-a8f730027501"
+ ],
+ "connect_attempts": [],
+ "supervisor_kill_at_s": null,
+ "ch_events": [
+  {
+   "event": "booting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 3134620
+   },
+   "host_t_s": -1.5738
+  },
+  {
+   "event": "booted",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 13370411
+   },
+   "host_t_s": -1.5738
+  },
+  {
+   "event": "activated",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 0,
+    "nanos": 527603979
+   },
+   "host_t_s": -1.0628
+  },
+  {
+   "event": "reset",
+   "source": "virtio-device",
+   "ch_ts": {
+    "secs": 1,
+    "nanos": 649517441
+   },
+   "host_t_s": 0.0431
+  },
+  {
+   "event": "rebooting",
+   "source": "vm",
+   "ch_ts": {
+    "secs": 1,
+    "nanos": 659566551
+   },
+   "host_t_s": 0.0431
+  }
+ ],
+ "timeline": [
+  {
+   "t_s": 0.5622,
+   "wall": 1791705070.7479157,
+   "ev": "host_accepted_guest_connection",
+   "incarnation": "c33e4deb-2083-4939-804d-a8f730027501",
+   "hello": "HELLO c33e4deb-2083-4939-804d-a8f730027501"
+  },
+  {
+   "t_s": 0.0005,
+   "wall": 1791705070.799407,
+   "ev": "host_connected_to_guest",
+   "greeting": "INC c33e4deb-2083-4939-804d-a8f730027501"
+  },
+  {
+   "t_s": 0.0,
+   "wall": 1791705071.8116114,
+   "ev": "GO",
+   "case": "triple"
+  },
+  {
+   "t_s": 0.0863,
+   "wall": 1791705071.897908,
+   "ev": "ch_exited",
+   "rc": 1
+  }
+ ]
+}

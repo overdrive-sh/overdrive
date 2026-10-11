@@ -1,0 +1,10 @@
+[    0.003008] KHO: Failed to reserve nid 0 scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4
+[   0.000] GUEST_BOOT boot_id=cf4fc14c-7872-4fe1-9873-a6e25b22a93d
+GUEST_LISTEN_READY
+[   0.003] GUEST_HELLO_SENT
+GUEST_GO sysrq-b
+GUEST_ACT sysrq-b
+[    1.431341] sysrq: Resetting
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

@@ -1,0 +1,249 @@
+{
+ "substrate": {
+  "host_uname": "7.0.0-29-generic",
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "S-H1-fin-then-reply-vsock": {
+  "expect": "all clean",
+  "client_bad": 192,
+  "app_bad": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.5,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-H3-simultaneous-vsock": {
+  "expect": "all clean",
+  "client_bad": 0,
+  "app_bad": 192,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.5,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-H2-app-fin-first-vsock": {
+  "expect": "all clean",
+  "client_bad": 0,
+  "app_bad": 192,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.5,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-H4-small-vsock": {
+  "expect": "all clean",
+  "client_bad": 480,
+  "app_bad": 0,
+  "flows": 480,
+  "app_conns_logged": 480,
+  "wall_s": 1.9,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-A1-client-rst-vsock": {
+  "expect": "app sees reset, never clean EOF",
+  "app_up_end": {
+   "err:ECONNRESET": 192
+  },
+  "silent_truncation": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.5,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-A2-app-rst-vsock": {
+  "expect": "client sees reset, never clean EOF short of M",
+  "client_down_end": {
+   "reset": 192
+  },
+  "silent_truncation": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.5,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-A2b-app-rst-idle-vsock": {
+  "expect": "client sees reset, never clean EOF short of M",
+  "client_down_end": {
+   "reset": 192
+  },
+  "silent_truncation": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 3.7,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 12,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 12,
+  "tp_none_records": 0
+ },
+ "S-A3-app-close-unread-vsock": {
+  "expect": "same distribution as tcp baseline",
+  "outcomes": {
+   "up_err=0 down_end=eof recv=1000": 135,
+   "up_err=32 down_end=eof recv=1000": 54,
+   "up_err=104 down_end=reset recv=1000": 2,
+   "up_err=0 down_end=err:32 recv=1000": 1
+  },
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.5,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-H1-fin-then-reply-tcp": {
+  "expect": "all clean",
+  "client_bad": 0,
+  "app_bad": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.3,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-H3-simultaneous-tcp": {
+  "expect": "all clean",
+  "client_bad": 0,
+  "app_bad": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.3,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-H2-app-fin-first-tcp": {
+  "expect": "all clean",
+  "client_bad": 0,
+  "app_bad": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.3,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-H4-small-tcp": {
+  "expect": "all clean",
+  "client_bad": 0,
+  "app_bad": 0,
+  "flows": 480,
+  "app_conns_logged": 480,
+  "wall_s": 1.6,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-A1-client-rst-tcp": {
+  "expect": "app sees reset, never clean EOF",
+  "app_up_end": {
+   "err:ECONNRESET": 192
+  },
+  "silent_truncation": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.3,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-A2-app-rst-tcp": {
+  "expect": "client sees reset, never clean EOF short of M",
+  "client_down_end": {
+   "reset": 192
+  },
+  "silent_truncation": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.3,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-A2b-app-rst-idle-tcp": {
+  "expect": "client sees reset, never clean EOF short of M",
+  "client_down_end": {
+   "reset": 192
+  },
+  "silent_truncation": 0,
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 2.3,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ },
+ "S-A3-app-close-unread-tcp": {
+  "expect": "same distribution as tcp baseline",
+  "outcomes": {
+   "up_err=32 down_end=eof recv=1000": 167,
+   "up_err=0 down_end=eof recv=1000": 23,
+   "up_err=0 down_end=err:32 recv=1000": 2
+  },
+  "flows": 192,
+  "app_conns_logged": 192,
+  "wall_s": 1.3,
+  "hang_clients": 0,
+  "setup_errs": 0,
+  "relay_not_paired": 0,
+  "gagent_bind_fail": 0,
+  "gagent_not_paired": 0,
+  "tp_none_records": 0
+ }
+}

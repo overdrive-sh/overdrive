@@ -1,0 +1,64 @@
+[09:44:46] === v32 vm stage matrix ['cells/C1.json']
+[09:44:46] === preflight (fail closed)
+[09:44:46] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[09:44:46] $ modprobe vhost_vsock; modprobe vsock_loopback; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[09:44:46]     vsock_diag             12288  0
+[09:44:46]     vhost_vsock            28672  0
+[09:44:46]     vhost                  69632  1 vhost_vsock
+[09:44:46]     vhost_iotlb            16384  1 vhost
+[09:44:46]     vsock_loopback         12288  0
+[09:44:46]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[09:44:46]     vmw_vsock_vmci_transport    53248  0
+[09:44:46]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[09:44:46]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[09:44:46] === guest image
+[09:44:47] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "625bb557cea7", "v32probe": "69ecc32d5a76", "bpf_obj": "ec1ae5b05414", "cloud_hypervisor": "eadddf1bbcdc"}
+[09:44:47] launch VM: /tmp/v32-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v32-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v32-work/out/vm-matrix-20261011T094446Z/serial.log --console off --vsock cid=3232,backend=vhost-kernel --log-file /tmp/v32-work/out/vm-matrix-20261011T094446Z/ch.log -v
+[09:44:48] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[09:44:48] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+
+/sys/kernel/tracing/events/vsock/virtio_transport_alloc_pkt:
+44985	59980	89970
+4194304
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[09:44:48] --- cell C-seq-64-hb64k: {'label': 'C-seq-64-hb64k', 'variant': 'seq', 'size': 64, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[09:44:55] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[09:44:55] --- cell C-seq-1024-hb64k: {'label': 'C-seq-1024-hb64k', 'variant': 'seq', 'size': 1024, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[09:45:06] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[09:45:06] --- cell C-seq-4096-hb64k: {'label': 'C-seq-4096-hb64k', 'variant': 'seq', 'size': 4096, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[09:45:26] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[09:45:26] --- cell C-seq-16384-hb64k: {'label': 'C-seq-16384-hb64k', 'variant': 'seq', 'size': 16384, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[09:46:38] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[09:46:38] --- cell C-seq-mixs-hb64k: {'label': 'C-seq-mixs-hb64k', 'variant': 'seq', 'size': 'mixs', 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[09:46:48] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[09:46:48] --- cell C-stream-64-hb64k: {'label': 'C-stream-64-hb64k', 'variant': 'stream', 'size': 64, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[09:46:56] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[09:46:56] --- cell C-stream-1024-hb64k: {'label': 'C-stream-1024-hb64k', 'variant': 'stream', 'size': 1024, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[09:47:06] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[09:47:06] --- cell C-stream-4096-hb64k: {'label': 'C-stream-4096-hb64k', 'variant': 'stream', 'size': 4096, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}
+[09:47:27] guest rc=0 GUEST_DONE sent=100000 stalled=false
+
+[09:47:27] --- cell C-stream-16384-hb64k: {'label': 'C-stream-16384-hb64k', 'variant': 'stream', 'size': 16384, 'n': 100000, 'hostbuf': 65536, 'nodelay': 1}

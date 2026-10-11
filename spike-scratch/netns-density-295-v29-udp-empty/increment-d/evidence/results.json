@@ -1,0 +1,4277 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      17,
+      17
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [],
+    "modules_diff": [],
+    "modules_restored": true,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": true
+  },
+  "h4": {
+    "h4_ring4k_comp": {
+      "host_counters_total": {
+        "ctl_bytes_written": 8,
+        "empty_compensated": 898,
+        "empty_sent": 102,
+        "notice_lat_us_max": 3798967,
+        "notice_lat_us_sum": 386676273,
+        "notice_lost": 898,
+        "notice_lost_seen": 898,
+        "notice_ok": 102,
+        "notice_paused_ticks": 1694634,
+        "notices_read": 102,
+        "redirect_ok": 1,
+        "request_bytes_read": 32,
+        "sent_calls": 1,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 1000,
+        "verdict_queued": 1,
+        "vstrip": 1
+      },
+      "host_counters_while_paused": {
+        "ctl_bytes_written": 8,
+        "notice_lost": 898,
+        "notice_ok": 102,
+        "notice_paused_ticks": 1358332,
+        "redirect_ok": 1,
+        "request_bytes_read": 32,
+        "sent_calls": 1,
+        "udp_associations": 1,
+        "verdict_empty_seen": 1000,
+        "verdict_queued": 1,
+        "vstrip": 1
+      },
+      "invariants": {
+        "all_empties_on_wire_or_counted_lost": true,
+        "owner_lost_seen_eq_kernel_lost": true,
+        "peer_rx_eq_ok_plus_compensated": true,
+        "seen_eq_ok_plus_lost": true
+      },
+      "peer_empty_rx_final": 1000,
+      "peer_empty_rx_while_paused": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.167082243,
+        "sent_data": 0,
+        "sent_empty": 1000
+      },
+      "sent_empty": 1000
+    },
+    "h4_ring4k_nocomp": {
+      "host_counters_total": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 102,
+        "notice_lat_us_max": 3797835,
+        "notice_lat_us_sum": 386420131,
+        "notice_lost": 898,
+        "notice_lost_seen": 898,
+        "notice_ok": 102,
+        "notice_paused_ticks": 1692984,
+        "notices_read": 102,
+        "redirect_ok": 1,
+        "request_bytes_read": 32,
+        "sent_calls": 1,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 1000,
+        "verdict_queued": 1,
+        "vstrip": 1
+      },
+      "host_counters_while_paused": {
+        "ctl_bytes_written": 8,
+        "notice_lost": 898,
+        "notice_ok": 102,
+        "notice_paused_ticks": 1361927,
+        "redirect_ok": 1,
+        "request_bytes_read": 32,
+        "sent_calls": 1,
+        "udp_associations": 1,
+        "verdict_empty_seen": 1000,
+        "verdict_queued": 1,
+        "vstrip": 1
+      },
+      "invariants": {
+        "all_empties_on_wire_or_counted_lost": true,
+        "owner_lost_seen_eq_kernel_lost": true,
+        "peer_rx_eq_ok_plus_compensated": true,
+        "seen_eq_ok_plus_lost": true
+      },
+      "peer_empty_rx_final": 102,
+      "peer_empty_rx_while_paused": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.173490668,
+        "sent_data": 0,
+        "sent_empty": 1000
+      },
+      "sent_empty": 1000
+    },
+    "h4_ring64k_paused_fits": {
+      "host_counters_total": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 1000,
+        "notice_lat_us_max": 3797897,
+        "notice_lat_us_sum": 3716442512,
+        "notice_ok": 1000,
+        "notice_paused_ticks": 1626264,
+        "notices_read": 1000,
+        "redirect_ok": 1,
+        "request_bytes_read": 32,
+        "sent_calls": 1,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 1000,
+        "verdict_queued": 1,
+        "vstrip": 1
+      },
+      "host_counters_while_paused": {
+        "ctl_bytes_written": 8,
+        "notice_ok": 1000,
+        "notice_paused_ticks": 1276800,
+        "redirect_ok": 1,
+        "request_bytes_read": 32,
+        "sent_calls": 1,
+        "udp_associations": 1,
+        "verdict_empty_seen": 1000,
+        "verdict_queued": 1,
+        "vstrip": 1
+      },
+      "invariants": {
+        "all_empties_on_wire_or_counted_lost": true,
+        "owner_lost_seen_eq_kernel_lost": true,
+        "peer_rx_eq_ok_plus_compensated": true,
+        "seen_eq_ok_plus_lost": true
+      },
+      "peer_empty_rx_final": 1000,
+      "peer_empty_rx_while_paused": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.171096484,
+        "sent_data": 0,
+        "sent_empty": 1000
+      },
+      "sent_empty": 1000
+    }
+  },
+  "modes": {
+    "--ack oob --intake-mode park --arm yes --flush yes --udp park --declare 7300,7301,7302": "OWNER_READY role=guest pid=478\n"
+  },
+  "phases": {
+    "h1_after_empties_k1_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 114727,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 14,
+        "early_dist_mean": 2.34,
+        "early_rate": 0.51425,
+        "empties_mapped": 4000,
+        "empty_early": 2057,
+        "empty_late": 21,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 6,
+        "late_rate": 0.00525,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799857458,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h1_after_empties_k1_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 14,
+        "early_dist_mean": 2.34,
+        "early_rate": 0.515,
+        "empties_mapped": 4000,
+        "empty_early": 2060,
+        "empty_late": 21,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 6,
+        "late_rate": 0.00525,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h1_empties_only_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 3000,
+        "release": 1,
+        "strp_frames": 3000,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 3000,
+        "notice_lat_us_max": 783,
+        "notice_lat_us_sum": 84823,
+        "notice_ok": 3000,
+        "notices_read": 3000,
+        "request_bytes_read": 32,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 3000
+      },
+      "peer": {
+        "per_size": {},
+        "rx_empty": 3000,
+        "rx_headerless_X": 0,
+        "rx_total": 3000,
+        "sent_data": 0,
+        "sent_empty": 3000,
+        "split_examples": {},
+        "split_seqs": 0,
+        "tiny_equal": true,
+        "tiny_rx": 0,
+        "tiny_sent": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 3000
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.820045741,
+        "sent_data": 0,
+        "sent_empty": 3000
+      },
+      "tag": "h1_empties_only_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 3000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 3000
+        },
+        "data_on_wire": 0,
+        "empty_on_wire": 3000,
+        "headerless_on_wire": 0
+      }
+    },
+    "h1_mixed_sizes": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 800,
+        "release": 1,
+        "strp_frames": 800,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 440,
+        "notice_lat_us_max": 928,
+        "notice_lat_us_sum": 33433,
+        "notice_ok": 440,
+        "notices_read": 440,
+        "redirect_ok": 360,
+        "request_bytes_read": 32,
+        "sent_calls": 360,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 440,
+        "verdict_queued": 360,
+        "vstrip": 360
+      },
+      "peer": {
+        "per_size": {
+          "8": {
+            "dup": 0,
+            "exact_single_datagram": 40,
+            "missing": 0,
+            "sent": 40,
+            "wrong_len_or_sha": 0
+          },
+          "100": {
+            "dup": 0,
+            "exact_single_datagram": 40,
+            "missing": 0,
+            "sent": 40,
+            "wrong_len_or_sha": 0
+          },
+          "1431": {
+            "dup": 0,
+            "exact_single_datagram": 40,
+            "missing": 0,
+            "sent": 40,
+            "wrong_len_or_sha": 0
+          },
+          "1472": {
+            "dup": 0,
+            "exact_single_datagram": 40,
+            "missing": 0,
+            "sent": 40,
+            "wrong_len_or_sha": 0
+          },
+          "1473": {
+            "dup": 0,
+            "exact_single_datagram": 40,
+            "missing": 0,
+            "sent": 40,
+            "wrong_len_or_sha": 0
+          },
+          "4096": {
+            "dup": 0,
+            "exact_single_datagram": 40,
+            "missing": 0,
+            "sent": 40,
+            "wrong_len_or_sha": 0
+          },
+          "59000": {
+            "dup": 0,
+            "exact_single_datagram": 40,
+            "missing": 0,
+            "sent": 40,
+            "wrong_len_or_sha": 0
+          }
+        },
+        "rx_empty": 440,
+        "rx_headerless_X": 0,
+        "rx_total": 800,
+        "sent_data": 280,
+        "sent_empty": 440,
+        "split_examples": {},
+        "split_seqs": 0,
+        "tiny_equal": true,
+        "tiny_rx": 80,
+        "tiny_sent": 80
+      },
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 120,
+        "Ip:ReasmReqds": 1800,
+        "Udp:InDatagrams": 800
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.701709786,
+        "sent_data": 360,
+        "sent_empty": 440
+      },
+      "tag": "h1_mixed_sizes",
+      "wire": {
+        "capture": {
+          "datagrams": 800,
+          "ip_more_fragments_flagged": 120,
+          "later_fragments": 0,
+          "packets": 800
+        },
+        "data_on_wire": 280,
+        "empty_on_wire": 440,
+        "headerless_on_wire": 80
+      }
+    },
+    "h2_naive_control": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 7,
+        "release": 1,
+        "strp_frames": 7,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "redirect_ok": 7,
+        "request_bytes_read": 32,
+        "sent_calls": 1,
+        "sent_zero": 1,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "vstrip": 7,
+        "vstrip_empty_fwd": 1
+      },
+      "peer": {
+        "per_size": {
+          "100": {
+            "dup": 0,
+            "exact_single_datagram": 1,
+            "missing": 4,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "1400": {
+            "dup": 0,
+            "exact_single_datagram": 0,
+            "missing": 1,
+            "sent": 1,
+            "wrong_len_or_sha": 0
+          }
+        },
+        "rx_empty": 0,
+        "rx_headerless_X": 0,
+        "rx_total": 1,
+        "sent_data": 6,
+        "sent_empty": 1,
+        "split_examples": {},
+        "split_seqs": 0,
+        "tiny_equal": true,
+        "tiny_rx": 0,
+        "tiny_sent": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 1
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.140790124,
+        "sent_data": 6,
+        "sent_empty": 1
+      },
+      "tag": "h2_naive_control",
+      "wire": {
+        "capture": {
+          "datagrams": 1,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 1
+        },
+        "data_on_wire": 1,
+        "empty_on_wire": 0,
+        "headerless_on_wire": 0
+      }
+    },
+    "h2_naive_control_second_assoc": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 2,
+        "release": 1,
+        "strp_frames": 2,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "redirect_ok": 2,
+        "request_bytes_read": 32,
+        "sent_calls": 2,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "vstrip": 2
+      },
+      "peer": {
+        "per_size": {
+          "100": {
+            "dup": 0,
+            "exact_single_datagram": 2,
+            "missing": 0,
+            "sent": 2,
+            "wrong_len_or_sha": 0
+          }
+        },
+        "rx_empty": 0,
+        "rx_headerless_X": 0,
+        "rx_total": 2,
+        "sent_data": 2,
+        "sent_empty": 0,
+        "split_examples": {},
+        "split_seqs": 0,
+        "tiny_equal": true,
+        "tiny_rx": 0,
+        "tiny_sent": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 2
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.04043952,
+        "sent_data": 2,
+        "sent_empty": 0
+      },
+      "tag": "h2_naive_control_second_assoc",
+      "wire": {
+        "capture": {
+          "datagrams": 2,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 2
+        },
+        "data_on_wire": 2,
+        "empty_on_wire": 0,
+        "headerless_on_wire": 0
+      }
+    },
+    "h3_leglimit_datanly_gap0": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 2001,
+        "release": 1,
+        "strp_frames": 2001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "redirect_ok": 2001,
+        "request_bytes_read": 32,
+        "sent_calls": 2001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_queued": 2001,
+        "vstrip": 2001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 0,
+        "k": 0,
+        "lead": 0,
+        "n": 2000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 2000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 2000,
+        "data_sent": 2000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": null,
+        "empties_mapped": 0,
+        "empty_early": 0,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 0,
+        "empty_sent": 0,
+        "late_dist_max": 0,
+        "late_rate": null,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 2001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.02524314,
+        "sent_data": 2000,
+        "sent_empty": 0
+      },
+      "tag": "h3_leglimit_datanly_gap0",
+      "wire": {
+        "capture": {
+          "datagrams": 2000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 2001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 2000,
+        "data_sent": 2000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": null,
+        "empties_mapped": 0,
+        "empty_early": 0,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 0,
+        "empty_sent": 0,
+        "late_dist_max": 0,
+        "late_rate": null,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "2001 packets captured",
+          "2001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 0
+      }
+    },
+    "h3_leglimit_gate_no_k1_gap0": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 4001,
+        "release": 1,
+        "strp_frames": 4001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 2000,
+        "notice_lat_us_max": 427,
+        "notice_lat_us_sum": 119505,
+        "notice_ok": 2000,
+        "notices_read": 2000,
+        "redirect_ok": 2001,
+        "request_bytes_read": 32,
+        "sent_calls": 2001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 2000,
+        "verdict_queued": 2001,
+        "vstrip": 2001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 0,
+        "k": 1,
+        "lead": 0,
+        "n": 2000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 2000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 2000,
+        "data_sent": 2000,
+        "early_dist_max": 32,
+        "early_dist_mean": 10.34,
+        "early_rate": 0.849,
+        "empties_mapped": 2000,
+        "empty_early": 1698,
+        "empty_late": 63,
+        "empty_missing": 0,
+        "empty_rx": 2000,
+        "empty_sent": 2000,
+        "late_dist_max": 30,
+        "late_rate": 0.0315,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 4001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.043231672,
+        "sent_data": 2000,
+        "sent_empty": 2000
+      },
+      "tag": "h3_leglimit_gate_no_k1_gap0",
+      "wire": {
+        "capture": {
+          "datagrams": 4000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 4001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 2000,
+        "data_sent": 2000,
+        "early_dist_max": 32,
+        "early_dist_mean": 10.33,
+        "early_rate": 0.854,
+        "empties_mapped": 2000,
+        "empty_early": 1708,
+        "empty_late": 50,
+        "empty_missing": 0,
+        "empty_rx": 2000,
+        "empty_sent": 2000,
+        "late_dist_max": 30,
+        "late_rate": 0.025,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "4001 packets captured",
+          "4001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 2000
+      }
+    },
+    "h3_noload_datanly_control_gap100": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 4001,
+        "release": 1,
+        "strp_frames": 4001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 100,
+        "k": 0,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": null,
+        "empties_mapped": 0,
+        "empty_early": 0,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 0,
+        "empty_sent": 0,
+        "late_dist_max": 0,
+        "late_rate": null,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 4001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.399933547,
+        "sent_data": 4000,
+        "sent_empty": 0
+      },
+      "tag": "h3_noload_datanly_control_gap100",
+      "wire": {
+        "capture": {
+          "datagrams": 4000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 4001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": null,
+        "empties_mapped": 0,
+        "empty_early": 0,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 0,
+        "empty_sent": 0,
+        "late_dist_max": 0,
+        "late_rate": null,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "4001 packets captured",
+          "4001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 0
+      }
+    },
+    "h3_noload_gateno_k1_gap100": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 99025,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 100,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 32,
+        "early_dist_mean": 8.36,
+        "early_rate": 0.655,
+        "empties_mapped": 4000,
+        "empty_early": 2620,
+        "empty_late": 22,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 3,
+        "late_rate": 0.0055,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.399918033,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateno_k1_gap100",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 32,
+        "early_dist_mean": 8.37,
+        "early_rate": 0.6545,
+        "empties_mapped": 4000,
+        "empty_early": 2618,
+        "empty_late": 20,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 3,
+        "late_rate": 0.005,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateno_k1_gap1000": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 4000,
+        "notice_lat_us_max": 466,
+        "notice_lat_us_sum": 164214,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 1000,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 3,
+        "early_dist_mean": 1.01,
+        "early_rate": 0.65,
+        "empties_mapped": 4000,
+        "empty_early": 2600,
+        "empty_late": 3,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 1,
+        "late_rate": 0.00075,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 3.999068383,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateno_k1_gap1000",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 2,
+        "early_dist_mean": 1.01,
+        "early_rate": 0.65475,
+        "empties_mapped": 4000,
+        "empty_early": 2619,
+        "empty_late": 3,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 1,
+        "late_rate": 0.00075,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateno_k1_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 84723,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 12,
+        "early_dist_mean": 2.0,
+        "early_rate": 0.551,
+        "empties_mapped": 4000,
+        "empty_early": 2204,
+        "empty_late": 4,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 1,
+        "late_rate": 0.001,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.79981846,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateno_k1_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 12,
+        "early_dist_mean": 2.0,
+        "early_rate": 0.55375,
+        "empties_mapped": 4000,
+        "empty_early": 2215,
+        "empty_late": 4,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 1,
+        "late_rate": 0.001,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateno_k1_gap200_rep2": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 97939,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 12,
+        "early_dist_mean": 2.83,
+        "early_rate": 0.3385,
+        "empties_mapped": 4000,
+        "empty_early": 1354,
+        "empty_late": 15,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 5,
+        "late_rate": 0.00375,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.79985841,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateno_k1_gap200_rep2",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 12,
+        "early_dist_mean": 2.81,
+        "early_rate": 0.3435,
+        "empties_mapped": 4000,
+        "empty_early": 1374,
+        "empty_late": 15,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 5,
+        "late_rate": 0.00375,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateno_k1_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 93210,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 6,
+        "early_dist_mean": 1.07,
+        "early_rate": 0.70025,
+        "empties_mapped": 4000,
+        "empty_early": 2801,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.999564567,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateno_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 6,
+        "early_dist_mean": 1.07,
+        "early_rate": 0.70375,
+        "empties_mapped": 4000,
+        "empty_early": 2815,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateno_k1_small64_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 80701,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 64
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 18,
+        "early_dist_mean": 2.48,
+        "early_rate": 0.37625,
+        "empties_mapped": 4000,
+        "empty_early": 1505,
+        "empty_late": 2,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 1,
+        "late_rate": 0.0005,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799816447,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateno_k1_small64_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 18,
+        "early_dist_mean": 2.48,
+        "early_rate": 0.37725,
+        "empties_mapped": 4000,
+        "empty_early": 1509,
+        "empty_late": 2,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 1,
+        "late_rate": 0.0005,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateno_k8_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 4501,
+        "release": 1,
+        "strp_frames": 4501,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 500,
+        "notice_lat_us_max": 1285,
+        "notice_lat_us_sum": 20449,
+        "notice_ok": 500,
+        "notices_read": 500,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 500,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 8,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 22,
+        "early_dist_mean": 2.59,
+        "early_rate": 0.3,
+        "empties_mapped": 500,
+        "empty_early": 150,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 500,
+        "empty_sent": 500,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 4501
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799839882,
+        "sent_data": 4000,
+        "sent_empty": 500
+      },
+      "tag": "h3_noload_gateno_k8_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 4500,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 4501
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 22,
+        "early_dist_mean": 2.56,
+        "early_rate": 0.308,
+        "empties_mapped": 500,
+        "empty_early": 154,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 500,
+        "empty_sent": 500,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "4501 packets captured",
+          "4501 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 500
+      }
+    },
+    "h3_noload_gatespin_k1_gap100": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 3184,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 738908,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 100,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 2200,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 28,
+        "late_rate": 0.55,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.39994269,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gatespin_k1_gap100",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 2185,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 28,
+        "late_rate": 0.54625,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gatespin_k1_gap1000": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 18805,
+        "empty_sent": 4000,
+        "notice_lat_us_max": 401,
+        "notice_lat_us_sum": 192674,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 1000,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 5,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 1,
+        "late_rate": 0.00125,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 3.999053821,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gatespin_k1_gap1000",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 5,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 1,
+        "late_rate": 0.00125,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gatespin_k1_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 4950,
+        "empty_sent": 4000,
+        "notice_lat_us_max": 743,
+        "notice_lat_us_sum": 356878,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 728,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 14,
+        "late_rate": 0.182,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799864479,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gatespin_k1_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 751,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 14,
+        "late_rate": 0.18775,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gatespin_k1_gap200_rep2": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 5758,
+        "empty_sent": 4000,
+        "notice_lat_us_max": 480,
+        "notice_lat_us_sum": 301373,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 649,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 13,
+        "late_rate": 0.16225,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799818931,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gatespin_k1_gap200_rep2",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 659,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 13,
+        "late_rate": 0.16475,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gatespin_k1_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 4258,
+        "empty_sent": 4000,
+        "notice_lat_us_max": 1819,
+        "notice_lat_us_sum": 254492,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 151,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 4,
+        "late_rate": 0.03775,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.9995633160000001,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gatespin_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 153,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 4,
+        "late_rate": 0.03825,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gatespin_k1_small64_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 4433,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 374459,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 64
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 795,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 13,
+        "late_rate": 0.19875,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799817258,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gatespin_k1_small64_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 794,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 13,
+        "late_rate": 0.1985,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gatespin_k8_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 4501,
+        "release": 1,
+        "strp_frames": 4501,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 449,
+        "empty_sent": 500,
+        "notice_lat_us_sum": 75678,
+        "notice_ok": 500,
+        "notices_read": 500,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 500,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 8,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 500,
+        "empty_early": 0,
+        "empty_late": 29,
+        "empty_missing": 0,
+        "empty_rx": 500,
+        "empty_sent": 500,
+        "late_dist_max": 4,
+        "late_rate": 0.058,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 4501
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.79986458,
+        "sent_data": 4000,
+        "sent_empty": 500
+      },
+      "tag": "h3_noload_gatespin_k8_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 4500,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 4501
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 500,
+        "empty_early": 0,
+        "empty_late": 31,
+        "empty_missing": 0,
+        "empty_rx": 500,
+        "empty_sent": 500,
+        "late_dist_max": 4,
+        "late_rate": 0.062,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "4501 packets captured",
+          "4501 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 500
+      }
+    },
+    "h3_noload_gateyes_k1_gap100": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 1598,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 1031624,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 100,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 2264,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 32,
+        "late_rate": 0.566,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.399918423,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateyes_k1_gap100",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 2269,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 32,
+        "late_rate": 0.56725,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateyes_k1_gap1000": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 2263,
+        "empty_sent": 4000,
+        "notice_lat_us_max": 1385,
+        "notice_lat_us_sum": 2447396,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 1000,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 712,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 3,
+        "late_rate": 0.178,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 3.999056636,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateyes_k1_gap1000",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 646,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 3,
+        "late_rate": 0.1615,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateyes_k1_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 1193,
+        "empty_sent": 4000,
+        "notice_lat_us_max": 1774,
+        "notice_lat_us_sum": 851316,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 1340,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 20,
+        "late_rate": 0.335,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799863247,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateyes_k1_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 1326,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 20,
+        "late_rate": 0.3315,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateyes_k1_gap200_rep2": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 1020,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 431246,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 1150,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 12,
+        "late_rate": 0.2875,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799863247,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateyes_k1_gap200_rep2",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 1142,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 12,
+        "late_rate": 0.2855,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateyes_k1_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 2171,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 1521071,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 1742,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 5,
+        "late_rate": 0.4355,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.999556275,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateyes_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 1742,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 5,
+        "late_rate": 0.4355,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateyes_k1_small64_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 8001,
+        "release": 1,
+        "strp_frames": 8001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 984,
+        "empty_sent": 4000,
+        "notice_lat_us_sum": 456599,
+        "notice_ok": 4000,
+        "notices_read": 4000,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 4000,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 1,
+        "lead": 0,
+        "n": 4000,
+        "size": 64
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 1169,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 19,
+        "late_rate": 0.29225,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 8001
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799861505,
+        "sent_data": 4000,
+        "sent_empty": 4000
+      },
+      "tag": "h3_noload_gateyes_k1_small64_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 8000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 8001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 4000,
+        "empty_early": 0,
+        "empty_late": 1150,
+        "empty_missing": 0,
+        "empty_rx": 4000,
+        "empty_sent": 4000,
+        "late_dist_max": 19,
+        "late_rate": 0.2875,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "8001 packets captured",
+          "8001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 4000
+      }
+    },
+    "h3_noload_gateyes_k8_gap200": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 4501,
+        "release": 1,
+        "strp_frames": 4501,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 146,
+        "empty_sent": 500,
+        "notice_lat_us_sum": 164921,
+        "notice_ok": 500,
+        "notices_read": 500,
+        "redirect_ok": 4001,
+        "request_bytes_read": 32,
+        "sent_calls": 4001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 500,
+        "verdict_queued": 4001,
+        "vstrip": 4001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 1000",
+        "gap_us": 200,
+        "k": 8,
+        "lead": 0,
+        "n": 4000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 4000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 500,
+        "empty_early": 0,
+        "empty_late": 138,
+        "empty_missing": 0,
+        "empty_rx": 500,
+        "empty_sent": 500,
+        "late_dist_max": 16,
+        "late_rate": 0.276,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 4501
+      },
+      "qdisc": [
+        "qdisc noqueue 0: root refcnt 2 ",
+        " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 0.799938971,
+        "sent_data": 4000,
+        "sent_empty": 500
+      },
+      "tag": "h3_noload_gateyes_k8_gap200",
+      "wire": {
+        "capture": {
+          "datagrams": 4500,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 4501
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 4000,
+        "data_sent": 4000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 500,
+        "empty_early": 0,
+        "empty_late": 138,
+        "empty_missing": 0,
+        "empty_rx": 500,
+        "empty_sent": 500,
+        "late_dist_max": 16,
+        "late_rate": 0.276,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "4501 packets captured",
+          "4501 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 500
+      }
+    },
+    "h3_throttle5m_datanly_control_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 3001,
+        "release": 1,
+        "strp_frames": 3001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "redirect_ok": 3001,
+        "request_bytes_read": 32,
+        "sent_calls": 3001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_queued": 3001,
+        "vstrip": 3001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 14000",
+        "gap_us": 500,
+        "k": 0,
+        "lead": 0,
+        "n": 3000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 3000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": null,
+        "empties_mapped": 0,
+        "empty_early": 0,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 0,
+        "empty_sent": 0,
+        "late_dist_max": 0,
+        "late_rate": null,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 3001
+      },
+      "qdisc": [
+        "qdisc tbf 8005: root refcnt 17 rate 5Mbit burst 3000b lat 6.4s ",
+        " Sent 22134726 bytes 27009 pkt (dropped 0, overlimits 80920 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.499537183,
+        "sent_data": 3000,
+        "sent_empty": 0
+      },
+      "tag": "h3_throttle5m_datanly_control_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 3000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 3001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": null,
+        "empties_mapped": 0,
+        "empty_early": 0,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 0,
+        "empty_sent": 0,
+        "late_dist_max": 0,
+        "late_rate": null,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "3001 packets captured",
+          "3001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 0
+      }
+    },
+    "h3_throttle5m_gateno_k1_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 6001,
+        "release": 1,
+        "strp_frames": 6001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 3000,
+        "notice_lat_us_max": 81,
+        "notice_lat_us_sum": 43003,
+        "notice_ok": 3000,
+        "notices_read": 3000,
+        "redirect_ok": 3001,
+        "request_bytes_read": 32,
+        "sent_calls": 3001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 3000,
+        "verdict_queued": 3001,
+        "vstrip": 3001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 14000",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 3000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 3000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 2423,
+        "early_dist_mean": 1210.19,
+        "early_rate": 0.988333,
+        "empties_mapped": 3000,
+        "empty_early": 2965,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 6001
+      },
+      "qdisc": [
+        "qdisc tbf 8005: root refcnt 17 rate 5Mbit burst 3000b lat 6.4s ",
+        " Sent 4452106 bytes 6001 pkt (dropped 0, overlimits 17974 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.4995557,
+        "sent_data": 3000,
+        "sent_empty": 3000
+      },
+      "tag": "h3_throttle5m_gateno_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 6000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 6001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 2423,
+        "early_dist_mean": 1210.19,
+        "early_rate": 0.988333,
+        "empties_mapped": 3000,
+        "empty_early": 2965,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "6001 packets captured",
+          "6001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 3000
+      }
+    },
+    "h3_throttle5m_gateno_noretry_k1_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 6001,
+        "release": 1,
+        "strp_frames": 6001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_sent": 3000,
+        "notice_lat_us_max": 103,
+        "notice_lat_us_sum": 31638,
+        "notice_ok": 3000,
+        "notices_read": 3000,
+        "redirect_ok": 3001,
+        "request_bytes_read": 32,
+        "sent_calls": 3001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 3000,
+        "verdict_queued": 3001,
+        "vstrip": 3001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 14000",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 3000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 3000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 2428,
+        "early_dist_mean": 1211.45,
+        "early_rate": 0.987667,
+        "empties_mapped": 3000,
+        "empty_early": 2963,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 6001
+      },
+      "qdisc": [
+        "qdisc tbf 8005: root refcnt 17 rate 5Mbit burst 3000b lat 6.4s ",
+        " Sent 17808508 bytes 24006 pkt (dropped 0, overlimits 71926 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.499625506,
+        "sent_data": 3000,
+        "sent_empty": 3000
+      },
+      "tag": "h3_throttle5m_gateno_noretry_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 6000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 6001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 2428,
+        "early_dist_mean": 1211.05,
+        "early_rate": 0.988,
+        "empties_mapped": 3000,
+        "empty_early": 2964,
+        "empty_late": 0,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 0,
+        "late_rate": 0.0,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "6001 packets captured",
+          "6001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 3000
+      }
+    },
+    "h3_throttle5m_gatespin_k1_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 6001,
+        "release": 1,
+        "strp_frames": 6001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 1795600,
+        "empty_sent": 3000,
+        "notice_lat_us_max": 5543979,
+        "notice_lat_us_sum": 8198926150,
+        "notice_ok": 3000,
+        "notices_read": 3000,
+        "redirect_ok": 3001,
+        "request_bytes_read": 32,
+        "sent_calls": 3001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 3000,
+        "verdict_queued": 3001,
+        "vstrip": 3001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 14000",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 3000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 3000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 3000,
+        "empty_early": 0,
+        "empty_late": 24,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 2,
+        "late_rate": 0.008,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 6001
+      },
+      "qdisc": [
+        "qdisc tbf 8005: root refcnt 17 rate 5Mbit burst 3000b lat 6.4s ",
+        " Sent 13356402 bytes 18005 pkt (dropped 0, overlimits 53945 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.4995660659999999,
+        "sent_data": 3000,
+        "sent_empty": 3000
+      },
+      "tag": "h3_throttle5m_gatespin_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 6000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 6001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 3000,
+        "empty_early": 0,
+        "empty_late": 24,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 2,
+        "late_rate": 0.008,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "6001 packets captured",
+          "6001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 3000
+      }
+    },
+    "h3_throttle5m_gatespin_sndbuf16k_k1_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 6001,
+        "release": 1,
+        "strp_frames": 6001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 1799364,
+        "empty_sent": 3000,
+        "notice_lat_us_max": 5607319,
+        "notice_lat_us_sum": 8389701138,
+        "notice_ok": 3000,
+        "notices_read": 3000,
+        "redirect_ok": 3001,
+        "request_bytes_read": 32,
+        "sent_calls": 3001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 3000,
+        "verdict_queued": 3001,
+        "vstrip": 3001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 14000",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 3000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 3000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 3000,
+        "empty_early": 0,
+        "empty_late": 505,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 2,
+        "late_rate": 0.168333,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 6001
+      },
+      "qdisc": [
+        "qdisc tbf 8005: root refcnt 17 rate 5Mbit burst 3000b lat 6.4s ",
+        " Sent 26586874 bytes 33011 pkt (dropped 0, overlimits 98910 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.499563433,
+        "sent_data": 3000,
+        "sent_empty": 3000
+      },
+      "tag": "h3_throttle5m_gatespin_sndbuf16k_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 6000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 6001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 3000,
+        "empty_early": 0,
+        "empty_late": 505,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 2,
+        "late_rate": 0.168333,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "6001 packets captured",
+          "6001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 3000
+      }
+    },
+    "h3_throttle5m_gateyes_k1_gap500": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 6001,
+        "release": 1,
+        "strp_frames": 6001,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "empty_gate_waits": 8248,
+        "empty_sent": 3000,
+        "notice_lat_us_max": 5544628,
+        "notice_lat_us_sum": 8202406080,
+        "notice_ok": 3000,
+        "notices_read": 3000,
+        "redirect_ok": 3001,
+        "request_bytes_read": 32,
+        "sent_calls": 3001,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_empty_seen": 3000,
+        "verdict_queued": 3001,
+        "vstrip": 3001
+      },
+      "params": {
+        "burst": 1,
+        "extra": "--warm --linger-ms 14000",
+        "gap_us": 500,
+        "k": 1,
+        "lead": 0,
+        "n": 3000,
+        "size": 1400
+      },
+      "peer": {
+        "bad_sha": 0,
+        "checked": 3000,
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 3000,
+        "empty_early": 0,
+        "empty_late": 307,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 4,
+        "late_rate": 0.102333,
+        "other_examples": [],
+        "other_rx": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Udp:InDatagrams": 6001
+      },
+      "qdisc": [
+        "qdisc tbf 8005: root refcnt 17 rate 5Mbit burst 3000b lat 6.4s ",
+        " Sent 8904254 bytes 12003 pkt (dropped 0, overlimits 35958 requeues 0) ",
+        " backlog 0b 0p requeues 0"
+      ],
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.4995641339999999,
+        "sent_data": 3000,
+        "sent_empty": 3000
+      },
+      "tag": "h3_throttle5m_gateyes_k1_gap500",
+      "wire": {
+        "capture": {
+          "datagrams": 6000,
+          "ip_more_fragments_flagged": 0,
+          "later_fragments": 0,
+          "packets": 6001
+        },
+        "data_dup": 0,
+        "data_missing": 0,
+        "data_missing_examples": [],
+        "data_out_of_order": 0,
+        "data_rx": 3000,
+        "data_sent": 3000,
+        "early_dist_max": 0,
+        "early_dist_mean": 0,
+        "early_rate": 0.0,
+        "empties_mapped": 3000,
+        "empty_early": 0,
+        "empty_late": 307,
+        "empty_missing": 0,
+        "empty_rx": 3000,
+        "empty_sent": 3000,
+        "late_dist_max": 4,
+        "late_rate": 0.102333,
+        "other_examples": [],
+        "other_rx": 0,
+        "tcpdump_stderr": [
+          "6001 packets captured",
+          "6001 packets received by filter",
+          "0 packets dropped by kernel"
+        ],
+        "zero_length_datagrams_on_wire": 3000
+      }
+    },
+    "h5_sizes_NO_linearise_control": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 65,
+        "release": 1,
+        "strp_frames": 65,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "redirect_ok": 65,
+        "request_bytes_read": 32,
+        "sent_calls": 65,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_nolinear": 65,
+        "verdict_queued": 65,
+        "vstrip": 65
+      },
+      "peer": {
+        "per_size": {
+          "1024": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "2048": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "4096": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "8192": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "16384": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "24576": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "32000": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "32768": {
+            "dup": 0,
+            "exact_single_datagram": 0,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 5
+          },
+          "32769": {
+            "dup": 0,
+            "exact_single_datagram": 0,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 5
+          },
+          "40000": {
+            "dup": 0,
+            "exact_single_datagram": 0,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 5
+          },
+          "49152": {
+            "dup": 0,
+            "exact_single_datagram": 0,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 5
+          },
+          "59000": {
+            "dup": 0,
+            "exact_single_datagram": 0,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 5
+          },
+          "65507": {
+            "dup": 0,
+            "exact_single_datagram": 0,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 5
+          }
+        },
+        "rx_empty": 0,
+        "rx_headerless_X": 45,
+        "rx_total": 110,
+        "sent_data": 65,
+        "sent_empty": 0,
+        "split_examples": {
+          "10": [
+            32760,
+            16384,
+            8
+          ],
+          "11": [
+            32760,
+            16384,
+            8192,
+            1664
+          ],
+          "12": [
+            32760,
+            32747
+          ],
+          "20": [
+            32760,
+            8
+          ],
+          "21": [
+            32760,
+            9
+          ],
+          "22": [
+            32760,
+            7240
+          ],
+          "23": [
+            32760,
+            16384,
+            8
+          ],
+          "7": [
+            32760,
+            8
+          ],
+          "8": [
+            32760,
+            9
+          ],
+          "9": [
+            32760,
+            7240
+          ]
+        },
+        "split_seqs": 30,
+        "tiny_equal": true,
+        "tiny_rx": 0,
+        "tiny_sent": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 90,
+        "Ip:ReasmReqds": 1300,
+        "Udp:InDatagrams": 110
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.9686794669999998,
+        "sent_data": 65,
+        "sent_empty": 0
+      },
+      "tag": "h5_sizes_NO_linearise_control",
+      "wire": {
+        "capture": {
+          "datagrams": 110,
+          "ip_more_fragments_flagged": 90,
+          "later_fragments": 0,
+          "packets": 110
+        },
+        "data_on_wire": 65,
+        "empty_on_wire": 0,
+        "headerless_on_wire": 45
+      }
+    },
+    "h5_sizes_linearise": {
+      "drain_wait_s": 3.0,
+      "guest_counters": {
+        "encoded": 65,
+        "release": 1,
+        "strp_frames": 65,
+        "tc_apport": 1,
+        "udp_capture": 1
+      },
+      "host_counters": {
+        "ctl_bytes_written": 8,
+        "redirect_ok": 65,
+        "request_bytes_read": 32,
+        "sent_calls": 65,
+        "udp_associations": 1,
+        "udp_teardowns": 1,
+        "verdict_queued": 65,
+        "vstrip": 65
+      },
+      "peer": {
+        "per_size": {
+          "1024": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "2048": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "4096": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "8192": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "16384": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "24576": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "32000": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "32768": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "32769": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "40000": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "49152": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "59000": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          },
+          "65507": {
+            "dup": 0,
+            "exact_single_datagram": 5,
+            "missing": 0,
+            "sent": 5,
+            "wrong_len_or_sha": 0
+          }
+        },
+        "rx_empty": 0,
+        "rx_headerless_X": 0,
+        "rx_total": 65,
+        "sent_data": 65,
+        "sent_empty": 0,
+        "split_examples": {},
+        "split_seqs": 0,
+        "tiny_equal": true,
+        "tiny_rx": 0,
+        "tiny_sent": 0
+      },
+      "peer_ns_snmp_delta": {
+        "Ip:ReasmOKs": 60,
+        "Ip:ReasmReqds": 1275,
+        "Udp:InDatagrams": 65
+      },
+      "rc": 0,
+      "sender": {
+        "connected": true,
+        "errs": 0,
+        "ev": "v29_done",
+        "first_err": "",
+        "secs": 1.9701429190000002,
+        "sent_data": 65,
+        "sent_empty": 0
+      },
+      "tag": "h5_sizes_linearise",
+      "wire": {
+        "capture": {
+          "datagrams": 65,
+          "ip_more_fragments_flagged": 60,
+          "later_fragments": 0,
+          "packets": 65
+        },
+        "data_on_wire": 65,
+        "empty_on_wire": 0,
+        "headerless_on_wire": 0
+      }
+    }
+  },
+  "preflight": {
+    "blob_sha256": "6ad39e4276d6052d5122a85f6a0c2d91eb9c1b6e18d5c778f39e9e604732bb57",
+    "cid": 3329,
+    "host_uname": "7.0.0-29-generic",
+    "host_uname_v": "#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026",
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vmci",
+      "vmw_vsock_virtio_transport_common",
+      "vmw_vsock_vmci_transport",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ]
+  },
+  "programs": {
+    "loaded": "\"programs\":[{\"id\":64914,\"name\":\"verdict\",\"tag\":\"10eb4482b2049ca7\",\"verified_insns\":1185},{\"id\":64915,\"name\":\"strp_parse\",\"tag\":\"2abd9169f6e90deb\",\"verified_insns\":62},{\"id\":64916,\"name\":\"strp_verdict\",\"tag\":\"43bb1ec76775fce6\",\"verified_insns\":1196},{\"id\":64917,\"name\":\"sent(fexit skb_send_sock)\",\"tag\":\"3a11f30c5a8ab4b7\",\"verified_insns\":109},{\"id\":64918,\"name\":\"sockops(/sys/fs/cgroup/gvc-v29-4045481)\",\"tag\":\"76815629f15442aa\",\"verified_insns\":342}],\"role\":\"host\",\"tuple_from_peer\":true,\"udp_park\":true,\"unframe\":\"verdict-notify\"}\n",
+    "tc_filters_v29_h_and_lo": "",
+    "tcx_attachments_during_run": "xdp:\n\ntc:\n\nflow_dissector:\n\nnetfilter:\n\n"
+  },
+  "substrate": {
+    "guest_uname_r": "7.0.0-29-generic",
+    "host_uname_r": "7.0.0-29-generic",
+    "offhost": "63095: v29-h@if63094: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\n    link/ether 9a:3b:db:6f:aa:ff brd ff:ff:ff:ff:ff:ff link-netns v29-p promiscuity 0 allmulti 0 minmtu 68 maxmtu 65535 \n    veth addrgenmode eui64 numtxqueues 16 numrxqueues 16 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 \nlo               UNKNOWN        127.0.0.1/8 ::1/128 \nv29-p0@if63095   UP             10.250.229.2/24 fe80::ecad:61ff:fec9:6895/64 \n\ttx-scatter-gather-fraglist: on\ntcp-segmentation-offload: on\n\ttx-tcp-segmentation: on\n\ttx-tcp-ecn-segmentation: on\n\ttx-tcp-mangleid-segmentation: on\n\ttx-tcp6-segmentation: on\n\ttx-tcp-accecn-segmentation: on\ngeneric-segmentation-offload: on\ngeneric-receive-offload: off\ntx-fcoe-segmentation: off [fixed]\ntx-gre-segmentation: on\ntx-gre-csum-segmentation: on\ntx-ipxip4-segmentation: on\ntx-ipxip6-segmentation: on\ntx-udp_tnl-segmentation: on\ntx-udp_tnl-csum-segmentation: on\ntx-tunnel-remcsum-segmentation: off [fixed]\ntx-sctp-segmentation: on\ntx-esp-segmentation: off [fixed]\ntx-udp-segmentation: on\nrx-udp_tunnel-port-offload: off [fixed]\nrx-udp-gro-forwarding: off\nState  Recv-Q Send-Q Local Address:Port Peer Address:Port\nUNCONN 0      0       10.250.229.2:7229      0.0.0.0:*   \n"
+  },
+  "throttle": {
+    "tbf": "qdisc tbf 8005: root refcnt 17 rate 5Mbit burst 3000b lat 6.4s \n"
+  }
+}

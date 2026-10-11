@@ -1,0 +1,99 @@
+{
+ "label": "s3-stream-59000-hb64k",
+ "cell": {
+  "label": "s3-stream-59000-hb64k",
+  "variant": "stream",
+  "size": 59000,
+  "n": 3000,
+  "hostbuf": 65536
+ },
+ "wall_s": 11.174867391586304,
+ "host": {
+  "accepted_child_buffer_size": 65536,
+  "bpf_counters": {
+   "redirect_ok": 5696,
+   "rx_ok": 1,
+   "rx_pkt_stream": 5695,
+   "rx_pkt_stream_bytes": 177024000,
+   "strp_bad_frame": 2,
+   "strp_frames": 1
+  },
+  "check": 1,
+  "events": {
+   "badmagic": 0,
+   "long": 0,
+   "long_with_second_magic": 0,
+   "lt8": 0,
+   "sample": [],
+   "short": 0
+  },
+  "guest_done": "{\"sent\":3000,\"stalled\":false}",
+  "hostbuf_arg": 65536,
+  "listener_buffer_size": 65536,
+  "n": 3000,
+  "outcome": {
+   "delivered_once": 1,
+   "duplicate_extra_copies": 0,
+   "duplicated_seqs": 0,
+   "lost": 2999,
+   "n": 3000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+   "badmagic": 0,
+   "bytes": 0,
+   "long": 0,
+   "long_second_magic": 0,
+   "lt8": 0,
+   "ok": 0,
+   "records": 0,
+   "short": 0
+  },
+  "sink": {
+   "bad": 0,
+   "bad_reasons": {},
+   "bytes": 59008,
+   "desync_bytes_skipped": 0,
+   "frames_parsed": 1,
+   "frames_verified_ok": 1
+  },
+  "size": "59000",
+  "uname": "7.0.0-29-generic",
+  "variant": "stream",
+  "wall_s": 11.109046922
+ },
+ "guest": {
+  "app_sent_ok": 3000,
+  "bound": 59000,
+  "bpf_counters": {
+   "fexit_bytes": 177024000,
+   "fexit_calls": 8419,
+   "guest_encoded": 3000,
+   "redirect_ok": 6000,
+   "strp_frames": 3000,
+   "tx_alloc_stream": 5695,
+   "tx_alloc_stream_bytes": 177024000
+  },
+  "drain_wall_s": 7.509241204,
+  "guest_vsock_buffer_size": 262144,
+  "n": 3000,
+  "role": "guest",
+  "send_wall_s": 5.105156518,
+  "sender_stalled": false,
+  "size": "59000",
+  "skb_send_sock_outcomes_on_vsock_leg": {
+   "errno11": 2724,
+   "ok_full": 3000,
+   "ok_partial": 2695
+  },
+  "synth": 0,
+  "udp_snmp_delta": {
+   "OutDatagrams": 3000
+  },
+  "uname": "7.0.0-29-generic",
+  "variant": "stream"
+ },
+ "guest_stdout_tail": "GUEST_DONE sent=3000 stalled=false\n"
+}

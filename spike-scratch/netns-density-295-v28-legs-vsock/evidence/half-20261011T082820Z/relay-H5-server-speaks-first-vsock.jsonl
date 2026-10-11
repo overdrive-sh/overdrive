@@ -1,0 +1,6 @@
+{"ev":"relay_ready","fwd":"Splice","legs":"vsock","native":false,"peer_mode":"gateway","uname":"7.0.0-29-generic"}
+{"early":0,"ev":"relay_paired","hs_us":1217,"id":1,"legs_open_us":789,"peer_c":"198.18.28.1:44425"}
+{"dir":"s2c","ev":"vsock_eof_classify","id":1,"mode":1,"zero_send_errno":0}
+{"bytes":2000003,"dir":"s2c","end":"eof_clean","errno":0,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791707309291649}
+{"bytes":0,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791707309299388}
+{"ev":"relay_done","id":1,"r":{"aborted":false,"c2s":{"bytes":0,"end":"eof_clean"},"s2c":{"bytes":2000003,"end":"eof_clean"}},"us":19647}

@@ -1,0 +1,21 @@
+{
+ "name": "v30-loop-fd-keep-3701",
+ "mode": "fd-keep",
+ "secs_observed": 2.0,
+ "vmm_exited": true,
+ "vmm_exit_t_s": 2.001159464009106,
+ "rc": 1,
+ "rebooted_events": 0,
+ "samples_t_rebooted_count": [
+  [
+   0.0,
+   0
+  ],
+  [
+   1.0,
+   0
+  ]
+ ],
+ "vhost_fds": null,
+ "cpu_s_ch": null
+}

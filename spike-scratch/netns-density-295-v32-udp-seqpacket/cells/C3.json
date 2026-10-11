@@ -1,0 +1,34 @@
+[
+ {
+  "label": "C-seq-16384-hb128k",
+  "variant": "seq",
+  "size": 16384,
+  "n": 100000,
+  "hostbuf": 131072,
+  "nodelay": 1
+ },
+ {
+  "label": "C-seq-59000-hb128k",
+  "variant": "seq",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 131072,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-16384-hb128k",
+  "variant": "stream",
+  "size": 16384,
+  "n": 100000,
+  "hostbuf": 131072,
+  "nodelay": 1
+ },
+ {
+  "label": "C-stream-59000-hb128k",
+  "variant": "stream",
+  "size": 59000,
+  "n": 100000,
+  "hostbuf": 131072,
+  "nodelay": 1
+ }
+]

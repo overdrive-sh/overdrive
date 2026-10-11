@@ -1,0 +1,2 @@
+[17:05:29] === v31 loop cf7perf: 1 scenarios
+[17:05:29] $ modprobe vhost_vsock; modprobe vsock_loopback (rc=0)

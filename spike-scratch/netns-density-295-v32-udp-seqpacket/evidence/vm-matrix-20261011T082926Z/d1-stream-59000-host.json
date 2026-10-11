@@ -1,0 +1,98 @@
+{
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+    "redirect_ok": 201,
+    "rx_ok": 1,
+    "rx_pkt_stream": 200,
+    "rx_pkt_stream_bytes": 11801600,
+    "strp_bad_frame": 2,
+    "strp_frames": 1,
+    "strp_parse_calls": 3
+  },
+  "check": 1,
+  "events": {
+    "badmagic": 0,
+    "long": 0,
+    "long_with_second_magic": 0,
+    "lt8": 0,
+    "sample": [
+      {
+        "declared": 0,
+        "first8_hex": "5a5544310000e678",
+        "kind": "parse",
+        "n": 32741,
+        "second_magic": 0,
+        "seq": 6509183813678065272
+      },
+      {
+        "declared": 0,
+        "first8_hex": "f8f9fafbfcfdfeff",
+        "kind": "parse",
+        "n": 47616,
+        "second_magic": 0,
+        "seq": 17940646550795321087
+      },
+      {
+        "declared": 0,
+        "first8_hex": "f8f9fafbfcfdfeff",
+        "kind": "parse_bad",
+        "n": 47616,
+        "second_magic": 0,
+        "seq": 17940646550795321087
+      },
+      {
+        "declared": 0,
+        "first8_hex": "f8f9fafbfcfdfeff",
+        "kind": "parse",
+        "n": 47616,
+        "second_magic": 0,
+        "seq": 17940646550795321087
+      },
+      {
+        "declared": 0,
+        "first8_hex": "f8f9fafbfcfdfeff",
+        "kind": "parse_bad",
+        "n": 47616,
+        "second_magic": 0,
+        "seq": 17940646550795321087
+      }
+    ],
+    "short": 0
+  },
+  "guest_done": "{\"sent\":200,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 200,
+  "outcome": {
+    "delivered_once": 1,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 199,
+    "n": 200
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 0,
+    "bad_reasons": {},
+    "bytes": 59008,
+    "desync_bytes_skipped": 0,
+    "frames_parsed": 1,
+    "frames_verified_ok": 1
+  },
+  "size": "59000",
+  "uname": "7.0.0-29-generic",
+  "variant": "stream",
+  "wall_s": 5.908046815
+}

@@ -1,0 +1,225 @@
+{
+  "accepted_child_buffer_size": 262144,
+  "bpf_counters": {
+    "redirect_ok": 1953,
+    "rx_badmagic": 47,
+    "rx_ok": 1953,
+    "rx_pkt_seq_eom": 2047,
+    "rx_pkt_seq_eom_bytes": 2064000,
+    "rx_short": 47
+  },
+  "check": 1,
+  "events": {
+    "badmagic": 47,
+    "long": 0,
+    "long_with_second_magic": 0,
+    "lt8": 0,
+    "sample": [
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 776,
+        "second_magic": 0,
+        "seq": 31
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 256,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 520,
+        "second_magic": 0,
+        "seq": 63
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 512,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 264,
+        "second_magic": 0,
+        "seq": 95
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 768,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 776,
+        "second_magic": 0,
+        "seq": 158
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 256,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 520,
+        "second_magic": 0,
+        "seq": 190
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 512,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 264,
+        "second_magic": 0,
+        "seq": 222
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 768,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 776,
+        "second_magic": 0,
+        "seq": 285
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 256,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 520,
+        "second_magic": 0,
+        "seq": 317
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 512,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 264,
+        "second_magic": 0,
+        "seq": 349
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 768,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 776,
+        "second_magic": 0,
+        "seq": 412
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 256,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 520,
+        "second_magic": 0,
+        "seq": 444
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 512,
+        "second_magic": 0,
+        "seq": null
+      },
+      {
+        "declared": 1024,
+        "kind": "short",
+        "n": 264,
+        "second_magic": 0,
+        "seq": 476
+      },
+      {
+        "declared": 0,
+        "kind": "badmagic",
+        "n": 768,
+        "second_magic": 0,
+        "seq": null
+      }
+    ],
+    "short": 47
+  },
+  "guest_done": "{\"sent\":2000,\"stalled\":false}",
+  "hostbuf_arg": 0,
+  "listener_buffer_size": 262144,
+  "n": 2000,
+  "outcome": {
+    "delivered_once": 1953,
+    "duplicate_extra_copies": 0,
+    "duplicated_seqs": 0,
+    "lost": 47,
+    "n": 2000
+  },
+  "pause_ms": 0,
+  "peer_buf_alloc_seen_by_host_recv_pkt": 262144,
+  "role": "host",
+  "seqrecv": {
+    "badmagic": 0,
+    "bytes": 0,
+    "long": 0,
+    "long_second_magic": 0,
+    "lt8": 0,
+    "ok": 0,
+    "records": 0,
+    "short": 0
+  },
+  "sink": {
+    "bad": 0,
+    "bad_reasons": {},
+    "bytes": 2015496,
+    "desync_bytes_skipped": 0,
+    "frames_parsed": 1953,
+    "frames_verified_ok": 1953
+  },
+  "size": "1024",
+  "uname": "7.0.0-29-generic",
+  "variant": "seq",
+  "wall_s": 5.802223737
+}

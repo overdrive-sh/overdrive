@@ -1,0 +1,218 @@
+[
+ {
+  "name": "k-none",
+  "action": "none",
+  "repeat": 2,
+  "trials": 1000,
+  "conc": 200,
+  "flows": 512,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": true,
+  "seed": 40001,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-guest-owner-held",
+  "action": "kill-guest-owner",
+  "repeat": 6,
+  "trials": 800,
+  "conc": 400,
+  "flows": 512,
+  "kill_ms": [
+   100,
+   1400
+  ],
+  "clients": "--n 1048576 --m 1048576 --srv-pause 300 --cli-pause 300 --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40100,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-guest-owner-busy",
+  "action": "kill-guest-owner",
+  "repeat": 6,
+  "trials": 3000,
+  "conc": 128,
+  "flows": 512,
+  "kill_ms": [
+   30,
+   700
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40150,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-host-owner-held",
+  "action": "kill-host-owner",
+  "repeat": 6,
+  "trials": 800,
+  "conc": 400,
+  "flows": 512,
+  "kill_ms": [
+   100,
+   1400
+  ],
+  "clients": "--n 1048576 --m 1048576 --srv-pause 300 --cli-pause 300 --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40200,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-host-owner-busy",
+  "action": "kill-host-owner",
+  "repeat": 6,
+  "trials": 3000,
+  "conc": 128,
+  "flows": 512,
+  "kill_ms": [
+   30,
+   700
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40250,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-ctl-loss-held",
+  "action": "ctl-loss",
+  "repeat": 5,
+  "trials": 800,
+  "conc": 400,
+  "flows": 512,
+  "kill_ms": [
+   100,
+   1400
+  ],
+  "clients": "--n 1048576 --m 1048576 --srv-pause 300 --cli-pause 300 --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40300,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-ctl-loss-busy",
+  "action": "ctl-loss",
+  "repeat": 5,
+  "trials": 3000,
+  "conc": 128,
+  "flows": 512,
+  "kill_ms": [
+   30,
+   700
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40350,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-crash-fin",
+  "action": "none",
+  "repeat": 6,
+  "trials": 300,
+  "conc": 64,
+  "flows": 512,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15 --crash-permille 300 --crash-kind fin --crash-ms-max 25",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40400,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-crash-rst",
+  "action": "none",
+  "repeat": 6,
+  "trials": 300,
+  "conc": 64,
+  "flows": 512,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15 --crash-permille 300 --crash-kind rst --crash-ms-max 25",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40500,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "k-dest-rst",
+  "action": "none",
+  "repeat": 6,
+  "trials": 300,
+  "conc": 128,
+  "flows": 512,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n 2097152 --m 1000 --srv-pause 100 --fin mix --io-timeout 15 --srv-rst-permille 500",
+  "owners": "--intake-rcvbuf 4194304",
+  "strict": false,
+  "seed": 40600,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "n-guest-owner-held-noclassify",
+  "action": "kill-guest-owner",
+  "repeat": 2,
+  "trials": 800,
+  "conc": 400,
+  "flows": 512,
+  "kill_ms": [
+   100,
+   1400
+  ],
+  "clients": "--n 1048576 --m 1048576 --srv-pause 300 --cli-pause 300 --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304 --classify-abort no",
+  "strict": false,
+  "seed": 40700,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "n-host-owner-held-noclassify",
+  "action": "kill-host-owner",
+  "repeat": 2,
+  "trials": 800,
+  "conc": 400,
+  "flows": 512,
+  "kill_ms": [
+   100,
+   1400
+  ],
+  "clients": "--n 1048576 --m 1048576 --srv-pause 300 --cli-pause 300 --fin mix --io-timeout 15",
+  "owners": "--intake-rcvbuf 4194304 --classify-abort no",
+  "strict": false,
+  "seed": 40800,
+  "settle_s": 30,
+  "client_timeout": 300
+ }
+]

@@ -1,0 +1,3 @@
+{"ev":"relay_ready","fwd":"Splice","legs":"vsock","native":false,"peer_mode":"gateway","uname":"7.0.0-29-generic"}
+{"early":0,"ev":"relay_paired","hs_us":1083,"id":1,"legs_open_us":615,"peer_c":"198.18.28.1:53063"}
+{"bytes":100000,"dir":"c2s","end":"eof_clean","errno":0,"ev":"pump_end","id":1,"splice_einval":0,"t_us":1791706496421926}

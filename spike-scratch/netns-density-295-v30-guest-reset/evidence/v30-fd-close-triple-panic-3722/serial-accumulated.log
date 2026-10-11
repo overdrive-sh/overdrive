@@ -1,0 +1,48 @@
+[    0.002946] KHO: Failed to reserve nid 0 scratch buffer
+GUEST_INIT uname_r=7.0.0-29-generic cmdline=console=ttyS0 panic=1 loglevel=4 reboot=t
+[   0.000] GUEST_BOOT boot_id=4fabc72e-00b9-45e9-9c65-eb8763b71d3f
+GUEST_LISTEN_READY
+[   0.002] GUEST_HELLO_SENT
+GUEST_GO triple-panic
+GUEST_ACT triple-panic
+[    1.433363] sysrq: Trigger a crash
+[    1.434592] Kernel panic - not syncing: sysrq triggered crash
+[    1.436480] CPU: 0 UID: 0 PID: 80 Comm: guest-run.sh Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.439613] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.441716] Call Trace:
+[    1.442590]  <TASK>
+[    1.443348]  show_stack+0x49/0x60
+[    1.444494]  dump_stack_lvl+0x5f/0x90
+[    1.445755]  dump_stack+0x10/0x18
+[    1.446892]  vpanic+0x262/0x4b0
+[    1.447981]  panic+0x67/0x70
+[    1.448992]  sysrq_handle_crash+0x1a/0x20
+[    1.450343]  __handle_sysrq.cold+0x23/0x167
+[    1.451758]  write_sysrq_trigger+0x62/0xa0
+[    1.453134]  proc_reg_write+0x6d/0xd0
+[    1.454379]  vfs_write+0xce/0x490
+[    1.455530]  ksys_write+0x71/0xf0
+[    1.456696]  __x64_sys_write+0x19/0x30
+[    1.457969]  x64_sys_call+0x22f/0x2390
+[    1.459241]  do_syscall_64+0x105/0x5a0
+[    1.460511]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.462117]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[    1.464047]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.465642]  ? irqentry_exit+0x97/0x6f0
+[    1.466948]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.468529]  ? exc_page_fault+0x94/0x1e0
+[    1.469866]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.471446]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.473116] RIP: 0033:0x4ccde6
+[    1.474174] Code: 47 ba 04 00 00 00 48 c7 c0 e8 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[    1.478655] RSP: 002b:00007ffcda4cd040 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[    1.480393] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00000000004ccde6
+[    1.482051] RDX: 0000000000000002 RSI: 000000003fd5e900 RDI: 0000000000000001
+[    1.483704] RBP: 00007ffcda4cd050 R08: 0000000000000000 R09: 0000000000000000
+[    1.485343] R10: 0000000000000000 R11: 0000000000000202 R12: 000000003fd5e900
+[    1.486994] R13: 0000000000000002 R14: 0000000000000000 R15: 000000003fd5e902
+[    1.488654]  </TASK>
+[    1.489306] Kernel Offset: 0x3a200000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    1.490847] Rebooting in 1 seconds..
+
+==== SERIAL FILE TRUNCATED (VM re-created) ====

@@ -1,0 +1,92 @@
+[
+ {
+  "name": "vs-none",
+  "action": "none",
+  "repeat": 1,
+  "trials": 300,
+  "conc": 64,
+  "flows": 256,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15",
+  "owners": "",
+  "strict": true,
+  "seed": 7001,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "vs-kill-guest",
+  "action": "kill-guest-owner",
+  "repeat": 1,
+  "trials": 400,
+  "conc": 200,
+  "flows": 256,
+  "kill_ms": [
+   100,
+   900
+  ],
+  "clients": "--n 1048576 --m 1048576 --srv-pause 300 --cli-pause 300 --fin mix --io-timeout 15",
+  "owners": "",
+  "strict": false,
+  "seed": 7002,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "vs-kill-host",
+  "action": "kill-host-owner",
+  "repeat": 1,
+  "trials": 400,
+  "conc": 200,
+  "flows": 256,
+  "kill_ms": [
+   100,
+   900
+  ],
+  "clients": "--n 1048576 --m 1048576 --srv-pause 300 --cli-pause 300 --fin mix --io-timeout 15",
+  "owners": "",
+  "strict": false,
+  "seed": 7003,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "vs-ctl-loss",
+  "action": "ctl-loss",
+  "repeat": 1,
+  "trials": 400,
+  "conc": 200,
+  "flows": 256,
+  "kill_ms": [
+   100,
+   900
+  ],
+  "clients": "--n 1048576 --m 1048576 --srv-pause 300 --cli-pause 300 --fin mix --io-timeout 15",
+  "owners": "",
+  "strict": false,
+  "seed": 7004,
+  "settle_s": 30,
+  "client_timeout": 300
+ },
+ {
+  "name": "vs-crash-rst",
+  "action": "none",
+  "repeat": 1,
+  "trials": 200,
+  "conc": 64,
+  "flows": 256,
+  "kill_ms": [
+   0,
+   1
+  ],
+  "clients": "--n mix --m mix --srv-pause mix --cli-pause mix --fin mix --io-timeout 15 --crash-permille 300 --crash-kind rst --crash-ms-max 25",
+  "owners": "",
+  "strict": false,
+  "seed": 7005,
+  "settle_s": 30,
+  "client_timeout": 300
+ }
+]
