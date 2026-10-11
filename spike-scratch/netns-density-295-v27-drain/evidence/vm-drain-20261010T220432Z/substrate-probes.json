@@ -1,0 +1,9 @@
+{
+ "uname_r": "7.0.0-29-generic",
+ "machine": "x86_64",
+ "systemd_detect_virt": "none",
+ "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n",
+ "cpu": "AMD EPYC 8024P 8-Core Processor",
+ "nproc": 16,
+ "failures": []
+}

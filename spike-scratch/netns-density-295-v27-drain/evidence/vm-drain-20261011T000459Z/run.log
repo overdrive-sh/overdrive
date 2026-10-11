@@ -1,0 +1,42 @@
+[00:04:59] === v27 vm stage drain ['vm-naive-p300', '--arm', 'none', '--trials', '1500', '--conc', '128', '--flows', '256', '--n', '1048576', '--m', '1048576', '--srv-pause', '300', '--cli-pause', '300', '--diag-seq', '--io-timeout', '40', '--events-sample', '500']
+[00:04:59] === preflight (fail closed)
+[00:05:00] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[00:05:00] $ modprobe vhost_vsock; modprobe vsock_loopback; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[00:05:00]     vsock_diag             12288  0
+[00:05:00]     vhost_vsock            28672  1
+[00:05:00]     vhost                  69632  1 vhost_vsock
+[00:05:00]     vhost_iotlb            16384  1 vhost
+[00:05:00]     vsock_loopback         12288  0
+[00:05:00]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[00:05:00]     vmw_vsock_vmci_transport    53248  0
+[00:05:00]     vsock                  73728  6 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[00:05:00]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[00:05:00] === guest image
+[00:05:00] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "487c29c3e63e", "drainprobe": "35991bcbff17", "bpf_obj": "7dfb4344b9d6", "cloud_hypervisor": "eadddf1bbcdc"}
+[00:05:00] launch VM: /tmp/v27-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v27-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v27-work/out/vm-drain-20261011T000459Z/serial.log --console off --vsock cid=3360,backend=vhost-kernel --log-file /tmp/v27-work/out/vm-drain-20261011T000459Z/ch.log -v
+[00:05:01] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[00:05:01] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+
+/sys/kernel/tracing/events/vsock/virtio_transport_recv_pkt:
+1024	65535
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[00:05:11] guest rc=0 GUEST_DONE
+
+[00:05:11] $ pgrep -af cloud-hypervisor | grep -v pgrep; ls -d /sys/fs/cgroup/v27-* 2>&1; true (rc=0)
+[00:05:11]     ls: cannot access '/sys/fs/cgroup/v27-*': No such file or directory

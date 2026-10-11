@@ -1,0 +1,1932 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "label": "vm-t4-vlate2-banner100000",
+  "args": [
+   "--arm",
+   "owner",
+   "--v-late",
+   "2",
+   "--srv-banner",
+   "100000",
+   "--trials",
+   "400",
+   "--conc",
+   "32",
+   "--flows",
+   "64",
+   "--n",
+   "small",
+   "--m",
+   "small",
+   "--io-timeout",
+   "8",
+   "--settle-s",
+   "4",
+   "--diag-seq",
+   "--events-sample",
+   "50"
+  ],
+  "guest_uname": "7.0.0-29-generic",
+  "host_uname": "7.0.0-29-generic",
+  "wall_s": 38.30825734138489,
+  "trials": {
+   "total": 400,
+   "pass": 369,
+   "fail": {
+    "cli_recv_err:TIMEOUT": 31
+   },
+   "examples": [
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      8,
+      42348,
+      48249,
+      42348,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16689,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      8,
+      42348,
+      true,
+      true,
+      null,
+      48249,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      10,
+      68819,
+      15888,
+      68819,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16689,
+      0,
+      false,
+      null
+     ],
+     "srv": [
+      10,
+      68819,
+      true,
+      true,
+      null,
+      15888,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      6,
+      5980,
+      5732,
+      5980,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16689,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      6,
+      5980,
+      true,
+      true,
+      null,
+      5732,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      1,
+      15581,
+      419,
+      15581,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16690,
+      0,
+      false,
+      null
+     ],
+     "srv": [
+      1,
+      15581,
+      true,
+      true,
+      null,
+      419,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      20,
+      9241,
+      47978,
+      9241,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16686,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      20,
+      9241,
+      true,
+      true,
+      null,
+      47978,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      14,
+      2961,
+      48136,
+      2961,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16688,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      14,
+      2961,
+      true,
+      true,
+      null,
+      48136,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      26,
+      21834,
+      0,
+      21834,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16686,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      26,
+      21834,
+      true,
+      true,
+      null,
+      0,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      18,
+      2518,
+      3682,
+      2518,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16688,
+      0,
+      false,
+      null
+     ],
+     "srv": [
+      18,
+      2518,
+      true,
+      true,
+      null,
+      3682,
+      null,
+      false
+     ]
+    }
+   ]
+  },
+  "guest": {
+   "complete_owner_cas": 214,
+   "complete_record_fexit": 555,
+   "flows_clean": 369,
+   "flows_started": 400,
+   "max_eof_to_complete_us": 4941,
+   "n_eof_to_complete": 769,
+   "owner_waits_for_record": 586,
+   "records": 555,
+   "stale_event_for_finished_flow": 11,
+   "sum_eof_to_complete_us": 154406,
+   "tcp_eof_deficit_bytes": 10282864,
+   "tcp_eof_deficit_max": 69866,
+   "tcp_eof_events": 400,
+   "tcp_eof_sent_lt_goal": 362,
+   "vsock_eof_deficit_bytes": 14881604,
+   "vsock_eof_events": 400,
+   "vsock_eof_fwd_lt_goal": 31,
+   "vsock_eof_sent_lt_goal": 229
+  },
+  "host": {
+   "complete_owner_cas": 634,
+   "complete_record_fexit": 166,
+   "flows_clean": 400,
+   "flows_started": 400,
+   "max_eof_to_complete_us": 2584,
+   "n_eof_to_complete": 800,
+   "owner_waits_for_record": 166,
+   "records": 166,
+   "sum_eof_to_complete_us": 18038,
+   "tcp_eof_deficit_bytes": 4675026,
+   "tcp_eof_deficit_max": 169021,
+   "tcp_eof_events": 400,
+   "tcp_eof_sent_lt_goal": 125,
+   "vsock_eof_deficit_bytes": 1125190,
+   "vsock_eof_events": 400,
+   "vsock_eof_sent_lt_goal": 42
+  },
+  "guest_live_at_end": 31,
+  "host_live_at_end": 0,
+  "guest_stuck": [
+   {
+    "age_ms": 37103,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     0,
+     1
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 1,
+    "fwd": [
+     15637,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     15637,
+     100419
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100419,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     15637,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37103,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     2,
+     3
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 2,
+    "fwd": [
+     47510,
+     69268
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     47510,
+     168384
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 168384,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     47510,
+     69268
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37103,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     4,
+     5
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 3,
+    "fwd": [
+     65235,
+     58892
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     65235,
+     158088
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 158088,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     65235,
+     58892
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37103,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     6,
+     7
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 4,
+    "fwd": [
+     35633,
+     43964
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     35633,
+     140703
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 140703,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     35633,
+     43964
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37102,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     8,
+     9
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 5,
+    "fwd": [
+     57,
+     62624
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     57,
+     161131
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 161131,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     57,
+     62624
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37102,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     10,
+     11
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 6,
+    "fwd": [
+     6036,
+     7464
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     6036,
+     105732
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 105732,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     6036,
+     7464
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37101,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     12,
+     13
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 7,
+    "fwd": [
+     21296,
+     14928
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     21296,
+     114442
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 114442,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     21296,
+     14928
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37101,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     14,
+     15
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 8,
+    "fwd": [
+     27572,
+     26124
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     27572,
+     125593
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 125593,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     27572,
+     26124
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37101,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     16,
+     17
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 9,
+    "fwd": [
+     42404,
+     51428
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     42404,
+     148249
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 148249,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     42404,
+     51428
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37101,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     18,
+     19
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 10,
+    "fwd": [
+     68875,
+     18660
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     68875,
+     115888
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 115888,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     68875,
+     18660
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37100,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     20,
+     21
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 11,
+    "fwd": [
+     48800,
+     51428
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     48800,
+     149708
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 149708,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     48800,
+     51428
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37100,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     22,
+     23
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 12,
+    "fwd": [
+     61288,
+     18660
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     61288,
+     116658
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 116658,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     61288,
+     18660
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37100,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     24,
+     25
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 13,
+    "fwd": [
+     50067,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     50067,
+     100921
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100921,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     50067,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37100,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     26,
+     27
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 14,
+    "fwd": [
+     3017,
+     51428
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     3017,
+     148136
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 148136,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     3017,
+     51428
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     28,
+     29
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 15,
+    "fwd": [
+     20535,
+     7464
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     20535,
+     107068
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 107068,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     20535,
+     7464
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     30,
+     31
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 16,
+    "fwd": [
+     41851,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     41851,
+     100000
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100000,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     41851,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     32,
+     33
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 17,
+    "fwd": [
+     2574,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     2574,
+     103682
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 103682,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     2574,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     34,
+     35
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 18,
+    "fwd": [
+     50369,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     50369,
+     100000
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100000,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     50369,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     36,
+     37
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 19,
+    "fwd": [
+     62964,
+     55160
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     62964,
+     154860
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 154860,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     62964,
+     55160
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     38,
+     39
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 20,
+    "fwd": [
+     9297,
+     51428
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     9297,
+     147978
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 147978,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     9297,
+     51428
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     40,
+     41
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 21,
+    "fwd": [
+     20924,
+     58892
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     20924,
+     155524
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 155524,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     20924,
+     58892
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     42,
+     43
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 22,
+    "fwd": [
+     41259,
+     40232
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     41259,
+     138306
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 138306,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     41259,
+     40232
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     44,
+     45
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 23,
+    "fwd": [
+     56,
+     40232
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     56,
+     137082
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 137082,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     56,
+     40232
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     46,
+     47
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 24,
+    "fwd": [
+     27755,
+     58892
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     27755,
+     155692
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 155692,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     27755,
+     58892
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37099,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     48,
+     49
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 25,
+    "fwd": [
+     4664,
+     18660
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     4664,
+     118422
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 118422,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     4664,
+     18660
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37098,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     50,
+     51
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 26,
+    "fwd": [
+     21890,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     21890,
+     100000
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100000,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     21890,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37098,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     52,
+     53
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 27,
+    "fwd": [
+     57,
+     14928
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     57,
+     113671
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 113671,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     57,
+     14928
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37098,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     54,
+     55
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 28,
+    "fwd": [
+     17567,
+     7464
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     17567,
+     104107
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 104107,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     17567,
+     7464
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37098,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     56,
+     57
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 29,
+    "fwd": [
+     14292,
+     65536
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     14292,
+     165159
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 165159,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     14292,
+     65536
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37098,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     58,
+     59
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 30,
+    "fwd": [
+     26463,
+     26124
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     26463,
+     124517
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 124517,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     26463,
+     26124
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 37052,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     100,
+     101
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 51,
+    "fwd": [
+     41146,
+     69268
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     41146,
+     100000
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100000,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     41146,
+     69268
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   }
+  ],
+  "host_stuck": [],
+  "guest_bpf": {
+   "cb_flags_set_err": 0,
+   "cb_flags_set_ok": 400,
+   "fexit_b_recursion_misses": 0,
+   "fexit_recursion_misses": 0,
+   "fexit_run_cnt": 0,
+   "fexit_send_calls": 14192,
+   "fexit_send_err": 0,
+   "fexit_send_err_last_errno": 0,
+   "fexit_send_untracked_target": 469,
+   "fexit_send_zero": 0,
+   "fire_fexit": 555,
+   "fire_state_cb": 0,
+   "install_fail": 0,
+   "p2_verdicts": 0,
+   "park_empty": 0,
+   "parked": 400,
+   "ringbuf_output_fail": 0,
+   "send_err_hist": {},
+   "state_cb_armed": 0,
+   "state_cb_br_zero": 0,
+   "state_cb_calls": 1540,
+   "state_cb_est_to_closewait": 400,
+   "state_cb_fw1_to_closing": 0,
+   "state_cb_fw2_to_close": 0,
+   "state_cb_nocell": 0,
+   "tcp_overlap_bytes": 0,
+   "tcp_overlap_skbs": 0,
+   "tracepoint_drops": 0,
+   "tracepoint_records": 0,
+   "verdict_noroute": 0,
+   "verdict_redirect_fail": 0,
+   "verdict_redirect_ok": 14661,
+   "verdict_zero_len_drop": 34
+  },
+  "host_bpf": {
+   "cb_flags_set_err": 0,
+   "cb_flags_set_ok": 400,
+   "fexit_b_recursion_misses": 0,
+   "fexit_recursion_misses": 0,
+   "fexit_run_cnt": 0,
+   "fexit_send_calls": 4809,
+   "fexit_send_err": 0,
+   "fexit_send_err_last_errno": 0,
+   "fexit_send_untracked_target": 0,
+   "fexit_send_zero": 0,
+   "fire_fexit": 166,
+   "fire_state_cb": 0,
+   "install_fail": 0,
+   "p2_verdicts": 0,
+   "park_empty": 0,
+   "parked": 0,
+   "ringbuf_output_fail": 0,
+   "send_err_hist": {},
+   "state_cb_armed": 0,
+   "state_cb_br_zero": 0,
+   "state_cb_calls": 1200,
+   "state_cb_est_to_closewait": 0,
+   "state_cb_fw1_to_closing": 0,
+   "state_cb_fw2_to_close": 400,
+   "state_cb_nocell": 0,
+   "tcp_overlap_bytes": 0,
+   "tcp_overlap_skbs": 0,
+   "tracepoint_drops": 0,
+   "tracepoint_records": 0,
+   "verdict_noroute": 0,
+   "verdict_redirect_fail": 0,
+   "verdict_redirect_ok": 4809,
+   "verdict_zero_len_drop": 374
+  }
+ }
+}

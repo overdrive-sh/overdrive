@@ -1,0 +1,51 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "guest_to_host": {
+   "guest_sender": "{\"cmd\":\"t3\",\"mode\":\"send\",\"sender\":{\"sender_errors\":0,\"sender_trials\":6000},\"uname\":\"7.0.0-29-generic\"}",
+   "host_receiver": {
+    "cmd": "t3",
+    "mode": "recv",
+    "summary": {
+     "close_variant_trials": 2001,
+     "credit_exhausted_confirmed(>=100kB accepted)": 600,
+     "credit_fill_early_eof": 0,
+     "credit_fill_trials": 600,
+     "early_eof": 0,
+     "examples": [],
+     "excess_bytes": 0,
+     "expected": 6000,
+     "max_bytes_accepted": 19595272,
+     "pattern_errors": 0,
+     "shutwr_variant_trials": 3999,
+     "verdicts": 6000
+    },
+    "uname": "7.0.0-29-generic"
+   }
+  },
+  "host_to_guest": {
+   "host_sender": "{\"cmd\":\"t3\",\"mode\":\"send\",\"sender\":{\"sender_errors\":0,\"sender_trials\":6000},\"uname\":\"7.0.0-29-generic\"}",
+   "guest_receiver": {
+    "cmd": "t3",
+    "mode": "recv",
+    "summary": {
+     "close_variant_trials": 2001,
+     "credit_exhausted_confirmed(>=100kB accepted)": 601,
+     "credit_fill_early_eof": 0,
+     "credit_fill_trials": 601,
+     "early_eof": 0,
+     "examples": [],
+     "excess_bytes": 0,
+     "expected": 6000,
+     "max_bytes_accepted": 4194312,
+     "pattern_errors": 0,
+     "shutwr_variant_trials": 3999,
+     "verdicts": 6000
+    },
+    "uname": "7.0.0-29-generic"
+   }
+  }
+ }
+}

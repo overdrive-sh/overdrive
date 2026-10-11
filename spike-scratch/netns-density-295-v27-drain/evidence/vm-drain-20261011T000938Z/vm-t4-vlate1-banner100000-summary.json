@@ -1,0 +1,3579 @@
+{
+ "label": "vm-t4-vlate1-banner100000",
+ "args": [
+  "--arm",
+  "owner",
+  "--v-late",
+  "1",
+  "--srv-banner",
+  "100000",
+  "--trials",
+  "400",
+  "--conc",
+  "32",
+  "--flows",
+  "64",
+  "--n",
+  "small",
+  "--m",
+  "small",
+  "--io-timeout",
+  "8",
+  "--settle-s",
+  "4",
+  "--diag-seq",
+  "--events-sample",
+  "50"
+ ],
+ "guest_uname": "7.0.0-29-generic",
+ "host_uname": "7.0.0-29-generic",
+ "wall_s": 54.53475904464722,
+ "trials": {
+  "total": 400,
+  "pass": 139,
+  "fail": {
+   "cli_recv_err:TIMEOUT": 64,
+   "no_server_result": 197
+  },
+  "examples": [
+   {
+    "why": "cli_recv_err:TIMEOUT",
+    "row": [
+     8,
+     42348,
+     48249,
+     42348,
+     null,
+     0,
+     true,
+     false,
+     "TIMEOUT",
+     16663,
+     0,
+     true,
+     null
+    ],
+    "srv": [
+     8,
+     42348,
+     true,
+     true,
+     null,
+     48249,
+     null,
+     false
+    ]
+   },
+   {
+    "why": "cli_recv_err:TIMEOUT",
+    "row": [
+     19,
+     62908,
+     54860,
+     62908,
+     null,
+     0,
+     true,
+     false,
+     "TIMEOUT",
+     16661,
+     0,
+     true,
+     null
+    ],
+    "srv": [
+     19,
+     62908,
+     true,
+     true,
+     null,
+     54860,
+     null,
+     false
+    ]
+   },
+   {
+    "why": "cli_recv_err:TIMEOUT",
+    "row": [
+     12,
+     61232,
+     16658,
+     61232,
+     null,
+     0,
+     true,
+     false,
+     "TIMEOUT",
+     16663,
+     0,
+     false,
+     null
+    ],
+    "srv": [
+     12,
+     61232,
+     true,
+     true,
+     null,
+     16658,
+     null,
+     false
+    ]
+   },
+   {
+    "why": "cli_recv_err:TIMEOUT",
+    "row": [
+     26,
+     21834,
+     0,
+     21834,
+     null,
+     0,
+     true,
+     false,
+     "TIMEOUT",
+     16660,
+     0,
+     true,
+     null
+    ],
+    "srv": [
+     26,
+     21834,
+     true,
+     true,
+     null,
+     0,
+     null,
+     false
+    ]
+   },
+   {
+    "why": "cli_recv_err:TIMEOUT",
+    "row": [
+     10,
+     68819,
+     15888,
+     68819,
+     null,
+     0,
+     true,
+     false,
+     "TIMEOUT",
+     16663,
+     0,
+     false,
+     null
+    ],
+    "srv": [
+     10,
+     68819,
+     true,
+     true,
+     null,
+     15888,
+     null,
+     false
+    ]
+   },
+   {
+    "why": "cli_recv_err:TIMEOUT",
+    "row": [
+     2,
+     47454,
+     68384,
+     47454,
+     null,
+     0,
+     true,
+     false,
+     "TIMEOUT",
+     16664,
+     0,
+     false,
+     null
+    ],
+    "srv": [
+     2,
+     47454,
+     true,
+     true,
+     null,
+     68384,
+     null,
+     false
+    ]
+   },
+   {
+    "why": "cli_recv_err:TIMEOUT",
+    "row": [
+     1,
+     15581,
+     419,
+     15581,
+     null,
+     0,
+     true,
+     false,
+     "TIMEOUT",
+     16665,
+     0,
+     false,
+     null
+    ],
+    "srv": [
+     1,
+     15581,
+     true,
+     true,
+     null,
+     419,
+     null,
+     false
+    ]
+   },
+   {
+    "why": "cli_recv_err:TIMEOUT",
+    "row": [
+     7,
+     21240,
+     14442,
+     21240,
+     null,
+     0,
+     true,
+     false,
+     "TIMEOUT",
+     16663,
+     0,
+     true,
+     null
+    ],
+    "srv": [
+     7,
+     21240,
+     true,
+     true,
+     null,
+     14442,
+     null,
+     false
+    ]
+   }
+  ]
+ },
+ "guest": {
+  "complete_owner_cas": 58,
+  "complete_record_fexit": 284,
+  "flows_clean": 139,
+  "flows_started": 203,
+  "intake_without_park_slot": 197,
+  "max_eof_to_complete_us": 6379,
+  "n_eof_to_complete": 342,
+  "owner_waits_for_record": 348,
+  "records": 284,
+  "stale_event_for_finished_flow": 1,
+  "sum_eof_to_complete_us": 149429,
+  "tcp_eof_deficit_bytes": 5632044,
+  "tcp_eof_deficit_max": 69866,
+  "tcp_eof_events": 203,
+  "tcp_eof_sent_lt_goal": 196,
+  "vsock_eof_deficit_bytes": 11051079,
+  "vsock_eof_events": 203,
+  "vsock_eof_fwd_lt_goal": 64,
+  "vsock_eof_sent_lt_goal": 154
+ },
+ "host": {
+  "complete_owner_cas": 302,
+  "complete_record_fexit": 104,
+  "flows_clean": 203,
+  "flows_started": 203,
+  "max_eof_to_complete_us": 2865,
+  "n_eof_to_complete": 406,
+  "owner_waits_for_record": 104,
+  "records": 104,
+  "sum_eof_to_complete_us": 42646,
+  "tcp_eof_deficit_bytes": 3037987,
+  "tcp_eof_deficit_max": 161083,
+  "tcp_eof_events": 203,
+  "tcp_eof_sent_lt_goal": 79,
+  "vsock_eof_deficit_bytes": 816923,
+  "vsock_eof_events": 203,
+  "vsock_eof_sent_lt_goal": 27
+ },
+ "guest_live_at_end": 64,
+ "host_live_at_end": 0,
+ "guest_stuck": [
+  {
+   "age_ms": 53402,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    0,
+    1
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 1,
+   "fwd": [
+    15637,
+    3732
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    15637,
+    100419
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100419,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    15637,
+    3732
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53402,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    2,
+    3
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 2,
+   "fwd": [
+    65235,
+    58892
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    65235,
+    158088
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 158088,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    65235,
+    58892
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53401,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    4,
+    5
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 3,
+   "fwd": [
+    47510,
+    69268
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    47510,
+    168384
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 168384,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    47510,
+    69268
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53400,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    6,
+    7
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 4,
+   "fwd": [
+    35633,
+    43964
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    35633,
+    140703
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 140703,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    35633,
+    43964
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53400,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    8,
+    9
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 5,
+   "fwd": [
+    57,
+    62624
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    57,
+    161131
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 161131,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    57,
+    62624
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53400,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    10,
+    11
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 6,
+   "fwd": [
+    6036,
+    7464
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    6036,
+    105732
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 105732,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    6036,
+    7464
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53399,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    12,
+    13
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 7,
+   "fwd": [
+    21296,
+    14928
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    21296,
+    114442
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 114442,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    21296,
+    14928
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53399,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    14,
+    15
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 8,
+   "fwd": [
+    42404,
+    51428
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    42404,
+    148249
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 148249,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    42404,
+    51428
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53398,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    16,
+    17
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 9,
+   "fwd": [
+    27572,
+    26124
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    27572,
+    125593
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 125593,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    27572,
+    26124
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53398,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    18,
+    19
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 10,
+   "fwd": [
+    68875,
+    18660
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    68875,
+    115888
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 115888,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    68875,
+    18660
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53398,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    20,
+    21
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 11,
+   "fwd": [
+    48800,
+    51428
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    48800,
+    149708
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 149708,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    48800,
+    51428
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53397,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    22,
+    23
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 12,
+   "fwd": [
+    61288,
+    18660
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    61288,
+    116658
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 116658,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    61288,
+    18660
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53397,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    24,
+    25
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 13,
+   "fwd": [
+    50067,
+    3732
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    50067,
+    100921
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100921,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    50067,
+    3732
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53397,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    26,
+    27
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 14,
+   "fwd": [
+    3017,
+    51428
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    3017,
+    148136
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 148136,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    3017,
+    51428
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53397,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    28,
+    29
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 15,
+   "fwd": [
+    20535,
+    7464
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    20535,
+    107068
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 107068,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    20535,
+    7464
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53397,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    30,
+    31
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 16,
+   "fwd": [
+    50369,
+    0
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    50369,
+    100000
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100000,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    50369,
+    0
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53397,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    32,
+    33
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 17,
+   "fwd": [
+    41851,
+    0
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    41851,
+    100000
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100000,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    41851,
+    0
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53397,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    34,
+    35
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 18,
+   "fwd": [
+    2574,
+    3732
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    2574,
+    103682
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 103682,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    2574,
+    3732
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53397,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    36,
+    37
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 19,
+   "fwd": [
+    62964,
+    55160
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    62964,
+    154860
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 154860,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    62964,
+    55160
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    38,
+    39
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 20,
+   "fwd": [
+    9297,
+    51428
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    9297,
+    147978
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 147978,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    9297,
+    51428
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    40,
+    41
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 21,
+   "fwd": [
+    20924,
+    58892
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    20924,
+    155524
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 155524,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    20924,
+    58892
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    42,
+    43
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 22,
+   "fwd": [
+    41259,
+    40232
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    41259,
+    138306
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 138306,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    41259,
+    40232
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    44,
+    45
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 23,
+   "fwd": [
+    56,
+    40232
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    56,
+    137082
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 137082,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    56,
+    40232
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    46,
+    47
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 24,
+   "fwd": [
+    27755,
+    58892
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    27755,
+    155692
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 155692,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    27755,
+    58892
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    48,
+    49
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 25,
+   "fwd": [
+    4664,
+    18660
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    4664,
+    118422
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 118422,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    4664,
+    18660
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    50,
+    51
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 26,
+   "fwd": [
+    21890,
+    0
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    21890,
+    100000
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100000,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    21890,
+    0
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    52,
+    53
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 27,
+   "fwd": [
+    57,
+    14928
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    57,
+    113671
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 113671,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    57,
+    14928
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53396,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    54,
+    55
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 28,
+   "fwd": [
+    17567,
+    7464
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    17567,
+    104107
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 104107,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    17567,
+    7464
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53395,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    56,
+    57
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 29,
+   "fwd": [
+    14292,
+    65536
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    14292,
+    165159
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 165159,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    14292,
+    65536
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53395,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    58,
+    59
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 30,
+   "fwd": [
+    26463,
+    26124
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    26463,
+    124517
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 124517,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    26463,
+    26124
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53371,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    66,
+    67
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 34,
+   "fwd": [
+    49920,
+    3732
+   ],
+   "gen": [
+    0,
+    0
+   ],
+   "goal": [
+    49920,
+    100001
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100001,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    49920,
+    3732
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 53143,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    76,
+    77
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 171,
+   "fwd": [
+    12931,
+    47696
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    12931,
+    144601
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 144601,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    12931,
+    47696
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36737,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    78,
+    79
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 172,
+   "fwd": [
+    5080,
+    40232
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    5080,
+    139573
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 139573,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    5080,
+    40232
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36737,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    82,
+    83
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 173,
+   "fwd": [
+    9544,
+    32768
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    9544,
+    130503
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 130503,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    9544,
+    32768
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36737,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    80,
+    81
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 174,
+   "fwd": [
+    16137,
+    32768
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    16137,
+    132088
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 132088,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    16137,
+    32768
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36737,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    84,
+    85
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 175,
+   "fwd": [
+    55722,
+    69268
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    55722,
+    166172
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 166172,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    55722,
+    69268
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36736,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    86,
+    87
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 176,
+   "fwd": [
+    57072,
+    58892
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    57072,
+    157400
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 157400,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    57072,
+    58892
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36736,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    88,
+    89
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 177,
+   "fwd": [
+    32813,
+    7464
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    32813,
+    104624
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 104624,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    32813,
+    7464
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36735,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    90,
+    91
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 178,
+   "fwd": [
+    18272,
+    40232
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    18272,
+    137305
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 137305,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    18272,
+    40232
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36735,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    92,
+    93
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 179,
+   "fwd": [
+    26607,
+    22392
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    26607,
+    121644
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 121644,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    26607,
+    22392
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36735,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    94,
+    95
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 180,
+   "fwd": [
+    11488,
+    47696
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    11488,
+    145445
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 145445,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    11488,
+    47696
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36735,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    98,
+    99
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 181,
+   "fwd": [
+    56,
+    55160
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    56,
+    153670
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 153670,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    56,
+    55160
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36735,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    96,
+    97
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 182,
+   "fwd": [
+    56,
+    3732
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    56,
+    100001
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100001,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    56,
+    3732
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36734,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    100,
+    101
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 183,
+   "fwd": [
+    6497,
+    18660
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    6497,
+    115845
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 115845,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    6497,
+    18660
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36734,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    102,
+    103
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 184,
+   "fwd": [
+    16120,
+    0
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    16120,
+    100000
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100000,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    16120,
+    0
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36734,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    104,
+    105
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 185,
+   "fwd": [
+    11001,
+    11196
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    11001,
+    108961
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 108961,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    11001,
+    11196
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36734,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    106,
+    107
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 186,
+   "fwd": [
+    66666,
+    14928
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    66666,
+    113244
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 113244,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    66666,
+    14928
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36734,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    108,
+    109
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 187,
+   "fwd": [
+    45418,
+    0
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    45418,
+    100000
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100000,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    45418,
+    0
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36733,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    110,
+    111
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 188,
+   "fwd": [
+    61155,
+    40232
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    61155,
+    137662
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 137662,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    61155,
+    40232
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36733,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    112,
+    113
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 189,
+   "fwd": [
+    69866,
+    7464
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    69866,
+    107141
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 107141,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    69866,
+    7464
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36733,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    114,
+    115
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 190,
+   "fwd": [
+    57,
+    18660
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    57,
+    117609
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 117609,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    57,
+    18660
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36732,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    116,
+    117
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 191,
+   "fwd": [
+    10964,
+    7464
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    10964,
+    107032
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 107032,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    10964,
+    7464
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36732,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    118,
+    119
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 192,
+   "fwd": [
+    53608,
+    65536
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    53608,
+    162833
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 162833,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    53608,
+    65536
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36732,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    120,
+    121
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 193,
+   "fwd": [
+    57,
+    73000
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    57,
+    169494
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 169494,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    57,
+    73000
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36732,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    122,
+    123
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 194,
+   "fwd": [
+    43667,
+    7464
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    43667,
+    106311
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 106311,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    43667,
+    7464
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36732,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    124,
+    125
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 195,
+   "fwd": [
+    56004,
+    40232
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    56004,
+    137231
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 137231,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    56004,
+    40232
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36731,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    126,
+    127
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 196,
+   "fwd": [
+    26098,
+    55160
+   ],
+   "gen": [
+    4,
+    4
+   ],
+   "goal": [
+    26098,
+    153426
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 153426,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    26098,
+    55160
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36731,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    62,
+    63
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 197,
+   "fwd": [
+    53708,
+    7464
+   ],
+   "gen": [
+    5,
+    5
+   ],
+   "goal": [
+    53708,
+    105286
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 105286,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    53708,
+    7464
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36731,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    60,
+    61
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 198,
+   "fwd": [
+    40691,
+    3732
+   ],
+   "gen": [
+    5,
+    5
+   ],
+   "goal": [
+    40691,
+    100001
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100001,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    40691,
+    3732
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36731,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    64,
+    65
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 199,
+   "fwd": [
+    67754,
+    62624
+   ],
+   "gen": [
+    5,
+    5
+   ],
+   "goal": [
+    67754,
+    161134
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 161134,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    67754,
+    62624
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36730,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    68,
+    69
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 200,
+   "fwd": [
+    40237,
+    11196
+   ],
+   "gen": [
+    5,
+    5
+   ],
+   "goal": [
+    40237,
+    110692
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 110692,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    40237,
+    11196
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36730,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    70,
+    71
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 201,
+   "fwd": [
+    44087,
+    69268
+   ],
+   "gen": [
+    5,
+    5
+   ],
+   "goal": [
+    44087,
+    166812
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 166812,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    44087,
+    69268
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36730,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    72,
+    73
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 202,
+   "fwd": [
+    23345,
+    43964
+   ],
+   "gen": [
+    5,
+    5
+   ],
+   "goal": [
+    23345,
+    142572
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 142572,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    23345,
+    43964
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  },
+  {
+   "age_ms": 36730,
+   "armed": [
+    true,
+    true
+   ],
+   "cells": [
+    74,
+    75
+   ],
+   "done": [
+    true,
+    false
+   ],
+   "eof": [
+    true,
+    true
+   ],
+   "flow": 203,
+   "fwd": [
+    50117,
+    3732
+   ],
+   "gen": [
+    5,
+    5
+   ],
+   "goal": [
+    50117,
+    100001
+   ],
+   "hup": [
+    false,
+    true
+   ],
+   "paired": true,
+   "peer_count": 100001,
+   "poll_o": "IN|OUT|RDHUP",
+   "poll_v": "IN|HUP|RDHUP",
+   "sent": [
+    50117,
+    3732
+   ],
+   "shut": [
+    true,
+    false
+   ],
+   "so_error_o": 0,
+   "so_error_v": 0
+  }
+ ],
+ "host_stuck": [],
+ "guest_bpf": {
+  "cb_flags_set_err": 0,
+  "cb_flags_set_ok": 203,
+  "fexit_b_recursion_misses": 0,
+  "fexit_recursion_misses": 0,
+  "fexit_run_cnt": 0,
+  "fexit_send_calls": 5820,
+  "fexit_send_err": 0,
+  "fexit_send_err_last_errno": 0,
+  "fexit_send_untracked_target": 242,
+  "fexit_send_zero": 0,
+  "fire_fexit": 284,
+  "fire_state_cb": 0,
+  "install_fail": 0,
+  "p2_verdicts": 0,
+  "park_empty": 197,
+  "parked": 203,
+  "ringbuf_output_fail": 0,
+  "send_err_hist": {},
+  "state_cb_armed": 0,
+  "state_cb_br_zero": 0,
+  "state_cb_calls": 684,
+  "state_cb_est_to_closewait": 203,
+  "state_cb_fw1_to_closing": 0,
+  "state_cb_fw2_to_close": 0,
+  "state_cb_nocell": 0,
+  "tcp_overlap_bytes": 0,
+  "tcp_overlap_skbs": 0,
+  "tracepoint_drops": 0,
+  "tracepoint_records": 0,
+  "verdict_noroute": 0,
+  "verdict_redirect_fail": 0,
+  "verdict_redirect_ok": 6062,
+  "verdict_zero_len_drop": 23
+ },
+ "host_bpf": {
+  "cb_flags_set_err": 0,
+  "cb_flags_set_ok": 203,
+  "fexit_b_recursion_misses": 0,
+  "fexit_recursion_misses": 0,
+  "fexit_run_cnt": 0,
+  "fexit_send_calls": 2494,
+  "fexit_send_err": 0,
+  "fexit_send_err_last_errno": 0,
+  "fexit_send_untracked_target": 0,
+  "fexit_send_zero": 0,
+  "fire_fexit": 104,
+  "fire_state_cb": 0,
+  "install_fail": 0,
+  "p2_verdicts": 0,
+  "park_empty": 0,
+  "parked": 0,
+  "ringbuf_output_fail": 0,
+  "send_err_hist": {},
+  "state_cb_armed": 0,
+  "state_cb_br_zero": 0,
+  "state_cb_calls": 609,
+  "state_cb_est_to_closewait": 0,
+  "state_cb_fw1_to_closing": 0,
+  "state_cb_fw2_to_close": 203,
+  "state_cb_nocell": 0,
+  "tcp_overlap_bytes": 0,
+  "tcp_overlap_skbs": 0,
+  "tracepoint_drops": 0,
+  "tracepoint_records": 0,
+  "verdict_noroute": 0,
+  "verdict_redirect_fail": 0,
+  "verdict_redirect_ok": 2494,
+  "verdict_zero_len_drop": 197
+ }
+}

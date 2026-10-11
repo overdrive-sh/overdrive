@@ -91,6 +91,62 @@ kernel cannot hold, a call BPF cannot make, or it exceeds a verifier limit. The
 ADR records the BPF alternative that was evaluated and why it lost. This
 applies to kernel-adjacent dataplane design, not to control-plane logic.
 
+## Ground every kernel claim in the Linux source Overdrive runs
+
+Overdrive runs **Linux 7.0**. Its source is vendored as a submodule at
+`vendors/linux`, checked out at the `v7.0` tag. Every claim about kernel
+behaviour that a design rests on — networking, sockets, vsock, vhost, BPF
+helpers and program types, netfilter, routing, cgroups, process exit,
+ordering and locking — is read in that source and cited as
+`path:line @ v7.0`. This binds three roles:
+
+- **The architect** reads the source before choosing a kernel-adjacent
+  mechanism. A design built on a remembered or assumed kernel behaviour is a
+  hypothesis; read the code path, then design.
+- **The researcher** cites the vendored source, not a web fetch of another
+  version and not prior knowledge.
+- **The reviewer** verifies each cited kernel claim against
+  `vendors/linux` and rejects a design whose kernel claims are uncited, cite
+  another kernel version, or do not match the source.
+
+Source reading establishes what the code does; it does not replace a spike
+for behaviour that depends on timing, load or hardware (see § "Run
+contract-shaping validation before the design is accepted").
+
+**Symptoms during review:** "the kernel guarantees …" with no `path:line`;
+a citation to a different kernel version; a mechanism justified by a
+behaviour no one read in the source.
+
+## Correct, and no more than correct
+
+A design is judged on two counts: it must be correct, and it must not carry
+mechanism that correctness does not require. Every mechanism names the
+failure it prevents, and that failure must be one Overdrive can actually
+reach: on its appliance OS, with its vendored Cloud Hypervisor, on its
+kernel, through its production entry points (CLAUDE.md § "Overdrive runs on
+its own appliance OS", `development.md` § "Ground the premise"). A mechanism
+whose failure cannot occur, or that duplicates a guarantee the kernel or
+another component already gives, is removed.
+
+Simplifying is not cutting. Before removing a mechanism, trace why it was
+added (the ADR context, the spike finding, the review round, the model
+counterexample) and confirm the reason is unreal on Overdrive. Removing
+something whose reason is real only defers the complexity until it is added
+back, which is the circle this rule exists to prevent.
+
+**The DESIGN reviewer checks both counts.** Alongside correctness, the
+reviewer asks of every mechanism: which reachable failure does it prevent,
+and is there a simpler mechanism that is still correct? A mechanism that
+defends an unreachable failure, duplicates an existing guarantee, or has a
+simpler correct alternative the design never evaluated is a review finding,
+with the same weight as a correctness defect.
+
+**Symptoms during review:** a defence against a binary, image or kernel
+Overdrive never runs; a recovery path for a state that boot reclamation or
+the kernel already removes; a timer, poll or retry where the kernel offers an
+event; a protocol step whose only justification is a state no production path
+produces.
+
 **Symptoms during review:** a userspace listener, proxy, firewall-set
 bookkeeping or revoke/retry protocol standing between a connection and its
 destination with no BPF alternative named in the ADR.
@@ -477,7 +533,13 @@ The DESIGN reviewer blocks approval when any of the following is true:
   `Sim*` adapter feeds a projected variable without being named as the
   arbiter and paired with a real-adapter Tier-3 scenario;
 - a contract-shaping validation item (§ "Run contract-shaping validation
-  before the design is accepted") is still Open.
+  before the design is accepted") is still Open;
+- a kernel-behaviour claim is not cited against `vendors/linux` at `v7.0`, or
+  the citation does not match the source (§ "Ground every kernel claim in the
+  Linux source Overdrive runs");
+- a mechanism defends a failure Overdrive cannot reach, duplicates an existing
+  guarantee, or has a simpler correct alternative the design did not evaluate
+  (§ "Correct, and no more than correct").
 
 This is enforced first as a DESIGN artifact and blocking review contract, then
 as executable state-boundary scenarios in DISTILL/DELIVER. Do not claim that

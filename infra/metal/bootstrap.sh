@@ -237,6 +237,7 @@ ssh "${SSH_OPTS[@]}" "${TARGET}" "mkdir -p ${REMOTE_DIR}"
   --exclude='spike-scratch/*/target/' \
   --exclude='spike-scratch/*/out/' \
   --exclude='node_modules/' \
+  --exclude='/vendors/linux/' \
   --exclude='.DS_Store' \
   --exclude='/.git' \
   --exclude='/.git/' \

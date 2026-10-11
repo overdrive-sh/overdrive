@@ -1,0 +1,222 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "host_observes_guest_peers": {
+   "bpf_counters": {
+    "cb_flags_set_err": 0,
+    "cb_flags_set_ok": 0,
+    "fexit_send_calls": 0,
+    "fexit_send_err": 0,
+    "fexit_send_err_last_errno": 0,
+    "fexit_send_untracked_target": 0,
+    "fexit_send_zero": 0,
+    "fire_fexit": 0,
+    "fire_state_cb": 0,
+    "install_fail": 0,
+    "p2_verdicts": 0,
+    "park_empty": 0,
+    "parked": 0,
+    "ringbuf_output_fail": 0,
+    "send_err_hist": {},
+    "state_cb_armed": 0,
+    "state_cb_br_zero": 0,
+    "state_cb_calls": 0,
+    "state_cb_est_to_closewait": 0,
+    "state_cb_fw1_to_closing": 0,
+    "state_cb_fw2_to_close": 0,
+    "state_cb_nocell": 0,
+    "tcp_overlap_bytes": 0,
+    "tcp_overlap_skbs": 0,
+    "tracepoint_drops": 0,
+    "tracepoint_records": 990,
+    "verdict_noroute": 0,
+    "verdict_redirect_fail": 0,
+    "verdict_redirect_ok": 0,
+    "verdict_zero_len_drop": 0
+   },
+   "cmd": "t5-obs",
+   "no_record_at_rdhup_wake": {},
+   "poll_bits_at_wake": {
+    "close/idle": {
+     "RDHUP": 110
+    },
+    "close/unread": {
+     "RDHUP": 110
+    },
+    "kill/idle": {
+     "RDHUP": 110
+    },
+    "kill/unread": {
+     "RDHUP": 110
+    },
+    "shut_wr/idle": {
+     "RDHUP": 110
+    },
+    "shut_wr/unread": {
+     "RDHUP": 110
+    }
+   },
+   "record_only_after_wake": {},
+   "record_to_wake_lag_ns": {
+    "max": 286952,
+    "min": 11678,
+    "n": 660,
+    "p50": 52188,
+    "p99": 139690
+   },
+   "signature_after_60ms": {
+    "close/idle": {
+     "SHUTDOWN:0x3": 110
+    },
+    "close/unread": {
+     "SHUTDOWN:0x3": 110
+    },
+    "kill/idle": {
+     "SHUTDOWN:0x3": 110
+    },
+    "kill/unread": {
+     "SHUTDOWN:0x3": 110
+    },
+    "shut_wr/idle": {
+     "SHUTDOWN:0x2": 110
+    },
+    "shut_wr/unread": {
+     "SHUTDOWN:0x2": 110
+    }
+   },
+   "signature_at_rdhup_wake": {
+    "close/idle": {
+     "SHUTDOWN:0x3": 110
+    },
+    "close/unread": {
+     "SHUTDOWN:0x3": 110
+    },
+    "kill/idle": {
+     "SHUTDOWN:0x3": 110
+    },
+    "kill/unread": {
+     "SHUTDOWN:0x3": 110
+    },
+    "shut_wr/idle": {
+     "SHUTDOWN:0x2": 110
+    },
+    "shut_wr/unread": {
+     "SHUTDOWN:0x2": 110
+    }
+   },
+   "timeouts": 0,
+   "trials_observed": 660,
+   "uname": "7.0.0-29-generic"
+  },
+  "guest_observes_host_peers": {
+   "bpf_counters": {
+    "cb_flags_set_err": 0,
+    "cb_flags_set_ok": 0,
+    "fexit_send_calls": 0,
+    "fexit_send_err": 0,
+    "fexit_send_err_last_errno": 0,
+    "fexit_send_untracked_target": 0,
+    "fexit_send_zero": 0,
+    "fire_fexit": 0,
+    "fire_state_cb": 0,
+    "install_fail": 0,
+    "p2_verdicts": 0,
+    "park_empty": 0,
+    "parked": 0,
+    "ringbuf_output_fail": 0,
+    "send_err_hist": {},
+    "state_cb_armed": 0,
+    "state_cb_br_zero": 0,
+    "state_cb_calls": 0,
+    "state_cb_est_to_closewait": 0,
+    "state_cb_fw1_to_closing": 0,
+    "state_cb_fw2_to_close": 0,
+    "state_cb_nocell": 0,
+    "tcp_overlap_bytes": 0,
+    "tcp_overlap_skbs": 0,
+    "tracepoint_drops": 0,
+    "tracepoint_records": 991,
+    "verdict_noroute": 0,
+    "verdict_redirect_fail": 0,
+    "verdict_redirect_ok": 0,
+    "verdict_zero_len_drop": 0
+   },
+   "cmd": "t5-obs",
+   "no_record_at_rdhup_wake": {},
+   "poll_bits_at_wake": {
+    "close/idle": {
+     "RDHUP": 110
+    },
+    "close/unread": {
+     "RDHUP": 110
+    },
+    "kill/idle": {
+     "RDHUP": 110
+    },
+    "kill/unread": {
+     "RDHUP": 110
+    },
+    "shut_wr/idle": {
+     "RDHUP": 110
+    },
+    "shut_wr/unread": {
+     "RDHUP": 110
+    }
+   },
+   "record_only_after_wake": {},
+   "record_to_wake_lag_ns": {
+    "max": 197817,
+    "min": 24617,
+    "n": 660,
+    "p50": 58949,
+    "p99": 122945
+   },
+   "signature_after_60ms": {
+    "close/idle": {
+     "SHUTDOWN:0x3": 110
+    },
+    "close/unread": {
+     "SHUTDOWN:0x3": 110
+    },
+    "kill/idle": {
+     "SHUTDOWN:0x3": 110
+    },
+    "kill/unread": {
+     "SHUTDOWN:0x3": 110
+    },
+    "shut_wr/idle": {
+     "SHUTDOWN:0x2": 110
+    },
+    "shut_wr/unread": {
+     "SHUTDOWN:0x2": 110
+    }
+   },
+   "signature_at_rdhup_wake": {
+    "close/idle": {
+     "SHUTDOWN:0x3": 110
+    },
+    "close/unread": {
+     "SHUTDOWN:0x3": 110
+    },
+    "kill/idle": {
+     "SHUTDOWN:0x3": 110
+    },
+    "kill/unread": {
+     "SHUTDOWN:0x3": 110
+    },
+    "shut_wr/idle": {
+     "SHUTDOWN:0x2": 110
+    },
+    "shut_wr/unread": {
+     "SHUTDOWN:0x2": 110
+    }
+   },
+   "timeouts": 0,
+   "trials_observed": 660,
+   "uname": "7.0.0-29-generic"
+  },
+  "runner_host": "{\"cmd\":\"t5-runner\",\"done\":660,\"errors\":0}"
+ }
+}

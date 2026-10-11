@@ -1,0 +1,1926 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "label": "vm-t4-vlate2-banner100000",
+  "args": [
+   "--arm",
+   "owner",
+   "--v-late",
+   "2",
+   "--srv-banner",
+   "100000",
+   "--trials",
+   "400",
+   "--conc",
+   "32",
+   "--flows",
+   "64",
+   "--n",
+   "small",
+   "--m",
+   "small",
+   "--io-timeout",
+   "8",
+   "--settle-s",
+   "4",
+   "--diag-seq",
+   "--events-sample",
+   "50"
+  ],
+  "guest_uname": "7.0.0-29-generic",
+  "host_uname": "7.0.0-29-generic",
+  "wall_s": 38.09628176689148,
+  "trials": {
+   "total": 400,
+   "pass": 369,
+   "fail": {
+    "cli_recv_err:TIMEOUT": 31
+   },
+   "examples": [
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      5,
+      1,
+      61131,
+      1,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16501,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      5,
+      1,
+      true,
+      true,
+      null,
+      61131,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      51,
+      41090,
+      0,
+      41090,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16466,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      51,
+      41090,
+      true,
+      true,
+      null,
+      0,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      37,
+      27731,
+      52149,
+      27731,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16469,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      37,
+      27731,
+      true,
+      true,
+      null,
+      52149,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      1,
+      15581,
+      419,
+      15581,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16501,
+      0,
+      false,
+      null
+     ],
+     "srv": [
+      1,
+      15581,
+      true,
+      true,
+      null,
+      419,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      8,
+      42348,
+      48249,
+      42348,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16500,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      8,
+      42348,
+      true,
+      true,
+      null,
+      48249,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      38,
+      19078,
+      1,
+      19078,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16469,
+      0,
+      true,
+      null
+     ],
+     "srv": [
+      38,
+      19078,
+      true,
+      true,
+      null,
+      1,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      34,
+      49864,
+      1,
+      49864,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16469,
+      0,
+      false,
+      null
+     ],
+     "srv": [
+      34,
+      49864,
+      true,
+      true,
+      null,
+      1,
+      null,
+      false
+     ]
+    },
+    {
+     "why": "cli_recv_err:TIMEOUT",
+     "row": [
+      33,
+      37400,
+      42740,
+      37400,
+      null,
+      0,
+      true,
+      false,
+      "TIMEOUT",
+      16470,
+      0,
+      false,
+      null
+     ],
+     "srv": [
+      33,
+      37400,
+      true,
+      true,
+      null,
+      42740,
+      null,
+      false
+     ]
+    }
+   ]
+  },
+  "guest": {
+   "complete_owner_cas": 181,
+   "complete_record_fexit": 588,
+   "flows_clean": 369,
+   "flows_started": 400,
+   "max_eof_to_complete_us": 12237,
+   "n_eof_to_complete": 769,
+   "owner_waits_for_record": 619,
+   "records": 588,
+   "stale_event_for_finished_flow": 15,
+   "sum_eof_to_complete_us": 288250,
+   "tcp_eof_deficit_bytes": 10825765,
+   "tcp_eof_deficit_max": 69866,
+   "tcp_eof_events": 400,
+   "tcp_eof_sent_lt_goal": 389,
+   "vsock_eof_deficit_bytes": 11725941,
+   "vsock_eof_events": 400,
+   "vsock_eof_fwd_lt_goal": 31,
+   "vsock_eof_sent_lt_goal": 237
+  },
+  "host": {
+   "complete_owner_cas": 662,
+   "complete_record_fexit": 138,
+   "flows_clean": 400,
+   "flows_started": 400,
+   "max_eof_to_complete_us": 487,
+   "n_eof_to_complete": 800,
+   "owner_waits_for_record": 138,
+   "records": 138,
+   "sum_eof_to_complete_us": 10345,
+   "tcp_eof_deficit_bytes": 4058674,
+   "tcp_eof_deficit_max": 142441,
+   "tcp_eof_events": 400,
+   "tcp_eof_sent_lt_goal": 119,
+   "vsock_eof_deficit_bytes": 537996,
+   "vsock_eof_events": 400,
+   "vsock_eof_sent_lt_goal": 22
+  },
+  "guest_live_at_end": 31,
+  "host_live_at_end": 0,
+  "guest_stuck": [
+   {
+    "age_ms": 36904,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     0,
+     1
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 1,
+    "fwd": [
+     47510,
+     69268
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     47510,
+     168384
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 168384,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     47510,
+     69268
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36903,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     2,
+     3
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 2,
+    "fwd": [
+     65235,
+     58892
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     65235,
+     158088
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 158088,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     65235,
+     58892
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36903,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     4,
+     5
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 3,
+    "fwd": [
+     35633,
+     43964
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     35633,
+     140703
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 140703,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     35633,
+     43964
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36903,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     6,
+     7
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 4,
+    "fwd": [
+     57,
+     62624
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     57,
+     161131
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 161131,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     57,
+     62624
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36902,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     8,
+     9
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 5,
+    "fwd": [
+     15637,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     15637,
+     100419
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100419,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     15637,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36902,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     10,
+     11
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 6,
+    "fwd": [
+     6036,
+     7464
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     6036,
+     105732
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 105732,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     6036,
+     7464
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36901,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     12,
+     13
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 7,
+    "fwd": [
+     21296,
+     14928
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     21296,
+     114442
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 114442,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     21296,
+     14928
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36900,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     14,
+     15
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 8,
+    "fwd": [
+     42404,
+     51428
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     42404,
+     148249
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 148249,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     42404,
+     51428
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36872,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     64,
+     65
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 33,
+    "fwd": [
+     37456,
+     43964
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     37456,
+     142740
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 142740,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     37456,
+     43964
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36872,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     66,
+     67
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 34,
+    "fwd": [
+     49920,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     49920,
+     100001
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100001,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     49920,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36872,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     68,
+     69
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 35,
+    "fwd": [
+     12651,
+     22392
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     12651,
+     121773
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 121773,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     12651,
+     22392
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36872,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     70,
+     71
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 36,
+    "fwd": [
+     11728,
+     18660
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     11728,
+     118284
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 118284,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     11728,
+     18660
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36872,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     72,
+     73
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 37,
+    "fwd": [
+     27787,
+     55160
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     27787,
+     152149
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 152149,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     27787,
+     55160
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36872,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     74,
+     75
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 38,
+    "fwd": [
+     19134,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     19134,
+     100001
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100001,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     19134,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36871,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     76,
+     77
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 39,
+    "fwd": [
+     44078,
+     32768
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     44078,
+     131911
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 131911,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     44078,
+     32768
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36868,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     78,
+     79
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 40,
+    "fwd": [
+     65584,
+     43964
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     65584,
+     141885
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 141885,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     65584,
+     43964
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36867,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     80,
+     81
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 41,
+    "fwd": [
+     56,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     56,
+     102975
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 102975,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     56,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36867,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     82,
+     83
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 42,
+    "fwd": [
+     37755,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     37755,
+     100000
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100000,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     37755,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36867,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     84,
+     85
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 43,
+    "fwd": [
+     1848,
+     29856
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     1848,
+     128672
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 128672,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     1848,
+     29856
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36867,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     86,
+     87
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 44,
+    "fwd": [
+     43171,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     43171,
+     100860
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100860,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     43171,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36867,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     88,
+     89
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 45,
+    "fwd": [
+     65118,
+     14928
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     65118,
+     113275
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 113275,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     65118,
+     14928
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36867,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     90,
+     91
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 46,
+    "fwd": [
+     39789,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     39789,
+     102303
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 102303,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     39789,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36866,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     92,
+     93
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 47,
+    "fwd": [
+     15459,
+     32768
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     15459,
+     131333
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 131333,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     15459,
+     32768
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36866,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     94,
+     95
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 48,
+    "fwd": [
+     37011,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     37011,
+     100000
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100000,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     37011,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36866,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     96,
+     97
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 49,
+    "fwd": [
+     42248,
+     65536
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     42248,
+     165027
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 165027,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     42248,
+     65536
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36866,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     98,
+     99
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 50,
+    "fwd": [
+     8724,
+     55160
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     8724,
+     154486
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 154486,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     8724,
+     55160
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36866,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     100,
+     101
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 51,
+    "fwd": [
+     41146,
+     0
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     41146,
+     100000
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100000,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     41146,
+     0
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36866,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     102,
+     103
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 52,
+    "fwd": [
+     34823,
+     7464
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     34823,
+     105039
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 105039,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     34823,
+     7464
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36865,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     104,
+     105
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 53,
+    "fwd": [
+     22025,
+     3732
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     22025,
+     100877
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 100877,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     22025,
+     3732
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36865,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     106,
+     107
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 54,
+    "fwd": [
+     53111,
+     58892
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     53111,
+     158302
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 158302,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     53111,
+     58892
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   },
+   {
+    "age_ms": 36865,
+    "armed": [
+     true,
+     true
+    ],
+    "cells": [
+     108,
+     109
+    ],
+    "done": [
+     true,
+     false
+    ],
+    "eof": [
+     true,
+     true
+    ],
+    "flow": 55,
+    "fwd": [
+     49651,
+     7464
+    ],
+    "gen": [
+     0,
+     0
+    ],
+    "goal": [
+     49651,
+     105430
+    ],
+    "hup": [
+     false,
+     true
+    ],
+    "paired": true,
+    "peer_count": 105430,
+    "poll_o": "IN|OUT|RDHUP",
+    "poll_v": "IN|HUP|RDHUP",
+    "sent": [
+     49651,
+     7464
+    ],
+    "shut": [
+     true,
+     false
+    ],
+    "so_error_o": 0,
+    "so_error_v": 0
+   }
+  ],
+  "host_stuck": [],
+  "guest_bpf": {
+   "cb_flags_set_err": 0,
+   "cb_flags_set_ok": 400,
+   "fexit_send_calls": 14175,
+   "fexit_send_err": 0,
+   "fexit_send_err_last_errno": 0,
+   "fexit_send_untracked_target": 459,
+   "fexit_send_zero": 0,
+   "fire_fexit": 588,
+   "fire_state_cb": 0,
+   "install_fail": 0,
+   "p2_verdicts": 0,
+   "park_empty": 0,
+   "parked": 400,
+   "ringbuf_output_fail": 0,
+   "send_err_hist": {},
+   "state_cb_armed": 0,
+   "state_cb_br_zero": 0,
+   "state_cb_calls": 1540,
+   "state_cb_est_to_closewait": 400,
+   "state_cb_fw1_to_closing": 0,
+   "state_cb_fw2_to_close": 0,
+   "state_cb_nocell": 0,
+   "tcp_overlap_bytes": 0,
+   "tcp_overlap_skbs": 0,
+   "tracepoint_drops": 0,
+   "tracepoint_records": 0,
+   "verdict_noroute": 0,
+   "verdict_redirect_fail": 0,
+   "verdict_redirect_ok": 14634,
+   "verdict_zero_len_drop": 33
+  },
+  "host_bpf": {
+   "cb_flags_set_err": 0,
+   "cb_flags_set_ok": 400,
+   "fexit_send_calls": 4805,
+   "fexit_send_err": 0,
+   "fexit_send_err_last_errno": 0,
+   "fexit_send_untracked_target": 0,
+   "fexit_send_zero": 0,
+   "fire_fexit": 138,
+   "fire_state_cb": 0,
+   "install_fail": 0,
+   "p2_verdicts": 0,
+   "park_empty": 0,
+   "parked": 0,
+   "ringbuf_output_fail": 0,
+   "send_err_hist": {},
+   "state_cb_armed": 0,
+   "state_cb_br_zero": 0,
+   "state_cb_calls": 1200,
+   "state_cb_est_to_closewait": 0,
+   "state_cb_fw1_to_closing": 0,
+   "state_cb_fw2_to_close": 400,
+   "state_cb_nocell": 0,
+   "tcp_overlap_bytes": 0,
+   "tcp_overlap_skbs": 0,
+   "tracepoint_drops": 0,
+   "tracepoint_records": 0,
+   "verdict_noroute": 0,
+   "verdict_redirect_fail": 0,
+   "verdict_redirect_ok": 4805,
+   "verdict_zero_len_drop": 386
+  }
+ }
+}
