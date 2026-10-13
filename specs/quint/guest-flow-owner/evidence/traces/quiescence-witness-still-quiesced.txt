@@ -1,37 +1,40 @@
-# quiescence-witness-still-quiesced: counterexample, 6 state(s) (from the TLC trace)
+# quiescence-witness-still-quiesced: counterexample, 7 state(s) (from the TLC trace)
 
 State 1
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  flowsOpen = 1
   repLeft = 1
-  att = [IpRules |-> 0, FlowListeners |-> 0]
+  att = [C1 |-> 0, C2 |-> 0]
   up = TRUE
-  prefix = "booted"
-  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  table = TRUE
   stop = "none"
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
+  cnt = 0
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
   latch = FALSE
-  lis = TRUE
-  holders = {}
 
 State 2 [Damage]
-  dmg = [IpRules |-> TRUE, FlowListeners |-> TRUE]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
 
 State 3 [RecQuiesce]
-  rec = [IpRules |-> "held", FlowListeners |-> "idle"]
+  flowsOpen = 0
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
   latch = TRUE
-  lis = FALSE
-  holders = {"IpRules"}
 
 State 4 [RecRepair]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
-  rec = [IpRules |-> "repaired", FlowListeners |-> "idle"]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  rec = [C1 |-> "repaired", C2 |-> "idle"]
 
-State 5 [RecQuiesce]
-  rec = [IpRules |-> "repaired", FlowListeners |-> "held"]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
-  holders = {"IpRules", "FlowListeners"}
+State 5 [Damage]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
-State 6 [RecRestore]
-  rec = [IpRules |-> "idle", FlowListeners |-> "held"]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE ]
-  holders = {"FlowListeners"}
+State 6 [RecQuiesce]
+  rec = [C1 |-> "repaired", C2 |-> "held"]
+  cnt = 2
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+
+State 7 [RecRestore]
+  rec = [C1 |-> "idle", C2 |-> "held"]
+  cnt = 1
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]

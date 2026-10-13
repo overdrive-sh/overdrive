@@ -90,7 +90,7 @@ C4Context
     title Driver-neutral allocation replacement — GH #284 corrective proposal
     Person(operator, "Platform operator", "Declares and observes workloads")
     System(overdrive, "Overdrive node", "Owns workload policy, physical allocations and replacement ordering")
-    System_Ext(host, "Linux host substrate", "Runs process and microVM allocation effects")
+    System_Ext(host, "Linux host", "Runs process and microVM allocation effects")
     System_Ext(guest, "MicroVM-family guest", "Runs VM, unikernel or sandboxed workload payloads")
     Rel(operator, overdrive, "deploys, restarts and describes workloads through")
     Rel(overdrive, host, "creates and cleans allocation-scoped effects on")
@@ -168,7 +168,7 @@ C4Context
 
   Person(engineer, "Platform Engineer (Ana)", "Writes core-plane logic; runs `cargo dst` and `cargo xtask bpf-build`")
   System(overdrive, "Overdrive node", "Single binary — control plane + worker + dataplane (Phase 2.1: dataplane crate scaffolded with no-op XDP)")
-  System_Ext(kernel, "Linux kernel", "BPF subsystem — XDP/TC hooks, BPF maps, BPF_PROG_TEST_RUN syscall (pinned 6.18 LTS appliance kernel — ADR-0068)")
+  System_Ext(kernel, "Linux kernel", "BPF subsystem — XDP/TC hooks, BPF maps, BPF_PROG_TEST_RUN syscall (pinned Linux 7.0 appliance kernel — ADR-0068)")
   System_Ext(ci, "CI", "GitHub Actions — runs xtask gates incl. `bpf-build` + `bpf-unit` + `integration-test vm`")
   System_Ext(fs, "Local filesystem (redb + cgroupfs)", "redb for IntentStore + LocalObservationStore; /sys/fs/cgroup for workload isolation")
 
@@ -766,7 +766,7 @@ C4Context
   Person(devon, "Platform Engineer (Devon)", "Authors a durable sequence as `impl Workflow { async fn run(ctx) }`; runs `cargo dst --only replay_equivalence_provision_record`")
   Person(ana, "Operator (Ana)", "Observes a running/terminal instance via ObservationStore rows + lifecycle events. NO `overdrive workflow` CLI verb (#206)")
   System(overdrive, "Overdrive node", "Single binary — control plane hosts the workflow engine + redb journal; runs durable-async sequences to a terminal WorkflowResult, crash-resumable on the same node")
-  System_Ext(fs, "Local filesystem (redb)", "ONE redb file `<data_dir>/reconcilers/memory.redb` — reconciler View tables + the `__wf_journal__` append-only journal table (second layout, same substrate)")
+  System_Ext(fs, "Local filesystem (redb)", "ONE redb file `<data_dir>/reconcilers/memory.redb` — reconciler View tables + the `__wf_journal__` append-only journal table (second layout, same store)")
   System_Ext(ci, "CI", "Runs `cargo dst` incl. the K4 `replay_equivalence_provision_record` SimInvariant on the critical path, seed-reproducible")
 
   Rel(devon, overdrive, "Authors `impl Workflow`; the workflow-lifecycle reconciler brings the instance up via Action::StartWorkflow")
@@ -790,7 +790,7 @@ C4Container
     Container(cli, "overdrive-cli", "Rust binary (class: binary)", "Unchanged — NO `overdrive workflow` verb (#206); engine composed in `serve` boot.")
   }
 
-  ContainerDb(redb_file, "redb file `memory.redb`", "On-disk ACID KV", "Shared substrate: reconciler View tables + `__wf_journal__` append-only journal table. ONE Arc<Database> handle.")
+  ContainerDb(redb_file, "redb file `memory.redb`", "On-disk ACID KV", "Shared store: reconciler View tables + `__wf_journal__` append-only journal table. ONE Arc<Database> handle.")
   ContainerDb(obs, "LocalObservationStore (redb)", "ObservationStore", "Terminal-result rows (keyed by CorrelationKey) + typed signal rows (slice 03)")
 
   Rel(devon, core, "impl Workflow for ProvisionRecord")
@@ -826,7 +826,7 @@ C4Component
     Component(inv, "replay_equivalence_provision_record (GRADUATED)", "invariants/", "Uninterrupted vs crash-resumed trajectory byte-equality + assert_eventually!(is_terminal). K4, CI critical path. Replaces the ReplayEquivalentEmptyWorkflow two-SimEntropy placeholder.")
   }
 
-  ContainerDb(redb_file, "redb file (shared substrate)", "ACID KV", "ViewStore tables + __wf_journal__ table, one Database handle")
+  ContainerDb(redb_file, "redb file (shared store)", "ACID KV", "ViewStore tables + __wf_journal__ table, one Database handle")
 
   Rel(wf_lifecycle, action_sw, "Emits StartWorkflow{start, correlation}")
   Rel(action_sw, shim, "Committed Action dispatched")
@@ -1412,11 +1412,11 @@ C4Context
   Person(peer, "Mesh client", "Sends requests only to eligible Service backends")
   System(overdrive, "Overdrive node", "Admits Service intent, runs VM allocations, probes guest HTTP/TCP, and converges eligibility")
   System_Ext(guest, "VM guest workload", "Cloud Hypervisor guest serving the declared TCP/HTTP endpoint")
-  System_Ext(kernel, "Linux VM networking substrate", "Per-allocation veth, netns, routed TAP, and guest address")
+  System_Ext(kernel, "Linux VM networking", "Guest address on the guest's dummy device; vsock attachment to the host (GH #295, ADR-0145)")
 
   Rel(ana, overdrive, "Deploys and describes a VM Service through")
   Rel(peer, overdrive, "Connects to the healthy Service through")
-  Rel(overdrive, kernel, "Provisions and routes the guest address through")
+  Rel(overdrive, kernel, "Leases the guest address and attaches the VM over vsock through")
   Rel(overdrive, guest, "Runs and probes HTTP/TCP endpoints on")
   Rel(guest, kernel, "Sends and receives Service traffic through")
 ```
@@ -1438,17 +1438,17 @@ C4Container
   ContainerDb(intent, "IntentStore", "redb / rkyv", "Stores validated ServiceV2 with existing WorkloadDriverV2 union")
   ContainerDb(obs, "ObservationStore", "redb observation adapter", "Stores allocation, probe-result, and backend rows")
   System_Ext(guest, "VM guest", "Cloud Hypervisor guest", "Runs the operator command and serves declared endpoints on workload_addr")
-  System_Ext(kernel, "Linux network substrate", "veth / netns / TAP", "Routes host-originated probes and Service traffic to the guest")
+  System_Ext(kernel, "Linux kernel networking", "vsock + Aya forwarding (GH #295)", "Carries host-dialled probes and Service traffic to the guest over vsock")
 
   Rel(ana, cli, "Runs deploy and workload describe via")
   Rel(cli, core, "Parses and validates the selected driver with")
   Rel(cli, cp, "Submits validated Service intent to")
   Rel(cp, core, "Projects Service intent into allocation contracts from")
   Rel(cp, intent, "Commits admitted Service intent into")
-  Rel(cp, kernel, "Provisions workload_addr and TAP routing through")
+  Rel(cp, kernel, "Leases workload_addr and attaches the VM over vsock through")
   Rel(cp, worker, "Starts the VM and registers probes after Running through")
   Rel(worker, guest, "Runs the declared command inside")
-  Rel(worker, kernel, "Connects HTTP/TCP probes to workload_addr through; HTTP uses the existing mark exemption")
+  Rel(worker, kernel, "Dials VM HTTP/TCP probes through the guest-flow owner's GuestStreamDial (ADR-0173) over")
   Rel(worker, obs, "Writes unchanged ProbeResultRow outcomes into")
   Rel(recon, obs, "Reads probe/terminal observations and writes lifecycle, backend, termination, and sole-authority restart outcomes through")
   Rel(peer, kernel, "Sends eligible Service traffic through")
@@ -1457,7 +1457,7 @@ C4Container
 
 The diagram adds no deployment unit. “Containers” are C4 logical containers
 inside the existing single `overdrive` binary, plus its existing local stores
-and external guest/kernel substrate. Target projection occurs after VM network
+and the external guest and kernel networking. Target projection occurs after VM network
 provisioning and Running registration; it does not gate Running. Proposed
 ADR-0092 changes only the worker's private HTTP socket effect. Proposed
 ADR-0096 changes only the existing `ServiceLifecycle` relationship from its
@@ -1485,19 +1485,19 @@ C4Context
   Person(operator, "Platform operator", "Declares, observes, stops, and replaces workloads")
   System(overdrive, "Overdrive node", "Accepts VM/microVM workload intent and converges it through driver-neutral allocation lifecycle")
   System_Ext(guest, "MicroVM guest workload", "Runs the operator command behind the existing guest-honest lifecycle boundary")
-  System_Ext(substrate, "Linux + Cloud Hypervisor substrate", "Provides KVM, cgroups, and the current temporary VM network path")
+  System_Ext(hosthv, "Linux + Cloud Hypervisor host", "Provides KVM, cgroups, and the VM network path (the vsock attachment of GH #295)")
 
   Rel(operator, overdrive, "Deploys [vm] intent and observes workload lifecycle through")
   Rel(overdrive, guest, "Starts, supervises, probes, stops, and replaces")
-  Rel(overdrive, substrate, "Probes and uses VM execution/network capabilities from")
-  Rel(guest, substrate, "Runs and exchanges traffic through")
+  Rel(overdrive, hosthv, "Probes and uses VM execution/network capabilities from")
+  Rel(guest, hosthv, "Runs and exchanges traffic through")
 ```
 
 The removed `[exec]` table is outside the context because it is not part of the
 live grammar, DTO, wire, or runtime model; there is no dedicated rejection path,
 external Exec workload system, or compatibility adapter. Unsupported/missing
 driver input follows the parser's existing ordinary generic failure. The Linux
-network description is the current VM implementation, not the #295 target.
+network path is the vsock microVM attachment of GH #295.
 
 ### C4 Level 2 — Container
 
@@ -1516,7 +1516,7 @@ C4Container
   ContainerDb(intent, "IntentStore", "redb / rkyv", "Writes and reads only the new VM-only WorkloadIntent V1")
   ContainerDb(obs, "ObservationStore", "redb observation adapter", "Stores only new V1 lifecycle rows and occurrences with no Exec reason/source")
   System_Ext(guest, "MicroVM guest", "Cloud Hypervisor guest", "Runs the declared command and reports guest-honest ready/exit")
-  System_Ext(network, "Current VM network substrate", "Linux netns / veth / TAP / nft", "Temporary VM path retained until GH #295")
+  System_Ext(network, "Current VM network path", "Linux netns / veth / TAP / nft", "Temporary VM path retained until GH #295")
 
   Rel(operator, cli, "Runs deploy, stop, restart, and describe through")
   Rel(cli, core, "Parses and validates VM-only live contracts with")
@@ -1546,536 +1546,241 @@ command release. Intercept success does not gate the already-accepted Running
 row; failure produces the existing later dominating `Failed` result and
 withholds the guest command.
 
-## Accepted shared-bridge microVM network (GH #295)
+## vsock microVM attachment (GH #295)
 
-**Status: Accepted — user-ratified and approved by system design review
-iteration 5 on 2026-09-16. D-295-7 and
-D-295-9 remain unchanged accepted-contract constraints.** This view is
-single-node, claims attachment capacity only, and is not DELIVER authority.
-
-**Post-DISTILL bounded decisions:** D-295-DISTILL-1 and D-295-DISTILL-2 were
-user-approved and independently approved on 2026-09-16. D-295-DISTILL-4 was
-user-approved and independently approved on 2026-09-16. D-295-DISTILL-5 was
-user-approved and independently approved at review iteration 6 on 2026-09-16. The diagrams show
-D-295-DISTILL-1's one owner boundary and D-295-DISTILL-4's crate ownership:
-core retains dependency-neutral handoff/EXEC values, control-plane owns the
-guest-network application contract, and dataplane owns the semantic TCX attach
-projection and exact aya-backed error. D-295-DISTILL-5 stays inside the existing
-private host-owner component: its module-private typed scratch I/O is not a new
-owner/container. Optional nft rollback prior remains a contract detail that
-does not add a C4 element. D-295-DISTILL-6/7/8 and the
-`RegistrationRetired` correction were user-approved and independently
-approved at review iteration 9 on 2026-09-17: they extend the existing dataplane
-adapter, worker owner, and retained control-plane task owner without adding a
-container. D-295-DISTILL-9 now pins the semantic bridge-family adapter needed
-by S-ND295-37, including exactly-once base/regular/unsupported chain
-occurrences, canonical semantic rule programs shared with guest-network
-postconditions, complete ordered/all-child observation, exact-exclusive
-deletion and typed pre-I/O validation, and is independently approved at review
-iteration 12 before DISTILL executable reconciliation.
-
-**Superseded in part (2026-09-24).** The #295 correctness-recovery replacement,
-accepted by the user on 2026-09-24, replaces parts of this view; its diagrams
-are in the next subsection. Where the earlier diagrams below conflict with it,
-the replacement governs:
-
-- `VmDriver + CloudHypervisorVmm` "attaches the host TAP directly" (ADR-0127 to
-  ADR-0129; the launch confinement also gains ADR-0143's filter);
-- the action shim's `require active-count < 16,384` step (ADR-0132 to
-  ADR-0134; 16,384 is a fixed placeholder, and Retiring leases count);
-- the supervisor's audit scope, DNS replacement, and unconditional quiescence
-  (#295 D-295-R13 to R15);
-- the start sequence's missing activation step (ADR-0131);
-- the ingress-only TCX classifier, which does not cover host→guest delivery: a
-  TAP egress guest-MAC classifier is added (ADR-0142 / D-295-R21) so a
-  host-side-MAC change cannot redirect another guest's host-to-guest
-  plaintext;
-- Cloud Hypervisor's confinement: a launch seccomp filter loaded in the
-  launcher child before its first exec denies every Cloud Hypervisor thread
-  the TAP-mutating ioctls (ADR-0143 / D-295-R22).
-
-### Correctness-recovery replacement — accepted 2026-09-24
-
-**Status: ACCEPTED by the user on 2026-09-24 (D-295-R1 to R22; R18 stands on its
-reproduced native RED; R19's rule-order change is withdrawn under its accepted
-native condition).** D-295-R7 (held counting, no slot
-reservation), D-295-R9, the D-295-R11 retry-forever reclaim, the D-295-R14 kill
-scope (unconfirmed TAPs and damaged per-VM parts), the D-295-R20
-cleanup-pending status, and the D-295-R22 launch seccomp filter are user
-rulings of 2026-09-24. The launch filter exists for x86_64 only, so the
-Cloud Hypervisor launches shown below happen only on x86_64. On any other
-architecture, aarch64 included, the node composes no microVM driver
-([GH #302](https://github.com/overdrive-sh/overdrive/issues/302)). Normative contracts are
-in the #295 feature delta, § *Correctness-Recovery Replacement DESIGN*. The
-decisions add no deployable unit and no new owner. As in the
-accepted view, the Level 2 diagram shows in-process owners as containers. The
-TAP queue helper, the in-child launch hook (close-on-exec, then the launch
-seccomp filter), the admission read-port, the
-reclaim action, the DNS port, the TAP restore, the policy-route audit, the
-intercept-mark guard table, the kill-only capability, and the cleanup-pending
-projection all sit inside existing owners.
-
-#### C4 Level 1 — System Context (correctness recovery, accepted)
-
-```mermaid
-C4Context
-  title Shared-bridge microVM network — system context (correctness recovery, accepted 2026-09-24)
-
-  Person(operator, "Platform operator", "Deploys and observes microVM workloads")
-  System(overdrive, "Overdrive node", "Admits guest attachments node-wide, owns the TAP queue handoff, transparent mTLS, and bounded shared-owner recovery")
-  System_Ext(guest, "Identity-unaware microVM guests", "Dial plaintext; hold no certificate or key; no L2 frame before intercept-live")
-  System_Ext(ch, "Cloud Hypervisor (appliance-shipped build; audited v53.0)", "Inherits only descriptors 0-3, fd 3 being one TAP queue, and the launch seccomp filter on every thread; never raises or mutates the TAP")
-  System_Ext(kernel, "Linux/KVM", "Bridge, persistent TAP, TCX, nftables, policy routing, cgroup v2, kTLS, splice")
-  System_Ext(proc_supervisor, "External process supervisor", "Restarts serve after exit status 1; deployment precondition, not #295")
-
-  Rel(operator, overdrive, "Runs overdrive serve and overdrive deploy")
-  Rel(overdrive, ch, "Spawns under the launch seccomp filter, with the TAP queue mapped to fd 3")
-  Rel(ch, guest, "Boots and connects the guest NIC to")
-  Rel(overdrive, kernel, "Creates the TAP down, raises it after intercept-live, and converges intercept state through")
-  Rel(proc_supervisor, overdrive, "Starts a new serve process after fail-stop")
-```
-
-#### C4 Level 2 — Container (correctness recovery, accepted)
-
-```mermaid
-C4Container
-  title Containers — TAP queue handoff, node-wide admission, full supervision (accepted 2026-09-24)
-
-  Container_Boundary(node, "overdrive serve process") {
-    Container(cli, "CLI serve owner", "overdrive-cli", "Selects typed fail-stop ahead of SIGINT and SIGTERM; bounds shutdown; exits 1")
-    Container(compose, "Serve composition root", "overdrive-control-plane", "Requires intercept and guest-DNS ports in ServerConfig; always composes worker, DNS, and supervisor")
-    Container(pool, "Guest address pool", "overdrive-control-plane", "One per server; sole admission linearization point; Admitted and Retiring leases both count against the placeholder cap until cleanup finishes")
-    Container(wl, "WorkloadLifecycle + scheduler", "overdrive-reconcilers", "Reads held and retiring counts through a read-port; gates restart with its predecessor counted; at the cap reclaims the predecessor first; emits row-neutral reclaim on every path")
-    Container(shim, "Action shim", "overdrive-control-plane", "Assigns, provisions down, starts VM, writes Running, installs intercept, waits on the EXEC gate while recovering, activates, releases EXEC; retires before cleanup")
-    Container(sw, "Shared guest-network owner", "overdrive-control-plane", "Creates persistent TAPs down, owned by uid 0; activates after intercept-live; per-TAP TCX ingress + egress guest-MAC classifiers (egress delivers unicast only to the registered guest MAC and drops it on a map miss, ADR-0142) over the shared endpoint map; reports per-TAP quiescence and per-allocation damage, including a debug-mask change or a host-side MAC that is missing or a reserved address (the bridge MAC or a held guest MAC, judged by invariant and never against a recorded value, ADR-0144); excludes condemned allocations; restores quiesced TAPs only when asked after a clean audit")
-    Container(vmm, "VmDriver + CloudHypervisorVmm", "overdrive-worker + overdrive-host", "Attaches one TAP queue, verifies flags and down-state, maps it to fd 3; in one child hook marks every other descriptor close-on-exec, then loads the launch seccomp filter (TAP-mutating ioctls never reach the tun ioctl handler on any CH thread: EPERM, or CH's own stricter action; a foreign syscall ABI is killed); drops the queue before any await")
-    Container(mtls, "Node-shared intercept owner", "overdrive-worker", "Awaited convergent element removal; boot member clear; mark-before-TPROXY rules retained (ADR-0140 reorder withdrawn on native E14 fail-closed); audits and repairs program, policy route, guard table, and members with live allocations")
-    Container(dns, "Guest DNS owner", "overdrive-control-plane", "Built through the required GuestDns port; replacement only after EXEC is closed")
-    Container(sup, "Shared-network supervisor", "overdrive-control-plane", "Audits all three owners every second; converges failing owners, re-audits, kills audited damage, then restores TAPs; through a kill-only capability kills only VMs whose TAP could not be confirmed down or whose parts are damaged, or the whole slice if that set is undetermined or a kill fails")
-    Container(api, "Allocation status handler", "overdrive-control-plane", "Serves GET /v1/allocs; derives CleanupPending from the live lease and row state")
-  }
-  Person(operator, "Platform operator", "Runs overdrive workload describe")
-  System_Ext(ch, "Cloud Hypervisor", "One queue holder per TAP")
-  System_Ext(kernel, "Linux kernel", "TAP, bridge, TCX, nftables, FIB, cgroup v2")
-
-  Rel(cli, compose, "Starts, then waits on the fail-stop request from")
-  Rel(wl, pool, "Reads held and retiring counts and leases through")
-  Rel(shim, pool, "Assigns, retires, and releases leases through")
-  Rel(shim, sw, "Provisions, activates, and tears down through")
-  Rel(shim, vmm, "Starts and stops the VM through")
-  Rel(shim, mtls, "Installs and removes allocation elements through")
-  Rel(vmm, ch, "Spawns under the launch seccomp filter with fd 3 = TAP queue")
-  Rel(sw, kernel, "Mutates and reads back TAP, bridge, TCX, and guard state in")
-  Rel(mtls, kernel, "Converges nft program, policy route, members, and intercept-mark guard table in")
-  Rel(sup, sw, "Audits and converges")
-  Rel(sup, mtls, "Audits and converges")
-  Rel(sup, dns, "Audits and replaces")
-  Rel(sup, kernel, "Kills VMMs whose TAP stayed unconfirmed or whose parts are damaged (per-VM cgroup.kill), or the whole workloads slice when undetermined, through")
-  Rel(sup, cli, "Sends typed fail-stop request to")
-  Rel(operator, api, "Reads allocation status, including CleanupPending, from")
-  Rel(api, pool, "Reads the leases of the listed allocations from")
-```
-
-#### Dynamic sequence — allocation start and teardown (correctness recovery, accepted)
-
-```mermaid
-sequenceDiagram
-  participant SH as Action shim
-  participant POOL as Guest address pool
-  participant SW as Shared guest-network owner
-  participant VM as CloudHypervisorVmm
-  participant CH as Cloud Hypervisor
-  participant OBS as ObservationStore
-  participant ML as Intercept owner
-  participant G as Guest
-
-  SH->>POOL: assign(alloc) (a restart assigns its successor the same way)
-  POOL-->>SH: plan, or AdmissionCapReached(held, retiring) / LeaseRetiring / PoolExhausted (no effect, no row)
-  SH->>SW: provision(plan)
-  SW-->>SH: persistent TAP down (owner uid 0, debug mask 0), guard, endpoint, TCX ingress and egress read back, host-side MAC not a reserved address
-  SH->>VM: create(config)
-  VM->>VM: build the launch seccomp program, then attach_tap_queue checks flags 0x5802 and TAP down
-  VM->>CH: spawn with --net fd=[3], child hook marks every other fd close-on-exec, then loads the launch seccomp filter before exec, parent copy dropped
-  CH-->>SH: guest READY (TAP still down, zero frames)
-  SH->>OBS: write Running
-  SH->>ML: start_alloc (2 + P elements read back)
-  ML-->>SH: mtls.intercept.install.success
-  SH->>SH: wait on the EXEC gate while recovering (FailStop: withhold, no row)
-  SH->>SW: activate(plan)
-  SW-->>SH: Raised (TAP up, read back), or QuiescenceLatched (wait again)
-  SH->>G: release EXEC
-  Note over SH,ML: teardown
-  SH->>VM: stop (quiescence proven)
-  SH->>POOL: retire(alloc)
-  SH->>ML: stop_alloc: drain, then remove_allocation_elements
-  ML-->>SH: Ok, or ElementRemoval (record and lease retained for retry)
-  SH->>SW: teardown: endpoint, TCX ingress and egress links, TAP down, delete, complement read back (absent parts count as removed)
-  SH->>POOL: release(alloc) last
-```
-
-Until `release`, `overdrive workload describe` shows the allocation as
-`CleanupPending` (D-295-R20); after a failed stop the row stays `Running`, but
-the status never does.
-
-A leased Failed or Terminated allocation whose cleanup no other action owns (a
-superseded restart predecessor whose cleanup failed, a leftover allocation of a
-stopped or deleted workload, or, at the cap, a replacement's predecessor) is
-cleaned up by the row-neutral `ReclaimAllocationNetwork` action (ADR-0136),
-with persisted-input backoff. It writes no row. At the cap the restart is
-emitted only after that reclaim releases the predecessor's lease (user ruling
-D-295-R7).
+**Status: Accepted**, with the decision dates stated in
+[brief.md § *vsock microVM attachment (GH #295)*](brief.md#vsock-microvm-attachment-gh-295).
+GW-LOCAL (only the guest gateway is host-local in the guest prefix,
+ADR-0152), PROBE-NOSAMPLE (a VM probe refused by node capacity or quiescence
+records no sample, ADR-0187), LEGB-DIAL (leg-B marks and binds `127.0.0.1`
+for a peer inside the guest prefix, ADR-0190), PROBE-RUN-COUNT (every
+probe run counts once, its streak recorded by the probe runner and the
+threshold applied by ServiceLifecycle at read time, with D-1 retrying a
+failed liveness stop on the next row still past the threshold, ADR-0191)
+and PROBE-NOSAMPLE-EVENT (a probe run that writes no row emits one
+not-sampled event, ADR-0192) were approved by the user on 2026-10-13;
+the DNS path below uses GW-LOCAL and same-node mesh leg-B to a VM uses
+LEGB-DIAL. Exact contracts live in the
+[#295 feature delta](../../feature/netns-density-295/feature-delta.md). The
+shared-bridge diagrams this section replaces are superseded by ADR-0145.
 
 ### C4 Level 1 — System Context
 
 ```mermaid
 C4Context
-  title Accepted shared-bridge microVM network — system context
+  title System Context — VM guest transport over vsock (#295)
 
-  Person(operator, "Platform operator", "Deploys and observes VM/microVM workloads")
-  System(overdrive, "Overdrive node", "Owns node-local guest switching, transparent mTLS, identity, cgroups, and lifecycle")
-  System_Ext(guest, "Identity-unaware microVM guests", "Dial plaintext; hold no certificate or private key")
-  System_Ext(kernel, "Linux/KVM substrate", "Bridge, TAP, TCX/SCHED_CLS, nftables TPROXY/guard, cgroup v2, kTLS, splice")
-  System_Ext(gateway, "Public-ingress gateway", "Uses existing Service selection and exact selected-backend identity receipt")
-  System_Ext(proc_supervisor, "External process supervisor", "Deployment precondition: restarts serve after RUN-295-B fail-stop; not implemented by #295")
+  Person(op, "Platform operator", "Deploys and observes workloads")
+  System(node, "Overdrive node", "overdrive serve on the appliance OS")
+  System_Boundary(vm, "MicroVM allocation") {
+    System(guest, "Guest workload", "Unmodified application; no NIC; workload address on a dummy device")
+  }
+  System_Ext(peer, "Remote mesh peer", "Workload on another node")
+  System_Ext(ext, "Non-mesh destination", "External address")
 
-  Rel(operator, overdrive, "overdrive serve + overdrive deploy")
-  Rel(overdrive, guest, "Runs one guest on one host TAP; supplies shared-prefix address/gateway/DNS")
-  Rel(overdrive, kernel, "Converges bridge/TAP/TCX/nft/cgroup and uses TLS 1.3 kTLS/splice")
-  Rel(gateway, overdrive, "Enters cgroup-BPF Service selection; reaches selected backend leg C")
-  Rel(proc_supervisor, overdrive, "Starts a new process after fail-stop; production-readiness probe required")
+  Rel(op, node, "Deploys workloads to", "overdrive deploy")
+  Rel(node, guest, "Launches, probes and opens inbound flows to", "virtio-vsock, kernel vhost")
+  Rel(guest, node, "Requests outbound flows and reports READY to", "virtio-vsock")
+  Rel(peer, node, "Connects with mTLS to", "TCP + kTLS")
+  Rel(node, peer, "Originates mTLS to", "TCP + kTLS")
+  Rel(node, ext, "Forwards non-mesh guest traffic to", "TCP / UDP, kernel-forwarded")
 ```
 
 ### C4 Level 2 — Container
 
 ```mermaid
 C4Container
-  title Accepted node-local shared bridge and transparent-mTLS path
+  title Container — guest transport on one node (#295)
 
-  Container_Boundary(node, "Overdrive node") {
-    Container(cp, "Guest-network application contract + action shim", "overdrive-control-plane / Rust/Tokio", "Owns plan, provisioner/owner ports, probe/scratch/fact/error/result family, private 16,384-cap pool, and ordered provision/teardown")
-    Container(sw, "Shared guest switch owner", "Private control-plane host implementation behind the application port", "Implements the one application contract and owns allocation provision/teardown, fixed bridge identity, maps, pinned links, proof-mark guard, startup probe, sweep, audit, quiescence, and repair")
-    Container(dns, "DnsResponder", "Rust/hickory-proto", "Answers on the shared bridge gateway; one supervisor-owned task state machine cooperatively stops/joins old work before publishing a read-back replacement")
-    Container(mtls, "Node-shared MtlsInterceptWorker", "Rust/Tokio", "Owns F/C listeners and one private capability registry; activation after retirement transfers effects to drain and returns typed refusal, never intercept-live/EXEC release")
-    Container(enforce, "HostMtlsEnforcement", "rustls + kTLS + splice", "Unchanged in #295; current per-handle cost motivates GH #300, outside attachment capacity")
-    Container(resolve, "ServiceBackendsResolve", "Rust", "Resolves recovered original destination through authoritative backend rows")
-    Container(identity, "IdentityMgr + RcgenCa", "Rust", "Holds platform SVID material; guests hold none")
-    Container(vmdriver, "VmDriver + CloudHypervisorVmm", "Rust + Cloud Hypervisor", "Attaches the host TAP directly and owns guest READY/EXEC ordering")
-    Container(cgroup, "CgroupManager + VmReclamation", "cgroup v2", "Owns CPU/memory/VMM PID/OOM/teardown/boot reclamation")
-    Container(supervisor, "Shared-owner health gate", "Rust/Tokio + kernel audit", "Owns one retained supervisor handle and one DNS task owner; classifies actual join/channel exits, exact-port recovery, 250 ms retries for 5 s, and fail-stop-before-return")
-    Container(serveowner, "ServerHandle + CLI serve owner", "Rust/Tokio", "Owns exactly one private supervisor handle; public wait delegates; CLI applies the separate hard shutdown/status bound")
-    ContainerDb(obs, "ObservationStore", "Existing adapter", "Persists workload_addr and backend/lifecycle facts")
-    Container(bridge, "ovd guest bridge", "Linux bridge", "One node-local L2; one TAP port per running guest")
-  }
-  System_Ext(guestA, "Guest A", "Plaintext, credential-free")
-  System_Ext(guestB, "Guest B", "Plaintext, credential-free")
-  System_Ext(procSupervisor, "External process supervisor", "Restarts a new serve PID after fail-stop; deployment precondition")
+  Person(op, "Platform operator")
+  Container(cli, "overdrive CLI", "Rust", "overdrive deploy")
+  Container(cp, "Guest-flow owner", "Rust, overdrive-control-plane::guest_network", "Leases, CIDs, launch tokens, flow and control listeners, control sessions, pairing, GuestStreamDial")
+  Container(fwd, "Host forwarder", "Aya eBPF via overdrive-dataplane::guest_flow", "SK_SKB verdicts, sock_ops on the owner cgroup, raw-tracepoint flow-end classifier, drain programs and cells, flow-event ring")
+  Container(mtls, "mTLS worker", "Rust, overdrive-worker", "leg-F (registered mesh flows), leg-C, leg-S")
+  Container(probe, "VM probe runner", "Rust, overdrive-worker", "TCP and HTTP probes of VM services")
+  Container(drv, "VmDriver", "Rust, overdrive-worker", "Beacon listener on vsock 1234; VMM lifecycle")
+  Container(resolve, "Mesh resolution", "Rust, ServiceBackendsResolve", "Classifies TCP destinations by frontend, VIP and backend")
+  Container(svc, "Service connect4", "Aya eBPF, ADR-0053", "Rewrites service VIPs at connect")
+  Container(dns, "DnsResponder", "Rust", "Node DNS, wildcard bind on port 53")
+  Container(nft, "Host firewall", "nftables, constant rules", "Diverts to leg-C; refuses other guest-prefix traffic; rejects marked owner sockets to host-internal destinations")
+  Container(vmm, "Cloud Hypervisor fork", "VMM, backend=vhost-kernel", "Opens its own vhost-vsock device; exits on guest reset with the fork change of ADR-0182")
+  Container(init, "overdrive-init", "Rust, guest PID 1", "Guest network configuration, guest flow owner, control session, beacon")
+  Container(gfwd, "Guest forwarder", "Aya eBPF in the guest kernel", "Captures sockets, installs at establishment, parks, frames, reassembles, classifies flow ends")
+  System_Ext(peer, "Remote mesh peer")
+  System_Ext(ext, "Non-mesh destination")
 
-  Rel(cp, sw, "After fixed-cap admission, assigns IP-derived TAP/MAC; orders guard membership -> endpoint map -> TCX attach/pin/query")
-  Rel(cp, vmdriver, "Passes grouped GuestNetworkAssignment; starts VM after network provision; releases EXEC after exact-generation intercept-live")
-  Rel(vmdriver, bridge, "Attaches one host-netns TAP")
-  Rel(guestA, bridge, "Plaintext TCP and DNS through TAP A")
-  Rel(bridge, sw, "Fixed bridge MAC + TCX ifindex/MAC/IP validation; every endpoint rewrite value is audited equal")
-  Rel(sw, bridge, "Minimum nft guard passes only sanctioned TCX marks; otherwise drops")
-  Rel(sw, mtls, "Intercept mark enters 8 constant IP nft rules; managed/source/destination set membership local-delivers or drops")
-  Rel(mtls, resolve, "Leg F resolves source capability + orig-dst; leg C checks IP-keyed capability allowed-port set")
-  Rel(mtls, enforce, "Claims immutable active generation, submits connection, and publish-fences returned handle")
-  Rel(enforce, identity, "Reads allocation SVID and trust bundle")
-  Rel(enforce, bridge, "Marked leg-S plaintext delivery to selected guest TAP")
-  Rel(bridge, guestB, "Delivers decrypted plaintext")
-  Rel(guestA, dns, "UDP :53 at shared bridge gateway; userspace name semantics")
-  Rel(resolve, obs, "List/Watch backend facts")
-  Rel(cp, obs, "Writes observed workload_addr/lifecycle")
-  Rel(vmdriver, cgroup, "Enrols VMM PID and applies resource limits")
-  Rel(supervisor, sw, "Audits bridge/TCX/map/pin/nft identity every second")
-  Rel(supervisor, dns, "Observes serve-task exit and gateway socket identity")
-  Rel(supervisor, mtls, "Observes leg-F/leg-C task and socket identity")
-  Rel(supervisor, vmdriver, "Closes new guest-command release while unhealthy")
-  Rel(supervisor, serveowner, "Typed explicit request; task return/error/panic/cancel are observed through retained JoinHandle")
-  Rel(serveowner, procSupervisor, "Exits status 1; restart is external to #295")
+  Rel(op, cli, "Runs deploy through")
+  Rel(cli, cp, "Submits workload intent that provisions leases in")
+  Rel(drv, vmm, "Launches with CID and launch token")
+  Rel(vmm, gfwd, "Carries guest virtqueues for")
+  Rel(init, drv, "Reports READY and exit status to", "vsock 1234")
+  Rel(init, cp, "Holds its control session with", "vsock 1243")
+  Rel(init, cp, "Opens outbound flows to", "vsock 1240 / 1241")
+  Rel(cp, init, "Opens host-initiated flows to", "vsock 1242")
+  Rel(init, gfwd, "Loads and installs pairs in", "bpf map ops")
+  Rel(cp, fwd, "Loads, installs pairs in and reads records from", "bpf map ops, ring buffer")
+  Rel(cp, resolve, "Classifies guest TCP destinations through", "MtlsResolve")
+  Rel(cp, mtls, "Registers resolved mesh flows with", "in-process call")
+  Rel(fwd, mtls, "Forwards guest mesh TCP to", "loopback TCP to leg-F")
+  Rel(mtls, peer, "Originates mTLS to", "leg-B")
+  Rel(mtls, nft, "Dials same-node leg-B to a VM through", "SO_MARK 0x1, bound 127.0.0.1, fwmark table 100 to leg-C on lo")
+  Rel(peer, nft, "Sends inbound mTLS through")
+  Rel(nft, mtls, "Diverts inbound guest-prefix TCP to", "TPROXY to leg-C")
+  Rel(mtls, cp, "Dials VM backends for leg-S through", "GuestStreamDial")
+  Rel(probe, cp, "Dials VM service ports through", "GuestStreamDial")
+  Rel(fwd, ext, "Forwards non-mesh guest traffic to", "owner TCP / UDP socket")
+  Rel(svc, cp, "Rewrites VIP destinations of owner datagram sockets for", "cgroup connect4")
+  Rel(fwd, dns, "Delivers guest DNS datagrams to", "UDP to gateway:53 on lo, GW-LOCAL")
 ```
 
-The proposed topology deletes per-workload netns/veth/two-`/30`/`NetSlot` and
-`host_veth`; it does not delete the separate ADR-0061 host veth pair used by
-the existing XDP Service dataplane. Public-ingress backend selection remains in
-that existing BPF dataplane; the shared bridge only delivers the selected
-backend through transparent mTLS. Cross-host routing is outside #295 and tracked
-by [GH #298](https://github.com/overdrive-sh/overdrive/issues/298); this diagram
-prescribes no cross-host mechanism. Heterogeneous schedulable guest-network
-capacity is outside #295 and tracked by
-[GH #299](https://github.com/overdrive-sh/overdrive/issues/299); the fixed
-private cap shown here adds no `network_ports` API/wire/persistence.
+leg-S's use of `GuestStreamDial` is a userspace kTLS↔vsock relay
+([ADR-0186](adr-0186-leg-s-reaches-vm-backends-through-a-temporary-vsock-relay-until-303.md))
+and is deleted when [GH #303](https://github.com/overdrive-sh/overdrive/issues/303)
+lands; the host then forwards ciphertext over the kernel redirect. A VM probe
+dial stands outside the allocation's flow quota, and one refused for node
+capacity or quiescence records no sample
+([ADR-0187](adr-0187-a-vm-probe-refused-by-node-capacity-or-quiescence-records-no-sample.md));
+each written probe run counts once toward its threshold
+([ADR-0191](adr-0191-every-probe-run-counts-once-through-a-run-sequence-in-the-probe-row.md)).
+Same-node leg-B to a VM sets the intercept mark `0x1` and binds `127.0.0.1`,
+so the existing `fwmark 0x1 → table 100` rule delivers it on `lo` and TPROXY
+assigns it to leg-C, with no route covering the prefix except the gateway
+`/32`
+([ADR-0190](adr-0190-leg-b-marks-and-loopback-binds-same-node-vm-dials.md));
+a marked dial to an unregistered tuple is refused by the constant
+guest-prefix rules (ADR-0172). This holds while Overdrive is single-node
+([#317](https://github.com/overdrive-sh/overdrive/issues/317)). Exec and
+process workloads keep leg-S's and the probe runner's plaintext TCP connect to
+`workload_addr:port`.
 
-The listener container is node-scoped, not allocation-scoped. Leg F freezes the
-capability selected by validated source address before resolving the original
-destination; leg C freezes the capability selected by recovered destination.
-Both require the exact active generation before enforcement and again before
-publishing the returned handle. The required production contract tears a late
-handle down rather than re-attributing it. Part D proved immutable capture,
-successor selection, stale rejection, and scoped drain of already-published
-handles; it did not execute retirement during held enforcement followed by
-publish. That race remains an evidence gate. Part D did measure exactly two
-listener FDs and two idle accept tasks at a 16,384-allocation comparison.
-
-CAP-295-A makes 16,384 an attachment-only contract. PORT-295-C fixes #295 nft
-rule count at eleven (eight IP plus three bridge) while managed/source elements
-scale with 2N and destination elements with total TCP ports M. Concurrent-flow capacity is
-not claimed; [GH #300](https://github.com/overdrive-sh/overdrive/issues/300)
-owns pump scaling. RUN-295-B retries failed shared owners for five seconds and
-then exits; restarting that process remains an external-supervisor deployment
-precondition, not a container added by #295. Single owned-component loss is
-fail-closed; simultaneous external TCX+bridge-guard deletion has an accepted
-one-second maximum detection window before TAP quiescence.
-
-### C4 Level 3 — Component
-
-**Stage-3 solution view: Accepted — approved by independent
-solution-architecture review iteration 4 on 2026-09-16 after iterations 1–3
-remediation; zero critical/high/medium findings remain.**
-Normative implementation-facing contracts remain exclusively in the #295
-feature delta.
+### C4 Level 3 — Component (guest-flow owner)
 
 ```mermaid
 C4Component
-  title Component — shared guest-network vertical slice inside overdrive serve
+  title Component — guest-flow owner inside overdrive serve (#295)
 
-  Container_Boundary(node, "overdrive serve process") {
-    Component(compose, "Serve composition root", "overdrive-control-plane", "Wires probes and owners; orders scratch probe, reclamation, sweep, production convergence, task retention, and admission")
-    Component(pool, "Guest address pool", "overdrive-control-plane / internal", "Owns atomic allocation-to-plan leases; derives address, TAP and guest MAC; release-last")
-    Component(shim, "Action shim", "overdrive-control-plane", "Sequences existing lifecycle Actions through guest-network, VMM, observation, intercept, EXEC and cleanup owners")
-    Component(sw, "Guest-network contract + shared switch owner", "overdrive-control-plane::guest_network / private host implementation behind doc-hidden port", "Owns plan, both ports, probe/scratch/operation/fact/error/result family, private pool and host owner; private typed scratch I/O supplies leaf effects/counts while this owner retains setup, probe, reverse cleanup, all-family observation, sweep, audit, quiescence and repair")
-    Component(netlink, "Host network adapter", "overdrive-netlink", "Executes typed rtnetlink; unchanged public IPv4 nft and semantic bridge-guard APIs share one private codec; exactly-once chain/child inventory, canonical ordered rule facts for guest postconditions, typed validation, exact-exclusive deletion")
-    Component(tcx, "TCX endpoint adapter", "overdrive-dataplane::guest_tcx + overdrive-bpf", "Loads SCHED_CLS; owns private map ABI; projects semantic attachment/counter facts; provides typed query, pinned-link detach and endpoint/counter operations with exact aya sources")
-    Component(mtls, "Node-shared intercept owner", "overdrive-worker", "Boot-starts F/C listeners; owns Pending effects/retirement handshake, typed activation-retired refusal, RAII claims, publish fence, drain completion and reuse exclusion")
-    Component(enforce, "Existing mTLS core", "overdrive-dataplane", "Performs TLS 1.3, kTLS TX/RX, splice and handle teardown")
-    Component(resolve, "Existing resolve + identity readers", "overdrive-control-plane + worker", "Maps original destination through backend facts and supplies platform-held SVID material")
-    Component(dns, "Shared-gateway DNS owner", "overdrive-control-plane", "Preserves NameIndex/wire/source-pin semantics; task owner states prevent replacement until old stop/join and replacement probe/read-back complete")
-    Component(vm, "VmDriver + VMM adapter", "overdrive-worker + overdrive-host", "Consumes grouped assignment, starts direct host-TAP VM, owns READY and deferred EXEC")
-    Component(execgate, "Paired EXEC-gate capabilities", "overdrive-core / guest_network", "One lock/Notify/recovery snapshot; worker claims release while control-plane supervisor recovers, reopens or fail-stops")
-    Component(supervisor, "Shared-owner supervisor", "overdrive-control-plane / internal", "Retains one join/request/gate/shutdown owner plus one DNS task owner; classifies actual Tokio outcomes, audits/reconverges, replaces recovered DNS task, and fail-stops before return")
-    Component(handle, "ServerHandle + CLI serve owner", "overdrive-control-plane + overdrive-cli", "Owns exactly one private supervisor handle; public shutdown-request wait delegates; CLI remains the outer process owner")
-    Component(reclaim, "Existing VM/cgroup reclamation", "overdrive-reconcilers + worker + host", "Kills unsupervised VMMs and removes driver artifacts before network sweep")
+  Container_Boundary(owner, "overdrive-control-plane::guest_network") {
+    Component(pool, "Guest lease pool", "Rust", "Assigns address, CID and launch token; releases after VMM exit")
+    Component(sessions, "Control sessions", "Rust", "One live session per CID, claimed on a matching live token")
+    Component(flows, "Flow table and pairing", "Rust", "Admits flows against node capacity and the allocation quota; pairs out of band")
+    Component(dial, "GuestStreamDial", "Rust", "Resolves a target to an Active VM lease and declared port; opens a host-initiated flow")
+    Component(ends, "Flow-end dispatch", "Rust", "Applies classification and drain records; reads ring-loss and recursion-miss counters at each dispatch and every audit period")
+    Component(quiesce, "Quiescence", "Rust", "Counted move-only holds; reopens admission at zero")
   }
+  Container(fwd, "Host forwarder", "overdrive-dataplane::guest_flow")
+  Container(sup, "Recovery supervisor", "ADR-0124")
+  Container(mtls, "mTLS worker", "leg-S")
+  Container(probe, "VM probe runner")
 
-  System_Ext(operator, "Platform operator", "Runs overdrive serve and overdrive deploy")
-  System_Ext(guest, "MicroVM guest", "Credential-free plaintext endpoint")
-  System_Ext(kernel, "Linux/KVM substrate", "Bridge, TAP, TCX, BPF maps, nftables, cgroup v2, kTLS, splice, Cloud Hypervisor")
-  System_Ext(proc_supervisor, "External process supervisor", "Starts a new serve PID after fail-stop")
-  ContainerDb(obs, "Existing intent/observation/View stores", "redb / existing ports", "Retain workload intent, lifecycle, workload_addr, backend facts and reconciler memory")
-
-  Rel(operator, compose, "Starts and configures")
-  Rel(operator, shim, "Drives deploy/stop/restart through existing handlers and reconciliation")
-  Rel(compose, sw, "Injects one owner; probes, sweeps and converges before use")
-  Rel(compose, reclaim, "Runs before shared-switch sweep")
-  Rel(compose, mtls, "Binds exactly one F and one C listener")
-  Rel(compose, dns, "Probes and starts one gateway responder")
-  Rel(compose, execgate, "Constructs one paired wiring from the injected clock")
-  Rel(compose, supervisor, "Starts and retains one supervisor with EXEC closed until full audit")
-  Rel(shim, pool, "Assigns before provision and releases after teardown")
-  Rel(shim, sw, "Uses the same owner's inherited port to provision and tear down one attachment through")
-  Rel(sw, netlink, "Mutates and reads bridge/TAP/guard state through")
-  Rel(sw, tcx, "Uses semantic attach facts and wraps the canonical sourced TCX error while mutating and reading classifier/map/link/pin state")
-  Rel(shim, vm, "Passes grouped assignment, starts/stops exact allocation, and invokes existing EXEC release hook")
-  Rel(shim, obs, "Writes accepted Running/terminal lifecycle and workload_addr")
-  Rel(shim, mtls, "Registers or retires exact allocation capability and IP elements")
-  Rel(vm, execgate, "Claims Open, waits during Recovering, and refuses at FailStop")
-  Rel(guest, tcx, "Sends TAP frames through")
-  Rel(tcx, kernel, "Returns proof-marked accept or drop verdicts into Linux bridge ingress")
-  Rel(netlink, kernel, "Mutates and reads bridge, TAP, guard and nft state through control-plane calls")
-  Rel(kernel, mtls, "Mediates runtime frames through bridge guard and IP nft TPROXY into shared F/C listeners")
-  Rel(mtls, resolve, "Resolves original destination and reads exact peer identity")
-  Rel(mtls, enforce, "Enforces one claimed capability and publish-fences returned handle")
-  Rel(enforce, kernel, "Arms kTLS and splices bytes in")
-  Rel(vm, kernel, "Creates direct host-TAP VMM and per-VM cgroup in")
-  Rel(dns, guest, "Answers shared-gateway DNS for")
-  Rel(resolve, obs, "Reads authoritative backend facts from")
-  Rel(supervisor, execgate, "Closes, snapshots, reopens or fail-stops through the sole supervisor capability")
-  Rel(supervisor, sw, "Audits and repairs bridge/TCX/map/pin/nft state")
-  Rel(supervisor, mtls, "Consumes task failure and invokes exact-port converge/audit")
-  Rel(supervisor, dns, "Observes DNS task/socket state")
-  Rel(supervisor, handle, "Sends typed fail-stop or exposes abnormal task exit to")
-  Rel(handle, proc_supervisor, "Exits status 1 so deployment restarts")
+  Rel(mtls, dial, "Requests a guest stream from")
+  Rel(probe, dial, "Requests a guest stream from")
+  Rel(dial, pool, "Looks up the Active lease and declared ports in")
+  Rel(dial, sessions, "Awaits the pairing reply of its host-initiated flow on")
+  Rel(flows, sessions, "Receives pairing replies through")
+  Rel(flows, fwd, "Installs and removes pairs through")
+  Rel(fwd, ends, "Delivers flow-event records to")
+  Rel(ends, fwd, "Arms drain cells and shuts down targets through")
+  Rel(sup, quiesce, "Takes and restores holds on")
+  Rel(quiesce, flows, "Closes and reopens admission of")
 ```
 
-The shared-switch owner and the node-shared intercept owner deliberately remain
-separate. The former proves endpoint origin and owns bridge/TAP/TCX/guard
-effects; the latter owns transparent socket delivery, registration capability,
-shared IP elements, and enforcement handles. Neither acquires Service backend
-selection, SVID issuance, allocation lifecycle, or cgroup ownership.
-`overdrive-netlink` appears only on the control/read-back edge: it never carries
-a guest runtime frame. Runtime packets move from the TCX verdict through the
-Linux bridge, bridge proof-mark guard, and IP nft TPROXY directly into the
-shared mTLS listeners.
-
-### Dynamic sequence — boot and admission
+### Dynamic sequence — deploy and activation
 
 ```mermaid
 sequenceDiagram
-  participant CLI as overdrive serve / CLI
-  participant CR as run_server composition root
-  participant SW as Shared guest-switch owner
-  participant VR as VmReclamation
-  participant ML as Node-shared mTLS owner
-  participant DNS as DnsResponder
-  participant GATE as Paired EXEC gate
-  participant SUP as Shared-owner supervisor
-  participant RT as Convergence runtime
-
-  CLI->>CR: start configured node
-  CR->>GATE: construct BootClosed wiring
-  CR->>SW: exercise isolated scratch bridge/TAP/guard/TCX probe
-  SW-->>CR: exact verdicts and empty scratch complement
-  CR->>VR: reclaim unsupervised VMMs and driver artifacts
-  VR-->>CR: settled reclamation result
-  CR->>SW: sweep prior shared-switch residue
-  SW-->>CR: zero managed TAP/link/pin/endpoint/guard complement
-  CR->>SW: converge production bridge, fixed MAC, maps, guard and read-back
-  SW-->>CR: production switch healthy
-  CR->>GATE: require is_boot_closed
-  CR->>ML: read/adopt exact owned constant-rule identity without mutation
-  ML-->>CR: prior owned targets or typed foreign/conflict refusal
-  CR->>ML: bind fresh F/C with port 0 and atomically replace owned target ports
-  ML-->>CR: listener/rule/set/zero-element full read-back or rollback+refusal
-  CR->>DNS: probe shared-gateway bind and List seed
-  DNS-->>CR: ready
-  CR->>SUP: retain owners, gate and one-second audit task
-  CR->>GATE: open_after_boot after every read-back succeeds
-  GATE-->>CR: EXEC Open
-  CR->>RT: start reconciliation/admission
-  CR-->>CLI: server handle owns all shared tasks
+    participant CP as Action shim
+    participant Pool as Guest lease pool
+    participant Drv as VmDriver
+    participant VMM as CH fork
+    participant Init as overdrive-init
+    participant Own as Guest-flow owner
+    participant M as mTLS lifecycle
+    CP->>Pool: assigns address, CID and launch token
+    CP->>Own: provisions the CID
+    CP->>Drv: starts the allocation
+    Drv->>VMM: launches with --vsock cid=N,backend=vhost-kernel and the token
+    VMM->>VMM: opens /dev/vhost-vsock and sets the CID
+    Init->>Own: opens the control session with the launch token
+    Init->>Drv: sends READY with the launch token
+    Drv->>CP: reports READY
+    CP->>CP: writes the Running row
+    CP->>M: makes the allocation intercept-live
+    CP->>Own: activates the allocation (requires the control session)
+    CP->>Drv: releases EXEC
 ```
 
-The scratch probe must not adopt or mutate the production allocation inventory.
-Its successful cleanup receipt observes every owned bridge/TAP/map/entry/
-program/link/pin/bridge-guard family at zero. A cleanup or observation failure
-refuses startup with the optional primary failure, direct cleanup source, and
-one complete per-family observation; unavailable is distinct from zero and no
-owner/task is published.
-Source-local tests drive that algorithm through the private typed scratch-I/O
-boundary; the public sim owner scripts final port outcomes only for composed
-ordering/refusal behavior. Native-metal tests retain actual kernel inventory
-authority. The private I/O is an effect boundary inside the same owner, not a
-new C4 component.
-The production bridge is converged only after reclamation and stale-state sweep;
-admission begins only after every owner has returned its complete read-back.
-Port zero and target replacement occur only in this fresh-process sequence. A
-failed replacement preserves the prior atomic program; post-commit mismatch
-rolls back to the captured prior program, and any rollback uncertainty keeps
-the gate BootClosed and refuses startup. Runtime uses only exact recorded-port
-rebind and never rewrites targets.
-
-### Dynamic sequence — allocation start, traffic, and teardown
+### Dynamic sequence — host platform client dials a VM port
 
 ```mermaid
 sequenceDiagram
-  participant OP as overdrive deploy
-  participant SH as Action shim
-  participant POOL as Guest address pool
-  participant SW as Shared guest-switch owner
-  participant VM as VmDriver / CloudHypervisorVmm
-  participant OBS as ObservationStore
-  participant ML as Shared mTLS owner
-  participant GATE as EXEC gate
-  participant G as Guest
-
-  OP->>SH: existing StartAllocation or RestartAllocation action
-  SH->>SH: require active-count < 16,384
-  SH->>POOL: assign exact AllocationId
-  POOL-->>SH: GuestNetworkPlan
-  SH->>SW: provision down TAP, guard membership, endpoint, TCX pin/query
-  SW-->>SH: full attachment read-back
-  SH->>VM: start with grouped assignment / direct TAP
-  VM-->>SH: guest READY and allocation handle
-  SH->>OBS: write Running + workload_addr
-  OBS-->>SH: accepted durable row
-  SH->>ML: register Pending capability and shared IP elements
-  ML-->>SH: exact generation Active, F/C listeners remain node-owned
-  SH->>VM: call existing release_for_exit_emission
-  VM->>GATE: claim Open before taking pending EXEC state
-  GATE-->>VM: claim held or wait/refuse
-  VM-->>G: deliver EXEC
-  VM->>GATE: drop claim after writer acknowledgement
-
-  Note over G,ML: TCP follows TCX proof mark -> bridge guard -> leg F -> TLS/kTLS/splice -> leg C -> leg S
-
-  SH->>VM: quiesce/stop exact allocation
-  SH->>ML: remove indexes, mark Retiring, await claims, drain exact handles, remove IP elements
-  ML-->>SH: capability and element complement empty
-  SH->>SW: delete endpoint, unpin/detach TCX, delete guarded TAP, remove guard membership
-  SW-->>SH: attachment complement empty
-  SH->>POOL: release exact AllocationId last
-  SH->>OBS: commit existing terminal disposition
+    participant S as leg-S or VM probe runner
+    participant Own as Guest-flow owner
+    participant G as overdrive-init
+    participant App as Guest application
+    S->>Own: dials workload_addr:port
+    Own->>Own: checks Active lease, declared port, live session, admission
+    Own->>G: opens a vsock flow to port 1242 with TcpAccept (peer gateway:0, launch token)
+    G->>App: connects from the gateway, bounded by GUEST_INBOUND_CONNECT_TIMEOUT
+    App-->>G: accepts the connection
+    G->>Own: replies Paired on the control session
+    Own-->>S: returns the guest stream
+    S->>G: relays bytes over the stream
+    G->>App: forwards bytes in the guest kernel
+    Note over Own,S: Refused / TimedOut from the guest, or no reply before GUEST_DIAL_PAIRING_DEADLINE, returns a typed dial error
 ```
 
-The Running row remains before intercept registration and guest EXEC remains
-after it. A failure before VMM start returns the typed guest-network effect
-error. An intercept failure after Running follows the existing dominating
-Failed path, awaits driver/intercept/network cleanup, and never releases EXEC.
-
-### Dynamic sequence — runtime recovery and fail-stop
+### Dynamic sequence — guest outbound flow and its end
 
 ```mermaid
 sequenceDiagram
-  participant AUD as Join watcher / one-second audit
-  participant GATE as EXEC gate + recovery snapshot
-  participant TAP as Managed TAP inventory
-  participant OWN as Exact failed owner
-  participant VMK as VM kill capability
-  participant SH as ServerHandle
-  participant CLI as CLI serve owner
-  participant PS as External supervisor
-
-  AUD->>GATE: lock Open -> Recovering(component, started_at, attempts=0)
-  GATE-->>AUD: new EXEC release closed
-  alt kernel-path mismatch
-    AUD->>TAP: set every managed TAP down and read back
-    alt quiescence Err or missed its bound (failing set undetermined)
-      AUD->>VMK: kill_workloads_slice (bounded by VM_KILL_CALL_BOUND)
-      AUD->>GATE: lock -> FailStop (TapQuiescenceUndetermined)
-    else TapQuiescence.unconfirmed non-empty (DR-08 (b)-A: a refused netlink thread leaves its TAP unconfirmed, never ends the pass)
-      loop each unconfirmed allocation, AllocationId order (one kill loop; runs to its end before any owner call or fail-stop)
-        AUD->>VMK: kill_allocation (each write bounded by VM_KILL_CALL_BOUND)
-        VMK-->>AUD: Ok within bound = confirmed kill, allocation Condemned
-        alt kill write fails (not NotFound) or misses its bound
-          AUD->>VMK: kill_workloads_slice (bounded)
-          AUD->>GATE: lock -> FailStop (VmKillFailed)
-        end
-      end
-    end
-  end
-  loop every 250 ms, at most five seconds
-    AUD->>OWN: converge exact owner through production path
-    OWN-->>AUD: typed result
-    AUD->>OWN: audit full registered-set postcondition
-    OWN-->>GATE: update completed attempt and first remaining component only while Recovering
-    alt every invariant healthy
-      GATE->>GATE: lock Recovering -> Open
-      GATE-->>AUD: wake waiting EXEC releases
-    end
-  end
-  alt five-second deadline (reached only after any kill loop has run to its end) or abnormal supervisor exit
-    AUD->>GATE: lock -> FailStop (RecoveryDeadlineExceeded on the deadline), freeze latest snapshot
-    AUD->>SH: typed shutdown request / retained JoinHandle result
-    SH->>CLI: return exact fail-stop cause and snapshot
-    CLI->>CLI: bound graceful shutdown to ten seconds
-    CLI-->>PS: exit status 1
-    PS->>CLI: start a new serve PID after deployment probe
-  end
+    participant App as Guest application
+    participant GF as Guest forwarder
+    participant G as overdrive-init
+    participant Own as Guest-flow owner
+    participant F as Host forwarder
+    participant D as Destination (leg-F or non-mesh)
+    App->>GF: connects to a destination
+    GF->>GF: captures the socket and parks early data
+    G->>Own: opens a flow vsock with the request and launch token
+    Own->>Own: applies policy, resolves mesh once, admits against the quota
+    Own->>D: connects the host-facing socket
+    Own->>F: installs the pair at establishment
+    Own->>G: sends Paired on the control session
+    F->>D: forwards payload in the host kernel
+    App->>GF: half-closes its write side
+    G->>Own: sends vsock SHUTDOWN with SEND only
+    F->>Own: records a clean half-close from the raw tracepoint
+    Own->>F: arms the drain cell with its goal
+    F->>Own: records drain complete
+    Own->>D: shuts down the write side
 ```
 
-Once `ServerHandle` writes FailStop, no late retry may restore Open. A report's
-per-VM kill loop writes each `kill_allocation` in `AllocationId` order and runs
-to its end before any further owner call or fail-stop; every write is capped by
-`SHARED_NETWORK_VM_KILL_CALL_BOUND`, a failed or missed write escalates to the
-workloads-slice kill and `VmKillFailed`, and `RecoveryDeadlineExceeded` is
-checked only after the loop. A pure
-listener/DNS loss does not down TAPs or pause already-written commands; it
-still closes new EXEC and new socket/query admission. External restart is an
-operational precondition, never an in-process recovery service.
+### Dynamic sequence — guest reset ends the VMM
 
-S-ND295-33 observes only the in-process portion of this sequence. It drives the
-exported server handler through HTTPS, drains that handler, and has the test
-harness construct a fresh handler over retained roots. The runtime does not
-create its successor. The `CLI -> external supervisor -> new PID` edge remains
-an accepted deployment/production-readiness contract but is not asserted by
-that direct-handler scenario. DISTILL assigns no S-ND295 process/PID/exit test
-to the edge.
+```mermaid
+sequenceDiagram
+    participant Guest as Guest kernel
+    participant VMM as CH fork
+    participant K as Host kernel vhost-vsock
+    participant Own as Guest-flow owner
+    participant Drv as VmDriver
+    participant Pool as Teardown and lease pool
+    Guest->>Guest: panics on a PID-1 crash and resets
+    Guest->>VMM: signals reset
+    VMM->>VMM: exits instead of rebooting in place
+    VMM->>K: closes its vhost-vsock descriptor
+    K->>Own: resets every host flow of that guest (orphan sweep)
+    Own->>Own: aborts the flows with no classification record
+    VMM-->>Drv: reports VMM exit
+    Drv->>Pool: reports the ended launch
+    Note over Pool: the lease is released only after the VMM has exited
+```
+
+The VMM step "exits instead of rebooting in place" is the fork change of
+ADR-0182; the pinned fork build `41a619d19` still answers a reset with
+`vm_reboot`. The driver classifies the exit as a crash because the guest sent
+no exit report.
+
+On a `serve` restart, boot reclamation ends every VM the new process does not
+supervise before any lease is assigned; VMs do not survive a restart
+([GH #312](https://github.com/overdrive-sh/overdrive/issues/312)).

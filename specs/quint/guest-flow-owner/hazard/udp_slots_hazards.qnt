@@ -1,5 +1,5 @@
 // -*- mode: Bluespec; -*-
-// Hazard / teeth instances of module B (../udp_slots.qnt): the design with ONE rule switched off
+// Hazard / teeth instances of udp_slots (../udp_slots.qnt): the design with ONE rule switched off
 // (OFF). Expected verdicts are in ../checks.toml.
 
 // slot claim is two steps (check, then take)

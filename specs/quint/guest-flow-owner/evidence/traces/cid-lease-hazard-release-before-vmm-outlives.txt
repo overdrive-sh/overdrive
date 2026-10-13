@@ -1,0 +1,24 @@
+# cid-lease-hazard-release-before-vmm-outlives: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  reclaimed = TRUE
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  up = TRUE
+  cursor = 0
+  bootLeft = -1
+
+State 2 [Assign]
+  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 1
+
+State 3 [Launch]
+  al = << [st |-> "running", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+
+State 4 [Release]
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)

@@ -229,9 +229,9 @@ disciplines specific to *changing* a baseline:
   kernel version the count was measured on.
 - **Counts vary across kernels — never gate on absolute numbers
   cross-kernel.** The verifier's accounting changes between kernel
-  releases. The dev Lima VM (currently 7.0) and the pinned-6.18 Tier-3
-  matrix produce *different* counts for the same program; the
-  **pinned-6.18 matrix is the authoritative merge signal** (ADR-0068).
+  releases. A dev VM on another kernel and the pinned Linux 7.0 Tier-3
+  kernel produce *different* counts for the same program; the
+  **pinned 7.0 kernel is the authoritative merge signal** (ADR-0068).
   A dev-VM count drifting over a baseline that was captured on a
   *different* kernel is environmental, not a regression — re-measure on
   the gating kernel before treating it as real. (Precedent: the

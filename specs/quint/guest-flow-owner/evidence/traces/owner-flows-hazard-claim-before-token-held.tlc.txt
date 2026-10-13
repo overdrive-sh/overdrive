@@ -1,36 +1,25 @@
 State 1: <Initial predicate>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Absent"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -44,39 +33,28 @@ State 1: <Initial predicate>
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 0
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 2: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
+State 2: <flows_bugClaimBeforeToken_owner_flows_Provision line 1209, col 3 to line 1231, col 50 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Provisioned"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -90,39 +68,28 @@ State 2: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 3: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
+State 3: <flows_bugClaimBeforeToken_owner_flows_VmStart line 783, col 3 to line 816, col 52 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Provisioned"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -136,39 +103,28 @@ State 3: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 4: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
+State 4: <flows_bugClaimBeforeToken_owner_flows_Teardown line 1297, col 3 to line 1351, col 50 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Retiring"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -182,39 +138,28 @@ State 4: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 5: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3539, col 55 of module flows_bugClaimBeforeToken>
+State 5: <flows_bugClaimBeforeToken_owner_flows_step line 3577, col 9 to line 3578, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Retiring"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -228,39 +173,28 @@ State 5: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 6: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
+State 6: <flows_bugClaimBeforeToken_owner_flows_VmStop line 822, col 3 to line 1011, col 52 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Retiring"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -274,39 +208,28 @@ State 6: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 7: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
+State 7: <flows_bugClaimBeforeToken_owner_flows_Release line 1357, col 3 to line 1379, col 50 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Absent"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -320,39 +243,28 @@ State 7: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 1
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 8: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
+State 8: <flows_bugClaimBeforeToken_owner_flows_Provision line 1209, col 3 to line 1231, col 50 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Provisioned"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -366,39 +278,28 @@ State 8: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 9: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 3537, col 55 of module flows_bugClaimBeforeToken>
+State 9: <flows_bugClaimBeforeToken_owner_flows_VmStart line 783, col 3 to line 816, col 52 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Provisioned"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -412,39 +313,28 @@ State 9: <flows_bugClaimBeforeToken_owner_flows_step line 3536, col 4 to line 35
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 10: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3539, col 55 of module flows_bugClaimBeforeToken>
+State 10: <flows_bugClaimBeforeToken_owner_flows_step line 3577, col 9 to line 3578, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Provisioned"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 1
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -458,39 +348,28 @@ State 10: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 11: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3539, col 55 of module flows_bugClaimBeforeToken>
+State 11: <flows_bugClaimBeforeToken_owner_flows_step line 3577, col 9 to line 3578, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Provisioned"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 1
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "reading", gen |-> 1], [st |-> "pending", gen |-> 2]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}
@@ -504,39 +383,28 @@ State 11: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3
 /\ flows_bugClaimBeforeToken_owner_flows_gen = 2
 /\ flows_bugClaimBeforeToken_owner_flows_bHeldByOther = FALSE
 
-State 12: <flows_bugClaimBeforeToken_owner_flows_step line 3538, col 9 to line 3539, col 55 of module flows_bugClaimBeforeToken>
+State 12: <flows_bugClaimBeforeToken_owner_flows_step line 3577, col 9 to line 3578, col 55 of module flows_bugClaimBeforeToken>
 /\ flows_bugClaimBeforeToken_owner_flows_phantom = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_badAct = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_crossMsg = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_badPaired = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_abortDiscarded = {}
 /\ flows_bugClaimBeforeToken_owner_flows_toGuestAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_readyCross = FALSE
+/\ flows_bugClaimBeforeToken_owner_flows_toHostAbort = {}
 /\ flows_bugClaimBeforeToken_owner_flows_alloc = "Provisioned"
 /\ flows_bugClaimBeforeToken_owner_flows_drvLive = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_bclaim = 0
+/\ flows_bugClaimBeforeToken_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_claim = 1
+/\ flows_bugClaimBeforeToken_owner_flows_act = "none"
 /\ flows_bugClaimBeforeToken_owner_flows_sess = <<[st |-> "reading", gen |-> 1], [st |-> "closed", gen |-> 2]>>
 /\ flows_bugClaimBeforeToken_owner_flows_heldByOther = TRUE
 /\ flows_bugClaimBeforeToken_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugClaimBeforeToken_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugClaimBeforeToken_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugClaimBeforeToken_owner_flows_resurrected = FALSE
 /\ flows_bugClaimBeforeToken_owner_flows_toHostPaired = {}

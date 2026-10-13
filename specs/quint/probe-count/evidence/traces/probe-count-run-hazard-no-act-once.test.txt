@@ -1,0 +1,23 @@
+
+  streak_bugNoActOnce
+    1) streak_bugNoActOnce::probe_count::ReReadAfterFailedStopDoesNotReTerminate failed after 1 test(s)
+
+  1 failed
+
+  1) streak_bugNoActOnce::probe_count::ReReadAfterFailedStopDoesNotReTerminate:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:261:49
+        261:   run ReReadAfterFailedStopDoesNotReTerminate = init
+                                                             ^^^^
+        262:     .then(ProbeRun("Fail", "")).then(ProbeRun("Fail", "")).then(ProbeRun("Fail", ""))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        263:     .then(ConsumerLook(false)).expect(terms == 1 and A == 3 and running)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        264:     .then(ConsumerLook(false)).expect(terms == 1 and A == 3 and running and Safety)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x44ddad2b64379cd2 --match=streak_bugNoActOnce::probe_count::ReReadAfterFailedStopDoesNotReTerminate to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/hazard/probe_count_hazards.qnt
+error: Tests failed

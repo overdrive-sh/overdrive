@@ -1,0 +1,42 @@
+
+=== S5: non-prefix dial through the leg-B code path (--leg-b) stays unmarked and uses the normal route
+Hypothesis:  destination outside 100.95.0.0/16: no mark, no bind; SYN leaves via the uplink default route
+Prediction:  SYN to 198.51.100.7 and 192.0.2.50 seen on up0 with src 192.0.2.10; v33 reports setup=[] (no mark, no bind); ETIMEDOUT (nobody answers on the dummy)
+Falsification: setup shows mark/bind, or the packet lands on lo
++ [ns] sysctl (netns v33ns; uname -r=7.0.0-29-generic x86_64)
+net.ipv4.conf.all.route_localnet = 0
+net.ipv4.conf.lo.route_localnet = 0
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.lo.rp_filter = 0
+net.ipv4.ip_forward = 1
++ [ns] ip route add default via 192.0.2.1 dev up0
+[exit=0]
++ [ns] ip rule add fwmark 0x1 lookup 100
+[exit=0]
++ [ns] ip route add local 0.0.0.0/0 dev lo table 100
+[exit=0]
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
++ [ns] ip route get 198.51.100.7
+198.51.100.7 via 192.0.2.1 dev up0 src 192.0.2.10 uid 0 
+    cache 
+[exit=0]
++ [ns] v33 dial --leg-b --ip 198.51.100.7 --port 8080 --timeout-ms 300
+RESULT connect-fail errno=110 ETIMEDOUT elapsed_ms=300.4 setup=[]
++ [ns] v33 dial --leg-b --ip 192.0.2.50 --port 8080 --timeout-ms 300
+RESULT connect-fail errno=110 ETIMEDOUT elapsed_ms=300.5 setup=[]
+--- capture up0_s5.pcap (IPv4 packets seen):
+  14:50:34.840168 IP 192.0.2.10.55536 > 198.51.100.7.8080: Flags [S], seq 3619321017, win 64240, options [mss 1460,sackOK,TS val 605117629 ecr 0,nop,wscale 10], length 0
+  14:50:35.145613 IP 192.0.2.10.55580 > 192.0.2.50.8080: Flags [S], seq 3144033810, win 64240, options [mss 1460,sackOK,TS val 3530795816 ecr 0,nop,wscale 10], length 0
+  count=2
+##### same dial with NO default route: off-link non-prefix dial keeps failing exactly as before (no dependency introduced)
++ [ns] ip route del default via 192.0.2.1 dev up0
+[exit=0]
++ [ns] v33 dial --leg-b --ip 198.51.100.7 --port 8080 --timeout-ms 300
+RESULT connect-fail errno=101 ENETUNREACH elapsed_ms=0.0 setup=[]
+--- leg-C listener log:
+  listener ready port=15001
+--- host decoy logs:

@@ -1,0 +1,93 @@
+
+=== S4: controls (which half of mark+bind is load-bearing)
+Hypothesis:  unmarked: no route (ENETUNREACH) or, with a default route, no host-socket delivery; mark-only gives src=dst; bind-only fails
+Prediction:  (a) ENETUNREACH; (b) not-in-set: ECONNREFUSED, in-set: reaches leg-C via today's divert from the uplink source; (c) mark-only: src=100.95.0.7, reply into prefix refused => no round trip; (d) bind-only: ENETUNREACH w/o default, EINVAL with default
+Falsification: any unmarked connect delivering to a host decoy socket
++ [ns] sysctl (netns v33ns; uname -r=7.0.0-29-generic x86_64)
+net.ipv4.conf.all.route_localnet = 0
+net.ipv4.conf.lo.route_localnet = 0
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.lo.rp_filter = 0
+net.ipv4.ip_forward = 1
++ [ns] ip rule add fwmark 0x1 lookup 100
+[exit=0]
++ [ns] ip route add local 0.0.0.0/0 dev lo table 100
+[exit=0]
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
+##### (a) unmarked, no default route
++ [ns] v33 dial --ip 100.95.0.7 --port 8080
+RESULT connect-fail errno=101 ENETUNREACH elapsed_ms=0.0 setup=[]
++ [ns] v33 dial --ip 100.95.0.99 --port 8080
+RESULT connect-fail errno=101 ENETUNREACH elapsed_ms=0.0 setup=[]
+##### (d1) bound only (127.0.0.1), no default route
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --bind 127.0.0.1
+RESULT connect-fail errno=101 ENETUNREACH elapsed_ms=0.0 setup=[bind=127.0.0.1]
+##### (c) marked only (unbound), no default route
++ [ns] ip route get 100.95.0.7 mark 1
+local 100.95.0.7 dev lo table 100 src 100.95.0.7 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --mark 1
+RESULT connect-fail errno=101 ENETUNREACH elapsed_ms=0.0 setup=[mark=1]
+--- capture lo_s4c.pcap (IPv4 packets seen):
+  count=0
+--- leg-C listener log:
+  listener ready port=15001
+--- host decoy logs:
+  wild-tcp ready port=8080
+  wild-udp ready port=53
+--- reject/drop counters:
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 0 bytes 0 reject with tcp reset
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 reject
+##### (c') marked only, table-100 route carrying 'src 127.0.0.1' (K8 / open question 2)
++ [ns] ip route replace local 0.0.0.0/0 dev lo table 100 src 127.0.0.1
+[exit=0]
++ [ns] ip route show table 100
+local default dev lo scope host src 127.0.0.1 
+[exit=0]
++ [ns] ip route get 100.95.0.7 mark 1
+local 100.95.0.7 dev lo table 100 src 127.0.0.1 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --mark 1
+RESULT ok client-local=127.0.0.1:58126 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.1 setup=[mark=1]
+--- leg-C listener log:
+  ACCEPT peer=127.0.0.1:58126 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+--- host decoy logs:
+--- reject/drop counters:
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 0 bytes 0 reject with tcp reset
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 reject
++ [ns] ip route replace local 0.0.0.0/0 dev lo table 100
+[exit=0]
++ [ns] ip route show table 100
+local default dev lo scope host 
+[exit=0]
+##### with a default route present
++ [ns] ip route add default via 192.0.2.1 dev up0
+[exit=0]
+##### (b1) unmarked, tuple NOT in set (decoys present)
++ [ns] v33 dial --ip 100.95.0.99 --port 8080
+RESULT connect-fail errno=111 ECONNREFUSED elapsed_ms=0.0 setup=[]
++ [ns] v33 dial --ip 100.95.0.99 --port 53 --udp
+RESULT send-fail errno=1 EPERM local=192.0.2.10:34075 setup=[]
+##### (b2) unmarked, tuple in set (today's divert path, test hosts with a default route)
++ [ns] v33 dial --ip 100.95.0.7 --port 8080
+RESULT ok client-local=192.0.2.10:34168 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.1 setup=[]
+##### (d2) bound only (127.0.0.1)
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --bind 127.0.0.1
+RESULT connect-fail errno=22 EINVAL elapsed_ms=0.0 setup=[bind=127.0.0.1]
++ [ns] v33 dial --ip 100.95.0.99 --port 8080 --bind 127.0.0.1
+RESULT connect-fail errno=22 EINVAL elapsed_ms=0.0 setup=[bind=127.0.0.1]
+--- leg-C listener log:
+  ACCEPT peer=192.0.2.10:34168 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+--- host decoy logs:
+--- reject/drop counters:
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 1 bytes 60 reject with tcp reset
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 1 bytes 46 reject

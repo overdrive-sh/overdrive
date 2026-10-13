@@ -1,0 +1,47 @@
+
+=== S2: same, default route via up0 present
+Hypothesis:  mark selects table 100 ahead of main's default; nothing is sent on the uplink
+Prediction:  same round trip; zero IPv4 packets on up0 for the marked dials
+Falsification: any IPv4 on up0; route via uplink
++ [ns] sysctl (netns v33ns; uname -r=7.0.0-38-generic aarch64)
+net.ipv4.conf.all.route_localnet = 0
+net.ipv4.conf.lo.route_localnet = 0
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.lo.rp_filter = 2
+net.ipv4.ip_forward = 1
++ [ns] ip route add default via 192.0.2.1 dev up0
+[exit=0]
++ [ns] v33-rules   (overdrive-netlink Client::add_fib_rule_fwmark(0x1,100) + add_local_route(100,"lo"))
+production client: fwmark 0x1 -> table 100 rule + local default dev lo table 100 installed
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
++ [ns] ip route show
+default via 192.0.2.1 dev up0 
+192.0.2.0/24 dev up0 proto kernel scope link src 192.0.2.10 
+[exit=0]
++ [ns] ip route get 100.95.0.7 mark 1 from 127.0.0.1
+local 100.95.0.7 from 127.0.0.1 dev lo table 100 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] ip route get 100.95.0.7
+100.95.0.7 via 192.0.2.1 dev up0 src 192.0.2.10 uid 0 
+    cache 
+[exit=0]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --mark 1 --bind 127.0.0.1
+RESULT ok client-local=127.0.0.1:43028 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.1 setup=[mark=1 bind=127.0.0.1]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --leg-b
+RESULT ok client-local=127.0.0.1:43042 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.1 setup=[mark=1 bind=127.0.0.1]
+--- capture up0_s2.pcap (IPv4 packets seen):
+  count=0
+--- leg-C listener log:
+  listener ready port=15001
+  ACCEPT peer=127.0.0.1:43028 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+  ACCEPT peer=127.0.0.1:43042 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+--- host decoy logs:
+--- reject/drop counters:
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 0 bytes 0 reject with tcp reset
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 reject

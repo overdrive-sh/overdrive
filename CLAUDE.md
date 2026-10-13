@@ -113,8 +113,8 @@ Two upstream projects are vendored as git submodules under `vendors/`:
   runs. It is a read-only reference: every design claim about kernel behaviour
   is read and cited there (`.claude/rules/design.md` § "Ground every kernel
   claim in the Linux source Overdrive runs"). It is excluded from the metal
-  sync. ADR-0068 and `.claude/rules/testing.md` still name 6.18 LTS as the
-  pinned kernel until they are amended; 7.0 is authoritative.
+  sync. ADR-0068 (amended 2026-10-10) and `.claude/rules/testing.md`
+  § "Kernel matrix" name 7.0 as the pinned kernel.
 
 ### A guest reset ends the VMM — enforced in the fork
 

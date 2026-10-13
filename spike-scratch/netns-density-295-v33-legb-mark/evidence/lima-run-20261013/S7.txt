@@ -1,0 +1,52 @@
+
+=== S7: production ip rule order (installed by the production netlink client, no priority argument)
+Hypothesis:  kernel picks pref = (second rule's pref) - 1 = 32765, ahead of main 32766
+Prediction:  ip rule show: 0 local, 32765 fwmark 0x1 lookup 100, 32766 main, 32767 default; mark-1 lookup beats main's default route
+Falsification: main (or a default route) wins for mark 1
++ [ns] sysctl (netns v33ns; uname -r=7.0.0-38-generic aarch64)
+net.ipv4.conf.all.route_localnet = 0
+net.ipv4.conf.lo.route_localnet = 0
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.lo.rp_filter = 2
+net.ipv4.ip_forward = 1
++ [ns] ip route add default via 192.0.2.1 dev up0
+[exit=0]
++ [ns] v33-rules   (overdrive-netlink Client::add_fib_rule_fwmark(0x1,100) + add_local_route(100,"lo"))
+production client: fwmark 0x1 -> table 100 rule + local default dev lo table 100 installed
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
++ [ns] ip rule show
+0:	from all lookup local
+32765:	from all fwmark 0x1 lookup 100
+32766:	from all lookup main
+32767:	from all lookup default
+[exit=0]
++ [ns] ip route get 100.95.0.7 mark 1 from 127.0.0.1
+local 100.95.0.7 from 127.0.0.1 dev lo table 100 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] ip route get 100.95.0.7 mark 0
+100.95.0.7 via 192.0.2.1 dev up0 src 192.0.2.10 uid 0 
+    cache 
+[exit=0]
++ [ns] ip route get 198.51.100.7 mark 1
+local 198.51.100.7 dev lo table 100 src 198.51.100.7 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] ip route get 198.51.100.7 mark 0
+198.51.100.7 via 192.0.2.1 dev up0 src 192.0.2.10 uid 0 
+    cache 
+[exit=0]
+##### idempotence of the production guard (dump-then-add) - second run must not stack a rule
+thread 'main' (72082) panicked at src/rules.rs:12:40:
+local route: Route { op: "local-add", source: NetlinkError(ErrorMessage { code: Some(-17), header: [44, 0, 0, 0, 24, 0, 5, 6, 3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 100, 4, 254, 2, 0, 0, 0, 0, 8, 0, 1, 0, 0, 0, 0, 0, 8, 0, 4, 0, 1, 0, 0, 0] }) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
++ [ns] ip rule show
+0:	from all lookup local
+32765:	from all fwmark 0x1 lookup 100
+32766:	from all lookup main
+32767:	from all lookup default
+[exit=0]

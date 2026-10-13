@@ -10,6 +10,22 @@ This amends ADR-0090's Exec default-target row and corrects the observed
 startup-attempt accounting defect. It retains ADR-0092 and ADR-0094's existing
 marked-socket rules; it does not broaden either socket decision.
 
+**Amended 2026-10-13 by ADR-0191** (#295, PROBE-RUN-COUNT, approved by user
+2026-10-13; not yet implemented). D2 is replaced. `ServiceLifecycle` no
+longer counts startup attempts: the probe runner records in each probe row
+the number of consecutive written runs of its status (`same_status_runs`),
+and the startup attempts are spent when the latest startup row is a `Fail`
+whose count is at least `max_attempts`, read at each reconcile. Observed-at
+de-duplication is removed with both view maps it used
+(`startup_attempts_per_alloc`, `startup_last_fail_seen_at`), and the
+`ServiceAllocFact::latest_startup_probe_observed_at` hydration input loses
+its consumer; D2's
+legacy-unpaired-view normalisation has no successor, because there is no
+counter to normalise. The `StartupProbeFailed` predicate keeps its other
+conditions (startup deadline elapsed, no `Pass`). D2 below is retained as the
+record of the 2026-09-07 fix; the current rule is the #295 feature delta,
+§ *[REF] VM probe runner*. D1 is unaffected.
+
 ## Context
 
 E10's checked-in `http-exec-204.toml` starts `e08-server` as an Exec Service
@@ -78,6 +94,10 @@ the mark, sockets, adapters, nft rules, routes, capabilities, or their result
 semantics.
 
 ### D2 — Count a startup failure only when its stored LWW observation changes
+
+*Amended 2026-10-13 by ADR-0191 (see Status): replaced. The startup attempts
+are the probe row's own `same_status_runs`, compared with `max_attempts` at
+read time; the de-duplication below and its view maps are removed.*
 
 `ServiceLifecycle` remains the sole owner of startup attempt accounting and of
 the existing `StartupProbeFailed` terminal. Its view uses the existing

@@ -1,0 +1,38 @@
+# cid-lease-hazard-reclaim-never-completes: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  reclaimed = TRUE
+  up = TRUE
+  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  cursor = 0
+  bootLeft = 1
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+
+State 2 [Assign]
+  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  cursor = 1
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+
+State 3 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "running", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 4 [Crash]
+  reclaimed = FALSE
+  up = FALSE
+  dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  cursor = 0
+  bootLeft = 0
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+
+State 5 [Restart]
+  up = TRUE
+
+State 6 [Reclaim]
+  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> TRUE]
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+
+-> stutters forever in State 6

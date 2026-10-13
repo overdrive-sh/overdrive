@@ -1,0 +1,23 @@
+State 1: <Initial predicate>
+/\ quota_bugNodeWideQuota_flow_quota_slot = << [own |-> 0, st |-> "free", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugNodeWideQuota_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 2: <quota_bugNodeWideQuota_flow_quota_Admit line 307, col 3 to line 349, col 10 of module quota_bugNodeWideQuota>
+/\ quota_bugNodeWideQuota_flow_quota_slot = << [own |-> 1, st |-> "active", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugNodeWideQuota_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 3: <quota_bugNodeWideQuota_flow_quota_Refuse line 355, col 3 to line 367, col 7 of module quota_bugNodeWideQuota>
+/\ quota_bugNodeWideQuota_flow_quota_slot = << [own |-> 1, st |-> "active", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugNodeWideQuota_flow_quota_g = [ refusedUnder |-> TRUE,
+  clash |-> FALSE,
+  refused |-> TRUE,
+  otherAdmitted |-> FALSE ]

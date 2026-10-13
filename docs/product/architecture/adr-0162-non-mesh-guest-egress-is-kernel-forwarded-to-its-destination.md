@@ -1,20 +1,19 @@
-# ADR-0162 — Non-mesh guest egress is forwarded in the kernel directly to its destination; no userspace payload relay remains on any guest path
+# ADR-0162 — Non-mesh guest egress is forwarded in the kernel directly to its destination; no userspace payload relay remains on the guest egress path
 
 ## Status
 
-**Accepted — ruling D14 approved by user 2026-10-05; the connect bound D15-R3 = (b)
-(independent DESIGN review finding L-5) approved by user 2026-10-06;
-independent review r12 answered; further review waived by user 2026-10-08;
-handed to DISTILL.** GH #295. Recorded in the #295
-feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
-2026-10-05*. The ADR is Accepted with the D1 transport it depends on. Its
-destination set is limited by ADR-0167 (host-internal destinations refused;
-decision D26, approved by user 2026-10-06).
+**Accepted — ruling D14 approved by user 2026-10-05; the connect bound D15-R3 =
+(b) approved by user 2026-10-06.** GH #295. Recorded in the #295 feature
+delta, § *[REF] vsock Attachment Replacement DESIGN*. Its destination set is
+limited by ADR-0167 (host-internal destinations refused; decision D26,
+approved by user 2026-10-06).
 
 ## Context
 
-The transport constraint is "no userspace application payload relay". Two
-existing leg-F data paths were examined against it:
+The transport constraint is "no userspace application payload relay". Its
+one admitted exception is leg-S's inbound relay to VM backends, temporary
+until #303 (ADR-0186); it is not on the egress path. Two existing leg-F data
+paths were examined against the constraint:
 
 - **Non-mesh pass-through.** `spawn_cleartext_passthrough` in
   `crates/overdrive-worker/src/mtls_intercept_worker.rs` relays every byte
@@ -32,8 +31,8 @@ and a real Internet SSH server's banner arrived before any client byte. The
 off-host UDP spike (`spike/v11-vip-v14-findings.md`) forwarded guest UDP of
 0 to 59,000 bytes through a host UDP socket connected to a destination
 behind a real egress interface (a namespace behind veth at MTU 1,500, and
-the physical NIC for `dig @1.1.1.1` and wire captures), with the frame
-removed as ADR-0165 decides.
+the physical NIC for `dig @1.1.1.1` and wire captures). The frame is removed
+in the host verdict and an empty datagram is sent by the owner (ADR-0165).
 
 ## Decision
 

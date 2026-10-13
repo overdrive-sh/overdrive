@@ -1,0 +1,51 @@
+# probe-count-hazard-lww-observed-at: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  fs = 0
+  clock = 0
+  runs = 0
+  A = 0
+  M = 0
+  rseq = 0
+  tseqs = {}
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 0, stoppedTerm |-> FALSE, missed |-> FALSE ]
+  rsame = 0
+  running = TRUE
+  rat = 0
+  hist = <<>>
+  terms = 0
+  pseq = 0
+  psame = 0
+  pst = ""
+  rst = ""
+
+State 2 [ProbeRun]
+  clock = 1
+  runs = 1
+  rseq = 1
+  rsame = 1
+  hist = <<"Pass">>
+  pseq = 1
+  psame = 1
+  pst = "Pass"
+  rst = "Pass"
+
+State 3 [ProbeRun]
+  clock = 2
+  runs = 2
+  rseq = 2
+  rsame = 2
+  rat = 1
+  hist = <<"Pass", "Pass">>
+  pseq = 2
+  psame = 2
+
+State 4 [ClockBack]
+  clock = 0
+
+State 5 [ProbeRun]
+  clock = 1
+  runs = 3
+  hist = <<"Pass", "Pass", "Pass">>
+  pseq = 3
+  psame = 3

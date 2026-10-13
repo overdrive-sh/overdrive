@@ -13,6 +13,28 @@ inference). **Extends**: ADR-0037 (typed TerminalCondition;
 non-terminal `Stable` is novel) and ADR-0035/0036 (typed View
 runtime contract).
 
+**Amended 2026-10-13 by ADR-0191** (#295, PROBE-RUN-COUNT with D-1,
+approved by user 2026-10-13; not yet implemented). The probe thresholds are
+no longer counted by this reconciler. The probe runner records in each probe
+row the number of consecutive written runs of its status
+(`same_status_runs`), and `ServiceLifecycle` compares the latest row's count
+with the spec's threshold at each reconcile: liveness is crossed by a `Fail`
+row whose count reaches `failure_threshold`, readiness is eligible on a
+`Pass` row whose count reaches `success_threshold`, and the startup attempts
+are spent by a `Fail` row whose count reaches `max_attempts`. The View loses
+`liveness_consecutive_failures`, `readiness_consecutive_successes`,
+`startup_attempts_per_alloc` and `startup_last_fail_seen_at`, and gains
+`liveness_last_acted_run` — the run sequence of the row on which a liveness
+terminate was last emitted per probe key; a terminate is emitted only on a
+newer crossed row, so a re-read of one row never stops twice and a failed
+stop is retried on the next row still past the threshold (D-1). A missing
+row no longer resets readiness. § 2's `View` sketch, § 3 steps 2–4 (the
+counter arithmetic) and § 6's "the counter lives in
+`View::readiness_consecutive_successes`" are retained as the record of the
+2026-05-24 decision; the current rule is the #295 feature delta,
+§ *[REF] VM probe runner*. The `Stable` condition (§ 4), the AND-of-all
+startup rule (§ 5) and the restart authority (ADR-0087) are unchanged.
+
 ## Context
 
 ADR-0047 split the Phase 1 reconciler into per-kind behaviour. The
@@ -222,7 +244,9 @@ shown. The keying is semantically the same per-`(alloc, probe_idx)`
 pair the amendment below describes; only the container nesting
 differed. Note further that the `View` sketch above is **abridged**:
 the implemented struct carries four fields the sketch omits —
-`startup_last_fail_seen_at` (`:316`), `observed` (`:338`),
+`startup_last_fail_seen_at` (`:316`; removed by ADR-0191, 2026-10-13 —
+the startup attempts are the probe row's `same_status_runs`; see Status),
+`observed` (`:338`),
 `terminal_announced` (`:368`), and
 `last_emitted_backend_fingerprint` (`:387`). The first three are
 GAP-9/GAP-10 additions; the fourth is the emit-time fingerprint
@@ -795,3 +819,11 @@ without a real use case.
   inventory is carried in `brief.md` § 77, which enumerates the five
   maps and three sets explicitly; this entry is the ADR-side
   reconciliation with it.
+- 2026-10-13 — **Amendment** — decision changed by ADR-0191 (#295,
+  PROBE-RUN-COUNT with D-1, approved by user 2026-10-13; not yet
+  implemented): the probe thresholds are applied to the probe row's
+  producer-recorded `same_status_runs` at read time, the four counter maps
+  leave the View, `liveness_last_acted_run` joins it, a failed liveness stop
+  is retried on the next row still past the threshold, and a missing row no
+  longer resets readiness. Recorded in Status; the sections it replaces are
+  retained as the 2026-05-24 record.

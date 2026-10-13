@@ -4,31 +4,32 @@
 
 **Accepted — carrier sub-decision D18a approved by user 2026-10-05; the
 handling of a control message for an unknown or closed flow (U-5) pinned at
-the user's direction on 2026-10-06 and its exact rule (discard and count, no
-reply) confirmed by user 2026-10-06 with its assumption K-A4 and validation
-item V-24 (second model check, `spike/quint-owner-findings-r2.md`, finding
-r2-3); independent review r12 answered; further review waived by user
-2026-10-08; handed to DISTILL.** GH #295. Split out of ADR-0158 (out-of-band
-pairing order, D18) so that each ADR records one decision. Recorded in the
-#295 feature delta, § *[REF] Control session (D18a)*. Which launch a session
-belongs to is ADR-0177 (approved under the user's 2026-10-09 remediation
-directive), and the claim's live-token step is ATTR-LIVE-CLAIM (same
-directive). The half-close messages are ADR-0180 (HALFCLOSE-SIGNAL, same
-directive). K-A4 was validated by V-24 (feature delta P-38).
+the user's direction and its exact rule (discard and count, no reply)
+confirmed by user 2026-10-06, with its assumption K-A4 and validation item
+V-24; ATTR-TOKEN and ATTR-LIVE-CLAIM approved by user directive 2026-10-09;
+the pairing replies of host-opened flows (INB-1), the
+flow-end classification that leaves no half-close message on the session
+(R2-END) and NO-SURVIVE approved by user 2026-10-11.** GH #295. The
+out-of-band pairing order (D18) is ADR-0158. Recorded in the #295 feature delta, § *[REF] Control session*.
+Which launch a session belongs to is ADR-0177. K-A4 was validated by V-24
+(feature delta P-38).
 
 ## Context
 
-ADR-0158 moves `Paired`, `Refused`, `Abort` and `ListenState` (ADR-0163) off
-the flow connections. They need a per-VM carrier whose sender is attributable
-to the VM. The VM already has one host session: the beacon (ADR-0157), owned
-by the VM driver, which carries READY / EXEC / EXIT authority with its own
-lifecycle.
+ADR-0158 moves `Paired`, `Refused` and `Abort` off the flow connections. They
+need a per-VM carrier whose sender is attributable to the VM. The VM already
+has one host session: the beacon (ADR-0157), owned by the VM driver, which
+carries READY / EXEC / EXIT authority with its own lifecycle.
 
 ## Decision
 
 - The guest opens one dedicated control session per VM, a vsock STREAM to a
   host port owned by the guest-flow owner, and keeps it for the VM's life,
-  reconnecting after loss.
+  reconnecting after loss. Within one VM's life the host side of the session
+  is lost only inside one `serve` process: the owner's control listener task
+  exits and is re-bound by in-process recovery (ADR-0124), and the guest
+  reconnects. A `serve` restart ends the VM (ADR-0159), so no session
+  reconnects across `serve` processes.
 - The host attributes a session by the kernel-reported peer CID and the
   launch token of the session's opening record (ADR-0177), exactly as the
   beacon is attributed: the token must equal the CID's live launch token,
@@ -43,25 +44,27 @@ lifecycle.
   ends.
 - Records on the session are fixed-size, written and read in userspace only:
   one opening record, then control messages. The messages are `Paired`,
-  `Refused`, `Abort`, `ListenState`, and the half-close pair `HalfClose` /
-  `HalfCloseAck` that carries a flow's half-close across the VM boundary
-  (ADR-0180).
+  `Refused`, `TimedOut` and `Abort`. `Refused` and `TimedOut` carry the
+  guest's errno when they answer a host-opened flow's request (ADR-0173). No
+  message carries a flow's half-close or end: the kernel's vsock `SHUTDOWN`
+  flags classify it (ADR-0180).
 - Loss of the session aborts every flow of that VM, because no further
-  `Paired` can be delivered, and closes the VM's intake listeners (ADR-0163).
+  `Paired` can be delivered.
 - A host-side flow request from a CID with no live session is not paired: the
-  host closes that flow connection without a control message.
+  host closes that flow connection without a control message. A host-opened
+  dial to a VM with no live session is refused before any vsock is opened
+  (ADR-0173).
 - **A control message for a flow the receiver does not hold is discarded
-  (U-5).** A `Paired`, `Refused`, `Abort`, `HalfClose` or `HalfCloseAck`
-  naming a flow id the receiver
-  never opened or has already closed is dropped and counted, with no reply.
-  The one exception is the guest's datagram slot rule — a late `Paired` for a
-  released slot is answered with `Abort` (ADR-0150). No reply is needed
-  because the side that closes a flow before `Paired` sends `Abort` while the
-  session is live, session loss aborts every flow on both sides, and, for a
-  host-opened flow whose guest vsock the guest has not yet accepted (so the
-  guest holds no entry for it), the host's close of its own vsock reaches the
-  guest and ends the guest side when the guest accepts it — on the same or a
-  reconnected session (assumption K-A4).
+  (U-5).** A `Paired`, `Refused`, `TimedOut` or `Abort` naming a flow id the
+  receiver never opened or has already closed is dropped and counted, with no
+  reply. The one exception is the guest's datagram slot rule — a late
+  `Paired` for a released slot is answered with `Abort` (ADR-0150). No reply
+  is needed because the side that closes a flow before `Paired` sends `Abort`
+  while the session is live, session loss aborts every flow on both sides,
+  and, for a host-opened flow whose guest vsock the guest has not yet
+  accepted (so the guest holds no entry for it), the host's close of its own
+  vsock reaches the guest and ends the guest side when the guest accepts it —
+  on the same or a reconnected session (assumption K-A4).
 
 ## Alternatives considered
 
@@ -87,19 +90,17 @@ lifecycle.
   unaffected.
 - Attribution by peer CID alone across allocations is unsafe: a session a
   dead VM left in the host's accept queue is accepted with the CID's next
-  holder as peer and delivers its buffered bytes (V-22, feature delta P-37;
-  the formal model's finding 3, `spike/quint-owner-findings.md`). The launch
-  token (ADR-0177) makes the attribution exact.
+  holder as peer and delivers its buffered bytes (V-22, feature delta P-37).
+  The launch token (ADR-0177) makes the attribution exact.
 - Discarding unknown-flow messages without reply is safe under K-A4:
   closing the host's socket of an aborted or session-lost host-opened flow
   reaches the guest and ends the guest-side connection, including one still
   in the guest's accept queue — after its request is read, the guest vsock
-  reads EOF, reports `POLLRDHUP` and fails its first write
-  (`spike/quint-owner-findings-r2.md`, finding r2-3; validated by V-24,
-  feature delta P-38). The guest owner checks for that end after the
+  reads EOF, reports `POLLRDHUP` and fails its first write (validated by
+  V-24, feature delta P-38). The guest owner checks for that end after the
   request read. No byte of such a flow reaches the application because the
   host writes nothing after the request before `Paired` (ADR-0158, H-1).
 - Even under K-A4, a guest application can accept a connection for a client
   the host already aborted and then see it reset at once.
-- The session protocol, including these rules, is modelled in the formal
-  specification of the guest-flow owner (ADR-0168).
+- The session protocol, including these rules, is covered by the feature
+  delta's § *Formal protocol model*.

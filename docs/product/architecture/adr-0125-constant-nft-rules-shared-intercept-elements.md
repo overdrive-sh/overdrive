@@ -33,6 +33,24 @@ retained; these accepted decisions amend it:
   mark → TPROXY → accept order. It changes no rule count, set, port, ownership,
   or canonical identity recorded here.
 
+**Amended 2026-10-11** by ADR-0172 and ADR-0173 (#295, INB-1, approved by
+user 2026-10-11). Rules 5 and 8 match the constant guest prefix (the gateway
+excluded: GW-LOCAL, ADR-0152, accepted 2026-10-13) instead of
+`managed_guest_ips`; the `managed_guest_ips` set and its
+element lifecycle are removed, so the worker maintains the remaining typed
+sets only. The two rules carry no `ct state` exception: no guest-prefix
+address except the gateway has a host-local route (ADR-0173; the gateway's
+`/32`, GW-LOCAL, is excluded from both rules), so a host socket cannot be
+sourced from a non-gateway prefix address — such a source fails the
+local-source check (`net/ipv4/route.c:2766-2769 @ v7.0`; `__ip_dev_find`
+consults interface addresses and the local table only,
+`net/ipv4/devinet.c:143-170 @ v7.0`) — and no reply addressed into the
+prefix exists (ADR-0172). Leg-S reaches a VM backend through an owner-opened vsock flow
+(ADR-0173, ADR-0186), so the leg-S exemption has no bearing on these two
+rules. The three bridge proof-mark rules and the bridge/TAP references of the
+Decision no longer apply under the vsock attachment (ADR-0145). The Decision
+text below is retained and read with this amendment.
+
 When #295 lands, this program, its boot convergence, and its one-second audit
 supersede [GH #234](https://github.com/overdrive-sh/overdrive/issues/234), the
 shared inbound-TPROXY routing reconciler.

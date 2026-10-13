@@ -25,8 +25,8 @@ do not rewrite prior sections without a corresponding ADR marked
 | Section | Owner | Status |
 |---|---|---|
 | System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn); reconciler-framework improvements — cadence hook (Piece A) + event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0084; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270)** |
-| Domain Model | Hera | **VM workloads — the ending taxonomy (three classes, not two), restart-budget vs restart-count accounting, and the driver/kind axis (2026-08-11, GH #42). No new bounded context, no new aggregate; revised 2026-08-11 after adversarial review — the Bar-2 ruling falsified "no new `Action` variant", so DD-5 now specifies two (`ReclaimAllocation`, `DiscardStrandedArtifacts`), and DD-1(b) rules SD-1's two regimes one Ending Class with a precondition plus one non-ending concept (Artifact Disposal, DD-4). DD-1 / DD-1(b) / DD-1(b.i) minted as [ADR-0081](adr-0081-three-ending-classes-platform-reclamation-and-artifact-disposal.md) (2026-08-11, deferral H-1) — the platform-wide decision record; this section remains the full rationale and evidence base. Extended 2026-09-16 for GH #295: the accepted shared-bridge topology creates no new bounded context, aggregate, repository, event model, or lifecycle meaning; transient guest-network values and exact-generation mTLS capabilities remain subordinate to existing Workload Orchestration, Transparent mTLS Enforcement, Workload Identity, Guest Runtime, and host-substrate boundaries. GH #295 DDD accepted — approved by DDD review iteration 2 on 2026-09-16.** |
-| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers; Service-kind VM HTTP/TCP health — registration-time guest target projection + parser driver-union V3 with VM Exec rejection to GH #280 (2026-09-06, GH #257, ADR-0090/0091; accepted after independent review); corrective driver-neutral physical allocation identity plus non-gating exact-old cleanup (2026-09-13, GH #284, user-ratified ADR-0105/0106/0108/0109 and P-105-1…P-105-7; ADR-0107 withdrawn; final review `CHANGES_REQUESTED`, bounded F-03…F-06 remediated under two-cycle cap, user disposition required); shared-bridge microVM application composition (2026-09-16, GH #295, stage 3 APPROVED by independent solution review iteration 4 after iterations 1–3 remediation) maps accepted ADR-0114…0118/0120…0126 onto existing control-plane/worker/host/BPF adapters and pins the user-authorized F-01/F-02/F-03 closures; post-DISTILL D-295-DISTILL-1/2 (user-approved and independently approved 2026-09-16) add only the doc-hidden shared-owner boundary and optional-prior/private rollback I/O seam; D-295-DISTILL-4 (user-approved and independently approved at review iteration 4 on 2026-09-16) keeps core infrastructure-free, puts the guest-network application contract in control-plane, and retains exact aya sources in dataplane; D-295-DISTILL-5 (user-approved and independently approved at review iteration 6 on 2026-09-16) adds only the private typed host scratch-I/O boundary and honest host-algorithm evidence split while retaining public sim APIs; no new crate, dependency, service, behavior scope, or persistence owner** |
+| Domain Model | Hera | **VM workloads — the ending taxonomy (three classes, not two), restart-budget vs restart-count accounting, and the driver/kind axis (2026-08-11, GH #42). No new bounded context, no new aggregate; revised 2026-08-11 after adversarial review — the Bar-2 ruling falsified "no new `Action` variant", so DD-5 now specifies two (`ReclaimAllocation`, `DiscardStrandedArtifacts`), and DD-1(b) rules SD-1's two regimes one Ending Class with a precondition plus one non-ending concept (Artifact Disposal, DD-4). DD-1 / DD-1(b) / DD-1(b.i) minted as [ADR-0081](adr-0081-three-ending-classes-platform-reclamation-and-artifact-disposal.md) (2026-08-11, deferral H-1) — the platform-wide decision record; this section remains the full rationale and evidence base. Extended for GH #295: the vsock microVM attachment (ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192) creates no new bounded context, aggregate, repository, event model, or lifecycle meaning; leases, flows, control sessions and quiescence holds remain transient technical state under the existing Workload Orchestration, Transparent mTLS Enforcement, Workload Identity and Guest Runtime boundaries.** |
+| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers; Service-kind VM HTTP/TCP health — registration-time guest target projection + parser driver-union V3 with VM Exec rejection to GH #280 (2026-09-06, GH #257, ADR-0090/0091; accepted after independent review); corrective driver-neutral physical allocation identity plus non-gating exact-old cleanup (2026-09-13, GH #284, user-ratified ADR-0105/0106/0108/0109 and P-105-1…P-105-7; ADR-0107 withdrawn; final review `CHANGES_REQUESTED`, bounded F-03…F-06 remediated under two-cycle cap, user disposition required); vsock microVM attachment application composition (GH #295; ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192): the guest-flow owner in control-plane implements the core `GuestStreamDial` port, the host forwarder is a dataplane driven port, and leg-S and the VM probe runner dial VM ports through the owner** |
 
 ---
 
@@ -777,11 +777,11 @@ flowchart TB
 
     subgraph HOSTSTATE["Per-allocation host state (SD-2)"]
         direction TB
-        RUN["/run/overdrive/vm/&lt;alloc&gt;/ — <b>tmpfs</b><br/>vsock UDS · beacon UDS · CH API socket<br/><i>exclusive: run-dir Landlock grant is rw</i><br/><i>networked VM proposal: selected TAP sysfs leaf is separate r grant</i><br/>survives serve restart · clears on host reboot"]
+        RUN["/run/overdrive/vm/&lt;alloc&gt;/ — <b>tmpfs</b><br/>vsock UDS · beacon UDS · CH API socket<br/><i>exclusive: run-dir Landlock grant is rw</i><br/><i>GH #295: no TAP grant; the VMM opens /dev/vhost-vsock under its own Landlock rule (ADR-0146)</i><br/>survives serve restart · clears on host reboot"]
         IMG["&lt;rootfs-master-filesystem&gt;/&lt;alloc&gt;.ext4<br/><b>FICLONE clone — same fs, mandatory</b><br/>survives both · <i>needs explicit GC</i>"]
     end
 
-    CH["cloud-hypervisor (CHILD of serve)<br/>OUTSIDE serve's failure domain — survives a restart<br/>setsid detaches session+pgrp, NOT parentage<br/>⇒ mid-run exit IS observed by the exit watcher<br/>kill_on_drop(false) · uid-dropped + kvm group<br/>--landlock · seccomp<br/><i>GH #295: + launch seccomp filter on every thread (ADR-0143)</i>"]
+    CH["cloud-hypervisor (CHILD of serve)<br/>OUTSIDE serve's failure domain — survives a restart<br/>setsid detaches session+pgrp, NOT parentage<br/>⇒ mid-run exit IS observed by the exit watcher<br/>kill_on_drop(false) · uid-dropped + kvm group<br/>--landlock · seccomp<br/><i>GH #295: + launch seccomp filter on every thread (ADR-0143); boot reclamation ends every VM a new serve does not supervise (#312)</i>"]
     GUEST["Guest: kernel + overdrive-init (PID 1)<br/>beacon → exec command → report WEXITSTATUS"]
     CG["cgroup scope<br/>overdrive.slice/workloads.slice/&lt;alloc&gt;.scope<br/><i>the durable alloc ↔ PID join</i>"]
 
@@ -939,374 +939,211 @@ resync**, not merely under edge-triggering. #265 remains a separate track.
 
 ---
 
-### Accepted shared-bridge microVM network (GH #295)
+### vsock microVM attachment (GH #295)
 
-**Current validation — 2026-10-03 (RECORDED):** the R19 rule-order change is
-withdrawn under its accepted native condition — native E14(c)/(d) fail closed
-under the existing mark-before-TPROXY program, so both TPROXY rules retain
-mark → TPROXY → accept — and the named-Service E14(e) `TIME_WAIT` door is
-resolved fail-closed, so the listener-only non-quiescence rationale is recorded
-on native evidence with the original single-loss security outcome preserved. The
-dependent ADR-summary/index projections below read against this record; the C4
-L2 order/listener prose in `c4-diagrams.md` is reconciled (c4-diagrams.md:1600,
-:1652, :2071 record the withdrawal and the no-quiescence classification,
-2026-10-03). This invalidates no independent
-R18/R14/R15 contract and relaxes no security outcome. The exact dependency map is
-the #295 feature delta's *Native falsification register*; the recorded
-replacement and its provenance are
-[R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
+**Status: Accepted.** D1–D26 and their companion decisions were approved by
+the user between 2026-10-05 and 2026-10-09; INB-1, UDP-EMPTY (with the
+D15-R4 residual), END-STATE, R2-END, R2-DRAIN, CID-NOCLAIM, RESET-EXIT,
+UDP-SEQ, QHOLD and NO-SURVIVE were approved by the user on 2026-10-11.
+GW-LOCAL (only the guest gateway is host-local in the guest prefix; guest
+DNS depends on it, ADR-0152), PROBE-NOSAMPLE (a VM probe dial stands outside
+the allocation's flow quota, and a probe refused by node capacity or
+quiescence records no sample, ADR-0187), LEGB-DIAL (leg-B marks and binds
+`127.0.0.1` for a peer inside the guest prefix, ADR-0190) and
+PROBE-RUN-COUNT (the probe runner numbers each written run and records its
+streak in the probe row, and ServiceLifecycle applies the thresholds when it
+reads the row, acting once per crossing; with D-1, a failed liveness stop is
+retried on the next row still past the threshold, ADR-0191) and
+PROBE-NOSAMPLE-EVENT (every probe run that writes no row emits one
+not-sampled event, ADR-0192) were approved by the user on 2026-10-13. Exact
+interface contracts, the decision index with approval dates, the validation
+plan and the formal protocol model live in the
+[#295 feature delta](../../feature/netns-density-295/feature-delta.md)
+§ *[REF] vsock Attachment Replacement DESIGN*; the protocol specifications are
+`specs/quint/guest-flow-owner/` and `specs/quint/probe-count/` (probe-run
+counting: PROBE-RUN-COUNT with D-1, and PROBE-NOSAMPLE). Diagrams:
+[C4 diagrams](c4-diagrams.md#vsock-microvm-attachment-gh-295).
 
-**Status: Accepted baseline — user-ratified and approved by system design
-review iteration 5 on 2026-09-16. D-295-7 and D-295-9 remain unchanged
-accepted-contract constraints. DESIGN REOPENED on 2026-09-23 under the
-correctness-recovery plan.** Reproduced evidence
-(`docs/feature/netns-density-295/recovery/proof-findings.md`) falsified the
-placement-cap premise, the named-TAP VMM premise, and the implemented
-supervisor, cleanup, and boot-clear paths. Replacement decisions D-295-R1 to
-R21 and ADR-0127 to ADR-0142 were **accepted by the user on 2026-09-24**, after
-independent DESIGN review. They include the user rulings of 2026-09-24:
-D-295-R7 (held-population counting, with no slot reserved for a replacement),
-D-295-R9 (CPU/memory accounting out of scope, GH #261), the D-295-R11
-retry-forever reclaim, the D-295-R14 kill scope (unconfirmed TAPs and damaged
-per-VM parts kill only that VM), and the D-295-R20 cleanup-pending status in
-`workload describe`. D-295-R22 and ADR-0143 (a seccomp filter installed at VMM
-launch that denies every Cloud Hypervisor thread the TAP-mutating ioctls) were
-approved by the user the same day, on native evidence from spike increment-aa.
-By a further user ruling that day, the filter ships for x86_64 only. No
-microVM starts on any other architecture, aarch64 included, and aarch64
-support is [GH #302](https://github.com/overdrive-sh/overdrive/issues/302).
-D-295-R18 stands on its reproduced native RED; D-295-R19's rule-order change is
-withdrawn 2026-10-03 under its accepted native condition (its native RED did not
-reproduce), so both TPROXY rules retain mark → TPROXY → accept. Both 2026-09-23 TAP-order revisions are withdrawn: attaching a down
-TAP by name, and admitting closed pre-event control frames. Where the accepted
-baseline below conflicts with the replacement, the replacement governs. Nothing
-here is DELIVER authority: DELIVER stays stopped until DISTILL is rewritten and
-the roadmap re-validated.
-Exact options, estimates, ownership, port-shape
-alternatives, lifecycle gates, and reuse analysis live in
-`docs/feature/netns-density-295/feature-delta.md`. Decision records:
-[ADR-0114](adr-0114-node-local-shared-bridge-guest-network.md),
-[ADR-0115](adr-0115-tcx-endpoint-classification-feeds-transparent-mtls.md),
-[ADR-0116](adr-0116-shared-bridge-gateway-dns.md),
-[ADR-0117](adr-0117-initial-shared-bridge-density-target.md),
-[ADR-0118](adr-0118-guest-address-lease-and-derived-link-identity.md),
-[ADR-0120](adr-0120-node-shared-transparent-mtls-listeners.md),
-[ADR-0121](adr-0121-fixed-guest-network-admission-cap.md),
-[ADR-0122](adr-0122-guest-network-operation-error-family.md),
-[ADR-0123](adr-0123-node-session-mtls-registration-generation.md),
-[ADR-0124](adr-0124-bounded-shared-network-owner-recovery.md),
-[ADR-0125](adr-0125-constant-nft-rules-shared-intercept-elements.md), and
-[ADR-0126](adr-0126-fixed-node-guest-bridge-mac.md). Accepted (2026-09-24):
-[ADR-0127](adr-0127-inherited-tap-queue-descriptor-guest-nic-attachment.md),
-[ADR-0128](adr-0128-vmm-adapter-owns-per-launch-tap-queue-descriptor.md),
-[ADR-0129](adr-0129-safe-descriptor-mapping-for-vmm-launch.md),
-[ADR-0130](adr-0130-guest-taps-carry-no-unprivileged-owner-grant.md),
-[ADR-0131](adr-0131-activate-allocation-tap-after-intercept-live.md),
-[ADR-0132](adr-0132-linearize-guest-attachment-admission-at-address-assignment.md),
-[ADR-0133](adr-0133-retiring-guest-attachment-counts-until-cleanup.md),
-[ADR-0134](adr-0134-placement-reads-held-attachment-count-through-read-port.md),
-[ADR-0135](adr-0135-awaited-convergent-intercept-element-release.md),
-[ADR-0136](adr-0136-row-neutral-reclaim-of-non-current-allocation-network.md),
-[ADR-0137](adr-0137-intercept-owner-converges-dynamic-members-at-boot.md),
-[ADR-0138](adr-0138-required-serve-boundary-intercept-and-guest-dns-ports.md),
-[ADR-0139](adr-0139-intercept-mark-fails-closed-without-ip-nft-program.md),
-[ADR-0140](adr-0140-tproxy-before-policy-route-mark-in-constant-intercept-rules.md),
-[ADR-0141](adr-0141-cleanup-pending-status-derived-from-live-guest-lease.md),
-[ADR-0142](adr-0142-guest-tap-egress-drops-frames-to-foreign-destination-mac.md),
-[ADR-0143](adr-0143-vmm-launch-seccomp-filter-denies-tap-mutating-ioctls.md).
+This design replaces the shared-bridge guest network of ADR-0114
+([ADR-0145](adr-0145-vsock-kernel-forwarded-guest-transport-replaces-shared-bridge.md)
+lists the ADRs it supersedes). The reason is a topology ceiling: on qualified
+metal the bridge attach path failed with `EXFULL` at about 1,023 ports, below
+the 16,384 measurement target. The bridge-era code on the #295 branch is dead
+on the production path and is deleted, with its tests, during DELIVER.
 
-The accepted system design replaces the post-Exec microVM network's per-workload netns,
-veth pair, transit/guest `/30` carves, `NetSlot`, `host_veth`, and setns launch
-with one node-local Linux bridge, one node-owned guest prefix, and one
-host-netns TAP/IP/MAC per allocation. The bridge converges one fixed locally
-administered unicast MAC in a namespace structurally disjoint from all derived
-guest MACs; boot/runtime read-back and every endpoint value must agree. One internal allocation-keyed guest
-address pool exposes exactly `assign`, `release`, and `snapshot` *(amended
-2026-09-24: ADR-0132/0133 add `retire` and a read-only `observe`, with Admitted
-and Retiring lease states, one pool per server)*; it derives TAP name and MAC from the assigned IPv4
-and `NetSlot` is deleted, not renamed. The
-selected B1 boundary replaces the two netns-era plans with one internal
-`GuestNetworkPlan` behind `GuestNetworkProvisioner`. The user-approved D-295-2 direction uses
-the spike-proven
-`SCHED_CLS` endpoint classifier attached by TCX ingress to every TAP. One
-ifindex map validates endpoint registration, source MAC, and source IP; valid
-TCP receives bridge-MAC rewrite, `PACKET_HOST`, and intercept mark `0x295a`.
-Valid gateway/ARP traffic receives accepted mark `0x295b`. nftables retains
-IP TPROXY/output delivery and one minimum bridge safeguard: registered managed
-TAPs may pass only those two TCX-authored proof marks; accepted is cleared,
-intercept is preserved, and unmarked/unknown traffic drops. The guard is not a
-second classifier. The production
-`HostMtlsEnforcement`, `ServiceBackendsResolve`, `IdentityMgr`, `RcgenCa`, and
-per-VM cgroup/VMM ownership remain unchanged. Guests remain plaintext and hold
-no SVID; the peer-facing path remains TLS 1.3 + kTLS TX/RX + kernel splice.
+**Transport.** A VM has no guest network device, no host TAP, no bridge port
+and no per-VM host netdevice. Its application traffic crosses its one
+virtio-vsock device. Aya Rust eBPF programs forward payload in the guest
+kernel (loaded and controlled by `overdrive-init`) and in the host kernel
+(held by the node's one guest-flow owner in `overdrive-control-plane`). Both
+control planes exchange only fixed-size control messages and never touch
+payload, with one temporary exception named under *Inbound* below.
 
-Part C is the evidence for D-295-2: 296 verified instructions, 4,096-byte
-program memlock, 3,840-byte bounded endpoint map, 368-byte counters map,
-50.811 ms load/verifier, 7.624/7.943 ms attach+pin, loader-exit survival,
-independent adoption/query/removal, exact map-miss/MAC-spoof/IP-spoof/
-direct-bypass drops, production TLS 1.3+kTLS+14 splice calls, zero cleartext or
-direct bypass, production cgroups, and clean complements. It does not prove
-16k scale, pinned-6.18 verifier cost, or deliberate-link-loss safety; the
-bridge guard and its probe close the last item. Part-C evidence is retained at
-commit `7a00464969e98fe00764e0ab707428e8cd82a026`.
+**VMM and device.** The vendored Cloud Hypervisor fork (ADR-0161) runs every
+VM with `--vsock cid=N,backend=vhost-kernel` and opens `/dev/vhost-vsock`
+itself; the VMM is the only holder of that descriptor. When the VMM exits,
+the device's last close runs the kernel's orphan sweep, which resets every
+host vsock connection to that guest (`drivers/vhost/vsock.c:753-768 @ v7.0`,
+reset at `:746-750`). With the fork change of ADR-0182 the VMM ends when the
+guest resets instead of rebooting it in place, so a guest PID-1 crash ends the
+VM, resets its host flows and reaches the driver as a VMM exit with no guest
+exit report, which the driver classifies as a crash (the pinned fork build
+`41a619d19` still reboots in place until the change lands). A VM's CID is
+`GUEST_CID_BASE + lease_offset`, derived from its admission lease and never
+persisted (ADR-0156); the lease is released only after the VMM has exited.
 
-Part D is bounded evidence for D-295-5. One shared F and one shared C served two
-real microVM allocations; source/destination capability selection rejected
-unknown, stale, and post-removal connections; a captured predecessor capability
-was not re-resolved after successor registration; the successor's new flow
-selected its own generation and SVID; and stopping one allocation drained its
-already-published handle while the unrelated handle and listeners stayed live. It
-did not hold production enforcement across retirement and execute late-handle
-publish/teardown; that race remains an explicit evidence gate. The same
-journey retained TCX, production cgroups, TLS 1.3, bidirectional kTLS, 14 splice
-calls, and zero cleartext/gaps/bypass. Part D ran against source commit
-`7a00464969e98fe00764e0ab707428e8cd82a026`; it proves the bounded same-node
-mechanism, not T1 throughput, connection floods, long-run performance, or the
-production implementation.
+**Attribution and sessions.** The VM driver's beacon listener and the
+guest-flow owner's listeners accept guest-opened vsock connections and
+attribute each by its peer CID and the per-launch token the guest received on
+its kernel command line (ADR-0157, ADR-0177). The token is sound only with
+the fork change of ADR-0182, under which a guest reset ends the VMM. Each VM holds one control session to the owner
+(ADR-0166); losing it aborts every flow of that session.
 
-16,384 guest attachments per node is a **fixed placeholder**, set without a
-capacity basis (user ruling, 2026-09-24): it sizes the design, including a
-`/16` with about 4× address headroom, and caps held attachments. It is not a
-measured, meaningful, or promised density, not a VM hardware claim, and does
-not adopt GH #112's 100k report. Real per-node capacity is
-[GH #299](https://github.com/overdrive-sh/overdrive/issues/299) (derived or
-configurable guest-network capacity) and
-[GH #261](https://github.com/overdrive-sh/overdrive/issues/261) (node-wide
-CPU/memory accounting). Attachment/set/recovery measurement at that population
-sizes runtime bounds and reports cost.
-F1 enforces the cap through the existing `NoCapacity` placement result before
-address assignment; #295 adds no public, wire, or persisted `network_ports`
-resource. *(Superseded in part 2026-09-24: proof §3.2 showed that placement
-sees only workload-local rows. It admitted 16,385 attachments through
-concurrent evaluations, in-flight admissions, crash replacement, and operator
-resume. The accepted replacement moves the linearization point to
-guest-address assignment on a per-server pool, counts Admitted and Retiring
-leases alike until cleanup finishes (user ruling D-295-R7), cleans up a
-replacement's predecessor first at the cap, and adds an authoritative placement
-read-port (ADR-0132 to ADR-0134).)* CAP-295-A makes this explicitly an
-attachment-only target: #295 promises no concurrent-flow or enforcement-handle
-population. Current enforcement still owns six FDs and two native pump threads
-per handle; scaling that mechanism belongs only to
-[GH #300](https://github.com/overdrive-sh/overdrive/issues/300). PORT-295-C keeps
-valid multi-port Services and replaces linear nft rules with eight constant IP
-rules *(nine with ADR-0139's guard table, accepted conditional on its native RED)*, three bridge rules,
-managed-IP/source-IP sets, and one destination-IP/TCP-port set. The attachment receipt runs exact N=16,384 profiles at M=0 and
-M=65,536 (four TCP ports on every attachment); larger valid M remains outside
-#295's receipt, not rejected product input. User-approved D-295-5 replaces the per-allocation
-listener topology with exactly one node-owned leg-F listener and one node-owned
-leg-C listener. Part D measured the exact T1 structural difference: 2 listener
-FDs and 2 idle accept tasks versus 32,768 of each for async per-allocation; the
-shared listener/task layer added 316 KiB RSS and took 0.042 ms to set up versus
-29,484 KiB and 405.335 ms. RSS and timings are point observations. Connection
-FDs remain workload-dependent and are not listener FDs.
+**Flows.** Each transport flow is one kernel-forwarded pair, never
+multiplexed: node pair capacity `GUEST_FLOW_MAX_PAIRS = 65,536` and a
+per-allocation quota of 4,096 flows, which counts draining flows (ADR-0147,
+ADR-0183). Pairing is out of band on the control session, with sockets
+installed at establishment and early data parked in kernel cells (ADR-0158).
+Datagrams travel as STREAM toward the guest and SEQPACKET from the guest
+(ADR-0148), framed by a length prefix (ADR-0149). The host verdict strips the
+frame from every guest datagram; an empty datagram is dropped by the verdict
+and sent by the owner, so an empty datagram may be reordered relative to its
+neighbours (D15-R4; ADR-0165).
 
-Leg F resolves the accepted socket's validated source guest address and
-original destination; leg C resolves the recovered destination. Accept freezes
-an immutable `(AllocationId, generation, SpiffeId)` capability, claims that
-exact active generation before production enforcement, and publishes the
-returned `EnforcedConnection` only if it is still active. Otherwise the handle
-is torn down, never re-attributed. Allocation stop retires its registrations and
-drains only its handles; both node listeners and unrelated handles remain live.
-Address reuse is remove-before-reassign.
+**Flow end and drain.** A flow's end is classified from the vsock SHUTDOWN
+flags the peer sent, read by a raw tracepoint on vsock packet receipt on host
+and guest: `shutdown(SHUT_WR)` sends SEND only, `close()` and process exit
+send RCV|SEND (`net/vmw_vsock/virtio_transport_common.c:1084-1097`,
+`:1294-1295 @ v7.0`; the tracepoint fires at `:1622`). SEND only is a clean
+half-close; RCV|SEND while a direction is open, or RST, is an abort; an end
+with no record is an abort (ADR-0180). A half-close drain completes on a
+kernel ring-buffer record when the forwarded count reaches its goal, with no
+deadline (ADR-0183).
 
-A2 remains a grouped transient guest-network handoff; ERR-295-A supplies one
-cause-preserving guest-network error; GEN-295-A keeps generation internal; and
-C1 retains its install-method surface while guards own shared set elements.
-Exact Rust fields, derives, visibility, methods, element keys, and conversions
-live exclusively in the
-[feature delta](../../feature/netns-density-295/feature-delta.md).
+**Addressing and reachability.** `workload_addr` remains the persisted
+backend and probe address and lives in the guest on a dummy device
+(ADR-0150). The guest prefix holds no node address and no service VIP
+(startup refuses either; ADR-0185). It is not host-local (ADR-0173); the
+guest gateway alone is, through one boot-converged `local` route on `lo`
+(GW-LOCAL, ADR-0152), and no other route covers the prefix, so INB-1 holds
+at the route table. Same-node mesh leg-B to a VM address sets the intercept
+mark `0x1` and binds `127.0.0.1` before `connect()`, so it reaches leg-C
+through the existing `fwmark 0x1 → table 100` rule and TPROXY without a
+prefix route or a node default route; a peer outside the prefix gets
+neither (LEGB-DIAL, ADR-0190; validated on Linux 7.0, V-LEGB-MARK). Leg-C
+sees the same-node peer as `127.0.0.1`. This holds while Overdrive is
+single-node; cross-node VM addressing is
+[#317](https://github.com/overdrive-sh/overdrive/issues/317). Constant nft
+rules refuse every packet to the guest prefix that is not diverted to leg-C
+(ADR-0172): a marked leg-B dial to an unregistered tuple sees TCP
+`ECONNREFUSED` or UDP `EPERM` and reaches no host socket.
 
-Lifecycle meanings do not move. `overdrive-init` READY still means guest
-platform initialization (including network application) completed; allocation
-Running still follows accepted READY + observation write; Service Stable stays
-probe-owned. The existing narrow guest-command-release gate becomes:
+**Inbound.** Remote mesh clients reach leg-C as today. Host platform clients
+dial a VM port through the owner's `GuestStreamDial` port: the owner checks
+that the address is an Active VM lease and the port a declared TCP listen
+port, opens a vsock flow to the guest, and returns the stream once the guest
+reports its own connect paired, or a typed refusal (ADR-0173). leg-S delivers
+mesh plaintext to a VM backend by relaying between its kTLS socket and that
+stream — a userspace relay, explicitly temporary, deleted when
+[GH #303](https://github.com/overdrive-sh/overdrive/issues/303) lands
+(ADR-0186). The VM
+probe runner's TCP probe is healthy when the dial succeeds; its HTTP probe
+runs over the stream. Under ADR-0187 a probe dial takes a node
+flow slot but stands outside the allocation's flow quota, so a hung
+application at its quota still fails its probe, and a probe dial refused for
+node capacity or quiescence records no sample. Under ADR-0191, for every
+workload kind, each written probe row carries the producer's run sequence
+and the producer's count of consecutive written runs of its status, the row
+merges by run sequence, and ServiceLifecycle compares that count with the
+threshold when it reads the row, keeping no streak of its own; it emits a
+liveness stop once per crossed row, retrying a failed stop on the next row
+still past the threshold (D-1). Each run therefore counts once, and a run
+that writes no row changes nothing and emits a not-sampled event
+(ADR-0192). Exec and process workloads keep plaintext TCP to
+`workload_addr:port`. The guest application sees host-opened connections from
+the guest gateway (ADR-0174).
 
-```text
-private 16,384 admission check
-  -> guest lease/TAP/bridge/classifier
-  -> managed guard set
-  -> endpoint map + TCX attach/pin/query
-  -> VMM READY
-  -> accepted Running row
-  -> exact-generation source/destination registration + IP nft entries live
-     on the already-running node-shared leg-F/leg-C listeners
-  -> release guest EXEC
-```
+**Outbound.** Guest TCP is resolved once at pairing: mesh destinations
+(including service VIPs) reach leg-F only through a registered pair
+(ADR-0153, ADR-0164); non-mesh destinations are kernel-forwarded directly
+(ADR-0162); datagrams to a VIP use the existing `connect4` rewrite on the
+owner's connected sockets (ADR-0164). Host-internal destinations are refused
+`HostInternal`, checked by the owner and enforced by a constant output rule
+(ADR-0167). Guest DNS is an ordinary datagram association to `gateway:53`,
+delivered to the node `DnsResponder` through the gateway route (ADR-0154,
+GW-LOCAL).
 
-**Replacement order (accepted 2026-09-24):**
+**Owner lifecycle and recovery.** The owner holds every host forwarding
+object, listener and pair socket (ADR-0151); its kernel objects are unpinned
+and die with the process (ADR-0159). Stop aborts flows with reset and restore
+reopens admission only (ADR-0160). Quiescence is a counted, move-only hold:
+forwarding reopens only when every hold has been restored, and a hold dropped
+without restore keeps forwarding quiesced until ADR-0124's recovery fails
+`serve` closed (ADR-0169). A failed boot write of the shared mTLS table
+refuses boot (ADR-0184). ADR-0124's cadence, EXEC gate and fail-stop are
+retained.
 
-```text
-placement advisory over the authoritative held count
-  -> GuestAddressPool::assign   (sole admission linearization; held, Admitted
-                                 plus Retiring, <= the placeholder cap)
-  -> TAP created persistent, owner uid 0, DOWN
-     -> bridge -> managed guard -> endpoint map
-     -> TCX ingress attach/pin/query
-     -> TCX egress guest-MAC attach/pin/query (ADR-0142)
-     -> read back DOWN (debug message mask 0; host-side MAC not a reserved
-        address)
-  -> VMM adapter builds the launch seccomp program (ADR-0143) and attaches one
-     IFF_VNET_HDR queue, verifying TAP still down
-  -> CH --net fd=[3], inheriting only descriptors 0-3, under the launch
-     seccomp filter loaded in the child before its first exec
-     (CH never opens or raises the TAP, and no CH thread can mutate it)
-  -> guest READY -> accepted Running row
-  -> exact-generation registration + 2 + P IP elements live and read back
-  -> synchronous mtls.intercept.install.success
-  -> wait on the EXEC gate while recovering (never a Failed row)
-  -> shared owner activate + up/master/protection read-back
-  -> release guest EXEC
-```
+**Lifecycle meanings.** READY still means guest platform initialisation,
+including guest network configuration, completed; allocation Running still
+follows accepted READY and the observation write; Service Stable stays
+probe-owned. Host activation requires the VM's control session. VMs do not
+survive a `serve` restart: boot reclamation ends every VM the new process
+does not supervise, before any lease is assigned
+([GH #312](https://github.com/overdrive-sh/overdrive/issues/312)).
 
-The zero-frame outcome of ADR-0088 is not weakened. With a TAP up before
-intercept-live, the guest kernel answers ambient traffic (native run
-`c4d36190`). CH v53's named path always raises the TAP (native run
-`f1a15668`). Its supported `fd=` path does not: two native spikes reached
-READY with the TAP down, zero frames, and activation after interception. The
-replacement therefore adopts that path through a VMM-owned, per-launch queue
-descriptor rather than admitting pre-event control frames. That earlier
-proposal is withdrawn. Handing a VMM a parent-opened TAP descriptor is how
-libvirt/QEMU, Kata (to Cloud Hypervisor), and Android AVF (to crosvm) work; the
-child inherits nothing else, as with libvirt's and the Firecracker jailer's
-mass close. TAPs are owned by uid 0 because the kernel lets any caller attach an
-ownerless TAP (research
-`docs/research/networking/netns-density-295-replacement-design-prior-art-comprehensive-research.md`,
-Findings 1.1–1.5 and 2.2).
+**Density.** 16,384 attachments remains a measurement target and admission
+placeholder; the attachment adds no fixed per-node limit below it (ADR-0155).
+Real per-node capacity is
+[GH #299](https://github.com/overdrive-sh/overdrive/issues/299) and
+[GH #261](https://github.com/overdrive-sh/overdrive/issues/261).
 
-The uid-0 owner does not bind the process that holds the TAP's queue: the
-kernel runs no capability check for any ioctl on an attached tun queue, so a
-compromised Cloud Hypervisor could set its TAP's host-side MAC to another
-guest's virtio-net MAC and, on the shared bridge, redirect that guest's
-host-originated plaintext to itself (research addendum 2), re-grant its TAP to
-the VMM uid, or flood the host kernel log. The MAC hazard, and the
-unknown-unicast flood leak beside it, were reproduced natively in spike
-increment-z (`docs/feature/netns-density-295/spike/findings-mac-fdb-isolation.md`).
-Three layers answer them:
+**Out of scope.** IPv6 ([#308](https://github.com/overdrive-sh/overdrive/issues/308)),
+UDP datagrams above 59,000 bytes ([#309](https://github.com/overdrive-sh/overdrive/issues/309)),
+inbound UDP service to VMs ([#310](https://github.com/overdrive-sh/overdrive/issues/310)),
+ICMP ([#311](https://github.com/overdrive-sh/overdrive/issues/311)), cross-host
+routing ([#298](https://github.com/overdrive-sh/overdrive/issues/298)) and
+connection-pump scaling ([#300](https://github.com/overdrive-sh/overdrive/issues/300)).
 
-- **Prevention at the source.**
-  [ADR-0143](adr-0143-vmm-launch-seccomp-filter-denies-tap-mutating-ioctls.md):
-  the VMM adapter's one launch hook loads a seccomp filter in the forked child
-  before its first exec. It returns `EPERM` for `SIOCSIFHWADDR`, `TUNSETOWNER`,
-  `TUNSETDEBUG`, and the other TAP-mutating ioctls, and kills the process on a
-  foreign syscall ABI. Every Cloud Hypervisor thread inherits it, the main
-  thread included, which Cloud Hypervisor's own per-thread filters leave
-  unfiltered. Spike increment-aa proved it natively on Cloud Hypervisor v53
-  (`docs/feature/netns-density-295/spike/findings-tap-ioctl-seccomp.md`).
-  The filter exists for x86_64 only. On any other architecture, aarch64
-  included, the VMM probe fails, so the node composes no microVM driver and
-  no microVM starts. Proving and enabling aarch64 is
-  [GH #302](https://github.com/overdrive-sh/overdrive/issues/302).
-- **Delivery by registered record.**
-  [ADR-0142](adr-0142-guest-tap-egress-drops-frames-to-foreign-destination-mac.md):
-  a TCX egress classifier on each managed TAP delivers unicast only to that
-  TAP's registered guest MAC from the ADR-0115 endpoint map, drops every other
-  unicast (a missing endpoint entry included), and always delivers broadcast
-  and multicast. Delivery is steered by the registered record, not the learned
-  bridge FDB — the Cilium/Neutron shape. Unicast flooding stays on, because the
-  same check drops each flooded copy at every non-target TAP. This closes the
-  flood leak, which needs no ioctl, and a MAC change the filter does not see.
-- **Detection.** The ADR-0130 audit read-back of each TAP's owner,
-  persistence, debug message mask, and host-side MAC reports a violation as
-  per-allocation damage. For the host-side MAC the check is an invariant, not
-  a recorded value: the address must not be a reserved one, meaning the
-  bridge MAC or the guest MAC of an allocation the owner holds outside
-  `Condemned`, the TAP's own included. A
-  hijacked TAP therefore breaks it, whatever made the change, while a host
-  link manager's rewrite to any other address is harmless
-  ([ADR-0144](adr-0144-managed-link-identity-independent-of-host-link-configuration.md)).
-  Only that VM is killed, and a victim's delivery resumes once the offending
-  TAP is torn down.
-
-The node bridge MAC is set explicitly to the fixed `02:01:00:00:00:01`
-(ADR-0126), which marks it `NET_ADDR_SET` and closes the bridge-MAC-takeover
-variant.
-
-The node shared-switch owner gains an Earned-Trust startup probe that exercises
-TCX load/verifier, attach/pin/close/adopt/query/detach, endpoint negative
-verdicts, bridge-local original-destination recovery, deliberate-link-removal
-drop through the bridge safeguard, and cleanup complements. Existing
-enforcement, resolution, DNS, cgroup, CA, and VMM probes are reused rather than
-duplicated. Boot recovery retains its authority order: VM reclamation first,
-then adopt-to-verify and stale TAP/link/map/guard sweep, then new allocation
-work. Address release remains last after owned effects are gone. *(ADR-0137,
-accepted 2026-09-24: after the sweep, the intercept owner converges dynamic IP members to
-empty and reads them back empty, before constant-program adoption. Proof §3.5
-showed restart after process loss refusing on stale members, because no boot
-clear ran.)*
-
-RUN-295-B closes new guest-command release on listener/DNS task exit or
-bridge/TCX/map/pin/nft mismatch, retries every 250 ms for at most five seconds,
-and then fail-stops `overdrive serve`. The repository ships no restart policy;
-external supervisor restart is a deployment precondition and separate
-production-readiness probe, not a #295 implementation claim. Confidentiality is
-fail-closed for a single owned-component loss; arbitrary near-simultaneous
-external deletion of both TCX and the bridge guard has an accepted <=1 s
-exposure window before TAP quiescence. *(Amended 2026-09-24, from proof
-§3.3.) The implemented supervisor audits only the mTLS worker, skips nft while
-allocations exist, quiesces for every component, and replaces DNS without
-closing EXEC. The accepted replacement pins the complete component matrix;
-program, policy-route, guard, and member audit and repair that runs with live
-allocations; required serve-boundary ports; a TAP restore that runs only after
-a clean full audit; one independent guard table that keeps intercept-marked TCP
-fail-closed if the IP nft program is lost; and the retained mark → TPROXY → accept
-rule order, under which native evidence shows outbound TCP already fails closed
-when a listener is absent (the ADR-0140 reorder is withdrawn 2026-10-03 under its
-native condition) (ADR-0138, ADR-0139, ADR-0140, and #295 D-295-R13 to R15 and
-R19). When quiescence cannot
-confirm a TAP down, or a VM's own network parts are damaged, only that VM is
-killed, its parts leave the audit, and repair continues; the whole workloads
-slice is killed and the process fail-stops only when the failing set cannot be
-determined or a known VM cannot be killed (user ruling D-295-R14, written into
-ADR-0124). When #295 lands it supersedes
-[GH #234](https://github.com/overdrive-sh/overdrive/issues/234);
-[GH #197](https://github.com/overdrive-sh/overdrive/issues/197), if it stays
-the home of a host-infrastructure reconciler, must exclude every component this
-supervisor owns.*
-
-`ServerHandle` retains both the recovery task join handle and its request
-receiver. Normal task return, typed error, panic, cancellation, and channel
-closure each close EXEC and become typed fail-stop; the supervisor cannot die
-silently. The CLI applies the hard outer shutdown bound and status 1. Recovery
-elapsed time crosses that boundary as `std::time::Duration`, not raw
-milliseconds. The existing EXEC-gate lock also carries the latest component,
-monotonic start, and completed full-recovery-attempt count; abnormal task exit
-uses that snapshot, or deterministic supervisor/zero/`std::time::Duration::ZERO` values
-when recovery never began. Partial repair never reopens EXEC. Exact public
-shapes remain feature-delta-only.
-
-D-295-7 is an unchanged non-regression constraint: per-VM cgroup ownership,
-platform identity, resolver/enforcement ownership, lifecycle meanings, and boot
-reclamation do not move. D-295-9 is likewise unchanged: the existing cgroup-BPF
-Service dataplane retains backend selection and atomic membership, and its
-selected-`BackendId` receipt remains the exact-peer identity source. Neither is
-a fresh #295 material decision or new ADR.
-
-Dial-by-name stays in the existing in-agent `DnsResponder`, re-homed to the
-single shared gateway (wildcard bind first, one-gateway fallback). DNS stays in
-userspace because the existing owner handles variable-length parsing,
-`NameIndex` state, negative-answer/SOA semantics, `IP_PKTINFO` source pinning,
-and protocol evolution; it is not the steady-state payload path, and the shared
-gateway makes socket cardinality O(1). Cilium independently enables endpoint
-TCX while retaining a singleton in-agent userspace DNS proxy; Overdrive uses
-that as validating precedent, not a mechanism to copy. The same checked-out
-Cilium revision also combines per-endpoint TCX with node-shared,
-reference-counted HTTP/TLS proxy listeners. Overdrive diverges by freezing an
-allocation-generation/SPIFFE capability before rustls, fencing publication
-after enforcement, and directly draining concrete kTLS/splice handles; Cilium's
-endpoint/IP metadata and Envoy lifecycle do not provide those contracts. Public
-ingress remains topology-independent: the existing cgroup-BPF Service
-dataplane owns backend selection and atomic membership, the selected
-`BackendId` receipt remains the exact-peer identity source, and the selected
-backend address reaches that node's leg C. Backend selection does not move into
-the gateway or switch.
-
-Cross-host routing is outside #295 and undecided;
-[GH #298](https://github.com/overdrive-sh/overdrive/issues/298) tracks that
-separate design. Heterogeneous per-node guest-network capacity is also outside
-#295; [GH #299](https://github.com/overdrive-sh/overdrive/issues/299) owns that
-separate schedulable-resource design. This subsection remains strictly
-single-node, prescribes no cross-host topology, and introduces no heterogeneous
-capacity surface. GH #300 separately owns connection-pump scaling.
+**Decision records.**
+[ADR-0145](adr-0145-vsock-kernel-forwarded-guest-transport-replaces-shared-bridge.md),
+[ADR-0146](adr-0146-vm-vsock-device-uses-kernel-vhost-backend-opened-by-the-vmm.md),
+[ADR-0147](adr-0147-one-kernel-forwarded-pair-per-transport-flow.md),
+[ADR-0148](adr-0148-stream-toward-guest-seqpacket-replies-for-datagram-flows.md),
+[ADR-0149](adr-0149-length-prefixed-datagram-frame-with-empty-carrier.md),
+[ADR-0150](adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md),
+[ADR-0151](adr-0151-one-node-guest-flow-owner-holds-forwarder-and-pair-sockets.md),
+[ADR-0152](adr-0152-only-the-guest-gateway-is-host-local-in-the-guest-prefix.md),
+[ADR-0153](adr-0153-vsock-flows-terminate-at-the-accepted-mtls-enforcement-boundary.md),
+[ADR-0154](adr-0154-guest-dns-reaches-node-responder-as-ordinary-datagram-association.md),
+[ADR-0155](adr-0155-vsock-attachment-density-target-introduces-no-topology-ceiling.md),
+[ADR-0156](adr-0156-guest-cid-derived-from-admission-lease.md),
+[ADR-0157](adr-0157-beacon-on-node-shared-vsock-listener-keyed-by-peer-cid.md),
+[ADR-0158](adr-0158-flows-are-paired-out-of-band-with-install-at-establishment-and-kernel-parking.md),
+[ADR-0159](adr-0159-guest-forwarding-kernel-objects-are-unpinned.md),
+[ADR-0160](adr-0160-forwarding-stop-aborts-flows-and-restore-reopens-admission-only.md),
+[ADR-0161](adr-0161-vendored-cloud-hypervisor-fork-is-built-pinned-and-provisioned-as-a-checksummed-release.md),
+[ADR-0162](adr-0162-non-mesh-guest-egress-is-kernel-forwarded-to-its-destination.md),
+[ADR-0164](adr-0164-guest-service-vip-access-uses-the-existing-connect4-rewrite-on-owner-sockets.md),
+[ADR-0165](adr-0165-host-verdict-strips-every-guest-datagram-frame-and-the-owner-sends-empty-datagrams.md),
+[ADR-0166](adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md),
+[ADR-0167](adr-0167-guest-flows-to-host-internal-destinations-are-refused.md),
+[ADR-0169](adr-0169-forwarding-quiescence-is-a-counted-move-only-hold.md),
+[ADR-0172](adr-0172-constant-rules-refuse-guest-prefix-traffic-not-diverted-to-leg-c.md),
+[ADR-0173](adr-0173-host-platform-clients-reach-a-vm-port-through-an-owner-opened-vsock-flow.md),
+[ADR-0174](adr-0174-host-opened-guest-connections-appear-from-the-guest-gateway.md),
+[ADR-0177](adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md),
+[ADR-0180](adr-0180-a-flow-end-is-classified-from-the-kernels-vsock-shutdown-flags.md),
+[ADR-0182](adr-0182-a-guest-reset-ends-the-vmm.md),
+[ADR-0183](adr-0183-a-half-close-drain-completes-on-a-kernel-record-without-a-deadline.md),
+[ADR-0184](adr-0184-a-failed-boot-write-of-the-shared-mtls-table-refuses-boot.md),
+[ADR-0185](adr-0185-the-guest-prefix-holds-no-node-address-and-no-vip.md),
+[ADR-0186](adr-0186-leg-s-reaches-vm-backends-through-a-temporary-vsock-relay-until-303.md),
+[ADR-0187](adr-0187-a-vm-probe-refused-by-node-capacity-or-quiescence-records-no-sample.md),
+[ADR-0190](adr-0190-leg-b-marks-and-loopback-binds-same-node-vm-dials.md),
+[ADR-0191](adr-0191-every-probe-run-counts-once-through-a-run-sequence-in-the-probe-row.md),
+[ADR-0192](adr-0192-a-probe-run-that-writes-no-row-emits-one-not-sampled-event.md).
+The numbers 0163, 0168, 0170, 0171, 0175, 0176, 0178, 0179, 0181, 0188 and
+0189 are not used. ADR-0068 pins the kernel, Linux 7.0.
 
 ---
 
@@ -2106,166 +1943,96 @@ approval.
 
 ---
 
-### Shared-bridge microVM network — no new domain boundary (GH #295, 2026-09-16)
+### vsock microVM attachment — no new domain boundary (GH #295)
 
-**Status: Accepted — approved by DDD review iteration 2 on 2026-09-16.**
+**Status: Accepted — no material, independently decidable domain choice.**
+The #295 vsock attachment replaces host network mechanics around an
+allocation; it does not change what a workload, Service, allocation, SVID,
+selected backend, Running row or Service Stable state means. It introduces no
+bounded context, aggregate, repository, domain event, persistence boundary,
+workload or allocation lifecycle state, workflow, Event Sourcing model or
+CQRS split. The decisions are technical and are recorded as ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192 (§ *vsock microVM attachment (GH #295)* above).
 
-**Stage-2 DDD conclusion: no material independently decidable domain choice.**
-The accepted #295 system design replaces host network and transparent-intercept
-mechanics around an allocation; it does not change what a workload, Service,
-allocation, SVID, selected backend, Running row, or Service Stable state means.
-No new bounded context, aggregate, repository, domain event, persistence
-boundary, workload/allocation lifecycle state, workflow, Event Sourcing model,
-or CQRS split is introduced. This is a bounded descriptive conclusion, not an
-additional user decision, and it does not reopen ADR-0114 through ADR-0118 or
-ADR-0120 through ADR-0126.
-
-The observed production model already separates the intent model from the live
-execution/observation surface:
-`WorkloadIntent::{Job,Service,Schedule}` owns declared workload intent;
-`Allocation { id, workload_id, node_id }` exists as an intent-side model but
-has no current live construction or persistence path; live physical-execution
-identity is the `AllocationId` carried through `Action::StartAllocation` /
-`Action::RestartAllocation` and observed/persisted through `AllocStatusRow`;
-`AllocationSpec` is a transient driver handoff; and `workload_addr` remains an
-`AllocStatusRow` observation. The current `NetSlot`,
-netns/veth/TAP plans, per-allocation intercept listeners, and nft rules are host
-mechanisms built around those identities. #295 replaces those mechanisms while
-preserving those model and live-surface boundaries.
-
-Cross-host routing remains with GH #298, heterogeneous per-node
-guest-network capacity with GH #299, and concurrent-flow pump scaling with GH
-#300. None becomes a domain model, aggregate field, or repository in #295.
-Per-VM cgroup ownership and the existing TLS 1.3/kTLS/splice enforcement model
-remain unchanged.
+The production model keeps its split: `WorkloadIntent::{Job,Service,Schedule}`
+owns declared intent; the live physical-execution identity is the
+`AllocationId` carried by `Action::StartAllocation` /
+`Action::RestartAllocation` and observed through `AllocStatusRow`;
+`AllocationSpec` is a transient driver handoff; `workload_addr` remains an
+`AllocStatusRow` observation. Leases, CIDs, launch tokens, flows, control
+sessions and quiescence holds are transient host mechanisms around those
+identities.
 
 #### Existing contexts and relationship map
 
-| Existing context / substrate | Classification | #295 reading |
+| Existing context | Classification | #295 reading |
 |---|---|---|
-| **Workload Orchestration** | Core subdomain | Retains workload intent, live `AllocationId` lifecycle identity, fixed-cap admission, accepted Running-row ownership, lifecycle ordering, and the narrow guest-command-release gate. |
-| **Transparent mTLS Enforcement** | Supporting subdomain | Retains the leg-F/leg-B/leg-C/leg-S language. Listener cardinality and registration ownership change; TLS 1.3, kTLS TX/RX, and splice semantics do not. |
-| **Name Layer** | Existing supporting reader bounded context | Retains `MeshServiceName`, `NameAnswer`, `NameIndex`, and the stable frontend-address concept owned by `FrontendAddrAllocator`. It reads the existing `service_backends` observation surface and meets enforcement at the re-keyed `MtlsResolve` frontend-to-backend translation seam. #295 only re-homes the `DnsResponder` socket to the shared gateway and supervises its task. |
-| **Workload Identity** | Supporting security subdomain | Retains platform-held SVID material and `SpiffeId`; guests remain identity-unaware and credential-free. |
-| **Guest Runtime** | Supporting subdomain | Retains the published guest-network token and READY/EXEC protocol. No host netns/veth vocabulary enters the guest. |
-| **Host Kernel / Hypervisor Substrate** | Generic external substrate | Supplies bridge/TAP/TCX/nft/cgroup/kTLS/splice and Cloud Hypervisor effects behind the existing adapter/port boundaries. |
+| **Workload Orchestration** | Core subdomain | Retains workload intent, live `AllocationId` identity, admission, accepted Running-row ownership, lifecycle ordering and the guest-command-release gate. |
+| **Transparent mTLS Enforcement** | Supporting subdomain | Retains the leg-F/leg-B/leg-C/leg-S language and TLS 1.3/kTLS/splice semantics. Guest mesh flows reach leg-F through a registered pair; leg-S reaches a VM backend through the owner's dial port. |
+| **Name Layer** | Supporting reader context | Unchanged `MeshServiceName`, `NameAnswer`, `NameIndex`, frontend allocation and `MtlsResolve` contract; the `DnsResponder` serves guests at the gateway. |
+| **Workload Identity** | Supporting security subdomain | Retains platform-held SVID material; guests stay identity-unaware and credential-free. |
+| **Guest Runtime** | Supporting subdomain | Retains the READY/EXEC beacon protocol; adds the per-VM control session and guest flow ownership in `overdrive-init`. |
+| **Host kernel and hypervisor** | Generic external | Supplies vhost-vsock, socket maps, eBPF hooks, nft, cgroups, kTLS and the Cloud Hypervisor fork behind adapter and port boundaries. |
 
 ```mermaid
 flowchart LR
     subgraph Core["Core subdomain"]
-        WO["Workload Orchestration\nWorkloadIntent · AllocationId / AllocStatusRow lifecycle"]
+        WO["Workload Orchestration\nWorkloadIntent · AllocationId / AllocStatusRow"]
     end
     subgraph Supporting["Supporting subdomains"]
-        TM["Transparent mTLS Enforcement\nregistration capability · F/B/C/S legs"]
-        NL["Name Layer\nMeshServiceName · NameAnswer · NameIndex · frontend F"]
+        TM["Transparent mTLS Enforcement\nleg-F / leg-B / leg-C / leg-S"]
+        NL["Name Layer\nNameIndex · frontend F"]
         WI["Workload Identity\nSpiffeId · held SVID"]
-        GR["Guest Runtime\noverdrive.net · READY / EXEC"]
+        GR["Guest Runtime\nREADY / EXEC · control session"]
     end
-    subgraph External["Generic / external substrate"]
-        HK["Host Kernel\nbridge · TAP · TCX · nft · cgroup · kTLS · splice"]
-        HV["Hypervisor Substrate\nCloud Hypervisor"]
+    subgraph External["Generic / external"]
+        HK["Host kernel\nvhost-vsock · sockmap · eBPF · nft · kTLS"]
+        HV["Cloud Hypervisor fork"]
     end
 
-    WO -->|"Customer-Supplier — accepted allocation identity and intercept lifecycle"| TM
-    WO -->|"Published Language — service_backends observation rows"| NL
-    NL -->|"ACL — shared FrontendAddrAllocator F; MtlsResolve translates to live backend"| TM
-    WI -->|"Open Host Service — IdentityRead / held SVID by AllocationId"| TM
-    WO -->|"Published Language — guest network token and READY/EXEC"| GR
-    WO -->|"ACL — GuestNetworkProvisioner / CgroupFs ports"| HK
-    WO -->|"ACL — Vmm + VmConfig"| HV
-    TM -->|"ACL — MtlsIntercept / MtlsEnforcement adapters"| HK
-    GR -.->|"Conformist — virtio device model"| HV
+    WO -->|"supplies accepted allocation identity and lifecycle to"| TM
+    WO -->|"publishes service_backends rows to"| NL
+    NL -->|"translates frontends to live backends for"| TM
+    WI -->|"serves held SVIDs by AllocationId to"| TM
+    WO -->|"exchanges READY / EXEC and control messages with"| GR
+    WO -->|"drives through GuestNetworkProvisioner and CgroupFs ports"| HK
+    WO -->|"launches through Vmm and VmConfig"| HV
+    TM -->|"dials VM ports through GuestStreamDial on"| WO
+    TM -->|"programs kTLS and nft through adapters in"| HK
+    GR -.->|"conforms to the virtio device model of"| HV
 ```
 
-These are existing relationship patterns. The node shared-switch owner is not
-a bounded context: it has no independently evolving business language or
-lifecycle and translates accepted allocation/network facts into host-kernel
-effects. The existing cgroup-BPF Service dataplane remains backend-selection
-and atomic-membership owner; the shared switch gains no Service-routing model
-and the selected `BackendId` receipt remains the exact-peer identity source.
-The Name Layer remains D-DBN-1's sibling reader over `service_backends`; #295
-changes only the shared-gateway `DnsResponder` socket composition and task
-supervision. It does not change `MeshServiceName`, `NameAnswer`, `NameIndex`,
-`FrontendAddrAllocator`, stable-frontend ownership, or the `MtlsResolve`
-translation contract.
+The guest-flow owner is not a bounded context: it has no independently
+evolving business language and translates accepted allocation facts into
+host-kernel effects.
 
 #### Tactical model
 
 | Concept | Classification | Invariant |
 |---|---|---|
-| `WorkloadIntent` / `Job` / `Service` | Existing aggregate root and variants — unchanged | Own declared workload intent, including Service listeners. #295 adds no field or behavior. |
-| `Allocation` | Existing intent-side aggregate model — empty #295 delta | The type records `{ id, workload_id, node_id }`, but current production has no live construction/persistence path for it. #295 neither activates nor changes that model. |
-| `AllocationId` + `AllocStatusRow` | Current live execution identity and persisted observation surface — unchanged | Start/restart actions carry the exact physical `AllocationId`; `AllocStatusRow` persists lifecycle state and `workload_addr` at that identity. Lifecycle meanings do not move, and TAP/MAC/generation/TCX/listener/nft state remains transient. |
-| `GuestNetworkAssignment` | Transient value object | Exactly `address`, `tap`, `mac`, `gateway`, `prefix`, and `dns` move as one all-or-none driver handoff. It has no independent identity or persistence. |
-| `GuestNetworkPlan` | Internal orchestration value object | Adds allocation, bridge, and node-prefix ownership context around one assignment; it is not a public aggregate. |
-| Guest address lease | Internal technical resource binding | One process-held pool entry binds an existing `AllocationId` to one plan. One mutex serializes unique smallest-free assignment, idempotent re-entry, release, and ordered snapshot. It is neither an aggregate type nor a repository. |
-| Transparent-mTLS registration capability | Ephemeral entity in the existing enforcement context | Identity is the exact `(AllocationId, node-session generation, SpiffeId)` triple. Pending/Active/Retiring/removed state, in-flight claims, and published handles share the node listener owner's lock. It is not a durable entity, aggregate root, or new public type. |
-| `GuestEndpointFact`, `GuestNetworkFact`, `DestinationRegistration` | Value/fact projections | Carry typed read-back, failure evidence, or active destination membership; no independent lifecycle exists. |
-| Shared-switch owner, provisioner, listener owner, supervisor | Application/infrastructure services | Coordinate host effects and already-approved lifecycle gates; they contain no cross-aggregate business rule and are not domain services. |
-
-No new aggregate means no new aggregate command universe. The complete
-observable `WorkloadIntent` payload and existing intent-side
-`Allocation { id, workload_id, node_id }` model have an empty #295 declared
-delta: archived workload-intent bytes and all three allocation-model fields
-remain complement-equal. #295 must not activate an `Allocation` persistence
-path. Live lifecycle identity/observation remains `AllocationId` plus
-`AllocStatusRow`; its accepted lifecycle meanings and `workload_addr` remain
-unchanged. Guest address handoff, TAP, MAC, node-session generation, TCX state,
-listener state, and nft membership stay transient.
-
-The subordinate technical consistency owners retain narrow change contracts:
-
-- address `assign` adds only one named allocation binding or returns its
-  byte-equal existing plan; address `release` removes only that binding and is
-  a no-op when absent;
-- capability registration changes only its exact generation, source/destination
-  indexes, and set-element guards; conflicting live keys change nothing;
-- retirement removes only its exact indexes, waits for its own in-flight
-  claims, and drains its own handles while unrelated capabilities and both
-  node listeners remain complement-equal; and
-- effect-first cleanup changes only the named allocation's enforcement, nft,
-  endpoint, TCX, TAP, guard, and lease inventory. It does not change workload
-  intent, the intent-side `Allocation` model, live `AllocationId`,
-  `AllocStatusRow` lifecycle meanings or `workload_addr`, Service selection,
-  SVID ownership, per-VM cgroup ownership, or unrelated allocations.
+| `WorkloadIntent` / `Job` / `Service` | Existing aggregate root — unchanged | #295 adds no field or behaviour. |
+| `AllocationId` + `AllocStatusRow` | Live execution identity and observation — unchanged | Lifecycle meanings and `workload_addr` do not move. |
+| Guest lease | Internal technical binding | Binds one `AllocationId` to a guest address, a CID and a launch token; released only after the VMM has exited. Not a repository. |
+| Flow pair | Ephemeral technical entity | One kernel-forwarded pair per transport flow; counts against its allocation's quota until it ends, draining included. |
+| Control session | Ephemeral technical entity | At most one live session per CID, attributed by launch token; its loss aborts its flows. |
+| Quiescence hold | Ephemeral move-only value | Forwarding reopens only when the hold count returns to zero. |
+| Guest stream | Ephemeral value handed to a dialer | Owns the host end of one host-opened flow; carries the classified end of the guest's direction. |
 
 #### Ubiquitous language
 
 | Term | Exact meaning | Not this |
 |---|---|---|
-| **Guest network attachment** | One allocation's live lease, host TAP, bridge membership, endpoint entry, TCX link/pin, guard membership, and registration facts. | Not a workload, VMM, netns, veth pair, concurrent flow, or `EnforcedConnection`. |
-| **Guest address lease** | The process-held `AllocationId -> GuestNetworkPlan` binding retained until effect-first teardown finishes. | Not a `NetSlot`, durable IPAM row, or schedulable public resource. |
-| **Shared guest switch** | Node-owned bridge/fixed MAC/gateway, endpoint/counter maps, per-TAP TCX links/pins, and proof-mark guard. | Not the existing XDP/cgroup-BPF Service dataplane or a backend selector. |
-| **Managed TAP** | Host-netns TAP currently present in the switch owner's guard/map/link inventory. | Not a per-workload namespace or veth endpoint. |
-| **Proof mark** | TCX-authored `0x295a` intercept or `0x295b` accepted evidence consumed by the bridge guard. | Not workload identity, a policy verdict, or selected backend identity. |
-| **Registration capability** | Immutable `(AllocationId, node-session generation, SpiffeId)` frozen once for an accepted connection. | Not address identity alone and never re-resolved to an address-reuse successor. |
-| **Node-session generation** | Non-zero process-session counter owned by the shared-listener registry. | Not workload desired generation, restart count, allocation identity, or a persisted epoch. |
-| **Attachment capacity** | Simultaneous guest-network attachment population N under CAP-295-A. | Not VMM, concurrent-flow, throughput, FD, pump-thread, stack, or connection capacity. |
-| **Release-last** | Release the address only after the predecessor's enforcement, nft, endpoint, TCX, TAP, and guard effects are gone. | Not release on lifecycle-row change or before handle drain. |
-
-The existing leg vocabulary remains exact: F is workload-facing plaintext, B
-is peer-facing outbound TLS, C is peer-facing inbound TLS, and S is
-server-workload-facing plaintext. #295 changes ownership and cardinality around
-those legs, not their meaning.
+| **Guest-flow owner** | The node-scoped component that holds the host forwarder, flow and control listeners, control sessions and every host pair socket. | Not a bounded context, not the mTLS worker. |
+| **Flow** | One TCP connection or one datagram association between a guest socket and a host-facing peer, carried by one vsock connection. | Not a VM, not a control session. |
+| **Dial** | A host platform client's request for a stream to a declared TCP port of an Active VM, answered by the owner. | Not a TCP connect to `workload_addr`. |
+| **Launch token** | The per-launch value on a guest's kernel command line that attributes its vsock connections. | Not an identity credential; not persisted. |
+| **Clean half-close / abort** | A flow end the kernel's vsock SHUTDOWN flags classify as SEND only / RCV\|SEND or RST. | Not inferred from end-of-stream alone. |
+| **Quiescence hold** | One counted, move-only value that keeps admission closed while a recovery repairs. | Carries no name; not a boolean latch. |
 
 #### Events, repositories, and ES/CQRS assessment
 
-No domain event is added. `guest_network.shared_owner_*` is operational
-health/evidence telemetry, not an event stream, and existing lifecycle
-observation rows retain their accepted meaning. No lease, capability, endpoint,
-rule, or recovery repository is authorized.
-
-Event Sourcing adds no value: the state is live technical/kernel state, no
-temporal business query is required, and boot intentionally reclaims rather
-than adopts prior capabilities. CQRS likewise adds no value: the existing
-intent/observation split remains for its accepted consistency reasons, while
-#295 creates no new command model, projection family, or query workload.
-
-The complete feature-local DDD record, including the observed-versus-proposed
-classification and the unchanged accepted D-295 constraints, is in
-`docs/feature/netns-density-295/feature-delta.md` § *Wave: DESIGN / [REF] DDD
-List*. No DDD ADR is minted because there is no independently reversible domain
-decision to record.
+No domain event or repository is added. The state is live technical and
+kernel state, boot reclaims rather than adopts it, and no temporal business
+query exists, so Event Sourcing and CQRS add nothing.
 
 ---
 
@@ -3624,7 +3391,8 @@ DNS name-layer integration via resolv.conf injection** into the per-workload net
 
 **No-Tier-2-backstop constraint (ADR-0068)**: the `cgroup_sock_addr`/`sockopt`
 families have no `BPF_PROG_TEST_RUN` — any interception change is Tier-3 on a
-real connect under Lima; pinned 6.18 is the authoritative merge signal.
+real connect under Lima; the pinned Linux 7.0 kernel is the authoritative merge
+signal.
 TPROXY/`IP_TRANSPARENT`/`getsockname` are far under any floor.
 
 #### C4 Level 1 — System Context (transparent-mTLS enrollment)
@@ -4096,9 +3864,9 @@ Rules to enforce:
 | 0065 | **Workflow result/error model** — body returns `Result<Output, TerminalError>` (typed success output + terminal-error failure channel, the Restate/Temporal/DBOS/Step-Functions shape), retryable errors absorbed/re-driven by the engine, never reaching the return type. Object safety via author-edge typing + a CBOR-erasing `ErasedWorkflowAdapter<W>` → object-safe `ErasedWorkflow` the engine drives (same typed-edge/erased-interior split as `ctx.run<T>`). `WorkflowResult` DELETED (greenfield single-cut); the status enum survives only as engine-owned control-plane projection `WorkflowStatus { Completed{output} \| Failed{terminal} \| Cancelled \| TimedOut }` (carried by journal `Terminal` + `ObservationRow::WorkflowTerminal`, distinct from the body return AND `TerminalCondition`). `TerminalError { kind, detail }` concrete core type (closes the `reason: String` replay-determinism hazard). Retry budget in the engine/journal (journal-`RetryAttempted`-derived attempts + engine-constant policy), NOT the body, NOT a reconciler `View` (contrast `RetryMemory` — a workflow has an engine). Typed `WorkflowStart { name, input }` crosses Raft via rkyv `WorkflowStartEnvelope` (V1) + co-located typed codec (ADR-0048 `Job` precedent); `input_digest` off `spec.input` — resolves #217, unblocks the first external/root rotation workflow consumer. *(Historical: "unblocks #40"; SUPERSEDED — #40 is the now-closed internal SVID reissue `Action::IssueSvid`, not a workflow; the future workflow consumer is external-ACME / public-trust or root-CA rotation, TBD.)* Amends ADR-0064 §2/§3/§5/§6 | Proposed |
 | 0069 | **Transparent mTLS via a universal agent-light L4 proxy** — folds #222 into #26; ONE enforcement mechanism for ALL workload kinds (process/exec, WASM, microVM, unikernel). Workload's outbound TCP transparently intercepted (`cgroup_connect4`-rewrite default / TPROXY alt) to an agent-owned plaintext leg F; the agent drains plaintext losslessly + rustls TLS 1.3 handshake on a peer-facing leg B presenting the held SVID (read via `IdentityRead`, never minted/cached) + arms kTLS on leg B (reusing `ktls::KtlsStream` for control records). Steady state (all four pumps agent-light zero-copy `splice`; NO sockmap/psock on any leg): **forward F→B = BLOCKING `splice` into leg B's kTLS-TX (`tls_sw_sendmsg`/`MSG_SPLICE_PAGES` encrypts in-kernel)**; **return B→F = non-blocking `splice(2)` via `tls_sw_splice_read` on a plain kTLS-RX leg (~1 splice/record)**; the in-memory pre-arm `prelude` keeps a `write_all`. *(Forward-mechanism history: an agent-idle sockmap EGRESS-redirect (`bpf_sk_redirect_map`, flags=0) RETIRED 2026-06-13 — its `MSG_DONTWAIT`-backlog stalled ~10–15% of records — for a `read → write_all` copy; that copy RETIRED 2026-08-26 for the blocking splice, proven lossless 15/15 under send-buffer exhaustion (increment-M). `splice` into kTLS-TX does NOT lose records — the loss class was non-blocking `MSG_DONTWAIT` delivery, not `splice(2)`. ADR-0069 amended 2026-06-13 + 2026-08-26.)* New driven port `MtlsEnforcement` in `overdrive-core` (does NOT fit `Dataplane` — per-connection socket ops, not map writes) + host adapter (`adapter-host`, over kTLS/splice/cgroup_connect4/nft-TPROXY, consumes `IdentityRead`; the sockops/sk_msg/sockmap surface retired with the forward redirect) + `SimMtlsEnforcement` for DST. Earned-Trust `probe()` (wire→probe→use; sentinel handshake + kTLS-arm + forward-encrypt blocking-splice round-trip + splice-read, refuse-to-start on failure). Decided on 6 Tier-3 spikes + 3 research docs (kernel 7.0, `353cdc52`): in-band lossless foreclosed 3 ways; proxy proven agent-light both directions. **Amends whitepaper §7/§8** (two mechanisms → one); **supersedes** in-band kTLS-on-own-socket as v1 — retained as a post-v1 optimization tracked in **#231** (restart-survival + 1-socket density). J-SEC-003 / GH #26 (folds #222) | Accepted |
 | 0070 | **Transparent-mTLS connection liveness — kernel TCP timeouts + per-connection self-supervision** — refines ADR-0069 § ATAM "Pump supervision policy (F6)" / the SD-4 supervision shape. v1 supervises connection liveness with **(C) `TCP_USER_TIMEOUT` + keepalive on the spliced legs** (kernel reaps transport-death; Linkerd/ztunnel precedent) **+ (B) per-connection self-supervision** in each SD-2 port-owned enforce task (self-tear-down fail-closed on EOF/error). **Rejects (A) a central tick enumerator** over the live-connection set (no surveyed production dataplane uses it for liveness; `reconcilers.md` disqualifies it — a stalled connection is not desired-vs-actual config drift). The central `MtlsSupervisor` (step 04-01) + its tests are **deleted** (delete, not refactor). The 4-method `MtlsEnforcement` contract is UNCHANGED — `liveness`/`PumpLiveness`/`pump_stall_deadline` are RETAINED (the `Gone` post-teardown no-leak observable the equivalence + F4 tests assert, plus the (B) verdict + the reserved hook for the deferred watchdog). Two NAMED deferrals (no issue created): the kernel-invisible progress-stall watchdog (Tier-3 spike; the kTLS-spliced progress predicate is undocumented upstream) and the Phase-5 policy-plane force-close (revocation/authz drain — a central registry IS correct THERE, not for v1 liveness). Decided on `transparent-mtls-connection-supervision-research.md` (22 sources). Refines ADR-0069 (locked core UNCHANGED: D-MTLS-1/fold/OQ-2/SD-1(a)/SD-2/SD-3/4-method contract/F3/F4-7/F5/authn-only). GH #26 | Accepted |
-| 0072 | **Dial-by-name responder — node-local in-agent DNS over the ObservationStore (the THIRD reader)** *(REV-2, supersedes headless v1 — see ADR-0072 § Changed Assumptions)* — answers `<job>.svc.overdrive.local` for an unmodified workload's `getaddrinfo`, closing the dial-by-name leg (#236 deferral). NEW `DnsResponder` host adapter (`overdrive-control-plane`, `adapter-host`) with its OWN name-keyed `name_index` (`<job>` → the **stable per-`<job>` frontend addr `F` in `10.98.0.0/16`**, NOT → backend addrs) over `service_backends ∩ running-AND-healthy` via the SAME List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` pattern as `ServiceBackendsResolve` — a **sibling reader** (DDN-1, ratified A1). The **ClusterIP split**: DNS answers a STABLE address; the already-live dataplane (nft-TPROXY Path-A + a re-keyed per-connection `MtlsResolve`) translates `(F, listener.port[, proto])` → a current running-AND-healthy backend and enforces SPIFFE mTLS, so the answer never goes stale on a backend cycle (the SQ1 fix). The byte-consistency anchor moved from the backend addr to `F` (the answered `F` is byte-identical to the addr `MtlsResolve` recognizes; the translation always lands a `Mesh` backend). `MtlsResolve` is **re-keyed** (1b-A) — `BackendIndex` gains `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)` (2nd-round Finding-1: the proto axis is carried so `tcp/53`/`udp/53` never collide; v1 captures TCP at the worker layer) + a three-way `classify` arm (frontend hit → translate; frontend-subnet miss → `MeshUnreachable` fail-closed; general miss → today's `by_addr`); this EDITS the security-critical resolve index, superseding REV-1's "intercept struct untouched" — pinned in the trait docstring + a DST equivalence test. NEW per-`<job>` `FrontendAddrAllocator` (1a-A, sibling to `NetSlotAllocator`, `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`, collision-checked disjoint from VIP `10.96.0.0/16` + workload `10.99.0.0/16`); `F` is per-LOGICAL-workload — WITHHELD at the `name_index` on transient zero-healthy (→ NXDOMAIN), RELEASED only on logical-workload deletion (Finding-2). `<job>` ← `Backend.alloc: SpiffeId` job segment = `WorkloadId` = deploy `[service].id` (verified mapping). Wire codec = **`hickory-proto`** (Apache-2.0/MIT, OSS-first); `hickory-server` REJECTED (no per-packet reply-source control on a multi-homed wildcard socket) → our OWN `IP_PKTINFO` recv/sendmsg loop with `ipi_spec_dst` source-pinning (spike-mandatory; `getaddrinfo` rejects wrong-source replies). DST seam = pure `answer_for(name, qtype, &index) -> NameAnswer` + a separately-proptested encoder (NO port trait / NO Sim adapter — the socket is irreducibly Tier-3, no Tier-2 backstop). Bind `0.0.0.0:53` wildcard first (`SO_REUSEADDR`), fall back to N per-gateway-addr sockets on `EADDRINUSE` — gateway set PINNED (DDN-5) to `NetSlotAllocator` + `responder_addr_for_slot`, re-derived on the converge tick. `run_server` owns it (construct after `resolve.probe()`, `responder.probe()`, spawn, hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on bind/List failure — wire→probe→use). NEW `MeshServiceName` newtype (`overdrive-core::id`, `SUFFIX = svc.overdrive.local`, single `<job>` label v1, full newtype completeness + proptest). DNS contract: A+running-and-healthy → NOERROR+A (the stable `F`); AAAA+live → NODATA(+SOA); 0 running-and-healthy (declared-not-running OR unhealthy OR unknown, indistinguishable v1) → NXDOMAIN(+1s-MINIMUM SOA); never a stale/unhealthy addr. v1 IPv4-only; a stable IPv4 frontend is **VIP-shaped** but delivered via nft-TPROXY (NOT #61 XDP/`SERVICE_MAP`/#167). BLOCKER-1 (frontend-subnet capture) RESOLVED → WORKS on a real kernel; BLOCKER-2 (multi-replica selection) pinned deterministic first-by-`Ord`. Spike PROMOTE (dev-Lima 7.0; re-confirm 6.18 appliance in DELIVER Tier-3). Builds on ADR-0071 (Q5a name-layer). GH #243 / J-MESH-001 | Accepted |
+| 0072 | **Dial-by-name responder — node-local in-agent DNS over the ObservationStore (the THIRD reader)** *(REV-2, supersedes headless v1 — see ADR-0072 § Changed Assumptions)* — answers `<job>.svc.overdrive.local` for an unmodified workload's `getaddrinfo`, closing the dial-by-name leg (#236 deferral). NEW `DnsResponder` host adapter (`overdrive-control-plane`, `adapter-host`) with its OWN name-keyed `name_index` (`<job>` → the **stable per-`<job>` frontend addr `F` in `10.98.0.0/16`**, NOT → backend addrs) over `service_backends ∩ running-AND-healthy` via the SAME List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` pattern as `ServiceBackendsResolve` — a **sibling reader** (DDN-1, ratified A1). The **ClusterIP split**: DNS answers a STABLE address; the already-live dataplane (nft-TPROXY Path-A + a re-keyed per-connection `MtlsResolve`) translates `(F, listener.port[, proto])` → a current running-AND-healthy backend and enforces SPIFFE mTLS, so the answer never goes stale on a backend cycle (the SQ1 fix). The byte-consistency anchor moved from the backend addr to `F` (the answered `F` is byte-identical to the addr `MtlsResolve` recognizes; the translation always lands a `Mesh` backend). `MtlsResolve` is **re-keyed** (1b-A) — `BackendIndex` gains `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)` (2nd-round Finding-1: the proto axis is carried so `tcp/53`/`udp/53` never collide; v1 captures TCP at the worker layer) + a three-way `classify` arm (frontend hit → translate; frontend-subnet miss → `MeshUnreachable` fail-closed; general miss → today's `by_addr`); this EDITS the security-critical resolve index, superseding REV-1's "intercept struct untouched" — pinned in the trait docstring + a DST equivalence test. NEW per-`<job>` `FrontendAddrAllocator` (1a-A, sibling to `NetSlotAllocator`, `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`, collision-checked disjoint from VIP `10.96.0.0/16` + workload `10.99.0.0/16`); `F` is per-LOGICAL-workload — WITHHELD at the `name_index` on transient zero-healthy (→ NXDOMAIN), RELEASED only on logical-workload deletion (Finding-2). `<job>` ← `Backend.alloc: SpiffeId` job segment = `WorkloadId` = deploy `[service].id` (verified mapping). Wire codec = **`hickory-proto`** (Apache-2.0/MIT, OSS-first); `hickory-server` REJECTED (no per-packet reply-source control on a multi-homed wildcard socket) → our OWN `IP_PKTINFO` recv/sendmsg loop with `ipi_spec_dst` source-pinning (spike-mandatory; `getaddrinfo` rejects wrong-source replies). DST seam = pure `answer_for(name, qtype, &index) -> NameAnswer` + a separately-proptested encoder (NO port trait / NO Sim adapter — the socket is irreducibly Tier-3, no Tier-2 backstop). Bind `0.0.0.0:53` wildcard first (`SO_REUSEADDR`), fall back to N per-gateway-addr sockets on `EADDRINUSE` — gateway set PINNED (DDN-5) to `NetSlotAllocator` + `responder_addr_for_slot`, re-derived on the converge tick. `run_server` owns it (construct after `resolve.probe()`, `responder.probe()`, spawn, hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on bind/List failure — wire→probe→use). NEW `MeshServiceName` newtype (`overdrive-core::id`, `SUFFIX = svc.overdrive.local`, single `<job>` label v1, full newtype completeness + proptest). DNS contract: A+running-and-healthy → NOERROR+A (the stable `F`); AAAA+live → NODATA(+SOA); 0 running-and-healthy (declared-not-running OR unhealthy OR unknown, indistinguishable v1) → NXDOMAIN(+1s-MINIMUM SOA); never a stale/unhealthy addr. v1 IPv4-only; a stable IPv4 frontend is **VIP-shaped** but delivered via nft-TPROXY (NOT #61 XDP/`SERVICE_MAP`/#167). BLOCKER-1 (frontend-subnet capture) RESOLVED → WORKS on a real kernel; BLOCKER-2 (multi-replica selection) pinned deterministic first-by-`Ord`. Spike PROMOTE (dev-Lima 7.0; re-confirm on the pinned 7.0 appliance kernel, ADR-0068, in DELIVER Tier-3). Builds on ADR-0071 (Q5a name-layer). GH #243 / J-MESH-001 | Accepted |
 | 0073 | **Backend instance replacement — `overdrive workload restart <id>` + a minimal desired-run generation precursor** — closes the `[D1]` DISCUSS gate (#249). NEW top-level `overdrive workload restart <id>` verb (new `workload` CLI namespace, #220-aligned; NOT under `job`); single verb, rollout-restart breadth (running → stop-then-start; operator-stopped → start; non-existent → 404). Mechanism = a minimal desired-run `generation: u64` at a NEW standalone sibling key `workloads/<id>/generation` (8-byte big-endian — NOT an rkyv aggregate field, so NO ADR-0048 envelope bump / golden fixture); the `WorkloadLifecycle` reconciler gains `State.generation` (hydrated input) + `View.observed_generation` (persisted input, `#[serde(default)]`) and gates the stale line-520 operator-stop observation-veto on restart-pending **AND scoped to the current instance** — `!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)`, where the new minimal pure helper `current_alloc` selects the latest-placed alloc by the numeric `mint_alloc_id` suffix so a superseded prior-generation `Terminated{Operator}` row can never veto a fresh instance's later crash-restart (the iteration-3 fix; iteration-2's transient generation-gating-only override was rejected for re-arming stale prior-generation rows after placement). The reconciler edit is required since clearing the `workloads/<id>/stop` sentinel alone is necessary-but-NOT-sufficient (the observed Operator-stop row persists). Bug-3 preserved: ONLY `restart` bumps the generation; `overdrive deploy` stays pure-declare and never bumps it, so a same-spec re-deploy cannot resurrect an operator-stopped workload. TOCTOU-safe + monotonic: the generation bump + sentinel delete commit in ONE `IntentStore::txn` via the NEW `TxnOp::IncrementU64` variant (read-modify-write inside the redb write txn; redb serializes writers ⇒ atomic, two concurrent restarts advance `generation` by 2, never wedge) + `TxnOp::Delete` — **NO `Conflict` retry** (the `Put`-then-retry-on-`Conflict` shape was the iteration-1-rejected design; `LocalIntentStore::txn` returns `Committed` unconditionally so that conflict is unproduceable). HTTP = `POST /v1/jobs/:id/restart` (mirrors `stop_workload`; the `jobs/` HTTP prefix vs `workloads/` IntentKey prefix vs `workload` CLI verb split is the already-shipped `job stop` shape); `RestartWorkloadResponse { workload_id, outcome ∈ {restarted, resumed} }`; 404 `NotFound { resource: workloads/<id> }`. `restart` is **level-triggered / coalescing** (iteration-2 contract): generation advances monotonically per call (audited), the reconciler converges to ONE fresh instance for the latest generation; sequential restarts each cycle the workload, concurrent / pre-placement restarts coalesce into one cycle. Per ADR-0104's accepted VM-only amendment, Exec fresh placement keeps the row-count attempt, while VM placement chooses above retained rows plus fsynced View reservation keys and reserves the ID before dispatch so rejected publication cannot reuse it. Seam is THIN per ADR-0050 OQ-1 — only `generation`/`observed_generation`, NO revision rows / `RevisionId` / retention (deferred to #180, where `generation` folds into the `workloads/<id>/current` pointer); reused verbatim by #64 (rolling deploy), #253 (zero-downtime), #254 (multi-replica). Reuse: 6 EXTEND (`stop_workload` shape, reconciler, `IntentKey`, http-client, api response enum, `hydrate_desired`), 5 minimal CREATE-NEW (`workload` namespace, restart handler+route, generation key+codec, the `TxnOp::IncrementU64` store primitive, the pure `current_alloc` reconciler helper). Wholly internal — no external integration, no new crate, no new dep. Alternatives rejected: lean narrow-veto edit (no forward seam), re-stamp observed row to SystemGc (corrupts observation honesty), full #180 pull-forward (over-build). GH #249 / J-OPS-003 (extended) | Accepted |
-| 0088 | **Guest-stack netns topology — routed two-/30 tap wire + silent pre-READY guest addressing** — VM-kind allocs get a persistent tap in the per-workload netns addressed from a second slot-derived /30 (upper half of `WORKLOAD_SUBNET_BASE` `10.99.0.0/16`: `base + 0x8000 + slot*4`; disjoint from transit under `NET_SLOT_MAX = 4095`), netns `ip_forward=1`, and a host return route — the increment-n spike topology (WORKS, no rp_filter/tx-offload toggle). **`workload_addr` = guest addr** for VM allocs through the existing `AllocStatusRowV2` field. ONE platform cmdline parameter carries guest /30, gateway, and dns. Before READY, `overdrive-init` verifies NIC-down, disables/reads back per-interface IPv6, writes/reads back `arp_notify=0`, then applies IPv4/route/resolver; any init/token/suppression/apply failure logs to guest serial and powers off before READY without guest `EXIT` or operator exec. After READY, `EXIT` is operator-only; Beacon PL is unchanged. `VmDriver` selects bounded guest-console diagnostics and the exact Job classifier finalizes `VmGuestExitUnreported` as Failed without restart. **2026-08-29 mutation-aware amendment:** the alloc egress rule gains one anonymous counter and a strict read-only exact-rule oracle. **2026-08-31 recovery amendment:** outbound and inbound prerouting rules order the existing mark before TPROXY, so listener-loss `NFT_BREAK` leaves traffic on the existing local policy route rather than restoring cleartext reachability; no second rule, quarantine, listener adoption, or guard API is added. **Amended (2026-09-24):** the zero-frame contract is unchanged. Its post-#295 shared-bridge realization, where CH inherits a TAP queue fd and the TAP stays down until the post-event activation, is decided by ADR-0127, ADR-0128 and ADR-0131 (accepted 2026-09-24); the listener-loss ordering claim is corrected by ADR-0140 (see ADR-0088's accepted amendment). Both earlier 2026-09-23 variants are withdrawn: attaching a down TAP by name, and the closed control-frame set. Reset, wrap, replacement/delete/reinsert, notification loss, partial/interrupted dumps, or ambiguity fails; same-tag adoption, by-handle teardown, boot sweep, and siblings remain unchanged. No external API, Beacon, persistence, describe, or observation schema changes arise. Extends ADR-0071; realises ADR-0069's staged #222 adapter. GH #222 | Accepted, amended 2026-09-23 |
+| 0088 | **Guest-stack netns topology — routed two-/30 tap wire + silent pre-READY guest addressing** — VM-kind allocs get a persistent tap in the per-workload netns addressed from a second slot-derived /30 (upper half of `WORKLOAD_SUBNET_BASE` `10.99.0.0/16`: `base + 0x8000 + slot*4`; disjoint from transit under `NET_SLOT_MAX = 4095`), netns `ip_forward=1`, and a host return route — the increment-n spike topology (WORKS, no rp_filter/tx-offload toggle). **`workload_addr` = guest addr** for VM allocs through the existing `AllocStatusRowV2` field. ONE platform cmdline parameter carries guest /30, gateway, and dns. Before READY, `overdrive-init` verifies NIC-down, disables/reads back per-interface IPv6, writes/reads back `arp_notify=0`, then applies IPv4/route/resolver; any init/token/suppression/apply failure logs to guest serial and powers off before READY without guest `EXIT` or operator exec. After READY, `EXIT` is operator-only; Beacon PL is unchanged. `VmDriver` selects bounded guest-console diagnostics and the exact Job classifier finalizes `VmGuestExitUnreported` as Failed without restart. **2026-08-29 mutation-aware amendment:** the alloc egress rule gains one anonymous counter and a strict read-only exact-rule oracle. **2026-08-31 recovery amendment:** outbound and inbound prerouting rules order the existing mark before TPROXY, so listener-loss `NFT_BREAK` leaves traffic on the existing local policy route rather than restoring cleartext reachability; no second rule, quarantine, listener adoption, or guard API is added. **Amended (2026-09-24):** the zero-frame contract is unchanged. Its post-#295 shared-bridge realization, where CH inherits a TAP queue fd and the TAP stays down until the post-event activation, is decided by ADR-0127, ADR-0128 and ADR-0131 (accepted 2026-09-24; superseded for #295 by the vsock microVM attachment, ADR-0145, under which a VM has no TAP); the listener-loss ordering claim is corrected by ADR-0140 (see ADR-0088's accepted amendment). Both earlier 2026-09-23 variants are withdrawn: attaching a down TAP by name, and the closed control-frame set. Reset, wrap, replacement/delete/reinsert, notification loss, partial/interrupted dumps, or ambiguity fails; same-tag adoption, by-handle teardown, boot sweep, and siblings remain unchanged. No external API, Beacon, persistence, describe, or observation schema changes arise. Extends ADR-0071; realises ADR-0069's staged #222 adapter. GH #222 | Accepted, amended 2026-09-23 |
 | 0089 | **Tap-in-netns provisioning boundary + CH net attach** — the C3 seam (`provision_and_inject_netns`) gains a `DriverPayload`-matched VM branch: pure `VmTapPlan` + four Bar-1 converge steps (tap create+persist/address, netns `ip_forward`, host return route; structural teardown); `overdrive-netlink` performs ioctl/netlink tap creation/move; `Vmm` uses the existing `ip netns exec <ns>` wrapper plus `--net tap=,mac=`; both `DriverType::Exec` install gates extend to VM-kind (fresh start `:1584`, restart `:1880`; D-MTLS-18 inherited; teardown remains ungated). **2026-08-29 mutation-aware amendment:** `install_outbound_tproxy` is EXTEND, not REUSE-AS-IS: the sole owner installs one anonymous counter after unchanged interface/TCP matches, with strict mutation-aware internal observation. **2026-08-31 recovery amendment:** both prerouting encoders use `selection → [outbound counter] → mark → TPROXY → accept`; a missing listener breaks after the mark, so the existing fwmark/local route fails closed. No second rule, quarantine, listener adoption, or public surface is added. The read-only metal decorator never installs/replaces/resets/deletes; exact tag, same-tag adoption, by-handle teardown, boot sweep, sibling nonmutation, public schemas, and 8/10/1 stay unchanged. Inbound topology is settled and BUILD deferred to #257. Rejected: driver-created tap, fd-passing, worker `pre_exec` setns, dedicated Bar-2 reconciler now, `start_alloc`-owned return route. Bar-2 rides #197/#234. **Proposed 2026-09-11, pending review:** the selected TAP attachment adds only its exact sysfs leaf `access=r` to `VmConfig`'s explicit Landlock sequence before the existing run-dir `access=rw`; public API, TAP lifecycle and every gate remain unchanged. GH #222 | Accepted; Landlock amendment proposed |
 | 0090 | **VM Service network-probe target projection** — resolve HTTP/TCP effective destinations once at `ProbeRunner` allocation registration: explicit hosts (including explicit loopback) unchanged; a VM HTTP omission or exact `0.0.0.0` HTTP/TCP target uses the provisioned guest `workload_addr`; an allocation-network Exec/process omission or exact wildcard uses its provisioned transit `workload_addr`; and unnetworked Exec/process defaults stay loopback. `ServiceLifecycle` counts each stored Startup/index-0 LWW failure once with its existing timestamp map, normalizing a legacy unpaired counter to one current observation. Share the trusted runner with `VmDriver` through existing lifecycle hooks. `Vm + None` has no production producer and receives no speculative behavior. Moves no lifecycle gate. GH #257; amended by proposed ADR-0097 | Accepted |
 | 0091 | **Service parser driver union + VM Exec exclusion** — `ServiceSpecEnvelope::V3` replaces parser `exec` with the existing `DriverInput` union; frozen V1/V2 migrate as Exec. Reuse existing wire/intent/allocation/describe unions. Reject VM Exec probes locally and in authoritative admission before intent commit, naming GH #280. GH #257 | Accepted |
@@ -4302,8 +4070,8 @@ on a multi-homed wildcard socket, so it cannot satisfy it.
 mandatory; acceptance = `getaddrinfo`/`getent`, never `dig @gw`; responder runs
 in the ROOT netns answering on each per-netns gateway addr (no per-netns
 listener); `ip_forward=1` prerequisite; verdict pinned to dev-Lima
-`7.0.0-22-generic` — **re-confirm on the 6.18 appliance kernel in the DELIVER
-Tier-3 matrix** (DEVOPS/Tier-3 obligation).
+`7.0.0-22-generic` — **re-confirm on the pinned Linux 7.0 appliance kernel in
+the DELIVER Tier-3 matrix** (DEVOPS/Tier-3 obligation).
 
 #### C4 Level 1 — System Context (dial-by-name responder, REV-2 stable-frontend)
 
@@ -6250,6 +6018,17 @@ Per ADR-0048 § "Version-bump procedure", `ProbeResultRow` ships as
 `FIXTURE_V1` constant. Existing fixtures are unaffected (greenfield
 row).
 
+**#295 change (PROBE-RUN-COUNT, ADR-0191; approved 2026-10-13, not yet
+implemented).** The row gains `run_seq` (`ProbeRunSeq`) and
+`same_status_runs` (`SameStatusRuns`, the producer's count of consecutive
+written runs of the row's status) as `ProbeResultRowEnvelope::V2`, and a
+written row replaces the stored row only
+if its `run_seq` is greater; the observation time no longer decides the
+merge. Contract: the
+[#295 feature delta](../../feature/netns-density-295/feature-delta.md)
+§ *[REF] Observation row — ProbeResultRow V2 and the probe run sequence
+(PROBE-RUN-COUNT)*.
+
 ### 77. ServiceLifecycleReconciler — typed View, pure reconcile, `Stable` non-terminal
 
 Per ADR-0055. A new reconciler lives at
@@ -6277,7 +6056,15 @@ seen in a non-terminal state — which, differenced against the two
 terminal sets by `has_alloc_mid_startup_window` (`:403`), is what the
 runtime's `view_has_backoff_pending` arm consults to keep the
 reconciler ticking through a startup window in which it emits no
-actions at all.
+actions at all. #295 (PROBE-RUN-COUNT with D-1, ADR-0191; approved
+2026-10-13, not yet implemented; amends ADR-0055) removes
+`startup_attempts_per_alloc`, `liveness_consecutive_failures`,
+`readiness_consecutive_successes` and `startup_last_fail_seen_at` — the
+thresholds are applied to the probe row's `same_status_runs` at read time —
+and adds `liveness_last_acted_run`, the run sequence of the row on which a
+liveness terminate was last emitted per probe key (a terminate is emitted
+only on a newer crossed row; a failed stop is retried on the next row still
+past the threshold).
 
 `last_emitted_backend_fingerprint` is the one field that is not an
 input: it is the emit-time-marker-as-diff anti-pattern that ADR-0079
@@ -7291,9 +7078,10 @@ Path-A loop, driven end-to-end through `overdrive serve` + `overdrive deploy`.
 reuse. DELIVER complete (6 steps 01-01…03-02 all COMMIT/PASS).
 
 > **STATUS — NOT YET MERGED.** Implementation complete; all 6 steps GREEN on
-> **dev-Lima 7.0.0-22**; the S-WS keystone is **MERGE-GATED on the pinned-6.18
-> appliance-kernel Tier-3 CI matrix (ADR-0068) — not yet observed.** dev-Lima
-> 7.0 is necessary-but-not-sufficient; the 6.18 signal has NOT passed. Evolution
+> **dev-Lima 7.0.0-22**; the S-WS keystone is **MERGE-GATED on the pinned
+> appliance-kernel (Linux 7.0) Tier-3 CI matrix (ADR-0068) — not yet observed.**
+> dev-Lima is necessary-but-not-sufficient; the pinned-kernel signal has NOT
+> passed. Evolution
 > record: `docs/evolution/2026-06-24-canonical-workload-address-inbound-tproxy.md`.
 
 | Component | Path | Disposition |
@@ -8905,7 +8693,7 @@ workload's SVID; the workload holds nothing).
 | Reliability (resource bounds, F4/F7) | `MtlsLimits` CONCRETE defaults (256 KiB pre-arm buffer / 5 s handshake deadline / 128 in-flight per alloc / 30 s pump-stall), all fail-closed; budget ≤ 32 MiB + ≤ 384 fds per alloc in-flight | Tier-3 asserts the VALUES: `BufferLimitExceeded` at 256 KiB+1, `HandshakeTimeout` at 5 s, `InFlightLimitExceeded` at the 129th |
 | Performance (agent-light, zero-copy) | All four pumps agent-light zero-copy `splice`: forward/response = BLOCKING splice into kTLS-TX (`tls_sw_sendmsg`/`MSG_SPLICE_PAGES` encrypts in-kernel); return/deliver = non-blocking splice out of kTLS-RX (~1/record). No userspace crypto, no plaintext copy, in any direction. *(2026-08-26 amendment: forward moved sockmap-egress-redirect → `write_all` copy → blocking splice; `splice` into kTLS-TX does NOT lose records — the loss class was non-blocking `MSG_DONTWAIT` delivery.)* | strace: forward pump issues `splice` only (no per-byte read/write); ~1 splice/record every direction; `eagain=0` on the forward pipe→kTLS-TX splice |
 | Maintainability (one mechanism, DST-testable) | One driven port + host/sim adapters + `mtls_enforcement_equivalence` DST harness | DST equivalence test passes for both adapters |
-| Portability | All primitives in-tree at the pinned 6.18 floor (ADR-0068); no kernel patch | Tier-3 on the pinned kernel |
+| Portability | All primitives in-tree at the pinned Linux 7.0 kernel (ADR-0068); no kernel patch | Tier-3 on the pinned kernel |
 
 ### 9. Earned-Trust probe (principle 12 — mandatory)
 
@@ -11002,9 +10790,9 @@ guest MAC, and guest address. From capture-ready through intercept-live,
 **every guest-originated L2 frame is forbidden**, with no control-frame
 allowlist: tagged/untagged and known/unknown EtherTypes, every protocol and
 destination, and zero/payload-bearing frames all fail. (The 2026-09-23
-proposal to admit correlated ARP replies and TCP resets is withdrawn. The #295
-shared-bridge realization of this contract is proposed in ADR-0127, ADR-0128
-and ADR-0131.) Unexpected source MAC, drops/overflow, truncated or malformed records, unknown
+proposal to admit correlated ARP replies and TCP resets is withdrawn. #295
+replaces this topology with the vsock attachment of ADR-0145, which has no
+guest L2 interface.) Unexpected source MAC, drops/overflow, truncated or malformed records, unknown
 direction/time, missing readiness, or ambiguous identity fail the proof rather
 than being ignored. `intercept-live` means `start_alloc` returned success **and** two
 quiet-interval strict generation-bracketed `GETRULE` reads established a
@@ -11124,7 +10912,13 @@ timestamp: an unchanged row does not increment, a strictly later stored row
 does, and Pass clears both existing maps. A persisted legacy counter without a
 timestamp is normalized to the current row's one observation rather than
 incremented; no new persistence, store operation, lifecycle state, or owner is
-introduced.
+introduced. #295 replaces this de-duplication: under PROBE-RUN-COUNT
+(ADR-0191, approved 2026-10-13, not yet implemented; amends ADR-0097 D2)
+`ServiceLifecycle` keeps no startup-attempt counter: the startup attempts are
+spent when the latest startup row is a `Fail` whose producer-recorded
+`same_status_runs` reaches `max_attempts`, read at each reconcile, and both
+view maps (`startup_attempts_per_alloc`, `startup_last_fail_seen_at`) are
+removed (#295 feature delta § *[REF] VM probe runner*).
 
 The production action shim always provisions VM networking and injects
 `Some(tap.guest_addr)` before VM start. `on_alloc_running` is invoked only after
@@ -11443,9 +11237,11 @@ The current VM netns/veth/two-`/30`/TAP/`host_veth` path remains temporarily
 because production VM start and transparent mTLS currently use it. This is not
 a permanent compatibility decision. Everything under GH #293's “Required
 handoff to #295” is a constraint on the state #293 leaves, not #293
-implementation: shared switching, per-tap classification/interception,
-shared-bridge DNS, transparent-mTLS re-homing, and the associated deletion of
-the current network mechanism remain exclusively GH #295.
+implementation: replacing the current network mechanism remains exclusively
+GH #295. GH #295's design is the vsock microVM attachment (§ *vsock microVM
+attachment (GH #295)*): it has no shared switching, per-tap classification
+or shared-bridge DNS; it re-homes transparent mTLS onto vsock flows and
+deletes the current network mechanism.
 
 The existing lifecycle order is preserved precisely: current VM network
 provision/injection and guest-ready `Driver::start` precede acceptance of the
@@ -11464,489 +11260,111 @@ The L1/L2 diagrams are in
 
 ---
 
-## Shared-bridge microVM application architecture (GH #295; stage 3)
+## vsock microVM attachment application architecture (GH #295)
 
-**Current validation — 2026-10-03 (RECORDED):** the R19 ordering change is
-withdrawn under its accepted native condition (native E14(c)/(d) fail closed
-under the existing order), so both TPROXY rules retain mark → TPROXY → accept and
-there is no R19-induced canonical-identity change. The listener-loss
-classification is the no-quiescence branch, resolved on the named-Service E14(e)
-door-closed native result with the original single-loss security outcome
-preserved. The intercept owner row's R18 guard, R10/R12/R15 responsibilities,
-existing C4 topology, component boundaries, public shapes, and security outcomes
-remain accepted. Independent review of the recorded listener-loss classification
-and roadmap revalidation remain downstream gates before DELIVER.
+**Status: Accepted**, with the decision dates stated in § *vsock microVM
+attachment (GH #295)* above. Exact
+signatures, wire layouts, error variants, constants, ownership and lifecycle
+tables are pinned only in the
+[#295 feature delta](../../feature/netns-density-295/feature-delta.md)
+§ *[REF] Interface contracts*. Diagrams:
+[C4 diagrams](c4-diagrams.md#vsock-microvm-attachment-gh-295).
 
-### Correctness-recovery replacement (accepted 2026-09-24)
+### Components and dependency direction
 
-DESIGN was reopened under the recovery charter after six proofs
-(`docs/feature/netns-density-295/recovery/proof-findings.md`) falsified accepted
-premises. The architecture style does not change: a Rust modular monolith with
-ports and adapters inside one `overdrive serve` process, with no new crate,
-daemon, container, persistence, or deployment unit. Twenty-two decisions,
-accepted by the user on 2026-09-24 (D-295-R1 to R21 after independent DESIGN
-review, and D-295-R22 by user ruling on native evidence the same day), change
-the responsibilities of these nine components. D-295-R7 (with no slot reservation),
-D-295-R9, the D-295-R11 retry-forever reclaim, the D-295-R14 kill scope
-(including damaged per-VM parts), and the D-295-R20 operator status are user
-rulings of 2026-09-24. D-295-R18 stands on its reproduced native RED; D-295-R19's
-rule-order change is withdrawn 2026-10-03 under its accepted native condition (its
-native RED did not reproduce), so both TPROXY rules retain mark → TPROXY → accept.
-Prior art for each choice is in
-`docs/research/networking/netns-density-295-replacement-design-prior-art-comprehensive-research.md`.
-
-| Component | Change | Decisions / ADR |
+| Crate | Component | Role |
 |---|---|---|
-| VMM adapter (`CloudHypervisorVmm`) | Owns a per-launch TAP queue descriptor. It attaches one `IFF_VNET_HDR` queue to the down persistent TAP, verifying flags and down state; maps it to child fd 3 through `command-fds`; in one audited `pre_exec` hook it marks every other descriptor close-on-exec and then loads the launch seccomp filter, which denies every Cloud Hypervisor thread the TAP-mutating ioctls and fails closed on a foreign syscall ABI; renders `--net fd=[3],mac=…`; drops its copy before any await. The filter exists for x86_64 only: on any other target, aarch64 included, the startup probe fails, so the node composes no microVM driver, and `create` refuses before any effect (aarch64 is GH #302). On x86_64 the startup probe proves the kernel accepts the filter. The value types and the `Vmm` trait are unchanged. Creating first-party raw descriptors close-on-exec under a source gate is a separate implementation obligation. | D-295-R1 to R3, R22; ADR-0127, 0128, 0129, 0143 |
-| Shared guest-switch owner | TAPs are owned by uid 0, so no unprivileged process without the queue can attach one. Provision ends with the TAP down and records the plan. A new `activate` raises it only after the allocation's install-success event and before EXEC, serialized with runtime quiescence; a latched quiescence defers it instead of failing the allocation. Quiescence reports per-TAP outcomes; the audit reports per-allocation damage separately from node-level failures; a reported allocation is condemned, its VM is killed, and its parts leave the audit and restore universes. A new `restore_quiesced_taps` is the only runtime restore, and the supervisor calls it only after a clean full audit. Teardown treats an absent part as removed. Each managed TAP also carries a TCX egress guest-MAC classifier over the shared endpoint map: it delivers unicast only to the TAP's registered guest MAC, drops every other unicast (a map miss included), and always delivers broadcast and multicast. Provision, activation, and the audit read back the TAP's debug message mask (expected 0) and its host-side MAC, which must not be a reserved address (the bridge MAC, or the guest MAC of an allocation the owner holds outside `Condemned`, the TAP's own included). A violation of either is per-allocation damage. No host-side MAC is recorded, so a host link manager's rewrite to any other address is harmless. | D-295-R4, R5, R13, R14, R21, R22; ADR-0130, 0131, 0142, 0144 |
-| Guest-address pool | One pool per server becomes the node-wide admission linearization point. Admitted and Retiring leases both count against the placeholder cap until cleanup finishes (user-approved D-295-R7); at the cap a replacement's predecessor is reclaimed first. A fifth hydration read-port gives placement one consistent occupancy snapshot (held, retiring, leases). | D-295-R6 to R8; ADR-0132, 0133, 0134 |
-| Intercept owner (`MtlsIntercept`, worker) | Three port methods: grouped, awaited, convergent, retry-retaining element release; member convergence, used for the fresh-boot clear and runtime repair; state observation with members, the policy route, and the guard. A typed stop error. Runtime repair observes the program identity without regard to dynamic members and hands over the node guard without dropping it, so repair runs with live allocations. One independent guard table (R18-B, chosen on evidence) drops TCP still carrying the TCX intercept mark, keeping intercept-marked TCP fail-closed without the IP program for both forwarding and host-local delivery. Both TPROXY rules retain their mark → TPROXY → accept order; native evidence shows an absent outbound listener already fails closed (the R19 reorder is withdrawn 2026-10-03 under its native condition). R18 stands on its reproduced native RED. | D-295-R10, R12, R15, R18, R19; ADR-0135, 0137, 0139, 0140 |
-| `WorkloadLifecycle` and action shim | Retirement points; admission refusal writes no row; the shim waits on the EXEC gate during recovery before activation; row-neutral `ReclaimAllocationNetwork` for every leased Failed/Terminated allocation no other action owns, computed on every reconcile path, retried forever at a constant one second until GH #137. | D-295-R5, R7, R11; ADR-0131, 0136 |
-| Shared-network supervisor | A full audit across the shared owner, worker, and DNS; component-specific quiescence with per-TAP outcomes; evidence-derived bounds on owner calls; DNS loss closes EXEC; through a kill-only capability, a per-VM kill for each unconfirmed TAP or damaged VM with repair continuing (an already-removed scope counts as killed), and a workloads-slice kill plus fail-stop only when the failing set is undetermined or a known VM cannot be killed. Each attempt converges the failing owners, runs a full audit, kills audited damage, and restores TAPs only when that audit is clean. The 1 s audit is a security detection bound, not drift correction. | D-295-R13, R14 (under ADR-0124) |
-| Allocation status (`alloc_status` handler, `workload describe`) | An allocation whose network cleanup has not finished shows as `CleanupPending`, never `Running`: derived at read time from its live pool lease and row state, not persisted, and excluded from running replicas. One additive wire field. | D-295-R20; ADR-0141 |
-| Serve composition | `ServerConfig::new(kek, mtls_intercept, guest_dns)` requires the intercept and guest-DNS ports. The mTLS worker, DNS owner, and supervisor are always composed; the `dataplane_override` gating is removed. | D-295-R16; ADR-0138 |
-| CLI process lifetime | The `ServeLifetime` port is pinned as built: internal request first; SIGINT and SIGTERM exit 0; a 10 s bound; fail-stop exits 1; killed mode for tests. | D-295-R17 (user ruling, as built) |
+| `overdrive-core` | vocabulary and ports | Transport assignment, launch token, CID, flow refusal and close-cause vocabulary; the `GuestStreamDial` driving port; the `Vmm` port. No I/O. |
+| `overdrive-control-plane` | guest-flow owner (`guest_network`) | Leases and CIDs, flow and control listeners, control sessions, pairing, dials, quiescence, the gateway route at boot (GW-LOCAL). Implements `GuestStreamDial`. |
+| `overdrive-dataplane` | host forwarder (`guest_flow`) | Driven port over the host Aya programs and maps: verdicts, `sock_ops`, flow-end classifier, drain programs and cells, flow-event ring. |
+| `overdrive-worker` | `VmDriver`, mTLS worker, VM probe runner | Beacon intake and VMM lifecycle; leg-F/leg-C/leg-S; leg-S and the VM probe runner dial VM ports through `GuestStreamDial`. |
+| `overdrive-host` | `CloudHypervisorVmm` | Launches the fork with `--vsock cid=N,backend=vhost-kernel`; the VMM opens the device. |
+| `overdrive-init` | guest PID 1 | Guest network configuration, guest Aya programs, guest flow owner, control session, beacon. |
+| `overdrive-sim` | `Sim*` adapters | Simulated dial, forwarder, VMM and guest peer for seeded DST and Quint conformance. |
 
-The zero-frame, single-loss fail-closed, release-last, and bounded-recovery
-outcomes are preserved or strengthened; none is weakened. The workload-local
-CPU/memory accounting defect is out of #295 scope and tracked by
-[GH #261](https://github.com/overdrive-sh/overdrive/issues/261) (D-295-R9,
-user-approved); operator restart of a stopped Job is tracked by
-[GH #301](https://github.com/overdrive-sh/overdrive/issues/301). Exact contracts, the lifecycle gates, the evidence-lane
-matrix, and the Changed Assumptions are in the #295 feature delta,
-§ *Correctness-Recovery Replacement DESIGN*. Where the stage-3 baseline below
-conflicts with this table, the table governs; the ADRs it amends state each
-amendment explicitly.
-
-### Managed-link identity independent of host link configuration (fresh-host RCA; ADR-0144)
-
-[ADR-0144](adr-0144-managed-link-identity-independent-of-host-link-configuration.md)
-makes every managed host link correct whatever the host's link configuration,
-and whether or not systemd-udevd runs. The managed links are `ovd-gbr0`,
-`ovd-gbr-probe`, each guest TAP `ovd-tp-<4hex>`, and `ovd-tp-probe`.
-systemd-udevd's default `99-default.link` (`MACAddressPolicy=persistent`)
-rewrites a new link whose address the kernel assigned at random. That write
-refused about half of the fresh-host boots that create `ovd-gbr0`
-(`docs/analysis/root-cause-analysis-netns295-fresh-bridge-boot-refusal.md`,
-root cause A). It also rewrites every new TAP a few milliseconds after
-creation.
-
-- **Bridge.** The shared owner creates the bridge with its fixed address in
-  the same `RTM_NEWLINK`, so udev's address policy leaves it alone, whatever
-  that policy is. The boot read-back names the observed address and up state
-  when it refuses, and the runtime audit repairs a later write.
-- **TAP.** A TAP's host-side MAC is judged by an invariant, not by a recorded
-  value. The address must not be reserved: not the bridge MAC, and not the
-  guest MAC of an allocation the owner holds outside `Condemned`, the TAP's
-  own included. It is checked at provision,
-  at activation, and on every audit pass. A host link manager's rewrite to any
-  other address is harmless. A reserved address, from a hijack or a rare
-  random collision, refuses the provision, fails the activation, or kills
-  that one VM.
-- **No host requirement and no host probe.** Nothing installs, reads, or
-  requires a host link-configuration file or udev's device database, and the
-  startup probe does not read its scratch TAP's address. Removing the node
-  runtime's dependence on systemd in general is
-  [GH #304](https://github.com/overdrive-sh/overdrive/issues/304).
-
-The exact contract is in the #295 feature delta, § *Managed-link identity
-independent of host link configuration*, and the reserved set and its
-residual are in § *Driven port — TAP egress guest-MAC delivery (D-295-R21)*.
-
-**Handoff annotation for `nw-platform-architect` / DEVOPS:** the appliance
-image and the dev and test substrates carry no link-configuration requirement
-for #295. A narrow `.link` file exempting the managed links
-(`OriginalName=ovd-gbr* ovd-tp-*`, `MACAddressPolicy=none`) may ship as image
-hygiene. It keeps a TAP's kernel address, which is redrawn at each creation.
-Whether to ship it is the Image Factory MVP's choice
-([GH #75](https://github.com/overdrive-sh/overdrive/issues/75)). A blanket
-mask of `99-default.link` is never used, because it would also drop
-predictable names for the host's NICs.
-
-### Accepted stage-3 baseline
-
-**Status: Accepted — approved by independent solution-architecture review
-iteration 4 on 2026-09-16 after iterations 1–3 remediation; zero
-critical/high/medium findings remain.** The system choices in ADR-0114 through ADR-0118 and
-ADR-0120 through ADR-0126 are accepted and user-ratified; the stage-2 DDD
-conclusion is accepted. The remediation closes four application-contract gaps
-without changing behavior or scope, and it does not authorize DELIVER.
-
-**Post-DISTILL bounded decisions:** D-295-DISTILL-1 and D-295-DISTILL-2 were
-user-approved and independently approved on 2026-09-16. They expose only the
-doc-hidden shared-network owner contract needed by the existing sibling sim
-adapter, make clean-first-boot nft rollback represent absence honestly behind
-a private host I/O seam, and make startup cleanup retain the primary failure,
-direct cleanup source, and complete per-resource scratch observation without
-an implicit zero. D-295-DISTILL-4 was user-approved and independently approved
-on 2026-09-16: core retains only dependency-neutral handoff, EXEC
-synchronization/request, and bridge-MAC values; control-plane owns the complete
-guest-network application contract; and dataplane owns the semantic TCX attach
-projection plus exact aya error sources. D-295-DISTILL-5 was user-approved and
-independently approved at review iteration 6 on 2026-09-16. It gives the
-private host owner one module-private typed scratch-I/O boundary while keeping setup/probe/cleanup/
-inventory/error aggregation in that owner; public sim scripting remains the
-reusable composition boundary. These decisions add no behavior, owner,
-service, persistence, deployment unit, crate, or dependency cycle.
-D-295-DISTILL-6/7/8 and the `RegistrationRetired` correction were user-approved
-and independently approved at review iteration 9 on 2026-09-17. They pin the dataplane typed TCX mutation/query adapter, the worker-
-private capability registry, and the control-plane-private retained
-supervisor/DNS task owners. D-295-DISTILL-9 was user-approved and independently
-approved at review iteration 12 on 2026-09-17 under the user's autonomous
-DESIGN/DISTILL authorization. It adds a semantic bridge-family guard adapter over one private family-
-aware nft codec while every public IPv4 API remains unchanged. Its read-only
-classification preserves actual identity, kernel rule order, duplicates and
-all target-table children. Chain occurrences never fabricate base-chain fields,
-and one adapter-owned semantic rule program supplies structured netlink and
-guest-error facts without raw bytes; typed validation remains separate from
-sourced netlink failure. DISTILL executable reconciliation is in progress; no
-behavior or ownership decision is reopened.
-
-D-295-DISTILL-10 records the reusable public `SimSharedGuestNetworkOwner`
-standing and one-shot fault scripting, ordered call observation, and shared-owner/
-EXEC test wiring. It is deterministic test infrastructure and adds no product
-behavior or compatibility surface.
-
-D-295-DISTILL-11 closes three acceptance reachability gaps without adding a
-product outcome. The worker privately owns and classifies actual Tokio listener
-task return/error/panic/cancel/channel-close causes. Shared-owner audit carries
-the failed closed component plus its exact existing source, and the public sim
-adapter scripts all twelve components plus one exact next result. S37 observes
-the existing structured `TcxLink` unhealthy event and joins it to supervisor
-begin-before-event and core Recovering-claim evidence; no public kill method,
-gate accessor, PID oracle, or fabricated consequence is added.
-
-The architecture stays a Rust modular monolith with ports-and-adapters. The
-current production chain—`overdrive serve` composition root → `AppState` →
-reconciliation runtime → action shim → `DriverRegistry`/`VmDriver`—remains.
-The action shim's present `NetSlotAllocator` + synchronous netns/veth/TAP
-provisioning segment is replaced in one cut by the accepted allocation-keyed
-address pool and async guest-network provisioner. The same action owner still
-writes Running, installs transparent interception, and releases deferred guest
-EXEC; only the concrete topology, listener cardinality, and shared-owner health
-gate change.
-
-### Application components and dependency direction
-
-| Component boundary | Owning crate/home | Responsibility after #295 |
-|---|---|---|
-| Serve composition and task ownership | `overdrive-control-plane::run_server*`, `AppState`, `ServerHandle` | Ordinary `run_server` privately constructs one host shared-network owner; injected-driver compositions require that one owner immediately before EXEC wiring. Wire/probe/reclaim/sweep/converge before use. `ServerHandle` retains exactly one private supervisor owner with the sole join/request receiver/EXEC supervisor/shutdown token; that supervisor owns the one DNS task owner. |
-| Allocation network orchestration | `overdrive-control-plane::guest_network`, used by the existing action-shim C3 seam | Own the opaque plan, both doc-hidden ports, probe/scratch/operation/fact/error/result family, private address pool, and private host owner. Apply fixed-cap admission before assignment; sequence lease, TAP/bridge/guard/map/TCX effects, VMM start, Running, registration, event, EXEC, and reverse-order cleanup. *(Proposed: admission moves to assignment; the TAP stays down until a post-event `activate`; the VMM attaches by fd handoff.)* The sibling sim implements the same application port through its existing control-plane dependency. |
-| Shared guest-switch owner | Private `overdrive-control-plane` host implementation behind one doc-hidden application port | The same object inherits allocation provision/teardown and owns one fixed-MAC bridge/gateway, endpoint/counter maps, pinned per-TAP TCX links, managed-TAP proof-mark guard, startup probe, boot sweep, runtime converge/audit, TAP quiescence, and repair. Its module-private typed scratch I/O supplies only raw leaf effects/counts; the owner retains setup, three-stage exercise, full reverse cleanup, all-fifteen inventory, and aggregation. Audit failure carries the exact closed component plus existing source. The sibling sim scripts all twelve components and exact next results for deterministic composition without pretending to prove kernel cleanup. |
-| Guest-address pool | Internal `overdrive-control-plane` value/owner | Own one process-session allocation-to-plan binding with atomic smallest-free assignment, release-last, and ordered snapshot. No repository or durable lease table. |
-| Host network effects | `overdrive-netlink` | Extend typed rtnetlink and the shipped nft codec. Existing public IPv4 operations remain unchanged; one private family-aware codec also backs semantic bridge-guard facts/outcomes and exact table/chain/set/rule/member observe/converge/delete. Read-only observation retains actual family/table identity, every chain exactly once as base/regular/unsupported without invented fields, ordered duplicate-preserving semantic rule programs including unknown expressions, and a disjoint exhaustive target-table child inventory. The adapter's canonical rule facts also populate structured guest-network expected/observed postconditions. Validation is pre-I/O; only real netlink failures retain their source. Aggregate guard deletion requires one exact exclusive owned identity; conflicts refuse without mutation and outside objects remain equal. |
-| Endpoint classifier | `overdrive-bpf` + `overdrive-dataplane::guest_tcx` | Add SCHED_CLS program/maps and the high-level TCX lifecycle plus typed semantic query/pinned-link detach/endpoint/counter adapter. Dataplane owns private map ABI, sorted attachment identity, and exact aya map/program/pin/link/I/O sources. Keep the existing XDP/cgroup-BPF Service dataplane separate and authoritative for backend selection. |
-| Transparent intercept owner | `overdrive-worker::MtlsInterceptWorker` + `MtlsIntercept` | Keep the existing four injected ports and public methods. Its module-private capability registry owns checked generation, Pending reservations/effects, retirement ownership handoff, cancellation/shutdown wake, RAII claims, publish fence, Retiring drain/complete, and address-reuse exclusion. A private two-slot Tokio task owner classifies real listener return/error/panic/cancel/channel-close and prevents detach. Activation after retirement returns typed refusal and can never make intercept-live or release EXEC. |
-| Guest runtime/VMM | `overdrive-worker::VmDriver`, `overdrive-host::CloudHypervisorVmm`, `overdrive-init` | Consume one grouped guest assignment, attach the host TAP directly, retain READY/Running/EXEC meanings, and keep all VMM/cgroup/confinement responsibilities. `VmDriver` receives only the claim half of one `overdrive-core` EXEC-gate wiring. *(Proposed, ADR-0127 to ADR-0129: the adapter hands CH one inherited queue descriptor on a down TAP, and CH never opens or raises the TAP. No capability is added.)* |
-| EXEC admission capability | `overdrive_core::guest_network`, consumed by worker and control plane | One constructor produces paired opaque gate/supervisor capabilities over one lock/Notify/recovery snapshot. Worker can claim/wait/refuse; only the control-plane supervisor capability can recover, reopen, or fail-stop. `Driver` is unchanged. |
-| Name layer | Existing `DnsResponder`, `NameIndex`, `FrontendAddrAllocator` | Serve one shared-gateway socket while preserving userspace wire/index/negative-answer/source-pin semantics. One private DNS task owner, owned by the common supervisor, classifies task loss and performs exact replacement as cooperative old stop/join → bounded abort backstop if necessary → replacement read-back → spawn/publish. No live handle is overwritten. |
-| Resource/recovery owners | Existing `CgroupManager`, `VmReclamation`, `VmHostState` | Retain per-VM CPU/memory/PID/OOM/termination and boot-reclamation authority. Shared-switch sweep follows reclamation and never adopts a VMM. |
-
-Dependency direction remains acyclic. `overdrive-core` carries only the grouped
-driver assignment, VMM attachment, fixed bridge MAC, and dependency-neutral
-EXEC synchronization/request values; it does not own the guest-network plan,
-ports, facts, or error family and does not import aya, rtnetlink, nft, Tokio
-networking, or host syscalls. `overdrive-control-plane::guest_network` owns the
-application contract and depends on existing core, dataplane, and netlink
-crates. `overdrive-dataplane::guest_tcx` owns TCX/aya translation and exact aya
-sources. Worker, host, and kernel adapters retain their existing directions.
-There is no adapter-to-domain back-edge, crate, service, database, message
-queue, or deployment boundary.
-
-Iteration-1 dispositions are deliberately narrow:
-
-| Finding | Approved disposition |
-|---|---|
-| F-01 | Put paired EXEC-gate capabilities and request/recovery vocabulary in dependency-neutral `overdrive-core`; add the mandatory gate to `VmDriver` after `ProbeRunner`; pass one wiring through production and injected-driver server compositions; keep `Driver` unchanged. ADR-0090 drops its stale exact constructor block. |
-| F-02 | Make only the async provisioner trait and opaque/read-only plan doc-hidden public across the existing sim-to-control-plane dependency; retain private host construction and exactly two test-gated high-level owner seams. |
-| F-03 | Keep `MtlsInterceptWorker` as owner; preserve its four injected ports; bind/start listeners once at boot; expose task-failure observation plus exact-port converge/audit; preserve allocation-scoped capabilities/handles and awaited owner shutdown. ADR-0076 retains port intent but drops stale signatures/per-allocation listener ownership. |
-| F-04 | Correct L3 runtime flow to TCX → Linux bridge/bridge guard + IP nft TPROXY → shared listeners; netlink remains control/read-back only. |
-| S2-F01 | Cold boot begins BootClosed, proves zero managed TAPs, identifies only owned constant rules, binds fresh ephemeral F/C listeners, atomically replaces owned targets with rollback/full read-back, then opens admission. Runtime remains exact-port/no-rewrite. |
-| S2-F02 | Remove every competing `VmDriver::new` arity from the brief and ADR-0082/0083/0090. Preserve historical dependency meaning and link the sole exact post-#295 signature in the feature delta. |
-| S2-F03 | Split Contract Shape universes for wiring construction, gate claim, supervisor mutation, intercept adapter rules/sets, listener owner sockets/tasks/registry, and control-plane orchestration; assert cross-owner complements. |
-| S2-F04 | Mark ADR-0090's netns/veth and Exec material historical; live target evidence is default-feature production shared bridge/direct host TAP through `serve` + `deploy`. |
-| I3-F01 | Split rollback transport/read failure from semantic rollback mismatch: only the former carries an operation-tagged real `NetlinkError`; exact restored-prior and wrong-identity read-back are separate source-less dispositions retaining structured identities. |
-| I3-F02 | Remove Exec/process from ADR-0090's operative decision, consequence, and evidence sets; retain it only as explicitly historical rationale after GH #293. |
-| D-295-DISTILL-1 | Keep one private host shared-switch implementation but expose a doc-hidden owner super-port over the allocation provisioner; inject one owner before paired EXEC wiring; preserve the optional primary failure, direct cleanup source, and complete per-resource scratch observation, with unavailable distinct from zero and no default complement. |
-| D-295-DISTILL-2 | Represent rollback prior as optional, where `None` means absence; test the host algorithm through one private observe/atomic-replace effect seam without changing public `MtlsIntercept`. |
-| D-295-DISTILL-4 | Keep cross-crate handoff, EXEC synchronization/request, and bridge-MAC values in core; put the complete guest-network application contract and private owner/pool in control-plane; put the semantic TCX attach projection and exact aya-backed TCX error in dataplane; re-export and wrap that canonical error without duplicating its taxonomy. |
-| D-295-DISTILL-5 | Keep startup setup/probe/reverse-cleanup/all-family observation and error aggregation in `HostSharedGuestNetworkOwner`; inject only module-private typed raw effects/counts into source-local tests; retain public sim scripting/call observation/test wiring as composition evidence rather than host-algorithm proof. |
-| D-295-DISTILL-6 | Keep raw aya and map ABI in dataplane; expose only semantic attachment/counter values and doc-hidden typed query/detach/endpoint/counter operations shared by production ownership and the S-ND295-37 external actor. |
-| D-295-DISTILL-7 | Keep registration generation, reservations, partial effects, capability lifecycle, claims, publication, Pending-retirement handoff, waiter/wake, drain and reuse exclusion inside one module-private worker registry. Project activation-after-retire as one typed allocation-identified install failure and stable action-shim stage; never success or EXEC release. |
-| D-295-DISTILL-8 | Keep exactly one private retained supervisor owner in `ServerHandle` and one stateful private DNS task owner beneath it; classify actual Tokio join/channel outcomes, fail-stop before return, separate intentional shutdown, and replace DNS only after old-task termination plus replacement read-back, never by overwriting a live handle. |
-| D-295-DISTILL-9 | Keep one private family-aware nft codec and every existing public IPv4 API unchanged; expose only semantic bridge-guard specification/facts/outcomes and staged table/chain/set/rule/member operations needed by production ownership and S-ND295-37. Preserve actual observed identity; exactly-once base/regular/unsupported chain occurrences without fabricated fields; canonical ordered rule programs with duplicates and unknown expressions shared by netlink and guest-network postconditions; and every candidate-table child. Separate validation from sourced netlink failure and permit aggregate deletion only for the exact exclusive owned guard. |
-| D-295-DISTILL-10 | Keep the public shared-network sim reusable and pin exact standing/one-shot fault scripting, ordered call observation, and shared-owner/EXEC test wiring. Simulation proves application-port composition and does not replace host-owner evidence. |
-| D-295-DISTILL-11 | Classify shared-listener return/error/panic/cancel/channel-close through one module-private actual Tokio task owner; tag shared-network audit failure with its exact closed component and retained guest-network source; extend the reusable sim with twelve independent component slots and one exact next audit result; prove S37 EXEC closure by joining the structured `TcxLink` unhealthy event to supervisor begin-before-event and core Recovering-claim evidence. No public task control, gate accessor, PID/process evidence, fabricated consequence, or new product outcome. |
-
-Exact signatures exist only in the feature delta.
+Dependencies point down to `overdrive-core`. Workers depend on the
+`GuestStreamDial` trait, never on the owner's concrete type.
 
 ### Port/adapter composition
 
-The driving surfaces stay `overdrive serve`, `overdrive deploy <SPEC>`, the
-existing VM lifecycle actions, guest READY/deferred EXEC, accepted leg-F/leg-C
-TCP, guest DNS, and public-ingress Service traffic. No network-specific CLI or
-HTTP surface is added. Public ingress continues through the existing cgroup-BPF
-Service selector; the selected `BackendId` receipt remains the exact-peer
-identity source before traffic reaches the selected node's leg C.
-
-The new action-shim host-effect boundary is the accepted async
-`GuestNetworkProvisioner`, inherited by the doc-hidden
-`SharedGuestNetworkOwner`. The opaque/read-only plan, both ports, and their
-probe/scratch/operation/fact/error/result family live in
-`overdrive-control-plane::guest_network`; exact normative shapes live only in
-the #295 feature delta. The private host implementation composes
-`overdrive-netlink` with `overdrive-dataplane::guest_tcx`, whose semantic attach
-projection and canonical error retain the exact aya source. Control-plane
-re-exports those TCX boundary types and wraps the canonical TCX error inside
-its single guest-network error taxonomy. Effects return only after their
-postcondition read-back completes. Cross-crate visibility is limited to the
-opaque/read-only plan and the two doc-hidden traits required by the one sibling
-`overdrive-sim` owner; the test-gated compositions reuse production preflight,
-hydration, View, validation, shim, and re-enqueue ownership. The accepted `MtlsIntercept` method
-surface owns shared nft elements, while `MtlsInterceptWorker` owns the concrete
-boot listener lifecycle and its task observation/recovery. Existing
-`MtlsEnforcement`, `MtlsResolve`, `IdentityRead`, `Vmm`, `CgroupFs`,
-`VmHostState`, IntentStore, ObservationStore, and ViewStore ports retain their
-existing contracts and adapters. Linux and Cloud Hypervisor are local substrate integrations, so
-startup probes, adapter-equivalence tests, and native behavior checks—not
-Pact-style remote API contracts—are the appropriate contract evidence.
-
-The host startup algorithm is tested one layer lower without widening that
-cross-crate surface. A private typed scratch-I/O contract exposes raw
-netlink/TCX/socket results and individual inventory counts only to source-local
-tests. The owner constructs the complement and cleanup aggregate. Public
-`overdrive-sim` scripts the accepted owner-port result for composed ordering and
-reaction tests; it does not substitute for the source-local host algorithm or
-native-metal kernel inventory.
+- **Driving port `GuestStreamDial`** (core trait; production impl the
+  guest-flow owner; `Sim` impl in `overdrive-sim`): `dial` resolves the target
+  address to an Active VM lease and a declared TCP port, opens a host-initiated
+  vsock flow, and returns a stream or a typed refusal (not serving, no live
+  session, quiesced, refused, timed out, pairing deadline, unreachable,
+  capacity). The dial gates no lifecycle state; it returns a result to its
+  caller.
+- **Driven port `guest_flow`** (dataplane): every kernel forwarding effect of
+  the owner. Its `Sim` counterpart is the named arbiter for kernel facts in
+  conformance (forwarded counts, ring contents, program skips), paired with
+  Tier-3 evidence.
+- **Existing ports reused:** `MtlsResolve` (mesh classification, VIP branch),
+  `Vmm`, `Entropy` (launch tokens), `Clock`, `IntentStore` /
+  `ObservationStore`.
 
 ### Lifecycle and data-flow contract
 
-Boot distinguishes the isolated dependency probe from production state:
-
-```text
-construct BootClosed EXEC wiring
-  -> existing host/security probes
-  -> isolated shared-switch scratch bridge/TAP/guard/TCX probe
-  -> empty scratch complement
-  -> existing VM reclamation
-  -> prior shared-switch attachment sweep
-  -> zero managed-TAP/link/pin/endpoint/guard read-back
-  -> production bridge fixed-MAC/gateway/maps/guard convergence
-  -> read/adopt exact owned constant-rule identity without mutation
-  -> fresh F/C port-zero bind
-  -> atomic owned TPROXY-target replacement (rollback on mismatch)
-  -> full listener/rule/set/zero-element read-back
-  -> shared-gateway DNS probe
-  -> retain supervisor
-  -> open_after_boot and start admission
-```
-
-This is the only branch that may choose fresh ephemeral listener ports or
-replace owned rule targets. Foreign/conflicting rule identity, a nonzero
-managed-TAP complement, a non-BootClosed gate, replacement/read-back failure,
-or rollback uncertainty refuses startup without READY/admission. Runtime
-recovery rebinds only the recorded ports and never rewrites target values.
-
-Startup-probe refusal never invents cleanup success. When cleanup succeeds,
-every bridge/TAP/map/entry/program/link/pin/bridge-guard family is observed as
-zero and the original primary failure returns. When cleanup or its observation
-fails, the refusal retains the optional primary failure, direct cleanup source,
-and one complete per-family observation in which unavailable is distinct from
-zero; no production shared owner or task is published.
-
-The allocation vertical slice remains production-driven:
-
-```text
-deploy / existing lifecycle Action
-  -> private 16,384 placement gate
-  -> guest-address lease
-  -> down TAP + bridge membership
-  -> managed guard membership
-  -> endpoint map + TCX ingress and egress attach/pin/query (ADR-0142)
-  -> TAP read back DOWN, host-side MAC not a reserved address;
-     VMM attaches one queue fd (ADR-0127/0128) and spawns CH under the
-     launch seccomp filter (ADR-0129/0143)
-  -> guest READY
-  -> accepted Running row
-  -> Pending capability + shared nft elements
-  -> atomic exact-generation Active publication/read-back
-  -> synchronous mtls.intercept.install.success intercept-live barrier
-  -> shared owner activate + up read-back (ADR-0131)
-  -> action shim invokes existing release hook
-  -> VmDriver EXEC-gate claim and guest EXEC acknowledgement
-```
-
-The earlier baseline flow raised the TAP before a named Cloud Hypervisor
-attachment. Native evidence falsified that premise, and the flow above, accepted
-by the user on 2026-09-24, replaces it. (The first step's placement gate is
-advisory under ADR-0134; admission linearizes at the lease, ADR-0132.)
-
-Running remains the accepted READY-plus-durable-row promise; interception and
-shared-owner health gate only the later EXEC release. Service Stable remains
-probe-owned. Stop removes registry visibility first, waits for exact-generation
-claims, tears down late handles, drains only that capability's published
-handles, removes IP elements, endpoint/TCX/TAP/guard effects, releases the
-address last, and then completes the existing lifecycle disposition. The two
-shared listeners and unrelated allocations remain live.
-
-Before the event, zero guest frames reach the host or bridge: this is the
-ADR-0088 outcome, unweakened. Under the proposed replacement the TAP is
-administratively down until the post-event activation. The earlier proposal to
-admit two correlated zero-payload response shapes before the event is
-withdrawn.
-
-The steady data path is source TAP → TCX source validation/proof mark → bridge
-guard → IP TPROXY leg F → immutable source capability + existing mesh resolve →
-outbound TLS 1.3/kTLS/splice → output divert leg C → destination capability and
-allowed-port check → inbound TLS 1.3/kTLS/splice → marked leg S → destination
-TAP. Guests remain credential-free plaintext endpoints. DNS goes from a guest
-to the bridge gateway and the existing userspace responder; no DNS payload or
-semantic state enters eBPF.
-
-For a selected same-node peer, those arrows name three distinct observation
-boundaries. The source TAP/shared bridge carries guest-local plaintext toward
-leg F. The host-local leg-B socket is then marked in the nft output route hook
-and re-routed by the accepted fwmark/table-100 `local ... dev lo` route into
-shared leg C; that exact socket is the **peer-facing protected-transport
-boundary**. After leg C decrypts, marked leg S carries plaintext over the shared
-bridge to the destination TAP. Cross-host physical wire remains out of #295.
-
-Native run `e72385d6` falsified the earlier loopback-byte ruling: exact tuple
-`100.95.0.1:35260 → 100.95.0.2:18951`, TLS 1.3 kTLS TX/RX state, inode, and
-sole fd correlated uniquely, and a lossless 6,076-packet loopback capture saw
-both directions but zero complete TLS `0x17` records. S-ND295-01 therefore
-proves same-node confidentiality by joining the unique live `ss` kTLS
-tuple/inode/fd to positive splice with that fd as request destination and
-response source. One lossless all-interface capture independently proves the
-exact leg-B tuple is loopback-only and absent from every non-loopback interface.
-It permits plaintext only on the caller guest-address-to-frontend leg-F tuple
-and the node-gateway-to-selected-backend leg-S tuple (plus their reverses),
-requires the expected markers there, and rejects markers elsewhere or direct
-guest bypass. Missing, ambiguous, lossy, or unapproved evidence fails closed.
-Same-node AF_PACKET payload is not a TLS-record oracle; `0x17` physical-wire
-capture remains a cross-host receipt outside #295. This changes no product
-topology, enforcement core, or API.
-
-`overdrive-netlink` is absent from that runtime packet path. It is only the
-control/read-back adapter by which the shared-switch and intercept owners
-mutate or inspect bridge, TAP, guard, and nft state. A guest frame returns from
-TCX into the Linux bridge, crosses the bridge guard and IP nft TPROXY in the
-kernel, and enters the shared listener directly.
+1. **Boot.** Startup probes refuse before any effect (owner cgroup placement,
+   descriptor budget, guest prefix free of node addresses and VIPs); the VM
+   driver and its beacon listener compose; boot reclamation ends every VM this
+   process does not supervise, before any lease is assigned; the shared mTLS
+   table is written in one transaction and a failure refuses boot (ADR-0184);
+   the owner converges its forwarder, listeners and the gateway route
+   (GW-LOCAL); the DNS responder binds; the supervisor starts.
+2. **Deploy.** The lease is assigned (address, CID, launch token), the owner
+   provisions the CID, the fork launches with that CID and token, the guest
+   configures its network, opens its control session and sends READY.
+   Running follows READY and the observation write; then the allocation
+   becomes intercept-live, the owner activates it (activation requires the
+   control session), and EXEC is released.
+3. **Traffic.** Guest-opened flows are paired out of band and forwarded in the
+   kernel. Host platform clients reach a VM port only through
+   `GuestStreamDial`; leg-S relays a VM backend's plaintext over the returned
+   stream until #303 lands (ADR-0186).
+4. **Flow end.** The flow-end classifier's records decide clean half-close
+   versus abort; drain completes on a kernel record; a lost flow record
+   aborts its flow, a lost empty-datagram notice is compensated, and a
+   recursion-miss rise triggers a level re-read. The owners read these
+   counters at every flow-event dispatch and on the one-second audit period
+   (ADR-0183, ADR-0165).
+5. **Teardown.** The driver stops the VMM; the device's release resets every
+   host flow of that guest; the mTLS lifecycle and the owner then tear down
+   the allocation's remaining state, aborting any flow with reset; the lease
+   is released last.
 
 ### Runtime failure and security boundary
 
-The accepted shared-owner supervisor consumes the worker's sole shared-listener
-failure future, observes DNS task completion, and audits
-bridge/TAP/TCX/map/pin/nft identity once per second. The dependency-neutral
-`overdrive_core::guest_network` wiring gives `VmDriver` only the release-claim
-capability and the control-plane task/`ServerHandle` only the supervisor
-capability over the same lock. Detection linearizes EXEC `Open -> Recovering`
-under that lock. A kernel-path mismatch downs managed TAPs before repair; if
-that cannot be confirmed, existing VMM cgroups are killed and the process
-fail-stops. Exact-owner convergence plus full read-back retries every 250 ms
-for five seconds. Only one locked full-success transition reopens EXEC. Any
-partial result or a result arriving after FailStop is ignored for admission.
-At the deadline the typed request crosses to the CLI-owned `ServerHandle`,
-which applies the accepted ten-second hard outer shutdown bound and status 1.
-Normal SIGINT remains status 0.
-
-Recurring S-ND295-33 conformance drives the exported server handler through
-the public HTTPS API, drains it after the typed fail-stop request, and has the
-test harness construct a fresh handler over retained roots. The runtime does
-not replace itself. That direct-handler lane makes no subprocess, CLI, PID, or
-new-process claim. The accepted external deployment-supervisor replacement and
-production-readiness contract remain separate operational context; no S-ND295
-process/PID/exit test is assigned. No restart daemon or HA owner is added to
-Overdrive.
-
-The security model has four explicit trust crossings:
-
-- untrusted guest TAP input is authenticated by registered ifindex, source MAC,
-  and IPv4/ARP source facts before any bridge delivery;
-- TCX proof marks are independently mediated by the minimal bridge guard, so a
-  missing entrypoint cannot silently become ordinary forwarding;
-- accepted sockets are bound once to immutable allocation/generation/SPIFFE
-  capabilities and cannot be re-attributed after address reuse; guest-mesh
-  peers continue through `ServiceBackendsResolve`, while public ingress keeps
-  the selected-`BackendId` receipt as its distinct exact-peer source; and
-- peer-facing application bytes cross only the existing TLS 1.3/kTLS/splice
-  enforcement boundary, with selected-backend identity preserved.
-
-The design is fail-closed for any one owned-component loss. The accepted
-exception remains arbitrary near-simultaneous external deletion of both one
-TAP's TCX entrypoint and the independent bridge guard: ordinary forwarding may
-exist for at most the one-second audit interval before TAP quiescence. #295
-does not relabel that double loss as fail-closed.
+- ADR-0124's recovery remains the containment authority. A recovery takes a
+  counted quiescence hold; forwarding reopens when every hold is restored; a
+  dropped hold is counted as leaked and ends recovery in the typed fail-stop
+  of `serve`, after which the supervisor restart converges on boot.
+- Control-session loss aborts that session's flows. A guest withholding vsock
+  credit holds at most its own flow quota.
+- The guest is untrusted: every guest-opened connection is attributed by peer
+  CID and launch token; host-internal destinations are refused and enforced
+  by a kernel rule; constant rules keep guest-prefix traffic on leg-C.
+- Overdrive keeps no copy of a VMM's `/dev/vhost-vsock` descriptor, so the
+  kernel's orphan sweep at VMM exit always runs.
 
 ### Effect isolation, enforcement, and evidence
 
-Pure derivations—address/TAP/MAC assignment, bridge/guest MAC disjointness,
-TCP-listener projection, and transient VMM projection—are return-only and
-property-tested. Stateful operations are bounded-change over named universes:
-one allocation binding; one allocation's TAP/map/link/pin/guard effects; one
-capability and its claims/handles; or the enumerated node-global bridge/maps/
-rules/sets/listeners/gate. Every bounded operation must assert the intended
-delta plus complement equality for unrelated allocations and host objects.
-There is no unbounded-preservation operation and therefore no new Plan-returning
-API.
-
-The mandatory catalogue in the feature delta separates four easily conflated
-universes. The EXEC gate's opaque claim capability is observed through Open
-claim return, BootClosed/Recovering pending behavior, FailStop refusal, and task
-wake; its private active-claim/waiter bookkeeping is not independently
-asserted. S-ND295-27 owns those public return/projection/task outcomes, while
-S-ND295-28 owns the real `VmDriver` claim lifetime through acknowledgement and
-cancellation. The supervisor capability may change only gate/recovery state;
-the intercept adapter may change only owned rule/set/element state; and the
-worker listener owner may change only sockets/tasks/registry/claims/handles plus
-its guard token. Tests assert each observable delta and the other universes as
-complement-equal rather than treating the shared owner as one unconstrained
-mutation set.
-
-Architecture erosion is prevented through existing Rust visibility and trait
-boundaries, crate-class/dst-lint checks, compile fallout from deleting obsolete
-fields/types, and focused AST/source checks that keep the post-cut production
-path free of `NetSlot`, netns/veth/setns/`host_veth` compatibility. The bridge
-MAC constant and Service TCP-listener projection each remain a single source.
-Composition checks enforce wire→probe→use; host/sim adapter-equivalence remains
-where a port has both, while TCX/nft/TAP/kTLS effects stay real-kernel/native-
-metal evidence.
-
-Control-plane ordering, retry, cancellation, generation, late completion, and
-convergence require seeded production-owner simulation. Actual bridge/TAP/TCX/
-nft/cgroup/kTLS/Cloud Hypervisor behavior requires Tier-3/native-metal tests.
-T1-BASE and T1-PORT4 are capacity/stress measurements, not EDD expectations.
-They must report N, M, exact inventories, kernel/substrate, memory, update/
-lookup/sweep rates, and cleanup complements; they make no concurrent-flow or
-pump-capacity claim. GH #300 retains sole ownership of that separate problem.
+Source checks pin: the flow-end classifier is a raw tracepoint, never a
+perf-attached one; no flow vsock sets `SO_RCVLOWAT` above 1; every strparser
+parking-cell sender sets `TCP_NODELAY`; every redirect into a UDP or
+SEQPACKET target pulls the whole frame first; no Overdrive process holds a
+`/dev/vhost-vsock` descriptor. The guest-flow owner's protocol is
+model-checked in `specs/quint/guest-flow-owner/` and replayed against the
+owner through quint-connect conformance drivers; probe-run counting
+(PROBE-RUN-COUNT with D-1, ADR-0191) is model-checked in
+`specs/quint/probe-count/`; kernel behaviour the model
+assumes is proven at Tier 3 on Linux 7.0 (spike findings under
+`docs/feature/netns-density-295/spike/`).
 
 ### Single-cut deployment boundary
 
-There is no persisted schema migration: workload intent, allocation rows,
-`workload_addr`, reconciler Views, identity audit, and Service backend formats
-do not change. Lease, endpoint, capability, generation, listener, and recovery
-state is process-local or kernel-resident and is converged rather than loaded
-from a new store.
-
-The code cut has no feature flag, dual writer, compatibility method, or legacy
-adapter. Deployment replaces the serve process only on a node with no live
-pre-#295 allocation network ownership; the greenfield decision deliberately
-does not retain a legacy netns/veth adopter or cleanup path, so rollout drains
-or reprovisions that state before installing the new binary. Once #295 owns
-the node, unclean restart uses existing VM reclamation followed by the accepted
-shared-switch sweep. Rollback likewise requires the new owner's inventory to
-be absent before an older binary starts; old and new serve processes never
-overlap on one node.
-
-Cross-host routing (GH #298), heterogeneous schedulable capacity (GH #299),
-and concurrent pump scaling (GH #300) are separate designs, not rollout
-phases or hidden compatibility hooks. The exact application contract,
-Contract Shape universes, and verification obligations live in
-[the feature delta](../../feature/netns-density-295/feature-delta.md). The
-Level-1 through Level-3 diagrams and dynamic sequences live in
-[C4 diagrams](c4-diagrams.md#accepted-shared-bridge-microvm-network-gh-295).
-No DESIGN roadmap is emitted; DISTILL and then `/nw-roadmap`/`/nw-deliver` own
-executable specifications and implementation order after review.
+The vsock attachment replaces the bridge-era #295 code in one cut: the bridge,
+TAP, TCX endpoint classifier, bridge guard and their tests are deleted during
+DELIVER, and no feature flag keeps the bridge path alive.
 
 ---
 
@@ -11968,6 +11386,7 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-10-13 | **netns-density-295: the #295 sections describe the vsock microVM attachment (ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192).** The shared-bridge sections are replaced by the current vsock design: § *vsock microVM attachment (GH #295)*, its domain reading and its application architecture. GW-LOCAL (ADR-0152), PROBE-NOSAMPLE (ADR-0187), LEGB-DIAL (ADR-0190), PROBE-RUN-COUNT with D-1 (ADR-0191; amends ADR-0054 § 5, ADR-0055 and ADR-0097 D2) and PROBE-NOSAMPLE-EVENT (ADR-0192) are recorded as approved by the user on 2026-10-13. — Morgan. |
 | 2026-10-03 | **netns-density-295 D-295-R19 ordering change WITHDRAWN under its accepted native condition; LegF/LegC listener-loss no-quiescence recorded on the named-Service E14(e) native result.** Native E14(c)/(d) fail closed under the existing mark-before-TPROXY program, so the R19 reorder does not reproduce its required ordinary absent-listener exposure; under the pre-approved conditional branch (user acceptance 2026-09-24) it is withdrawn and both constant TPROXY rules retain mark → TPROXY → accept, with no alternate-order recognizer and no canonical-identity change. The bounded ordinary-flow withdrawal was independently reviewed (`arch_rev_20261003_netns295_r19_native_falsification`, APPROVED). The named-Service E14(e) guest `TIME_WAIT` door (nextest `f03c43d5-ffcc-4bec-8bd3-9b98f90e334a`) fails closed — `reopened=false`, wildcard `accepts=0` — with the `serve` owner killed and the guest TAP up and the entry surviving, so a pure LegF/LegC listener failure does not quiesce managed TAPs, the killed-mode residual is closed, and the original single-loss security outcome (no SYN-ACK, no wildcard accept, no reopen to the user) is preserved by the kernel path, on that bounded native evidence and not extrapolated. D-295-R18 stands on its reproduced native RED, unchanged. ADR-0140 is Withdrawn; ADR-0088/0089/0124/0125/0139, this brief, and the #295 feature delta record the withdrawal. The `c4-diagrams.md` L2 order/listener prose, independent review of the listener-loss classification, and roadmap revalidation of step 08-01 remain downstream gates; DELIVER is not authorized by this record. — Morgan. |
 | 2026-09-28 | **netns-density-295: the `TapHostMac` fact shape and the reserved set's `Condemned` exclusion are user-approved, and the remaining host-side MAC wording is corrected (user approval of 2026-09-28).** `GuestNetworkFact::TapHostMac { ifindex, address: TapHostAddress }`, with `TapHostAddress` = `Unreserved \| Reserved([u8; 6]) \| Missing`, replaces the in-tree `{ ifindex, mac }`. The reserved set leaves out `Condemned` allocations. ADR-0122's amendment list, ADR-0124's Decision, ADR-0142's *Detection only* alternative and Consequences bound, ADR-0143's Consequences, and `c4-diagrams.md`'s shared-owner container and allocation sequence now describe the host-side MAC read-back by the invariant: a reserved or absent address is damage, a change to an unreserved address is not, and nothing is recorded. Code committed on the feature branch counts as landed, because the repository merges with linear history (the user, 2026-09-28: "we merge commit with linear history"), so the 2026-09-24 amendment blocks of ADR-0114, 0115, 0117, 0118, 0121, 0122, 0124, and 0125 stand as written. The host-side MAC clause revised here is not implemented even on the feature branch (`GuestNetworkFact::TapHostMac` is constructed only in `#[cfg(test)]` code), so it has no operative contract to amend, and each of the four ADRs states it in present tense with no amendment narrative. The allocation sequence's messages no longer contain `;`, which ends a Mermaid sequence message. — Morgan. |
 | 2026-09-28 | **netns-density-295 ADR-0144: managed-link identity is independent of host link configuration (user rulings of 2026-09-28).** The bridge is still created with its address. A TAP's host-side MAC is judged by an invariant instead of a recorded value: it must not be the bridge MAC or the guest MAC of an allocation the owner holds outside `Condemned`, the TAP's own included. The fact a violation reports (`TapHostMac { ifindex, address: TapHostAddress }`) was proposed here; the user approved it later the same day (entry above). A host link manager's rewrite to any other address is harmless, and a reserved address costs that one VM. No host `.link` file is required, no substrate installs one, and the startup probe does not read its scratch TAP's address. A narrow `.link` stays optional image hygiene for the Image Factory (GH #75). ADR-0144 is rewritten in present tense and renamed `adr-0144-managed-link-identity-independent-of-host-link-configuration.md`, and ADR-0130's read-back set states the invariant. GH #304 covers the node runtime's systemd dependence in general. — Morgan. |

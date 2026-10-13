@@ -1,0 +1,155 @@
+State 1: <Initial predicate>
+/\ probe_streak_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ probe_streak_probe_count_pst = ""
+/\ probe_streak_probe_count_rst = ""
+/\ probe_streak_probe_count_terms = 0
+/\ probe_streak_probe_count_runs = 0
+/\ probe_streak_probe_count_psame = 0
+/\ probe_streak_probe_count_clock = 0
+/\ probe_streak_probe_count_rseq = 0
+/\ probe_streak_probe_count_running = TRUE
+/\ probe_streak_probe_count_rat = 0
+/\ probe_streak_probe_count_fs = 0
+/\ probe_streak_probe_count_hist = <<>>
+/\ probe_streak_probe_count_tseqs = {}
+/\ probe_streak_probe_count_rsame = 0
+/\ probe_streak_probe_count_pseq = 0
+/\ probe_streak_probe_count_A = 0
+/\ probe_streak_probe_count_M = 0
+
+State 2: <probe_streak_probe_count_ProbeRun line 306, col 3 to line 359, col 72 of module probe_streak>
+/\ probe_streak_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ probe_streak_probe_count_pst = "Pass"
+/\ probe_streak_probe_count_rst = "Pass"
+/\ probe_streak_probe_count_terms = 0
+/\ probe_streak_probe_count_runs = 1
+/\ probe_streak_probe_count_psame = 1
+/\ probe_streak_probe_count_clock = 1
+/\ probe_streak_probe_count_rseq = 1
+/\ probe_streak_probe_count_running = TRUE
+/\ probe_streak_probe_count_rat = 0
+/\ probe_streak_probe_count_fs = 0
+/\ probe_streak_probe_count_hist = <<"Pass">>
+/\ probe_streak_probe_count_tseqs = {}
+/\ probe_streak_probe_count_rsame = 1
+/\ probe_streak_probe_count_pseq = 1
+/\ probe_streak_probe_count_A = 0
+/\ probe_streak_probe_count_M = 0
+
+State 3: <probe_streak_probe_count_ProbeRun line 306, col 3 to line 359, col 72 of module probe_streak>
+/\ probe_streak_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ probe_streak_probe_count_pst = "Fail"
+/\ probe_streak_probe_count_rst = "Fail"
+/\ probe_streak_probe_count_terms = 0
+/\ probe_streak_probe_count_runs = 2
+/\ probe_streak_probe_count_psame = 1
+/\ probe_streak_probe_count_clock = 2
+/\ probe_streak_probe_count_rseq = 2
+/\ probe_streak_probe_count_running = TRUE
+/\ probe_streak_probe_count_rat = 1
+/\ probe_streak_probe_count_fs = 0
+/\ probe_streak_probe_count_hist = <<"Pass", "Fail">>
+/\ probe_streak_probe_count_tseqs = {}
+/\ probe_streak_probe_count_rsame = 1
+/\ probe_streak_probe_count_pseq = 2
+/\ probe_streak_probe_count_A = 0
+/\ probe_streak_probe_count_M = 0
+
+State 4: <probe_streak_probe_count_ProbeRun line 306, col 3 to line 359, col 72 of module probe_streak>
+/\ probe_streak_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ probe_streak_probe_count_pst = "Fail"
+/\ probe_streak_probe_count_rst = "Fail"
+/\ probe_streak_probe_count_terms = 0
+/\ probe_streak_probe_count_runs = 3
+/\ probe_streak_probe_count_psame = 2
+/\ probe_streak_probe_count_clock = 3
+/\ probe_streak_probe_count_rseq = 3
+/\ probe_streak_probe_count_running = TRUE
+/\ probe_streak_probe_count_rat = 2
+/\ probe_streak_probe_count_fs = 0
+/\ probe_streak_probe_count_hist = <<"Pass", "Fail", "Fail">>
+/\ probe_streak_probe_count_tseqs = {}
+/\ probe_streak_probe_count_rsame = 2
+/\ probe_streak_probe_count_pseq = 3
+/\ probe_streak_probe_count_A = 0
+/\ probe_streak_probe_count_M = 0
+
+State 5: <probe_streak_probe_count_ProbeRun line 306, col 3 to line 359, col 72 of module probe_streak>
+/\ probe_streak_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ probe_streak_probe_count_pst = "Fail"
+/\ probe_streak_probe_count_rst = "Fail"
+/\ probe_streak_probe_count_terms = 0
+/\ probe_streak_probe_count_runs = 4
+/\ probe_streak_probe_count_psame = 3
+/\ probe_streak_probe_count_clock = 4
+/\ probe_streak_probe_count_rseq = 4
+/\ probe_streak_probe_count_running = TRUE
+/\ probe_streak_probe_count_rat = 3
+/\ probe_streak_probe_count_fs = 0
+/\ probe_streak_probe_count_hist = <<"Pass", "Fail", "Fail", "Fail">>
+/\ probe_streak_probe_count_tseqs = {}
+/\ probe_streak_probe_count_rsame = 3
+/\ probe_streak_probe_count_pseq = 4
+/\ probe_streak_probe_count_A = 0
+/\ probe_streak_probe_count_M = 0
+
+State 6: <probe_streak_probe_count_ConsumerLook line 477, col 3 to line 542, col 70 of module probe_streak>
+/\ probe_streak_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 4,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ probe_streak_probe_count_pst = "Fail"
+/\ probe_streak_probe_count_rst = "Fail"
+/\ probe_streak_probe_count_terms = 1
+/\ probe_streak_probe_count_runs = 4
+/\ probe_streak_probe_count_psame = 3
+/\ probe_streak_probe_count_clock = 4
+/\ probe_streak_probe_count_rseq = 4
+/\ probe_streak_probe_count_running = TRUE
+/\ probe_streak_probe_count_rat = 3
+/\ probe_streak_probe_count_fs = 0
+/\ probe_streak_probe_count_hist = <<"Pass", "Fail", "Fail", "Fail">>
+/\ probe_streak_probe_count_tseqs = {4}
+/\ probe_streak_probe_count_rsame = 3
+/\ probe_streak_probe_count_pseq = 4
+/\ probe_streak_probe_count_A = 4
+/\ probe_streak_probe_count_M = 0

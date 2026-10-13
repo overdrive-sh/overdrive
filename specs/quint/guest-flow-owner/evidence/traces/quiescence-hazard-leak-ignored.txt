@@ -1,0 +1,39 @@
+# quiescence-hazard-leak-ignored: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  up = TRUE
+  repLeft = -1
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  cnt = 0
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  stop = "none"
+  flowsOpen = 0
+  table = TRUE
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  att = [C1 |-> 0, C2 |-> 0]
+  latch = FALSE
+
+State 2 [Damage]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
+
+State 3 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> TRUE]
+
+State 4 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
+  latch = TRUE
+
+State 5 [RecDropHold]
+  rec = [C1 |-> "dropped", C2 |-> "idle"]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE ]
+
+State 6 [RecQuiesce]
+  rec = [C1 |-> "dropped", C2 |-> "held"]
+  cnt = 2
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE ]
+
+State 7 [RecDropHold]
+  rec = [C1 |-> "dropped", C2 |-> "dropped"]
+
+-> stutters forever in State 7

@@ -9,6 +9,16 @@ trusted-checkpoint review.** ADR-0123 owns registration generations;
 ADR-0124 owns runtime recovery; ADR-0125 owns destination allowed-port
 membership.
 
+**Amended 2026-10-11** by ADR-0173 and ADR-0186 (#295, INB-1, approved by
+user 2026-10-11). leg-S delivery to a VM backend — a destination inside the guest
+prefix — is no longer a plaintext TCP connection to `workload_addr:port`:
+leg-S dials the guest-flow owner's `GuestStreamDial` port and relays plaintext
+between its kTLS socket and the returned vsock stream in userspace. That relay
+is a temporary bridge, deleted when #303 lands. Delivery to exec and process
+backends is unchanged. The listener ownership decided below is unchanged; see
+ADR-0186 and the #295 feature delta § *[REF] leg-S over vsock (temporary
+bridge until #303) and the mTLS forwarded-outbound port*.
+
 ## Context
 
 The current worker owns one leg-F and one leg-C transparent listener per

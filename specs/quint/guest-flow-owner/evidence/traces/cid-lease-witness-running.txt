@@ -1,35 +1,20 @@
-# cid-lease-witness-running: counterexample, 6 state(s) (from the TLC trace)
+# cid-lease-witness-running: counterexample, 3 state(s) (from the TLC trace)
 
 State 1
-  pend = {}
-  walker = 0
-  al = << [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-  g = [ clash |-> FALSE, skipFree |-> FALSE, skipped |-> FALSE, skipOrphan |-> FALSE, refusedHeld |-> FALSE, refusedClaimable |-> FALSE, claimErr |-> FALSE, refusedUnasked |-> FALSE ]
-  kern = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
   cursor = 0
-  todo = {}
   bootLeft = -1
-  exitsLeft = 1
-  errsLeft = 1
+  reclaimed = TRUE
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  up = TRUE
 
-State 2 [OrphanExit]
-  kern = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-
-State 3 [AssignBegin]
-  walker = 1
-  todo = {0, 1, 2}
-
-State 4 [AssignTry]
-  walker = 0
-  al = << [ st |-> "admitted", off |-> 0, loc |-> "slot", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+State 2 [Assign]
+  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-  kern = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 1
-  todo = {}
 
-State 5 [LaunchBegin]
-  al = << [ st |-> "launching", off |-> 0, loc |-> "taken", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
-
-State 6 [CreateOk]
-  al = << [ st |-> "running", off |-> 0, loc |-> "vmm", retry |-> FALSE, remembered |-> {} ], [ st |-> "wait", off |-> -1, loc |-> "none", retry |-> FALSE, remembered |-> {} ] >>
+State 3 [Launch]
+  al = << [st |-> "running", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)

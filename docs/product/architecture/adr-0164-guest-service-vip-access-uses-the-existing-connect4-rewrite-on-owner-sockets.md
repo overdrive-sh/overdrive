@@ -4,13 +4,10 @@
 
 **Accepted — decision D24 approved by user 2026-10-06; its startup refusal
 outside the `connect4` attach point approved by user 2026-10-06; decision
-D24a — TCP to a VIP is resolved as mesh, narrowing D24 to datagrams
-(independent DESIGN review finding H-3) — approved by user 2026-10-06;
-independent review r12 answered; further review waived by user 2026-10-08;
-handed to DISTILL.** GH #295. Recorded in the
-#295 feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
-2026-10-05*. Depends on ADR-0151 (the owner), ADR-0153 (mesh flows), ADR-0162
-(direct non-mesh forwarding) and ADR-0165 (tuple registration).
+D24a — TCP to a VIP is resolved as mesh, so D24's rewrite applies to
+datagrams — approved by user 2026-10-06.** GH #295. Recorded in the #295 feature delta,
+§ *[REF] vsock Attachment Replacement DESIGN*. Depends on ADR-0151 (the
+owner), ADR-0153 (mesh flows) and ADR-0162 (direct non-mesh forwarding).
 
 ## Context
 
@@ -47,9 +44,7 @@ cgroup holding the host owner:
 - guest TCP and UDP (0 to 59,000 bytes, connected and unconnected) to a VIP
   with a non-intercepted backend worked, 300/300 stress each;
 - the guest application saw the VIP in `getpeername` and in `recvfrom`;
-- with no map entry the VIP was unreachable;
-- an unframe tuple registered from the requested destination (the VIP) missed
-  the rewritten packet; one registered from the socket's kernel peer did not.
+- with no map entry the VIP was unreachable.
 
 ## Decision
 
@@ -78,8 +73,8 @@ cgroup holding the host owner:
 
 ## Alternatives considered
 
-- **Leave TCP VIPs to `connect4` (the earlier text of this ADR).** A mesh
-  service's VIP is connected in cleartext and fails at leg-C. Rejected.
+- **Leave TCP VIPs to `connect4`.** A mesh service's VIP is connected in
+  cleartext and fails at leg-C. Rejected.
 - **Refuse every guest TCP flow to a VIP.** Fails closed but removes VIP access
   for TCP. Rejected.
 - **Resolve VIPs in the owner's userspace by reading the BPF service map.**
@@ -104,5 +99,7 @@ cgroup holding the host owner:
 - Every other socket of `overdrive serve` was already below the attach point;
   nothing changes for them.
 - Ancestor inheritance of the `connect4` attachment is existing production
-  behaviour for workload cgroups; its effect on the owner's own sockets is
+  behaviour for workload cgroups: a cgroup's effective program array is
+  built by walking its ancestors (`kernel/bpf/cgroup.c:442-447`, `:458-463
+  @ v7.0`), subject to each ancestor's attach flags; its effect on the owner's own sockets is
   confirmed inside the walking skeleton (V-15, folded into V-6).

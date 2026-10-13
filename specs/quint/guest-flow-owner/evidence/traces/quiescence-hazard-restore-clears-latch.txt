@@ -1,0 +1,41 @@
+# quiescence-hazard-restore-clears-latch: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  table = TRUE
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  latch = FALSE
+  stop = "none"
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  up = TRUE
+  att = [C1 |-> 0, C2 |-> 0]
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  cnt = 0
+  repLeft = 1
+  flowsOpen = 1
+
+State 2 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+
+State 3 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> TRUE]
+
+State 4 [RecQuiesce]
+  latch = TRUE
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
+  flowsOpen = 0
+
+State 5 [RecRepair]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
+  rec = [C1 |-> "repaired", C2 |-> "idle"]
+
+State 6 [RecQuiesce]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  rec = [C1 |-> "repaired", C2 |-> "held"]
+  cnt = 2
+
+State 7 [RecRestore]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  latch = FALSE
+  rec = [C1 |-> "idle", C2 |-> "held"]
+  cnt = 1

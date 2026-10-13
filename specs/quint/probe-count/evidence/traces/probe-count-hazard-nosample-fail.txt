@@ -1,0 +1,31 @@
+# probe-count-hazard-nosample-fail: counterexample, 2 state(s) (from the TLC trace)
+
+State 1
+  terms = 0
+  rseq = 0
+  running = TRUE
+  psame = 0
+  rat = 0
+  hist = <<>>
+  clock = 0
+  fs = 0
+  pseq = 0
+  pst = ""
+  rst = ""
+  tseqs = {}
+  rsame = 0
+  A = 0
+  runs = 0
+  M = 0
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 0, stoppedTerm |-> FALSE, missed |-> FALSE ]
+
+State 2 [ProbeRun]
+  rseq = 1
+  psame = 1
+  clock = 1
+  pseq = 1
+  pst = "Fail"
+  rst = "Fail"
+  rsame = 1
+  runs = 1
+  g = [ missTouched |-> TRUE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 0, stoppedTerm |-> FALSE, missed |-> FALSE ]

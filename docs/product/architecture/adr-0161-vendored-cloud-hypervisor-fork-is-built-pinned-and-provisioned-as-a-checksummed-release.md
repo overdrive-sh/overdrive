@@ -2,9 +2,10 @@
 
 ## Status
 
-**Accepted — decision D21 approved by user 2026-10-05; independent review r12 answered;
-further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
-Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
+**Accepted — decision D21 approved by user 2026-10-05; RESET-EXIT (the pinned
+fork build carries the change that ends the VMM on a guest reset, ADR-0182)
+approved by user 2026-10-11.** GH #295. Recorded in the #295 feature delta,
+§ *[REF] vsock Attachment Replacement DESIGN*.
 
 It implements the provisioning half of ruling **D13 = (a), APPROVED
 2026-10-05**: the vendored fork is the only VMM Overdrive runs with, and this
@@ -25,24 +26,27 @@ project's GitHub releases:
 - `infra/metal/native-preflight.sh` only checks that `cloud-hypervisor` is on
   `PATH`.
 
-Nothing verifies the binary's content, and Overdrive requires the fork's
-`backend=vhost-kernel` vsock (ADR-0146): the binary must be the pinned fork
-build, byte for byte.
+Nothing verifies the binary's content, and Overdrive requires two fork
+properties: the `backend=vhost-kernel` vsock device (ADR-0146) and the end of
+the VMM on a guest reset (ADR-0182). The binary must be the pinned fork build,
+byte for byte.
 
 The fork is the submodule `vendors/cloud-hypervisor` (URL
 `https://github.com/overdrive-sh/cloud-hypervisor.git`), branch
 `overdrive/vhost-kernel-vsock` = v53.0 (`9ed824d6d`) + `9b68dbb57` +
-`41a619d19`. Its gates passed: x86_64 clippy `-D warnings` (default and
-`--no-default-features --features kvm`), the vsock and config unit tests, and
-`fmt --check`; aarch64 compiled and passed clippy in Lima. Runtime evidence
-exists for x86_64 only.
+`41a619d19`. Those commits' gates passed: x86_64 clippy `-D warnings`
+(default and `--no-default-features --features kvm`), the vsock and config
+unit tests, and `fmt --check`; aarch64 compiled and passed clippy in Lima.
+Runtime evidence exists for x86_64 only. The reset-exit change of ADR-0182 is
+not yet a commit on the branch.
 
 ## Decision
 
 1. **One source pin.** The production VMM is built from one full commit SHA of
-   the fork. The submodule pointer is that SHA, and `versions.env` names it
-   (`CLOUD_HYPERVISOR_FORK_REV`). The submodule is the build input; nothing
-   builds from a moving branch.
+   the fork, and that commit carries both the `backend=vhost-kernel` vsock
+   device and the reset-exit change (ADR-0182). The submodule pointer is that
+   SHA, and `versions.env` names it (`CLOUD_HYPERVISOR_FORK_REV`). The
+   submodule is the build input; nothing builds from a moving branch.
 2. **One release artifact per architecture.** A fork CI workflow builds
    static binaries for x86_64 and aarch64 from that SHA and publishes them as a
    release on `overdrive-sh/cloud-hypervisor`, tagged
@@ -58,8 +62,9 @@ exists for x86_64 only.
    fork. Neither provisioning nor `Vmm::probe` inspects the installed binary to
    tell the fork from any other Cloud Hypervisor build; no typed error exists
    for "a different build is installed". `Vmm::probe` keeps its existing
-   stages (including the `--landlock` check), and `/dev/vhost-vsock` access —
-   a host fact — is proven by the claim probe (ADR-0170).
+   stages (including the `--landlock` check). No startup probe opens
+   `/dev/vhost-vsock`: the VMM opens it at launch, and a launch that cannot
+   fails pre-READY through the typed VMM-exit start failure (ADR-0146).
 5. **Lima stays a compile surface for the fork.** Lima installs the same
    pinned aarch64 asset so local tooling matches, but Lima remains non-signal
    for microVM boots (`.claude/rules/testing.md`).
@@ -90,7 +95,8 @@ Upstreaming the change to Cloud Hypervisor is outside this decision.
   parameter is replaced the same way. The exact keys are pinned in the feature
   delta (§ *VMM fork provisioning contract*).
 - Rebasing the fork onto a new Cloud Hypervisor version is a deliberate change: new
-  SHA, new tag, new checksums, and the V-1 evidence re-run on qualified metal.
+  SHA, new tag, new checksums, the reset-exit change carried forward, and the
+  V-1 evidence and the ADR-0182 validation item re-run on qualified metal.
 - The fork's aarch64 binary has compile and lint evidence only.
 - Any host image that ships Cloud Hypervisor consumes the same pinned
   artifact and checksum; nothing in this ADR depends on how such an image is

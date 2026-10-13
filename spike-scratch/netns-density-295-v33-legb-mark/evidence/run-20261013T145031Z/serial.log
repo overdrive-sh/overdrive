@@ -1,0 +1,4 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+GUEST_VSOCK_READY port=5000 uname_r=7.0.0-29-generic
+GUEST_SERVED FROM-MICROVM uname_r=7.0.0-29-generic req=REQ-100.95.0.7:8080

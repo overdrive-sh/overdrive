@@ -1,0 +1,23 @@
+
+  streak_bugOncePerStreak
+    1) streak_bugOncePerStreak::probe_count::FailedStopRetriedOnNextRow failed after 1 test(s)
+
+  1 failed
+
+  1) streak_bugOncePerStreak::probe_count::FailedStopRetriedOnNextRow:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:268:36
+        268:   run FailedStopRetriedOnNextRow = init
+                                                ^^^^
+        269:     .then(ProbeRun("Fail", "")).then(ProbeRun("Fail", "")).then(ProbeRun("Fail", ""))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        270:     .then(ConsumerLook(false)).expect(terms == 1 and A == 3 and running)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        271:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true)).expect(terms == 2 and A == 4 and not(running) and Safety)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0xe566c9349346d7f5 --match=streak_bugOncePerStreak::probe_count::FailedStopRetriedOnNextRow to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/hazard/probe_count_hazards.qnt
+error: Tests failed

@@ -1,0 +1,39 @@
+State 1: <Initial predicate>
+/\ empty_ok_udp_empty_sent = 0
+/\ empty_ok_udp_empty_lost = 0
+/\ empty_ok_udp_empty_ep = 0
+/\ empty_ok_udp_empty_live = FALSE
+/\ empty_ok_udp_empty_ring = <<>>
+/\ empty_ok_udp_empty_seen = 0
+/\ empty_ok_udp_empty_owed = 0
+/\ empty_ok_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 2: <empty_ok_udp_empty_Start line 166, col 3 to line 177, col 52 of module empty_ok>
+/\ empty_ok_udp_empty_sent = 0
+/\ empty_ok_udp_empty_lost = 0
+/\ empty_ok_udp_empty_ep = 1
+/\ empty_ok_udp_empty_live = TRUE
+/\ empty_ok_udp_empty_ring = <<>>
+/\ empty_ok_udp_empty_seen = 0
+/\ empty_ok_udp_empty_owed = 0
+/\ empty_ok_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 3: <empty_ok_udp_empty_Empty line 96, col 3 to line 111, col 52 of module empty_ok>
+/\ empty_ok_udp_empty_sent = 0
+/\ empty_ok_udp_empty_lost = 1
+/\ empty_ok_udp_empty_ep = 1
+/\ empty_ok_udp_empty_live = TRUE
+/\ empty_ok_udp_empty_ring = <<>>
+/\ empty_ok_udp_empty_seen = 0
+/\ empty_ok_udp_empty_owed = 1
+/\ empty_ok_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 4: <empty_ok_udp_empty_OwnReadLost line 224, col 3 to line 247, col 58 of module empty_ok>
+/\ empty_ok_udp_empty_sent = 1
+/\ empty_ok_udp_empty_lost = 1
+/\ empty_ok_udp_empty_ep = 1
+/\ empty_ok_udp_empty_live = TRUE
+/\ empty_ok_udp_empty_ring = <<>>
+/\ empty_ok_udp_empty_seen = 1
+/\ empty_ok_udp_empty_owed = 1
+/\ empty_ok_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> TRUE]

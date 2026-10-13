@@ -2,7 +2,8 @@
 
 ## Status
 
-**Current population-dependent validation — PENDING (2026-10-04).** E18's
+**Population-dependent validation of the bridge topology (2026-10-04) — no
+longer applies: the 2026-10-11 amendment below removes the bridge.** E18's
 recorded T1 population cannot be provisioned on the sole node-local bridge;
 its measured call bounds, recovery-window fit, and double-loss exposure
 restatement are unavailable. The accepted cadence, security outcomes, full
@@ -65,6 +66,64 @@ Three parts of the Decision below are rewritten to user rulings:
   runs to its end first, so the request can follow the five-second deadline
   by the rest of that loop. Stopping a VM whose TAP could not be confirmed
   down outranks the exact moment of the request.
+
+**Amended 2026-10-11 (GH #295, user rulings INB-1, R2-END, R2-DRAIN and
+QHOLD).** Under the vsock attachment design (ADR-0145) VMs have no TAP,
+bridge, TCX link, endpoint map or bridge guard, so the clauses of this ADR
+that act on them no longer apply. Each superseded clause and its
+replacement:
+
+- **TAP quiescence** — the Decision's "Kernel-path mismatch also quiesces
+  managed TAPs" and the containment it provides. Replaced by forwarding
+  quiescence, which refuses flow admission and aborts every live flow with a
+  reset (ADR-0160).
+- **TAP restore** — D-295-R13's "then the TAP restore only if that audit is
+  clean" and the Decision's "Admission reopens only after all invariants
+  pass and quiesced TAPs are restored". Replaced by restoring a counted,
+  move-only quiescence hold: a recovery restores only its own hold, after its
+  repair and a clean audit, and forwarding reopens only when the last hold is
+  restored; aborted flows are not reinstated (ADR-0169, ADR-0160).
+- **Per-TAP outcomes** — D-295-R14's per-TAP quiescence outcomes, the
+  per-allocation damage set (TAP deleted, owner, persistence, debug message
+  mask (D-295-R22), host-side MAC, TCX link or classifier, link pin,
+  endpoint entry, bridge-guard member) and the common-cause consequence
+  paragraph about a flushed managed-TAP set or endpoint map. Replaced by the
+  shared components of the guest-flow owner (forwarder bookkeeping, flow and
+  control listeners, leg-F, leg-C, firewall rules and sets, DNS); no VM has
+  per-allocation network parts to audit.
+- **Kill scope keyed on TAPs** — the Decision's kills of VMs whose TAPs could
+  not be confirmed down or whose own network parts are damaged, the
+  whole-slice kill when the TAP set cannot be determined, the 2026-09-24
+  "Kill scope" rewrite, the 2026-09-30 kill loop before the fail-stop, and
+  the alternatives and consequences that argue them. Replaced by flow abort
+  (ADR-0160): a VM with no forwarded flows emits nothing, so recovery kills
+  no VM; a failed recovery ends in this ADR's fail-stop.
+- **Bridge-era audit set** — "bridge/TAP membership, TCX program/link/ifindex,
+  endpoint maps, bpffs pins" and the "same production path" paragraph for
+  `SharedGuestNetworkOwner`'s bridge/TAP/TCX/map/pin/guard ownership.
+  Replaced by the guest-flow owner's audit of the components above; the
+  one-second audit period, the 250 ms retry and the five-second bound stay.
+- **Bridge double-loss exposure** — the Consequences' TCX-entrypoint and
+  bridge-guard double loss. No longer reachable.
+- **E18 bridge validation** — the PENDING status paragraph above. No longer
+  applies.
+- **Boot** — "only the supervisor capability may open it after VMM and
+  stale-attachment reclamation prove zero managed TAPs". Replaced by boot
+  reclamation of every VM the new process does not supervise, and by a failed
+  boot write of the shared mTLS table refusing boot (ADR-0184).
+
+A recovery quiesces node forwarding by taking a counted, move-only
+quiescence hold and reopens it only by restoring that hold (ADR-0169). A
+hold dropped without a restore cannot reopen forwarding: it increments the
+guest-flow owner's leaked-hold count and forwarding stays quiesced. **The
+supervisor treats a leaked-hold count above zero as an exhausted recovery**:
+it takes this ADR's typed fail-stop path at once, without waiting for the
+five-second bound. The external restart then converges on boot, including
+the shared mTLS table write, whose failure refuses boot (ADR-0184). The
+one-second audit period also paces the guest-flow owner's counter reads
+(ADR-0183, ADR-0165). The EXEC gate, the supervisor and `ServerHandle`
+ownership, the DNS task owner, exact-port listener recovery, the fail-stop
+request and the CLI's bounded shutdown are unchanged.
 
 ## Context
 

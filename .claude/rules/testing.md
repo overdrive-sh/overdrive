@@ -1603,18 +1603,19 @@ boots** (ADR-0068); it is not an agent that must run on operator-supplied
 kernels. The matrix is the one shipped kernel plus a single early-warning
 canary, not a range. Every merge runs against:
 
-- 6.18 LTS — **the pinned appliance kernel.** The latest LTS that meets
-  the feature floor (released 2025-11-30, EOL Dec 2028); guarantees
-  in-kernel TLS 1.3 TX+RX (≥6.0) and `CONFIG_NET_HANDSHAKE` (≥6.5). This
-  is the merge-blocking Tier-3/Tier-4 signal. Per ADR-0068 the pin tracks
-  the latest qualifying LTS (not a frozen number, and never non-LTS
-  mainline) — advanced deliberately at image rebuilds.
+- Linux 7.0 — **the pinned appliance kernel** (ADR-0068). It carries
+  in-kernel TLS 1.3 TX+RX (≥6.0). `CONFIG_NET_HANDSHAKE` is an image
+  kernel-configuration requirement, not a version guarantee: it is a hidden
+  bool enabled only when `SUNRPC`, `NVME_TARGET_TCP` or `NVME_TCP` is
+  (`net/Kconfig:94-97 @ v7.0`), so the image configuration must enable it. This is the merge-blocking Tier-3/Tier-4 signal. Its source is
+  vendored at `vendors/linux` (tag `v7.0`); kernel-behaviour claims are read
+  and cited there. Real-kernel evidence counts when it ran on a 7.0 kernel.
 - `bpf-next` (soft-fail; nightly gate) — early warning for upstream
   verifier / BPF-subsystem changes before a future pin bump adopts them.
 
 Adding a kernel is one line of YAML against `little-vm-helper`. **Dropping
 a kernel requires an ADR** — ADR-0068 is the record for collapsing the
-former `5.10 / 5.15 / 6.1 / 6.6 / current-LTS` matrix to the pinned-LTS +
+former `5.10 / 5.15 / 6.1 / 6.6 / current-LTS` matrix to the pinned-kernel +
 bpf-next model. Advancing the pin is a deliberate, tested image change.
 
 ### Harness

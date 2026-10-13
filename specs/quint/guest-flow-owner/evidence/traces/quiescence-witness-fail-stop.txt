@@ -1,48 +1,36 @@
-# quiescence-witness-fail-stop: counterexample, 8 state(s) (from the TLC trace)
+# quiescence-witness-fail-stop: counterexample, 5 state(s) (from the TLC trace)
 
 State 1
-  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  flowsOpen = 1
   repLeft = 1
-  att = [IpRules |-> 0, FlowListeners |-> 0]
+  att = [C1 |-> 0, C2 |-> 0]
   up = TRUE
-  prefix = "booted"
-  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  table = TRUE
   stop = "none"
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
+  cnt = 0
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
   latch = FALSE
-  lis = TRUE
-  holders = {}
 
 State 2 [Damage]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
 
 State 3 [RecQuiesce]
-  rec = [IpRules |-> "idle", FlowListeners |-> "held"]
+  flowsOpen = 0
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
   latch = TRUE
-  lis = FALSE
-  holders = {"FlowListeners"}
 
-State 4 [RecRepair]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
-  rec = [IpRules |-> "idle", FlowListeners |-> "repaired"]
+State 4 [RecDropHold]
+  rec = [C1 |-> "dropped", C2 |-> "idle"]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE ]
 
-State 5 [Damage]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
-
-State 6 [RecRedo]
-  att = [IpRules |-> 0, FlowListeners |-> 1]
-  rec = [IpRules |-> "idle", FlowListeners |-> "held"]
-
-State 7 [RepFail]
-  repLeft = 0
-  att = [IpRules |-> 0, FlowListeners |-> 2]
-
-State 8 [FailStop]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
-  att = [IpRules |-> 0, FlowListeners |-> 0]
+State 5 [FailStop]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
   up = FALSE
-  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  rec = [C1 |-> "idle", C2 |-> "idle"]
   stop = "failstop"
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE ]
+  cnt = 0
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE ]
   latch = FALSE
-  holders = {}

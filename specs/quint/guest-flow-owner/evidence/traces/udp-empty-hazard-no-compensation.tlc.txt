@@ -1,0 +1,51 @@
+State 1: <Initial predicate>
+/\ empty_bugNoCompensation_udp_empty_sent = 0
+/\ empty_bugNoCompensation_udp_empty_lost = 0
+/\ empty_bugNoCompensation_udp_empty_live = FALSE
+/\ empty_bugNoCompensation_udp_empty_ring = <<>>
+/\ empty_bugNoCompensation_udp_empty_seen = 0
+/\ empty_bugNoCompensation_udp_empty_owed = 0
+/\ empty_bugNoCompensation_udp_empty_ep = 0
+/\ empty_bugNoCompensation_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 2: <empty_bugNoCompensation_udp_empty_Start line 196, col 3 to line 215, col 44 of module empty_bugNoCompensation>
+/\ empty_bugNoCompensation_udp_empty_sent = 0
+/\ empty_bugNoCompensation_udp_empty_lost = 0
+/\ empty_bugNoCompensation_udp_empty_live = TRUE
+/\ empty_bugNoCompensation_udp_empty_ring = <<>>
+/\ empty_bugNoCompensation_udp_empty_seen = 0
+/\ empty_bugNoCompensation_udp_empty_owed = 0
+/\ empty_bugNoCompensation_udp_empty_ep = 1
+/\ empty_bugNoCompensation_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 3: <empty_bugNoCompensation_udp_empty_Empty line 98, col 3 to line 120, col 44 of module empty_bugNoCompensation>
+/\ empty_bugNoCompensation_udp_empty_sent = 0
+/\ empty_bugNoCompensation_udp_empty_lost = 1
+/\ empty_bugNoCompensation_udp_empty_live = TRUE
+/\ empty_bugNoCompensation_udp_empty_ring = <<>>
+/\ empty_bugNoCompensation_udp_empty_seen = 0
+/\ empty_bugNoCompensation_udp_empty_owed = 1
+/\ empty_bugNoCompensation_udp_empty_ep = 1
+/\ empty_bugNoCompensation_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 4: <empty_bugNoCompensation_udp_empty_Empty line 98, col 3 to line 120, col 44 of module empty_bugNoCompensation>
+/\ empty_bugNoCompensation_udp_empty_sent = 0
+/\ empty_bugNoCompensation_udp_empty_lost = 1
+/\ empty_bugNoCompensation_udp_empty_live = TRUE
+/\ empty_bugNoCompensation_udp_empty_ring = <<1>>
+/\ empty_bugNoCompensation_udp_empty_seen = 0
+/\ empty_bugNoCompensation_udp_empty_owed = 2
+/\ empty_bugNoCompensation_udp_empty_ep = 1
+/\ empty_bugNoCompensation_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 5: <empty_bugNoCompensation_udp_empty_OwnNotice line 221, col 3 to line 266, col 47 of module empty_bugNoCompensation>
+/\ empty_bugNoCompensation_udp_empty_sent = 1
+/\ empty_bugNoCompensation_udp_empty_lost = 1
+/\ empty_bugNoCompensation_udp_empty_live = TRUE
+/\ empty_bugNoCompensation_udp_empty_ring = <<>>
+/\ empty_bugNoCompensation_udp_empty_seen = 0
+/\ empty_bugNoCompensation_udp_empty_owed = 2
+/\ empty_bugNoCompensation_udp_empty_ep = 1
+/\ empty_bugNoCompensation_udp_empty_g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 6: Stuttering

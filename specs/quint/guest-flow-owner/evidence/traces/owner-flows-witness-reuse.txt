@@ -17,15 +17,18 @@ State 1
   toHostPaired = Set()
   toHostRefused = Set()
   toGuestAbort = Set()
+  toHostAbort = Set()
   resurrected = false
   abortDiscarded = Set()
   phantom = false
+  dl = { adm: Set(), earlyDl: false, lateReply: false, res: Map(1 -> "none"), tout: Set() }
   drvLive = false
   bclaim = 0
   bcn = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 0, st: "none" })
   readyCross = false
   bHeldByOther = false
-  hc = { ackDue: Map("g" -> false, "h" -> false), acked: Map("g" -> false, "h" -> false), ann: Map("g" -> "none", "h" -> "none"), ch: Map("g" -> List(), "h" -> List()), ctlDown: false, dead: Map("g" -> false, "h" -> false), earlyShut: false, far: Map("g" -> "none", "h" -> "none"), farHc: Map("g" -> false, "h" -> false), faulted: false, held: Map("g" -> false, "h" -> false), loss: Map("g" -> false, "h" -> false), open: Map("g" -> true, "h" -> true), opener: "g", outEof: Map("g" -> false, "h" -> false), outShut: Map("g" -> false, "h" -> false), paired: Map("g" -> false, "h" -> false), vEnd: Map("g" -> false, "h" -> false), vEndSent: Map("g" -> false, "h" -> false) }
+  act = "none"
+  badAct = false
 
 State 2
   alloc = "Provisioned"
@@ -57,3 +60,4 @@ State 9
 
 State 10
   alloc = "Active"
+  act = "Activated"

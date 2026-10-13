@@ -1,462 +1,318 @@
 // -*- mode: Bluespec; -*-
 /**
- * Guest-flow owner (netns-density-295) — module C: CID lease with the atomic host-kernel claim
- * (D16-CLAIM), next-fit assignment, the claim's handoff to the VMM, release, `serve` crash with
- * surviving VMMs (the only CID holders outside the pool's leases: K-C2 under APPLIANCE / A-31), and
- * restart.
+ * Guest-flow owner (netns-density-295) — the CID lease (CID-NOCLAIM, RESET-EXIT, NO-SURVIVE).
  *
- * Design artifact and DISTILL oracle. Models the design text (revision 9), not an implementation.
+ * Design artifact and DISTILL oracle. Models the design text, not an implementation.
  *
- * Source of truth: ADR-0170 (D16-CLAIM), ADR-0156 (D16: CID derived from the lease offset; next-fit
- * M-9, in-memory cursor), feature-delta.md § "vsock Attachment Replacement DESIGN": § Core vocabulary
- * (`GuestCidClaim`, `ClaimedGuestCid`, `GuestTransportAssignment::take_claim`,
- * `GuestAddressPool::assign` / `release` with the claim, `GuestCidsHeldElsewhere`, `GuestCidClaim`
- * error), § VMM backend contract (`Vmm::create(config, vsock: ClaimedGuestCid)`: Err drops the
- * claim; Ok = the VMM holds the device, the adapter holds no copy), § Composition.
+ * Source of truth: ADR-0156 (D16: CID = GUEST_CID_BASE + lease offset; next-fit, in-memory cursor),
+ * ADR-0146 (the VMM opens its own /dev/vhost-vsock device and is the only holder of its fd), ADR-0182
+ * (a guest reset ends the VMM), ADR-0159 as narrowed (VMs do not survive a `serve` restart: boot
+ * reclamation kills every VM the new process does not supervise before any `assign`), the release-last
+ * ordering of ADR-0133 (the lease is released only after the VMM has exited).
  *
- *   D16-CLAIM  `assign` walks the free offsets in next-fit order under the pool lock; for each it
- *          claims GUEST_CID_BASE+offset on the host kernel (the kernel's CID holder table is the
- *          arbiter). Ok → the lease is Admitted with that offset together with its claim (the lease
- *          exists only with its claim). InUse → the next free offset; nothing is remembered. Any
- *          other claim error → a typed error, no state change, no further offset tried. Every free
- *          offset InUse, each at the moment its own claim was tried (not necessarily all at once) →
- *          GuestCidsHeldElsewhere (no state change). No free offset → PoolExhausted.
- *          The move-only claim travels to the VMM (`take_claim` once; `create` Ok: the VMM holds
- *          it, `serve` holds no copy; `create` Err: dropped = released). An untaken claim is
- *          released at `pool.release`; a handed-off claim is released at the VMM's exit.
+ * There is no host-kernel CID claim: within one `serve` process, lease uniqueness is CID uniqueness. The
+ * only other CID holders are VMMs of the previous process, until boot reclamation has killed them.
  *
  * Abstraction:
  *   - OFFS: lease offsets (CID = GUEST_CID_BASE + offset). ALLOCS: workloads placed on the node; a
- *     workload whose launch ended before READY is retried by placement (`retry`), a stopped one is
- *     done and may be redeployed.
- *   - `kern` is the host kernel's CID holder table: 0 free, -2 a VMM that survived a `serve` crash
- *     (its process still holds its device), a > 0 the claim of allocation a (in the lease's
- *     take-once slot, in transit to `create`, or held by a's VMM). No other software takes a CID on
- *     the appliance (A-31): surviving VMMs are the only holders outside the pool's leases.
- *   - The walk of `assign` is stepwise (one claim ioctl per step): surviving VMMs exit between the
- *     steps; other pool operations do not (the pool lock).
- *   - A `serve` crash closes every claim `serve` holds in the slot — the kernel frees those CIDs —
- *     while VMMs that hold their device survive (-2) until reclaimed or dead (`OrphanExit`). A claim
- *     in transit to `create` survives iff the VMM process had already inherited the device (chosen
- *     nondeterministically). The pool, its cursor and the walk are in memory: after the restart every
- *     placed workload is placed again. Some VMMs may survive from before the model's first boot
- *     (SURVIVORS0).
- *   - In the two hazards where the VMM claims the CID itself at device creation (checkThenClaim,
- *     releaseBeforeVmm), a VMM launching at the crash survives as a pending creator (`pend`) that
- *     claims the CID when it creates its device after the restart (`SurvivorCreate`).
- *   - OFF names the design rules switched off (teeth; instances in hazard/):
- *       checkThenClaim   assign only checks the CID is free; the VMM claims it at create
- *       releaseBeforeVmm serve closes its claim when the driver takes it, before the VMM holds it
- *       rememberInUse    assign remembers offsets that returned InUse and skips them later
+ *     workload whose launch ended is retried by placement (`retry`), a stopped one is done and may be
+ *     redeployed.
+ *   - `dev` is the kernel's holder table of the vhost-vsock device per CID: 0 free, a > 0 allocation a's
+ *     VMM (the VMM is the only holder), -2 a VMM of the previous process (an orphan), still running until
+ *     reclaimed. A VMM that finds its CID's device held exits before READY (the device open is refused).
+ *   - `assign` walks the free offsets in next-fit order under the pool lock (one atomic step) and is
+ *     enabled only after boot reclamation completed (`reclaimed`).
+ *   - A `serve` crash empties the pool, its cursor and the in-memory placement; every running VMM
+ *     survives as an orphan (-2) until boot reclamation kills it, one orphan per step. An orphan may
+ *     also exit by itself before reclamation reaches it (a guest reset ends the VMM).
+ *   - RESET-EXIT: a guest reset (PID-1 crash, triple fault) ends the VMM process, so a CID's
+ *     incarnation is one VMM process; the VMM's exit releases its device and the lease retires.
+ *
+ * OFF names the design rules switched off (teeth; instances in hazard/):
+ *   releaseBeforeVmm    the lease is released while the VMM still holds the device
+ *   assignBeforeReclaim assign runs before boot reclamation completed
+ *   resetReboots        a guest reset reboots the guest inside the same VMM (no exit)
+ *   reclaimNeverCompletes boot reclamation kills the orphans but never records that it completed, so `assign` stays disabled
+ *   assignSplit         assign is not one step under the pool lock: the next-fit free offset is chosen in one step
+ *                       and taken in a later one, without re-checking it is still free
  *
  * ASSUMPTIONS:
- *   K-C1  A duplicate CID is refused at device creation and the first holder is unaffected; a CID
- *         is free right after the holder's last reference closes ........................ P-16
- *   K-C2  The only CID holders outside the pool's leases are Overdrive VMMs that survived a `serve`
- *         crash; they exit at any time (modelled: Boot, OrphanExit) ..... environment; the absence of
- *         other holders is A-31 (appliance image, ADR-0068)
- *   K-C3  A claim on an unowned instance is exclusive while any reference to its file is open,
- *         survives the handoff to the VMM, and is released at the last close ................ V-25
+ *   K-C1  A duplicate CID is refused at device creation and the first holder is unaffected; a CID is free
+ *         right after the holder's last reference closes .............................. P-16
+ *   K-C4  The VMM is the only holder of its vhost-vsock fd; no Overdrive process keeps a copy past VMM
+ *         exit, so the device is released at VMM exit ................................ V-30 Q2c, Q2d
+ *   K-C5  Boot reclamation kills every VMM the new process does not supervise before any `assign`, and a
+ *         reclaimed VMM's device is released before its cgroup can be removed. Source: an exiting task drops
+ *         its files (kernel/exit.c:971 @ v7.0) and runs its task work (kernel/exit.c:976 @ v7.0), where the
+ *         final fput of a user task is deferred (fs/file_table.c:528-530 @ v7.0) and reaches
+ *         vhost_vsock_dev_release; cgroup_rmdir waits in cgroup_drain_dying until every task has passed
+ *         cgroup_task_dead (kernel/cgroup/cgroup.c:6309 @ v7.0). OPEN: the Tier-3 serve-restart
+ *         reclamation scenario V-RECLAIM; not contract-shaping
+ *   K-C6  A guest reset ends the VMM in the pinned fork ....................... ADR-0182 (fork validation item)
  */
 module cid_lease {
   const OFF: Set[str]
-  const CFG: str   // "ok" | "three" | "live" | "conf_ok" | "conf_live"
+  const CFG: str   // "ok" | "live" | "conf_ok"
 
-  // The design instances use three offsets for tractability. No pool the production constructor builds
-  // has three: a /29 has five usable offsets (after the network address, the gateway and the broadcast
-  // address) and a /30 has one. The conformance instances (S-2) use the five offsets of the /29 test
-  // pool, otherwise as `ok` / `live`.
-  val CONF: bool = CFG == "conf_ok" or CFG == "conf_live"
-  val LIVE: bool = CFG == "live" or CFG == "conf_live"
+  val CONF: bool = CFG == "conf_ok"
+  val LIVE: bool = CFG == "live"
   val OFFS: Set[int] = if (CONF) Set(0, 1, 2, 3, 4) else Set(0, 1, 2)
   val N: int = if (CONF) 5 else 3
-  val ALLOCS: Set[int] = if (CFG == "three") Set(1, 2, 3) else Set(1, 2)
-  val SURVIVORS0: Set[int] = Set(0)                  // offsets a VMM from an earlier run holds at start
-  val BOOTS: int = if (LIVE) 1 else -1      // serve crash + restart (-1: unbounded)
-  val PRE_READY_EXITS: int = if (LIVE) 2 else 1
-  val CLAIM_ERRORS: int = if (CFG == "three") 0 else 1
-  val BUG_CHECK_THEN_CLAIM: bool = OFF.contains("checkThenClaim")
+  val ALLOCS: Set[int] = Set(1, 2)
+  val BOOTS: int = if (LIVE) 1 else -1             // serve crash + restart (-1: unbounded)
   val BUG_RELEASE_BEFORE_VMM: bool = OFF.contains("releaseBeforeVmm")
-  val BUG_REMEMBER_INUSE: bool = OFF.contains("rememberInUse")
+  val BUG_ASSIGN_BEFORE_RECLAIM: bool = OFF.contains("assignBeforeReclaim")
+  val BUG_RESET_REBOOTS: bool = OFF.contains("resetReboots")
+  val BUG_ASSIGN_SPLIT: bool = OFF.contains("assignSplit")
+  val BUG_RECLAIM_NEVER_COMPLETES: bool = OFF.contains("reclaimNeverCompletes")
 
-  type A = { st: str, off: int, loc: str, retry: bool, remembered: Set[int] }
+  // st: wait | picked (assignSplit only: an offset chosen, not yet taken) | leased (lease, VMM not launched) | running (the VMM holds the device) | retiring (lease Retiring) | done
+  type A = { st: str, off: int, retry: bool }
   type Ghost = {
-    clash: bool,            // a VMM create found its CID held by another holder
-    skipFree: bool,         // an offset was skipped while its CID was free in the kernel
-    skipped: bool,          // an InUse skip happened (witness)
-    skipOrphan: bool,       // an InUse skip on a CID held by a VMM that survived a serve crash (witness)
-    refusedHeld: bool,      // assign refused GuestCidsHeldElsewhere (witness)
-    refusedClaimable: bool, // ... at a moment when some free offset's CID was unheld (stepwise walk)
-    claimErr: bool,         // a non-InUse claim error ended an assign (witness)
-    refusedUnasked: bool,   // GuestCidsHeldElsewhere returned with a free offset not claimed in this call
+    clash: bool,       // a VMM found its CID's device held by another holder
+    rebooted: bool,    // a guest reset left the VMM alive
+    reclaimed: bool,   // an orphan was reclaimed (witness)
   }
 
-  var kern: int -> int
+  var dev: int -> int
   var lease: int -> int          // offset -> holding allocation (0 = free)
   var cursor: int
-  var walker: int                // allocation whose assign walk holds the pool lock (0 = none)
-  var todo: Set[int]             // free offsets the walk has not tried yet
-  // st: wait | admitted (lease + claim in the slot) | launching (claim taken, create running) |
-  //     running (VMM holds the device) | retiring (lease Retiring) | done
-  // loc: none | slot | taken | vmm — where the claim's file reference is
   var al: int -> A
-  var pend: Set[int]             // hazards only: offsets a surviving VMM will claim at device creation
+  var up: bool                   // the serve process is up
+  var reclaimed: bool            // boot reclamation of this process completed
   var bootLeft: int
-  var exitsLeft: int
-  var errsLeft: int
   var g: Ghost
 
-  val g0: Ghost = { clash: false, skipFree: false, skipped: false, skipOrphan: false,
-                    refusedHeld: false, refusedClaimable: false, claimErr: false,
-                    refusedUnasked: false }
-  // (S-2) the comparison points of a conformance driver: no `assign` walk is in progress (the walk is
-  // one `pool.assign` call under the pool lock; `walker` and `todo` are model-internal to it)
-  val walkIdle: bool = walker == 0
+  val g0: Ghost = { clash: false, rebooted: false, reclaimed: false }
   def isFree(o: int): bool = lease.get(o) == 0
   val freeOffs: Set[int] = OFFS.filter(o => isFree(o))
-  val claimableFree: bool = OFFS.exists(o => isFree(o) and kern.get(o) == 0)
   def dist(o: int): int = (o - cursor + N) % N
   def nextFitIn(S: Set[int]): int = S.fold(-1, (best, o) =>
     if (best == -1) o else if (dist(o) < dist(best)) o else best)
-  def holdsClaim(st: str): bool = st.in(Set("admitted", "launching", "running"))
+  def leased(a: int): bool = al.get(a).st.in(Set("leased", "running", "retiring"))
+  val orphans: Set[int] = OFFS.filter(o => dev.get(o) == -2)
+  def devAt(o: int): int = if (OFFS.contains(o)) dev.get(o) else 0
 
-  action keepCounters = all { pend' = pend, bootLeft' = bootLeft, exitsLeft' = exitsLeft, errsLeft' = errsLeft }
+  action keepAl = all { al' = al }
 
   action init = all {
-    kern' = OFFS.mapBy(o => if (SURVIVORS0.contains(o)) -2 else 0),
-    lease' = OFFS.mapBy(o => 0),
-    cursor' = 0, walker' = 0, todo' = Set(),
-    al' = ALLOCS.mapBy(a => { st: "wait", off: -1, loc: "none", retry: false, remembered: Set() }),
-    pend' = Set(), bootLeft' = BOOTS, exitsLeft' = PRE_READY_EXITS, errsLeft' = CLAIM_ERRORS,
-    g' = g0,
+    dev' = OFFS.mapBy(o => 0), lease' = OFFS.mapBy(o => 0), cursor' = 0,
+    al' = ALLOCS.mapBy(a => { st: "wait", off: -1, retry: false }),
+    up' = true, reclaimed' = true, bootLeft' = BOOTS, g' = g0,
   }
 
   // ------------------------------------------------------------------ assign (pool lock)
-  // Start the walk over the free offsets (PoolExhausted when none is free: disabled, no change).
-  action AssignBegin(a: int): bool = all {
-    walker == 0, al.get(a).st == "wait", freeOffs != Set(),
-    val rem = al.get(a).remembered
-    val cand = if (BUG_REMEMBER_INUSE) freeOffs.exclude(rem) else freeOffs
-    val skipF = BUG_REMEMBER_INUSE and freeOffs.exists(o => rem.contains(o) and kern.get(o) == 0)
-    if (cand == Set()) all {
-      // bug only: every free offset remembered — refused without asking the kernel
-      walker' = 0, todo' = Set(),
-      g' = { ...g, skipFree: g.skipFree or skipF, refusedHeld: true,
-             refusedClaimable: g.refusedClaimable or claimableFree, refusedUnasked: true },
-    } else all {
-      walker' = a, todo' = cand, g' = { ...g, skipFree: g.skipFree or skipF },
-    },
-    kern' = kern, lease' = lease, cursor' = cursor, al' = al, keepCounters,
-  }
-  // One claim ioctl on the next free offset in next-fit order.
-  action AssignTry = all {
-    walker != 0, todo != Set(),
-    val a = walker
-    val o = nextFitIn(todo)
-    val x = al.get(a)
-    if (kern.get(o) == 0) all {
-      // claimed (BUG_CHECK_THEN_CLAIM: only checked; nothing held)
-      kern' = if (BUG_CHECK_THEN_CLAIM) kern else kern.set(o, a),
+  // next-fit over the free offsets; after boot reclamation only
+  action Assign(a: int): bool = all {
+    not(BUG_ASSIGN_SPLIT),
+    up, reclaimed or BUG_ASSIGN_BEFORE_RECLAIM, al.get(a).st == "wait", freeOffs != Set(),
+    val o = nextFitIn(freeOffs)
+    all {
       lease' = lease.set(o, a), cursor' = (o + 1) % N,
-      al' = al.set(a, { ...x, st: "admitted", off: o, loc: if (BUG_CHECK_THEN_CLAIM) "none" else "slot" }),
-      walker' = 0, todo' = Set(), g' = g,
-    } else all {
-      // InUse: skip this offset for this call only (BUG_REMEMBER_INUSE: remember it)
-      val rest = todo.exclude(Set(o))
-      all {
-        kern' = kern, lease' = lease, cursor' = cursor,
-        al' = if (BUG_REMEMBER_INUSE) al.set(a, { ...x, remembered: x.remembered.union(Set(o)) }) else al,
-        walker' = if (rest == Set()) 0 else walker,
-        todo' = rest,
-        g' = { ...g, skipped: true, skipOrphan: g.skipOrphan or kern.get(o) == -2,
-               refusedHeld: g.refusedHeld or rest == Set(),
-               // the refusal is decided per ioctl: an offset tried earlier may be unheld by now
-               refusedClaimable: g.refusedClaimable or (rest == Set() and claimableFree) },
-      }
+      al' = al.set(a, { st: "leased", off: o, retry: false }),
     },
-    keepCounters,
+    dev' = dev, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
   }
-  // A claim error other than InUse: typed error, no state change, no further offset tried.
-  action AssignClaimErr = all {
-    walker != 0, errsLeft > 0,
-    walker' = 0, todo' = Set(), errsLeft' = errsLeft - 1, g' = { ...g, claimErr: true },
-    kern' = kern, lease' = lease, cursor' = cursor, al' = al,
-    pend' = pend, bootLeft' = bootLeft, exitsLeft' = exitsLeft,
+
+  // assignSplit: the walk picks the next-fit free offset in one step ...
+  action AssignPick(a: int): bool = all {
+    BUG_ASSIGN_SPLIT, up, reclaimed, al.get(a).st == "wait", freeOffs != Set(),
+    al' = al.set(a, { st: "picked", off: nextFitIn(freeOffs), retry: false }),
+    lease' = lease, cursor' = cursor, dev' = dev, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
+  }
+  // ... and takes it in a later step, without re-checking that it is still free
+  action AssignTake(a: int): bool = all {
+    BUG_ASSIGN_SPLIT, up, al.get(a).st == "picked",
+    val o = al.get(a).off
+    all { lease' = lease.set(o, a), cursor' = (o + 1) % N, al' = al.set(a, { ...al.get(a), st: "leased" }) },
+    dev' = dev, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
   }
 
   // ------------------------------------------------------------------ launch (VM driver, VMM)
-  // spec.transport.take_claim(): the claim leaves the slot (once).
-  action LaunchBegin(a: int): bool = all {
-    al.get(a).st == "admitted",
+  // the VMM opens /dev/vhost-vsock for the leased CID itself; a held device refuses the open and the VMM exits
+  // before READY (the lease retires and placement retries)
+  action Launch(a: int): bool = all {
+    up, al.get(a).st == "leased",
     val x = al.get(a)
-    all {
-      al' = al.set(a, { ...x, st: "launching", loc: "taken" }),
-      // BUG_RELEASE_BEFORE_VMM: serve closes its reference before the VMM holds the file
-      kern' = if (BUG_RELEASE_BEFORE_VMM and kern.get(x.off) == a) kern.set(x.off, 0) else kern,
-    },
-    lease' = lease, cursor' = cursor, walker' = walker, todo' = todo, keepCounters, g' = g,
-  }
-  // Vmm::create Ok: the VMM holds the claimed device; serve holds no copy. With either bug the VMM
-  // has no claim of its own to inherit and claims the CID itself at device creation (ADR-0146).
-  action CreateOk(a: int): bool = all {
-    al.get(a).st == "launching",
-    val x = al.get(a)
-    val vmmClaims = BUG_CHECK_THEN_CLAIM or BUG_RELEASE_BEFORE_VMM
-    if (not(vmmClaims) or kern.get(x.off) == 0) all {
-      kern' = kern.set(x.off, a),
-      al' = al.set(a, { ...x, st: "running", loc: "vmm" }),
-      g' = g,
+    if (dev.get(x.off) == 0) all {
+      dev' = dev.set(x.off, a), al' = al.set(a, { ...x, st: "running" }), g' = g,
     } else all {
-      // the CID is held elsewhere: the VMM exits before READY on the clash
-      kern' = kern,
-      al' = al.set(a, { ...x, st: "retiring", loc: "none", retry: true }),
-      g' = { ...g, clash: true },
+      dev' = dev, al' = al.set(a, { ...x, st: "retiring", retry: true }), g' = { ...g, clash: true },
     },
-    lease' = lease, cursor' = cursor, walker' = walker, todo' = todo, keepCounters,
+    lease' = lease, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
   }
-  def dropClaim(k: int -> int, o: int, a: int): int -> int = if (k.get(o) == a) k.set(o, 0) else k
-  // Vmm::create Err (any cause): the claim is dropped (released); the lease retires.
-  action CreateErr(a: int): bool = all {
-    al.get(a).st == "launching", exitsLeft > 0,
+  // the VMM exits (stop, a crash, or a guest reset: RESET-EXIT): the last close of its device frees the CID
+  action vmmExit(a: int, retry: bool): bool = all {
     val x = al.get(a)
     all {
-      kern' = dropClaim(kern, x.off, a),
-      al' = al.set(a, { ...x, st: "retiring", loc: "none", retry: true }),
+      dev' = if (dev.get(x.off) == a) dev.set(x.off, 0) else dev,
+      al' = al.set(a, { ...x, st: "retiring", retry: retry }),
     },
-    exitsLeft' = exitsLeft - 1, pend' = pend, bootLeft' = bootLeft, errsLeft' = errsLeft,
-    lease' = lease, cursor' = cursor, walker' = walker, todo' = todo, g' = g,
+    lease' = lease, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
   }
-  // the VMM exits before READY (any cause): its device closes, the kernel frees the CID
-  action VmmFail(a: int): bool = all {
-    al.get(a).st == "running", exitsLeft > 0,
-    val x = al.get(a)
-    all {
-      kern' = dropClaim(kern, x.off, a),
-      al' = al.set(a, { ...x, st: "retiring", loc: "none", retry: true }),
-    },
-    exitsLeft' = exitsLeft - 1, pend' = pend, bootLeft' = bootLeft, errsLeft' = errsLeft,
-    lease' = lease, cursor' = cursor, walker' = walker, todo' = todo, g' = g,
+  action Stop(a: int): bool = all { up, al.get(a).st == "running", vmmExit(a, false) }
+  // the VMM exits before READY or later by itself (a crash)
+  action VmmCrash(a: int): bool = all { up, al.get(a).st == "running", vmmExit(a, true) }
+  // RESET-EXIT: a guest reset ends the VMM. resetReboots: the guest reboots inside the same VMM; nothing exits
+  // and the restart budget is never charged
+  action GuestReset(a: int): bool = all {
+    up, al.get(a).st == "running",
+    if (BUG_RESET_REBOOTS) all {
+      g' = { ...g, rebooted: true },
+      dev' = dev, al' = al, lease' = lease, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
+    } else vmmExit(a, true),
   }
-  // stop: a running VMM exits; an admitted (unlaunched) allocation keeps its claim in the slot
-  // until pool.release
-  action Stop(a: int): bool = all {
-    al.get(a).st.in(Set("running", "admitted")),
-    val x = al.get(a)
-    all {
-      kern' = if (x.st == "running") dropClaim(kern, x.off, a) else kern,
-      al' = al.set(a, { ...x, st: "retiring", loc: if (x.st == "running") "none" else x.loc, retry: false }),
-    },
-    lease' = lease, cursor' = cursor, walker' = walker, todo' = todo, keepCounters, g' = g,
-  }
-  // pool.release (after teardown; pool lock): an untaken claim is dropped here; the offset is freed
+  // pool.release (after teardown; pool lock): only after the VMM exited; the offset is freed.
+  // releaseBeforeVmm: the lease is released while the VMM still holds the device
   action Release(a: int): bool = all {
-    walker == 0, al.get(a).st == "retiring",
+    up, al.get(a).st == "retiring" or (BUG_RELEASE_BEFORE_VMM and al.get(a).st == "running"),
+    devAt(al.get(a).off) != a or BUG_RELEASE_BEFORE_VMM,
     val x = al.get(a)
     all {
-      kern' = if (x.loc == "slot") dropClaim(kern, x.off, a) else kern,
       lease' = lease.set(x.off, 0),
-      al' = al.set(a, { st: if (x.retry) "wait" else "done", off: -1, loc: "none", retry: false,
-                        remembered: if (x.retry) x.remembered else Set() }),
+      al' = al.set(a, { st: if (x.st == "running" or x.retry) "wait" else "done", off: -1, retry: false }),
     },
-    cursor' = cursor, walker' = walker, todo' = todo, keepCounters, g' = g,
+    dev' = dev, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
   }
   action Redeploy(a: int): bool = all {
-    al.get(a).st == "done",
-    al' = al.set(a, { st: "wait", off: -1, loc: "none", retry: false, remembered: Set() }),
-    kern' = kern, lease' = lease, cursor' = cursor, walker' = walker, todo' = todo, keepCounters, g' = g,
+    up, al.get(a).st == "done",
+    al' = al.set(a, { st: "wait", off: -1, retry: false }),
+    dev' = dev, lease' = lease, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
   }
 
-  // ------------------------------------------------------------------ environment
-  // a VMM that survived a serve crash is reclaimed or dies: its device closes
+  // ------------------------------------------------------------------ environment: serve crash, restart, reclamation
+  // serve crashes: the pool, its cursor and the placement are lost; every running VMM survives as an orphan
+  // holding its device; allocations placed but not launched vanish
+  action Crash = all {
+    up, bootLeft != 0,
+    up' = false, reclaimed' = false,
+    dev' = OFFS.mapBy(o => if (dev.get(o) > 0) -2 else dev.get(o)),
+    lease' = OFFS.mapBy(o => 0), cursor' = 0,
+    al' = al.keys().mapBy(a => if (al.get(a).st == "done") al.get(a) else { st: "wait", off: -1, retry: false }),
+    bootLeft' = if (bootLeft < 0) bootLeft else bootLeft - 1, g' = g,
+  }
+  // the new process starts; boot reclamation is still to run
+  action Restart = all {
+    not(up),
+    up' = true, reclaimed' = (orphans == Set()),
+    dev' = dev, lease' = lease, cursor' = cursor, al' = al, bootLeft' = bootLeft, g' = g,
+  }
+  // boot reclamation kills one orphan VMM it does not supervise; its device is released
+  action Reclaim(o: int): bool = all {
+    up, not(reclaimed), dev.get(o) == -2,
+    dev' = dev.set(o, 0),
+    reclaimed' = ((orphans.exclude(Set(o)) == Set()) and not(BUG_RECLAIM_NEVER_COMPLETES)),
+    lease' = lease, cursor' = cursor, al' = al, up' = up, bootLeft' = bootLeft, g' = { ...g, reclaimed: true },
+  }
+  // an orphan exits by itself before it is reclaimed (a guest reset ends the VMM)
   action OrphanExit(o: int): bool = all {
-    kern.get(o) == -2,
-    kern' = kern.set(o, 0),
-    lease' = lease, cursor' = cursor, walker' = walker, todo' = todo, al' = al, keepCounters, g' = g,
-  }
-  // a hazard's surviving VMM creates its device after the restart, claiming its CID itself (a clash
-  // makes it exit: nothing changes)
-  action SurvivorCreate(o: int): bool = all {
-    pend.contains(o),
-    kern' = if (kern.get(o) == 0) kern.set(o, -2) else kern,
-    pend' = pend.exclude(Set(o)),
-    lease' = lease, cursor' = cursor, walker' = walker, todo' = todo, al' = al,
-    bootLeft' = bootLeft, exitsLeft' = exitsLeft, errsLeft' = errsLeft, g' = g,
-  }
-  // serve crash + restart: serve's claims in the slot close; VMM-held devices survive; a VMM being
-  // created survives iff it had inherited the device (S). Hazards: a VMM being created that has no
-  // claim of its own to inherit survives as a pending creator.
-  def launchingOff(o: int): bool = ALLOCS.exists(a => al.get(a).st == "launching" and al.get(a).off == o)
-  action Boot = {
-    nondet S = OFFS.powerset().oneOf()
-    BootWith(S)
-  }
-  action BootWith(S: Set[int]): bool = {
-    all {
-      bootLeft != 0,
-      kern' = OFFS.mapBy(o =>
-        val k = kern.get(o)
-        if (k > 0) (if (al.get(k).loc == "vmm" or (al.get(k).loc == "taken" and S.contains(o))) -2 else 0)
-        else k),
-      pend' = pend.union(OFFS.filter(o => S.contains(o) and launchingOff(o) and kern.get(o) == 0)),
-      lease' = OFFS.mapBy(o => 0), cursor' = 0, walker' = 0, todo' = Set(),
-      al' = al.keys().mapBy(a =>
-        val x = al.get(a)
-        if (x.st == "done") x else { st: "wait", off: -1, loc: "none", retry: false, remembered: Set() }),
-      bootLeft' = if (bootLeft < 0) bootLeft else bootLeft - 1,
-      exitsLeft' = exitsLeft, errsLeft' = errsLeft, g' = g,
-    }
+    dev.get(o) == -2,
+    dev' = dev.set(o, 0),
+    reclaimed' = (reclaimed or (up and orphans.exclude(Set(o)) == Set())),
+    lease' = lease, cursor' = cursor, al' = al, up' = up, bootLeft' = bootLeft, g' = g,
   }
 
-  action OwnerStep = {
-    nondet a = ALLOCS.oneOf()
-    any { AssignBegin(a), AssignTry, LaunchBegin(a), CreateOk(a), Release(a) }
-  }
   action step = {
     nondet a = ALLOCS.oneOf()
     nondet o = OFFS.oneOf()
     any {
-      AssignBegin(a), AssignTry, AssignClaimErr, LaunchBegin(a), CreateOk(a), CreateErr(a),
-      VmmFail(a), Stop(a), Release(a), Redeploy(a), OrphanExit(o), SurvivorCreate(o), Boot,
+      Assign(a), AssignPick(a), AssignTake(a), Launch(a), Stop(a), VmmCrash(a), GuestReset(a), Release(a), Redeploy(a),
+      Crash, Restart, Reclaim(o), OrphanExit(o),
     }
   }
 
   // ------------------------------------------------------------------ invariants
-  // Leased CIDs are unique among allocations holding a lease.
-  def leased(a: int): bool = al.get(a).st.in(Set("admitted", "launching", "running", "retiring"))
+  // Leased CIDs are unique among allocations holding a lease (lease uniqueness is CID uniqueness).
   val CidUnique: bool = ALLOCS.forall(a => ALLOCS.forall(b =>
     (a != b and leased(a) and leased(b)) implies al.get(a).off != al.get(b).off))
-  // (5, D16-CLAIM) every Admitted lease's CID is held by the kernel for that lease's claim (in the
-  // slot, in transit, or in its VMM) — never free, never another holder
-  val ClaimHeld: bool = ALLOCS.forall(a => holdsClaim(al.get(a).st) implies kern.get(al.get(a).off) == a)
-  // (5) no launch fails on a CID clash — including across serve crash and restart
+  // no VMM launch fails on a CID clash — including across serve crash and restart
   val NoLaunchClash: bool = not(g.clash)
-  // (5) InUse is the only skip, and it is the kernel's answer at that step: no offset is skipped
-  // while its CID is unheld
-  val NoSkipWhileClaimable: bool = not(g.skipFree)
-  // (5) a kernel claim of Overdrive's exists only for its lease: no leaked claim
-  val NoLeakedClaim: bool = OFFS.forall(o => kern.get(o) > 0 implies (
-    val x = al.get(kern.get(o))
-    x.off == o and (holdsClaim(x.st) or (x.st == "retiring" and x.loc == "slot"))))
-  // (5, D16-CLAIM wording of revision 9 item 5) GuestCidsHeldElsewhere means every free offset's claim
-  // returned InUse during this call — each CID held by another holder at the moment its own claim was
-  // tried (NoSkipWhileClaimable), not necessarily all at once (RefusalSnapshotConsistent is violated)
-  val RefusalEachClaimInUse: bool = not(g.refusedUnasked)
-  val Safety: bool = and {
-    CidUnique, ClaimHeld, NoLaunchClash, NoSkipWhileClaimable, NoLeakedClaim, RefusalEachClaimInUse,
-  }
+  // the lease outlives the VMM: a running VMM's offset stays leased until the VMM has exited (release-last)
+  val LeaseOutlivesVmm: bool = OFFS.forall(o => dev.get(o) > 0 implies lease.get(o) == dev.get(o))
+  // assign runs only after boot reclamation: no lease is on an offset a previous process's VMM still holds
+  val AssignAfterReclaim: bool = OFFS.forall(o => lease.get(o) != 0 implies dev.get(o) != -2)
+  // RESET-EXIT: a guest reset never leaves the VMM alive
+  val GuestResetEndsVmm: bool = not(g.rebooted)
+  val Safety: bool = and { CidUnique, NoLaunchClash, LeaseOutlivesVmm, AssignAfterReclaim, GuestResetEndsVmm }
 
   // ------------------------------------------------------------------ named runs (critical scenarios)
-  // Deterministic scenarios on the design instance `lease_ok` (offsets 0-2, workloads 1 and 2, a
-  // surviving VMM on offset 0 from before the first boot, one claim error, one pre-READY exit),
-  // each ending in an `expect` of its outcome with `Safety` checked along the way. `BootWith(S)` is
-  // `Boot` with the set of in-transit claims whose VMM had inherited the device chosen by the run.
+  // Deterministic scenarios on the design instance `lease_ok` (offsets 0-2, workloads 1 and 2), each ending
+  // in an `expect` of its outcome with `Safety` checked along the way.
   def st(a: int): str = al.get(a).st
-  // D16-CLAIM happy path: next-fit assign skips the surviving VMM's CID (InUse, nothing remembered),
-  // claims the next free offset, hands the claim to the VMM at create, and a stop releases it
-  run AssignSkipsSurvivorClaimsLaunchesAndReleases = init
-    .then(AssignBegin(1)).then(AssignTry)
-    .expect(Safety and walker == 1 and g.skipOrphan and st(1) == "wait")
-    .then(AssignTry)
-    .expect(Safety and walker == 0 and st(1) == "admitted" and al.get(1).off == 1 and kern.get(1) == 1 and al.get(1).loc == "slot" and cursor == 2)
-    .then(LaunchBegin(1)).expect(Safety and st(1) == "launching" and al.get(1).loc == "taken" and kern.get(1) == 1)
-    .then(CreateOk(1)).expect(Safety and st(1) == "running" and al.get(1).loc == "vmm" and kern.get(1) == 1)
-    .then(Stop(1)).expect(Safety and st(1) == "retiring" and kern.get(1) == 0 and lease.get(1) == 1)
-    .then(Release(1)).expect(Safety and st(1) == "done" and lease.get(1) == 0 and kern.get(1) == 0)
-    .then(Redeploy(1)).expect(Safety and st(1) == "wait" and al.get(1).remembered == Set())
-  // the surviving VMM exits: its CID is claimable again; next-fit continues from the cursor
-  run SurvivorExitFreesItsCidForLaterAssigns = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry)
-    .then(OrphanExit(0)).expect(Safety and kern.get(0) == 0)
-    .then(AssignBegin(2)).then(AssignTry).expect(Safety and st(2) == "admitted" and al.get(2).off == 2 and cursor == 3 % N)
-    .then(Stop(1)).expect(Safety)
-    .then(Release(1)).then(Redeploy(1)).then(AssignBegin(1)).then(AssignTry)
-    .expect(Safety and st(1) == "admitted" and al.get(1).off == 3 % N and kern.get(3 % N) == 1)
-  // an untaken claim (admitted, never launched) is released at pool.release, not at the stop
-  run UntakenClaimReleasedAtPoolRelease = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry)
-    .then(Stop(1)).expect(Safety and st(1) == "retiring" and al.get(1).loc == "slot" and kern.get(1) == 1)
-    .then(Release(1)).expect(Safety and st(1) == "done" and kern.get(1) == 0 and lease.get(1) == 0)
-  // Vmm::create Err drops the claim (released); the lease retires and placement retries
-  run CreateErrDropsClaimAndPlacementRetries = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1))
-    .then(CreateErr(1)).expect(Safety and st(1) == "retiring" and kern.get(1) == 0 and al.get(1).retry)
-    .then(Release(1)).expect(Safety and st(1) == "wait" and lease.get(1) == 0)
-    .then(AssignBegin(1)).then(AssignTry).expect(Safety and st(1) == "admitted" and al.get(1).off == 2 and kern.get(2) == 1)
-  // the VMM exits before READY: the device closes, the kernel frees the CID, placement retries
-  run VmmExitsBeforeReadyReleasesCidAndRetries = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1)).then(CreateOk(1))
-    .then(VmmFail(1)).expect(Safety and st(1) == "retiring" and kern.get(1) == 0 and al.get(1).retry)
-    .then(Release(1)).expect(Safety and st(1) == "wait" and lease.get(1) == 0)
-  // a claim error other than InUse: a typed error, no state change, no further offset tried; the
-  // next call places the workload
-  run ClaimErrorLeavesNoStateChange = init
-    .then(AssignBegin(1)).then(AssignClaimErr)
-    .expect(Safety and walker == 0 and st(1) == "wait" and lease == OFFS.mapBy(o => 0) and cursor == 0 and g.claimErr)
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).expect(Safety and st(1) == "admitted")
-  // serve crash with a running VMM: its device survives (kernel holder -2), the pool is rebuilt empty,
-  // and the restarted placement skips the surviving CID with no clash
-  run ServeCrashWithRunningVmmSurvivesAndReplaceSkipsIt = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1)).then(CreateOk(1))
-    .then(BootWith(Set()))
-    .expect(Safety and kern.get(1) == -2 and st(1) == "wait" and lease == OFFS.mapBy(o => 0) and cursor == 0)
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(AssignTry)
-    .expect(Safety and st(1) == "admitted" and al.get(1).off == 2 and kern.get(2) == 1 and not(g.clash))
-  // serve crash with a claim in transit to create: it survives iff the VMM had inherited the device
-  run ServeCrashClaimInTransitInheritedSurvives = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1))
-    .then(BootWith(Set(1))).expect(Safety and kern.get(1) == -2 and st(1) == "wait")
-  run ServeCrashClaimInTransitNotInheritedIsReleased = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1))
-    .then(BootWith(Set())).expect(Safety and kern.get(1) == 0 and st(1) == "wait")
-  // serve crash with a claim still in the take-once slot: serve's reference closes, the CID is free
-  run ServeCrashReleasesUntakenClaim = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry)
-    .then(BootWith(Set())).expect(Safety and kern.get(1) == 0 and kern.get(0) == -2 and st(1) == "wait")
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).expect(Safety and st(1) == "admitted" and al.get(1).off == 1)
-  // GuestCidsHeldElsewhere: every free offset's claim returns InUse (surviving VMMs on all of them);
-  // no state change and nothing remembered; once one survivor exits the next call places the workload
-  run AllOffsetsHeldElsewhereRefusesThenPlacesAfterExit = init
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(LaunchBegin(1)).then(CreateOk(1))
-    .then(AssignBegin(2)).then(AssignTry).then(LaunchBegin(2)).then(CreateOk(2))
-    .expect(Safety and kern.get(1) == 1 and kern.get(2) == 2)
-    .then(BootWith(Set()))
-    .then(AssignBegin(1)).then(AssignTry).then(AssignTry).then(AssignTry)
-    .expect(Safety and walker == 0 and st(1) == "wait" and g.refusedHeld and lease == OFFS.mapBy(o => 0) and al.get(1).remembered == Set())
-    .then(OrphanExit(0)).then(AssignBegin(1)).then(AssignTry)
-    .expect(Safety and st(1) == "admitted" and al.get(1).off == 0)
+  // happy path: next-fit assign, then the VMM opens its own device (the VMM is the only holder)
+  run AssignThenVmmOpensItsOwnDevice = init
+    .then(Assign(1)).expect(Safety and st(1) == "leased" and al.get(1).off == 0 and cursor == 1 and lease.get(0) == 1)
+    .then(Launch(1)).expect(Safety and st(1) == "running" and dev.get(0) == 1)
+  // the lease is released only after the VMM has exited: a release while the VMM runs is refused; a stop exits
+  // the VMM (device released), then the release frees the offset
+  run ReleaseWhileTheVmmRunsIsRefused = AssignThenVmmOpensItsOwnDevice
+    .then(Release(1)).fail()
+  run StopExitsTheVmmThenReleaseIsLast = AssignThenVmmOpensItsOwnDevice
+    .then(Stop(1)).expect(Safety and st(1) == "retiring" and dev.get(0) == 0 and lease.get(0) == 1)
+    .then(Release(1)).expect(Safety and st(1) == "done" and lease.get(0) == 0)
+    .then(Redeploy(1)).expect(Safety and st(1) == "wait")
+  // next-fit continues from the cursor and skips no free offset
+  run NextFitContinuesFromTheCursor = init
+    .then(Assign(1)).then(Assign(2)).expect(Safety and al.get(1).off == 0 and al.get(2).off == 1 and cursor == 2)
+    .then(Launch(1)).then(Launch(2)).then(Stop(1)).then(Release(1)).then(Redeploy(1)).then(Assign(1))
+    .expect(Safety and al.get(1).off == 2 and cursor == 3 % N)
+  // RESET-EXIT: a guest reset ends the VMM; its device is released, the lease retires and placement retries on a
+  // fresh VMM (one incarnation per VMM process)
+  run GuestResetEndsTheVmmAndPlacementRetries = init
+    .then(Assign(1)).then(Launch(1)).then(GuestReset(1))
+    .expect(Safety and st(1) == "retiring" and al.get(1).retry and dev.get(0) == 0 and lease.get(0) == 1 and not(g.rebooted))
+    .then(Release(1)).expect(Safety and st(1) == "wait")
+    .then(Assign(1)).then(Launch(1)).expect(Safety and st(1) == "running" and not(g.clash))
+  // the VMM crashes before READY: the device closes, the lease retires, placement retries
+  run VmmCrashFreesItsCidAndPlacementRetries = init
+    .then(Assign(1)).then(Launch(1)).then(VmmCrash(1))
+    .expect(Safety and st(1) == "retiring" and dev.get(0) == 0 and al.get(1).retry)
+    .then(Release(1)).expect(Safety and st(1) == "wait" and lease.get(0) == 0)
+  // NO-SURVIVE: serve crashes with a running VMM; the VMM survives as an orphan holding its device; the restarted
+  // process reclaims it BEFORE any assign, and the next lease of that CID launches without a clash
+  run ServeCrashOrphanIsReclaimedBeforeAnyAssign = init
+    .then(Assign(1)).then(Launch(1)).then(Crash)
+    .expect(Safety and not(up) and dev.get(0) == -2 and lease == OFFS.mapBy(o => 0) and cursor == 0 and st(1) == "wait")
+    .then(Restart).expect(Safety and up and not(reclaimed) and orphans == Set(0))
+    .then(Assign(1)).fail()
+  run ReclamationReleasesTheOrphanDeviceThenAssignProceeds = init
+    .then(Assign(1)).then(Launch(1)).then(Crash).then(Restart)
+    .then(Reclaim(0)).expect(Safety and reclaimed and dev.get(0) == 0 and g.reclaimed)
+    .then(Assign(1)).expect(Safety and st(1) == "leased" and al.get(1).off == 0)
+    .then(Launch(1)).expect(Safety and st(1) == "running" and dev.get(0) == 1 and not(g.clash))
+  // an orphan exits by itself (a guest reset) before reclamation reaches it; reclamation completes with nothing to kill
+  run OrphanExitsByItselfBeforeReclamation = init
+    .then(Assign(1)).then(Launch(1)).then(Crash).then(Restart).then(OrphanExit(0))
+    .expect(Safety and reclaimed and dev.get(0) == 0)
+    .then(Assign(2)).expect(Safety and st(2) == "leased")
+  // a crash with a lease that was never launched: nothing survives, the restarted pool is empty and assigns at once
+  run ServeCrashWithUnlaunchedLeaseLeavesNothingToReclaim = init
+    .then(Assign(1)).then(Crash)
+    .expect(Safety and dev == OFFS.mapBy(o => 0) and lease == OFFS.mapBy(o => 0))
+    .then(Restart).expect(Safety and up and reclaimed)
+    .then(Assign(1)).expect(Safety and st(1) == "leased" and al.get(1).off == 0)
 
   // ------------------------------------------------------------------ witnesses (expected violated)
-  val WitnessNoSkip: bool = not(g.skipped)
-  val WitnessNoOrphanSkip: bool = not(g.skipOrphan)
-  val WitnessNoHeldElsewhere: bool = not(g.refusedHeld)
-  val WitnessNoClaimErr: bool = not(g.claimErr)
   val WitnessNoRunning: bool = ALLOCS.forall(a => al.get(a).st != "running")
-  // The refusal is decided per claim ioctl (ADR-0170 "at that moment"): with a surviving VMM exiting
-  // between the ioctls of one walk, GuestCidsHeldElsewhere can be returned while an offset tried
-  // earlier has just become unheld. Expected violated (documented; the refusal is non-terminal).
-  val RefusalSnapshotConsistent: bool = not(g.refusedClaimable)
+  val WitnessNoOrphan: bool = orphans == Set()
+  val WitnessNoReclaim: bool = not(g.reclaimed)
 
   // ------------------------------------------------------------------ liveness (TLC)
-  // (D16-CLAIM) a waiting workload is eventually placed whenever a free offset's CID stays unheld:
-  // serve restarts are bounded (BOOTS), surviving VMMs are reclaimed (weak fairness on OrphanExit),
-  // the walk progresses, and AssignBegin is strongly fair (the pool lock is shared).
+  // a waiting workload is eventually placed: serve restarts are bounded (BOOTS), boot reclamation progresses
+  // (weak fairness on Reclaim and Restart), and assign is strongly fair (the pool lock is shared)
   temporal EventuallyPlaced =
     and {
-      ALLOCS.forall(a => strongFair(AssignBegin(a), (walker, al, todo))),
-      weakFair(AssignTry, (walker, todo, al, kern)),
-      OFFS.forall(o => weakFair(OrphanExit(o), kern)),
-    }.implies(ALLOCS.forall(a => always((al.get(a).st == "wait").implies(
-        eventually(al.get(a).st != "wait" or not(claimableFree))))))
+      ALLOCS.forall(a => strongFair(Assign(a), (lease, al, reclaimed, up))),
+      weakFair(Restart, (up, reclaimed, dev)),
+      OFFS.forall(o => weakFair(Reclaim(o), (dev, reclaimed, up))),
+      OFFS.forall(o => weakFair(OrphanExit(o), dev)),
+    }.implies(ALLOCS.forall(a => always((al.get(a).st == "wait" and (freeOffs != Set())).implies(
+        eventually(al.get(a).st != "wait" or freeOffs == Set())))))
 }
 
-// The design: two workloads, three offsets, a VMM surviving from an earlier run on offset 0, serve
-// crash + restart forever (VMMs survive each), one pre-READY exit, one claim error.
+// The design: two workloads, three offsets, serve crash + restart (VMMs survive each as orphans until reclaimed).
 module lease_ok { import cid_lease(OFF = Set(), CFG = "ok").* from "./cid_lease" }
-// Three workloads on three offsets (the pool fills; GuestCidsHeldElsewhere vs PoolExhausted).
-module lease_three { import cid_lease(OFF = Set(), CFG = "three").* from "./cid_lease" }
-// Conformance (S-2): `lease_ok` on the five offsets of the /29 test pool. Compared where `walkIdle`.
+// Conformance: `lease_ok` on the five offsets of the /29 test pool.
 module lease_conf_ok { import cid_lease(OFF = Set(), CFG = "conf_ok").* from "./cid_lease" }
-// Conformance (S-2): `lease_live` on the five offsets of the /29 test pool.
-module lease_conf_live { import cid_lease(OFF = Set(), CFG = "conf_live").* from "./cid_lease" }
-// Liveness: one serve restart, two pre-READY exits, one claim error.
+// Liveness: one serve restart.
 module lease_live { import cid_lease(OFF = Set(), CFG = "live").* from "./cid_lease" }

@@ -1,0 +1,99 @@
+
+=== S1: marked+bound dial, NO default route, NO prefix route
+Hypothesis:  leg-B mark=0x1 + bind(127.0.0.1) gives connect() a route via fwmark->table 100; divert/TPROXY hand it to leg-C
+Prediction:  round trip; leg-C sees peer=127.0.0.1:<eph> local=100.95.0.7:8080; counters 0; 'ip route get 100.95.0.7 mark 1 from 127.0.0.1' = local dev lo
+Falsification: ENETUNREACH/EINVAL, other peer/local pair, non-zero reject counter
++ [ns] ip rule add fwmark 0x1 lookup 100
+[exit=0]
++ [ns] ip route add local 0.0.0.0/0 dev lo table 100
+[exit=0]
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
++ [ns] ip rule show
+0:	from all lookup local
+32765:	from all fwmark 0x1 lookup 100
+32766:	from all lookup main
+32767:	from all lookup default
+[exit=0]
++ [ns] ip route show table all
+local default dev lo table 100 scope host 
+192.0.2.0/24 dev up0 proto kernel scope link src 192.0.2.10 
+local 100.95.0.1 dev lo table local proto 247 scope host 
+local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1 
+local 192.0.2.10 dev up0 table local proto kernel scope host src 192.0.2.10 
+broadcast 192.0.2.255 dev up0 table local proto kernel scope link src 192.0.2.10 
+fe80::/64 dev up0 proto kernel metric 256 pref medium
+local ::1 dev lo table local proto kernel metric 0 pref medium
+local fe80::c084:d3ff:fedb:8981 dev up0 table local proto kernel metric 0 pref medium
+multicast ff00::/8 dev up0 table local proto kernel metric 256 pref medium
+[exit=0]
++ [ns] nft list ruleset
+table ip overdrive-mtls {
+	set inbound_destinations {
+		type ipv4_addr . inet_service
+		elements = { 100.95.0.7 . 8080 }
+	}
+
+	chain prerouting {
+		type filter hook prerouting priority mangle; policy accept;
+		meta mark 0x00000002 accept
+		ip daddr . tcp dport @inbound_destinations tproxy to 127.0.0.1:15001 meta mark set 0x00000001 accept
+		ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+	}
+
+	chain output {
+		type route hook output priority mangle; policy accept;
+		meta mark 0x00000002 accept
+		ip daddr . tcp dport @inbound_destinations meta mark != 0x00000002 meta mark set 0x00000001 accept
+		ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 0 bytes 0 reject with tcp reset
+		ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 reject
+	}
+}
+[exit=0]
++ [ns] ip route get 100.95.0.7 mark 1 from 127.0.0.1
+local 100.95.0.7 from 127.0.0.1 dev lo table 100 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] ip route get 100.95.0.7
+RTNETLINK answers: Network is unreachable
+[exit=2]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --mark 1 --bind 127.0.0.1
+RESULT ok client-local=127.0.0.1:37074 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.2 setup=[mark=1 bind=127.0.0.1]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --leg-b
+RESULT ok client-local=127.0.0.1:37088 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.2 setup=[mark=1 bind=127.0.0.1]
+--- capture lo_s1.pcap (IPv4 packets seen):
+  14:48:21.143500 IP 127.0.0.1.37074 > 100.95.0.7.8080: Flags [S], seq 1804350534, win 65495, options [mss 65495,sackOK,TS val 2307070762 ecr 0,nop,wscale 10], length 0
+  14:48:21.143524 IP 100.95.0.7.8080 > 127.0.0.1.37074: Flags [S.], seq 89336474, ack 1804350535, win 65483, options [mss 65495,sackOK,TS val 2516139701 ecr 2307070762,nop,wscale 10], length 0
+  14:48:21.143543 IP 127.0.0.1.37074 > 100.95.0.7.8080: Flags [.], ack 1, win 64, options [nop,nop,TS val 2307070762 ecr 2516139701], length 0
+  14:48:21.143618 IP 127.0.0.1.37074 > 100.95.0.7.8080: Flags [P.], seq 1:20, ack 1, win 64, options [nop,nop,TS val 2307070763 ecr 2516139701], length 19: HTTP
+  14:48:21.143636 IP 100.95.0.7.8080 > 127.0.0.1.37074: Flags [.], ack 20, win 64, options [nop,nop,TS val 2516139702 ecr 2307070763], length 0
+  14:48:21.143729 IP 100.95.0.7.8080 > 127.0.0.1.37074: Flags [P.], seq 1:25, ack 20, win 64, options [nop,nop,TS val 2516139702 ecr 2307070763], length 24: HTTP
+  14:48:21.143748 IP 127.0.0.1.37074 > 100.95.0.7.8080: Flags [.], ack 25, win 64, options [nop,nop,TS val 2307070763 ecr 2516139702], length 0
+  14:48:21.143775 IP 100.95.0.7.8080 > 127.0.0.1.37074: Flags [F.], seq 25, ack 20, win 64, options [nop,nop,TS val 2516139702 ecr 2307070763], length 0
+  14:48:21.143968 IP 127.0.0.1.37074 > 100.95.0.7.8080: Flags [F.], seq 20, ack 26, win 64, options [nop,nop,TS val 2307070763 ecr 2516139702], length 0
+  14:48:21.143992 IP 100.95.0.7.8080 > 127.0.0.1.37074: Flags [.], ack 21, win 64, options [nop,nop,TS val 2516139702 ecr 2307070763], length 0
+  14:48:21.147785 IP 127.0.0.1.37088 > 100.95.0.7.8080: Flags [S], seq 3865156487, win 65495, options [mss 65495,sackOK,TS val 1315705280 ecr 0,nop,wscale 10], length 0
+  14:48:21.147813 IP 100.95.0.7.8080 > 127.0.0.1.37088: Flags [S.], seq 547701904, ack 3865156488, win 65483, options [mss 65495,sackOK,TS val 3410189189 ecr 1315705280,nop,wscale 10], length 0
+  14:48:21.147836 IP 127.0.0.1.37088 > 100.95.0.7.8080: Flags [.], ack 1, win 64, options [nop,nop,TS val 1315705280 ecr 3410189189], length 0
+  14:48:21.147890 IP 127.0.0.1.37088 > 100.95.0.7.8080: Flags [P.], seq 1:20, ack 1, win 64, options [nop,nop,TS val 1315705280 ecr 3410189189], length 19: HTTP
+  14:48:21.147903 IP 100.95.0.7.8080 > 127.0.0.1.37088: Flags [.], ack 20, win 64, options [nop,nop,TS val 3410189189 ecr 1315705280], length 0
+  14:48:21.147961 IP 100.95.0.7.8080 > 127.0.0.1.37088: Flags [P.], seq 1:25, ack 20, win 64, options [nop,nop,TS val 3410189189 ecr 1315705280], length 24: HTTP
+  14:48:21.147977 IP 127.0.0.1.37088 > 100.95.0.7.8080: Flags [.], ack 25, win 64, options [nop,nop,TS val 1315705280 ecr 3410189189], length 0
+  14:48:21.147990 IP 100.95.0.7.8080 > 127.0.0.1.37088: Flags [F.], seq 25, ack 20, win 64, options [nop,nop,TS val 3410189189 ecr 1315705280], length 0
+  14:48:21.148238 IP 127.0.0.1.37088 > 100.95.0.7.8080: Flags [F.], seq 20, ack 26, win 64, options [nop,nop,TS val 1315705280 ecr 3410189189], length 0
+  14:48:21.148262 IP 100.95.0.7.8080 > 127.0.0.1.37088: Flags [.], ack 21, win 64, options [nop,nop,TS val 3410189189 ecr 1315705280], length 0
+  count=20
+--- leg-C listener log:
+  listener ready port=15001
+  ACCEPT peer=127.0.0.1:37074 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+  ACCEPT peer=127.0.0.1:37088 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+--- host decoy logs:
+--- reject/drop counters:
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 0 bytes 0 reject with tcp reset
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 reject

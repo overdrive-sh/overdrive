@@ -68,8 +68,9 @@ The verdict rests on a real exercise on the real kernel, not "it compiled":
   and netns / nft / routing mechanisms have no synthetic harness — so **only a
   real `connect()` through a real cgroup/netns on the kernel is an honest
   signal.**
-- Record `uname -r` in the findings; the verdict is pinned to a kernel (dev Lima
-  and the pinned 6.18 appliance kernel differ — ADR-0068).
+- Record `uname -r` in the findings; the verdict is pinned to a kernel (the
+  pinned appliance kernel is Linux 7.0 — ADR-0068; a dev Lima or metal kernel
+  of another version is not that signal).
 
 ## Findings, gate, and honesty
 

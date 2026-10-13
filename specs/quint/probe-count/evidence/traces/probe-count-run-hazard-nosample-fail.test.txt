@@ -1,0 +1,23 @@
+
+  streak_bugNoSampleFail
+    1) streak_bugNoSampleFail::probe_count::MissingSampleChangesNothing failed after 1 test(s)
+
+  1 failed
+
+  1) streak_bugNoSampleFail::probe_count::MissingSampleChangesNothing:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:252:37
+        252:   run MissingSampleChangesNothing = init
+                                                 ^^^^
+        253:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true)).expect(rseq == 1 and rsame == 1)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        254:     .then(ProbeRun("NoSample", "node_capacity")).then(ProbeRun("WriteFail", "")).then(ProbeRun("NoSample", "quiesced"))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        255:     .expect(rseq == 1 and pseq == 1 and rsame == 1 and Safety)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x8f5ea1853e4fbfe6 --match=streak_bugNoSampleFail::probe_count::MissingSampleChangesNothing to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/hazard/probe_count_hazards.qnt
+error: Tests failed

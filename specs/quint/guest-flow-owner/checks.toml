@@ -1,23 +1,25 @@
 # Checks the `cargo xtask quint` runner executes for specs/quint/guest-flow-owner/.
 #
 # Each [[check]] names one property of one instance (`main`) of one spec file (`spec`, relative to
-# this directory). `invariant` = safety (state predicate); `temporal` = liveness (TLC only).
+# this directory). `invariant` = safety (state predicate); `temporal` = liveness (TLC only);
+# `run` = a named scenario executed by `quint test` (backend "evaluator").
 # backend "apalache" = bounded symbolic search to `max_steps`; "tlc" = exhaustive explicit-state
 # search of the finite instance (no step bound).
 # expect "holds" = the design property; "violation" = a non-vacuity witness (the behaviour is
 # reachable), a hazard/teeth instance (one design rule switched off through OFF), or documented
-# behaviour. Expectations are the design's claims; where the prediction written before the run
-# differs, the comment above the check says so (round 9: the 2026-10-09 spike remediation and its
-# round 2 — K-A2′, ATTR-TOKEN with ATTR-LIVE-CLAIM, the beacon and HALFCLOSE-SIGNAL in owner_flows,
-# CELL-RECREATE in udp_slots, INTAKE-BIND in prefix_landing; earlier rounds' findings:
-# docs/feature/netns-density-295/design/quint-guest-flow-owner-findings-r8.md and before).
+# behaviour. For a run, "violation" = an `expect` along the replayed scenario fails under the
+# weakened rule.
 # ci = true only for checks whose own time (the runner records it apart from start-up retries) is
-# under 2 minutes on the Lima VM (`cargo xtask quint check`). Round 9: the module-A TLC liveness
-# checks of the core instance (GuestHalfEnds, SessionBecomesLive) take 135-140 s, and the udp_slots
-# exhaustive checks 300-810 s (cell generations and queued readiness events).
+# under 2 minutes on the Lima VM (`cargo xtask quint check`).
+#
+# Modules: owner_flows (control sessions, flow admission, launch attribution, the dial, the beacon),
+# flow_end (R2-END, R2-DRAIN), flow_quota (the per-allocation quota counts draining flows),
+# cid_lease (CID-NOCLAIM, RESET-EXIT, NO-SURVIVE), quiescence (QHOLD, boot refusal), udp_slots (guest
+# UDP slots), udp_empty (UDP-EMPTY owner notice handling).
 
+# ==== owner_flows: control sessions, flow admission, launch attribution (ATTR-TOKEN, ATTR-LIVE-CLAIM), the dial (INB-1), the beacon
 
-# Module A: control sessions, flow admission, launch attribution (ATTR-TOKEN), TcpAccept pairing (U-1, U-5).
+# Control sessions, flow admission, launch attribution (ATTR-TOKEN), host-opened dials (U-1, U-5).
 # Invariants 1, 3, 4, 4+ (CurrentGeneration), ClosedIsTerminal, NoCrossLaunchMsg, NoCrossLaunchSessionHeld
 [[check]]
 name = "owner-flows-safety-tlc"
@@ -26,7 +28,8 @@ main = "flows_ok"
 invariant = "Safety"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
+timeout_secs = 2400   # r2: used 851.7 s of the 900 s default; margin for slower hosts
 
 [[check]]
 name = "owner-flows-safety-apalache"
@@ -34,12 +37,14 @@ spec = "owner_flows.qnt"
 main = "flows_ok"
 invariant = "Safety"
 backend = "apalache"
-max_steps = 12
+max_steps = 10
 expect = "holds"
 ci = false
 
 # U-5 + K-A4: a guest TcpAccept half (accepted, or still in the guest's accept queue) whose host side
 # closed is eventually torn down
+timeout_secs = 1500
+
 [[check]]
 name = "owner-flows-guest-half-ends"
 spec = "owner_flows.qnt"
@@ -48,7 +53,7 @@ temporal = "GuestHalfEnds"
 backend = "tlc"
 expect = "holds"
 ci = false
-
+timeout_secs = 3000
 
 # Non-vacuity witnesses: each behaviour is reachable (expected violation)
 [[check]]
@@ -122,7 +127,6 @@ max_steps = 14
 expect = "violation"
 ci = true
 
-
 # Teeth: each hazard switches one design rule off (expected violation)
 [[check]]
 name = "owner-flows-hazard-split-claim"
@@ -174,8 +178,7 @@ max_steps = 14
 expect = "violation"
 ci = true
 
-# ci = false from round 9: 115.9 s own time, at the two-minute limit (the module's added state slows
-# Apalache)
+# ci = false: 115.9 s own time, at the two-minute limit (Apalache)
 [[check]]
 name = "owner-flows-hazard-teardown-skips-flows"
 spec = "hazard/owner_flows_hazards.qnt"
@@ -196,50 +199,19 @@ max_steps = 14
 expect = "violation"
 ci = true
 
-
-# ATTR-TOKEN with ATTR-LIVE-CLAIM (round 9). 4+ (`CurrentGeneration`), no control message for another
-# launch's flow (`NoCrossLaunchMsg`) and no SessionHeld across launches (`NoCrossLaunchSessionHeld`), each
-# as its own check on the design instance (they are also inside `Safety`). The claim step compares the
-# ControlOpen's token with the CID's LIVE token (Provisioned or Active) in the same step as the claim;
-# teardown does not touch connections in `reading`. Prediction written before the run: all three hold
-# (the round-9 first-run counterexample is closed at its read).
-
-[[check]]
-name = "owner-flows-current-launch-tlc"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "CurrentGeneration"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-no-cross-launch-message-tlc"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "NoCrossLaunchMsg"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-no-cross-launch-session-held-tlc"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "NoCrossLaunchSessionHeld"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# (ATTR-TOKEN, D18a) a provisioned launch whose guest keeps reconnecting eventually holds a live session
+# (ATTR-TOKEN, D18a) a provisioned launch whose guest keeps reconnecting eventually holds a live session.
+# Checked on instance flows_sess (2 control connections, 2 launches; NO guest-opened flows, NO dial slots):
+# the property mentions sessions only, and the full flows_ok instance (3.5M states) did not finish
+# its liveness check in 900 s. The flow / dial parts do not gate session steps (session loss aborts them
+# in the same atomic step), so removing them drops no session interleaving.
 [[check]]
 name = "owner-flows-session-becomes-live"
 spec = "owner_flows.qnt"
-main = "flows_ok"
+main = "flows_sess"
 temporal = "SessionBecomesLive"
 backend = "tlc"
 expect = "holds"
-ci = false
+ci = true
 
 # K-A2′ (P-37): a dead launch's queued connection, its first record buffered, is accepted after the
 # CID's next lease exists (reachable)
@@ -253,7 +225,7 @@ max_steps = 14
 expect = "violation"
 ci = true
 
-# ATTR-LIVE-CLAIM: the round-9 first-run shape — a connection accepted while the CID was Provisioned
+# ATTR-LIVE-CLAIM: a connection accepted while the CID was Provisioned
 # is still unread after teardown (reachable; the design closes it at its read)
 [[check]]
 name = "owner-flows-witness-read-after-teardown"
@@ -264,7 +236,7 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# Teeth (ATTR-TOKEN): attribution by peer CID alone (the round-8 rule) under K-A2′
+# Teeth (ATTR-TOKEN): attribution by peer CID alone under K-A2′
 [[check]]
 name = "owner-flows-hazard-peer-cid-only"
 spec = "hazard/owner_flows_hazards.qnt"
@@ -287,7 +259,7 @@ ci = true
 # Teeth (ATTR-LIVE-CLAIM order): the session claim taken at accept, before the ControlOpen is read — a
 # stale connection of one launch holds the claim when the next launch's session arrives. (Its
 # SessionBecomesLive check is not teeth for this rule — the stale holder is closed at its read, so
-# progress holds — and was deleted in round 9.)
+# progress holds.)
 [[check]]
 name = "owner-flows-hazard-claim-before-token-held"
 spec = "hazard/owner_flows_hazards.qnt"
@@ -297,7 +269,7 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# Teeth (ATTR-LIVE-CLAIM): the first round-9 design — the CID state checked at accept only, the claim
+# Teeth (ATTR-LIVE-CLAIM): the CID state checked at accept only, the claim
 # step comparing with the lease token (Retiring included). Its first-run counterexample: a dead
 # launch's queued control connection accepted while Provisioned and read after teardown takes the
 # claim, which survives pool.release; the next lease's session is refused SessionHeld
@@ -331,14 +303,12 @@ main = "flows_altTeardownClosesReading"
 invariant = "Safety"
 backend = "tlc"
 expect = "holds"
-ci = true
-
+ci = false
 
 # Beacon (VM driver, port 1234; ADR-0157, ATTR-TOKEN, ATTR-LIVE-CLAIM): instance `flows_beacon`. READY is
 # read, then compared with the live launch's token and the beacon claim taken in one step; driver.stop ends
 # liveness, closes the beacon session and releases the claim in one step, before pool.release. Prediction:
 # the three invariants and ReadyReleased hold
-
 [[check]]
 name = "owner-flows-beacon-current-launch"
 spec = "owner_flows.qnt"
@@ -394,201 +364,6 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# Teeth (ATTR-LIVE-CLAIM, beacon): READY compared with the lease's token without the live check — a
-# connection accepted while the launch was live and read after driver.stop takes the claim
-[[check]]
-name = "owner-flows-hazard-beacon-no-live-recheck"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugBeaconNoLiveRecheck"
-invariant = "BeaconCurrentLaunch"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-hazard-beacon-no-live-recheck-held"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugBeaconNoLiveRecheck"
-invariant = "BeaconNoCrossLaunchHeld"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth (ATTR-TOKEN, beacon): READY attributed by peer CID alone — a dead launch's buffered READY is
-# released as the next launch's
-[[check]]
-name = "owner-flows-hazard-beacon-peer-cid-only"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugBeaconPeerCidOnly"
-invariant = "BeaconNoCrossLaunchReady"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-hazard-beacon-peer-cid-only-current"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugBeaconPeerCidOnly"
-invariant = "BeaconCurrentLaunch"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# Half-close (HALFCLOSE-SIGNAL, ADR-0180): instance `flows_half` — one paired TCP flow (TcpConnect or
-# TcpAccept, chosen at init), the flow vsock and the control session as independent channels, each owner
-# able to die (its vsock end reaching the survivor as its own action, VsockEndReachesSurvivor), the
-# session able to drop, flow errors (teardown, quiescence) and outer resets per side. Invariant 13:
-# NoEofOnPeerLoss, FinOnlyAfterAck. Progress: HalfCloseCompletes (no fault), AnnounceEnds (faults
-# included), EarlyEofCarried. Prediction: all hold
-
-[[check]]
-name = "owner-flows-half-no-eof-on-peer-loss"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "NoEofOnPeerLoss"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-fin-only-after-ack"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "FinOnlyAfterAck"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-close-completes"
-spec = "owner_flows.qnt"
-main = "flows_half"
-temporal = "HalfCloseCompletes"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-announce-ends"
-spec = "owner_flows.qnt"
-main = "flows_half"
-temporal = "AnnounceEnds"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-early-eof-carried"
-spec = "owner_flows.qnt"
-main = "flows_half"
-temporal = "EarlyEofCarried"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Non-vacuity: a clean half-close reaches a far end as EOF; a survivor aborts on a dead owner's vsock
-# end before it observes the session's loss (K-B4); an outer EOF before Paired is recorded
-[[check]]
-name = "owner-flows-half-witness-clean-eof"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "WitnessNoCleanEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-half-witness-survivor-abort-first"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "WitnessNoSurvivorAbortFirst"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-half-witness-early-eof"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "WitnessNoEarlyEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth: the round-8 rule (a vsock end is a half-close) — the survivor of an owner death sends a FIN
-[[check]]
-name = "owner-flows-hazard-rdhup-is-halfclose"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugRdhupIsHalfClose"
-invariant = "NoEofOnPeerLoss"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth: no acknowledgement — HalfClose sent and the vsock shut down at once, the receiver aborting a
-# bare vsock end: a clean half-close whose end-of-stream overtakes the message is aborted
-[[check]]
-name = "owner-flows-hazard-no-ack"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugNoAck"
-temporal = "HalfCloseCompletes"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-hazard-no-ack-fin"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugNoAck"
-invariant = "FinOnlyAfterAck"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth: the acknowledging side waits (acks only after its own outer EOF) — the announcer waits forever
-[[check]]
-name = "owner-flows-hazard-ack-waits"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugAckWaits"
-temporal = "AnnounceEnds"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth: an outer EOF before Paired aborts the flow (the early half-close is lost)
-[[check]]
-name = "owner-flows-hazard-early-eof-aborts"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugEarlyEofAborts"
-temporal = "EarlyEofCarried"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Rejected alternative (V-13 variant C, recorded as why the acknowledgement was chosen): HalfClose
-# without acknowledgement, a bare vsock end held until the message or session loss. Prediction: it
-# keeps NoEofOnPeerLoss, and a receiver whose peer ended its vsock without the message while its
-# session lives holds the end forever (ReceiverPendingEnds violated)
-[[check]]
-name = "owner-flows-alt-pending-wait-no-eof"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_altPendingWait"
-invariant = "NoEofOnPeerLoss"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-alt-pending-wait-receiver"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_altPendingWait"
-temporal = "ReceiverPendingEnds"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
 # K-A4 dropped (environment variant): U-5's discard rule then orphans a guest TcpAccept half
 [[check]]
 name = "owner-flows-env-guest-misses-host-close"
@@ -599,7 +374,6 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-
 # Prediction: a guest Abort tombstone does not remove the K-A4 dependence (session-loss path)
 [[check]]
 name = "owner-flows-alt-tombstone-misses-close"
@@ -608,2143 +382,6 @@ main = "flows_altTombstoneMissesClose"
 temporal = "GuestHalfEnds"
 backend = "tlc"
 expect = "violation"
-ci = true
-
-
-# Module B: guest UDP slots (D25, SLOT-ABORT, U-2). TLC exhaustive on the 1-destination instance
-# ci = false from round 9: the cell generations (CELL-RECREATE) and the queued readiness events
-# enlarge the exhaustive instance (about 300 s own time)
-[[check]]
-name = "udp-slots-safety-tlc"
-spec = "udp_slots.qnt"
-main = "slots_live"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = false
-
-# ci = false from round 9 (about 710 s own time; see above)
-[[check]]
-name = "udp-slots-release-liveness"
-spec = "udp_slots.qnt"
-main = "slots_live"
-temporal = "ReleasedSlotBecomesFree"
-backend = "tlc"
-expect = "holds"
-ci = false
-timeout_secs = 1800
-
-[[check]]
-name = "udp-slots-safety-apalache"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 8
-expect = "holds"
-ci = false
-timeout_secs = 1800
-
-[[check]]
-name = "udp-slots-witness-late-paired"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoLatePaired"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-witness-routed"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoRouted"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-witness-two-slots-one-socket"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoTwoSlotsOneSocket"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-witness-reassociation"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoReassociation"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-hazard-claim-split"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugClaimSplit"
-invariant = "SlotHeldOnce"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-hazard-keep-frames"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugKeepFrames"
-invariant = "ReleasedSlotCarriesNoData"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-hazard-late-paired-by-slot-route"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugLatePairedBySlot"
-invariant = "RouteCurrent"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-# ci = false from round 9: 140.3 s own time (the readiness events enlarge the search)
-[[check]]
-name = "udp-slots-hazard-late-paired-by-slot-data"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugLatePairedBySlot"
-invariant = "ReleasedSlotCarriesNoData"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = false
-
-# ci = true: 14.1 s own time in round 8 (round 7's 135.8 s included start-up retries)
-[[check]]
-name = "udp-slots-hazard-ignore-late-paired"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugIgnoreLatePaired"
-invariant = "LatePairedAborted"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-hazard-keep-frames-on-end"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugKeepFramesOnEnd"
-invariant = "NoReassociationWithoutNewDatagram"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-hazard-no-audit-fairness"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_liveTeeth"
-temporal = "NoAuditFairness"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# CELL-RECREATE (round 9): every end of association recreates the cells (a new cell generation);
-# readiness is dispatched by (slot, generation) and an event of an earlier generation is discarded.
-# Invariant 14 (`NoStaleGenerationStart`) is inside `Safety` (udp-slots-safety-*).
-[[check]]
-name = "udp-slots-witness-stale-event"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoStaleEvent"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-# Teeth: the cells emptied, not recreated (K-B3 as falsified, P-41) — the residue refills the cell and
-# re-triggers readiness, and the slot re-associates with no new datagram
-[[check]]
-name = "udp-slots-hazard-cells-emptied-only"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugCellsEmptiedOnly"
-invariant = "NoReassociationWithoutNewDatagram"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-# Teeth: readiness dispatched by slot (raw descriptor) only — an event of an earlier generation starts
-# an association with no new datagram
-[[check]]
-name = "udp-slots-hazard-fd-dispatch"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugFdDispatch"
-invariant = "NoReassociationWithoutNewDatagram"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-hazard-fd-dispatch-generation"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugFdDispatch"
-invariant = "NoStaleGenerationStart"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-
-# Module C: CID lease with the atomic kernel claim (D16-CLAIM). Safety = CidUnique, ClaimHeld,
-# NoLaunchClash, NoSkipWhileClaimable, NoLeakedClaim, RefusalEachClaimInUse — the only CID holders
-# outside the pool are VMMs that survived a serve crash (K-C2, A-31): one from an earlier run at start,
-# serve crash + restart forever, pre-READY exits and claim errors
-
-[[check]]
-name = "cid-lease-safety-tlc"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-three-safety-tlc"
-spec = "cid_lease.qnt"
-main = "lease_three"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-live-safety-tlc"
-spec = "cid_lease.qnt"
-main = "lease_live"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# D16-CLAIM placement progress: placed whenever a free offset's CID stays unheld
-[[check]]
-name = "cid-lease-eventually-placed"
-spec = "cid_lease.qnt"
-main = "lease_live"
-temporal = "EventuallyPlaced"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Non-vacuity witnesses (expected violation)
-[[check]]
-name = "cid-lease-witness-skip"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoSkip"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-witness-orphan-skip"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoOrphanSkip"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-witness-held-elsewhere"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoHeldElsewhere"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-witness-claim-error"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoClaimErr"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-witness-running"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoRunning"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Documented: the refusal is decided per claim ioctl, so GuestCidsHeldElsewhere can be returned while an
-# offset tried earlier in the walk has just been released by a surviving VMM's exit (non-terminal;
-# placement retries)
-[[check]]
-name = "cid-lease-refusal-snapshot"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "RefusalSnapshotConsistent"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth for D16-CLAIM: each must show its violation with surviving VMMs as the only holders outside
-# the pool (prediction: all do — via a VMM launching at the crash that creates its device after the
-# restart, and via InUse answers from survivors)
-[[check]]
-name = "cid-lease-hazard-check-then-claim"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugCheckThenClaim"
-invariant = "NoLaunchClash"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-check-then-claim-held"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugCheckThenClaim"
-invariant = "ClaimHeld"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-release-before-vmm"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugReleaseBeforeVmm"
-invariant = "NoLaunchClash"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-release-before-vmm-held"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugReleaseBeforeVmm"
-invariant = "ClaimHeld"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-remember-inuse"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugRemember"
-invariant = "NoSkipWhileClaimable"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-remember-refusal"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugRemember"
-invariant = "RefusalEachClaimInUse"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-remember-inuse-placed"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_live_bugRemember"
-temporal = "EventuallyPlaced"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# Steering concern 1 — boot convergence and the prefix route (prefix_boot.qnt): D8a-ROUTE,
-# D8a-LOAD-SWAP, U-4 (round 7: the runtime probe and boot `verify` removed). Instances: boot_ok
-# (programs v1, v2; one scripted failure; unbounded crashes), boot_faulty (unbounded failures and
-# crashes), boot_live (one crash, one failure). The nft rules are taken as absent (worst case: the
-# steering alone). Predictions written before the run: every design check holds, every witness and
-# hazard check is violated.
-[[check]]
-name = "prefix-boot-safety"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-safety-apalache"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 12
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-faulty-safety"
-spec = "prefix_boot.qnt"
-main = "boot_faulty"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Invariant 6 (restated for D8a-LOAD-SWAP): the route is `local` only while a link with a loaded
-# program exists
-[[check]]
-name = "prefix-boot-local-only-over-link"
-spec = "prefix_boot.qnt"
-main = "boot_faulty"
-invariant = "LocalOnlyOverLink"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-local-only-over-link-while-down"
-spec = "prefix_boot.qnt"
-main = "boot_faulty"
-invariant = "LocalOnlyOverLinkWhileDown"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-no-wildcard"
-spec = "prefix_boot.qnt"
-main = "boot_faulty"
-invariant = "NoWildcardReached"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-nothing-while-down"
-spec = "prefix_boot.qnt"
-main = "boot_faulty"
-invariant = "NothingDeliveredWhileDown"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# A boot opens only converged (its program in the pinned link, route `local`): a crash or failure at
-# any step leaves a state the next boot converges
-[[check]]
-name = "prefix-boot-open-converged"
-spec = "prefix_boot.qnt"
-main = "boot_faulty"
-invariant = "OpenConverged"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Progress: boot opens once load and swap eventually succeed
-[[check]]
-name = "prefix-boot-opens"
-spec = "prefix_boot.qnt"
-main = "boot_live"
-temporal = "BootOpens"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Non-vacuity witnesses (expected violation)
-[[check]]
-name = "prefix-boot-witness-refusal"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "WitnessNoRefusal"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# a load the kernel verifier rejects refuses boot
-[[check]]
-name = "prefix-boot-witness-load-refused"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "WitnessNoLoadRefused"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "prefix-boot-witness-update"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "WitnessNoUpdate"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "prefix-boot-witness-crash-with-local"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "WitnessNoCrashWithLocal"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# a crash right after a swap under `local`, before the route step, is reachable
-[[check]]
-name = "prefix-boot-witness-crash-after-swap"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "WitnessNoCrashAfterSwap"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# a crash inside swap (between a first attach and its pin) is reachable
-[[check]]
-name = "prefix-boot-witness-crash-mid-attach"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "WitnessNoCrashMidAttach"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# a failed swap under `local` (the earlier program kept, K-L9) is reachable
-[[check]]
-name = "prefix-boot-witness-swap-fail-kept"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-invariant = "WitnessNoSwapFailKept"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth (hazard/prefix_boot_hazards.qnt): each switches one rule off
-[[check]]
-name = "prefix-boot-hazard-route-first"
-spec = "hazard/prefix_boot_hazards.qnt"
-main = "boot_bugRouteFirst"
-invariant = "NoWildcardReached"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "prefix-boot-hazard-ignore-failure"
-spec = "hazard/prefix_boot_hazards.qnt"
-main = "boot_bugIgnoreFailure"
-invariant = "NoWildcardReached"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "prefix-boot-hazard-detach"
-spec = "hazard/prefix_boot_hazards.qnt"
-main = "boot_bugDetach"
-invariant = "NoWildcardReached"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "prefix-boot-hazard-unpinned"
-spec = "hazard/prefix_boot_hazards.qnt"
-main = "boot_bugUnpinned"
-invariant = "NothingDeliveredWhileDown"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "prefix-boot-hazard-unpinned-open-converged"
-spec = "hazard/prefix_boot_hazards.qnt"
-main = "boot_bugUnpinned"
-invariant = "OpenConverged"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# Steering concern 2 — intake listeners and their steering entries (intake.qnt): D8a-LOOKUP, D23, U-6,
-# U-3, M-7, D8a-CAP. Instances: intake_ok (one declared port, crash, one bind failure, KernelMemory
-# steer failures unbounded, steer defects, another allocation competing for the capacity CAP = 2),
-# intake_two (two declared ports), intake_live (as intake_ok, no steer defects).
-[[check]]
-name = "intake-safety-tlc"
-spec = "intake.qnt"
-main = "intake_ok"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-two-safety-tlc"
-spec = "intake.qnt"
-main = "intake_two"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# round 8: 166.8 s with the other allocation and the capacity added (over 2 minutes: not CI)
-[[check]]
-name = "intake-safety-apalache"
-spec = "intake.qnt"
-main = "intake_two"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 12
-expect = "holds"
-ci = false
-
-# D8a-CAP + A-MEM: a serving port is eventually reachable (round 7: violated, steer could fail forever)
-[[check]]
-name = "intake-serving-reachable"
-spec = "intake.qnt"
-main = "intake_live"
-temporal = "ServingReachable"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# with steer defects: a parked port is released when it stops serving
-[[check]]
-name = "intake-serving-reachable-with-defects"
-spec = "intake.qnt"
-main = "intake_ok"
-temporal = "ServingReachable"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-activation-completes"
-spec = "intake.qnt"
-main = "intake_ok"
-temporal = "ActivationCompletes"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# assumption off (A-MEM): kernel memory never recovers, KernelMemory steer failures forever — the
-# serving port stays refused; shows what the transience of KernelMemory carries
-[[check]]
-name = "intake-steer-forever-unreachable"
-spec = "intake.qnt"
-main = "intake_live"
-temporal = "ServingReachableNoMemRecovery"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Invariant 12 (D8a-CAP), each also in Safety
-[[check]]
-name = "intake-reserved-within-capacity"
-spec = "intake.qnt"
-main = "intake_two"
-invariant = "ReservedWithinCapacity"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-listeners-within-reserved"
-spec = "intake.qnt"
-main = "intake_two"
-invariant = "ListenersWithinReserved"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-entries-within-listeners"
-spec = "intake.qnt"
-main = "intake_two"
-invariant = "EntriesWithinListeners"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-no-capacity-steer-failure"
-spec = "intake.qnt"
-main = "intake_two"
-invariant = "NoCapacitySteerFailure"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Non-vacuity witnesses (expected violation)
-[[check]]
-name = "intake-witness-steered"
-spec = "intake.qnt"
-main = "intake_ok"
-invariant = "WitnessNoSteered"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-witness-second-allocation"
-spec = "intake.qnt"
-main = "intake_ok"
-invariant = "WitnessNoSecondAllocation"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-witness-activation-err"
-spec = "intake.qnt"
-main = "intake_two"
-invariant = "WitnessNoActivationErr"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-witness-resteer"
-spec = "intake.qnt"
-main = "intake_live"
-invariant = "WitnessNoResteer"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-witness-leg-c"
-spec = "intake.qnt"
-main = "intake_ok"
-invariant = "WitnessNoLegCWhileServed"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-witness-serving-refused"
-spec = "intake.qnt"
-main = "intake_ok"
-invariant = "WitnessNoServingRefused"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# D8a-CAP witnesses
-[[check]]
-name = "intake-witness-capacity-refusal"
-spec = "intake.qnt"
-main = "intake_ok"
-invariant = "WitnessNoCapacityRefusal"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-witness-retiring-refusal"
-spec = "intake.qnt"
-main = "intake_ok"
-invariant = "WitnessNoRetiringRefusal"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-witness-full-map"
-spec = "intake.qnt"
-main = "intake_two"
-invariant = "WitnessNoFullMap"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-witness-defect"
-spec = "intake.qnt"
-main = "intake_ok"
-invariant = "WitnessNoDefect"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth (hazard/intake_hazards.qnt)
-[[check]]
-name = "intake-hazard-entry-outlives-close"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugEntryOutlives"
-invariant = "EntryNamesServingListener"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-hazard-takedown-before-close"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugTakedownBeforeClose"
-invariant = "ReachOnlyServing"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-hazard-rollback-partial"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugRollbackPartial"
-invariant = "ActivationAllOrNothing"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-hazard-act-ok-partial"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugActOkPartial"
-invariant = "ActivationAllOrNothing"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-hazard-teardown-keeps-listeners"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugTeardownKeeps"
-invariant = "NoReleaseWithListener"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-hazard-quiesce-keeps-listeners"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugQuiesceKeeps"
-invariant = "QuiescedClosesListeners"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# D8a-CAP: admission does not reserve
-[[check]]
-name = "intake-hazard-no-admission-over-capacity"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugNoIntakeAdmission"
-invariant = "ReservedWithinCapacity"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "intake-hazard-no-admission-capacity-steer-failure"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugNoIntakeAdmission"
-invariant = "NoCapacitySteerFailure"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# D8a-CAP: revision-10 capacity-driven retry with admission off — the port retries forever against a full map
-[[check]]
-name = "intake-hazard-cap-retry-unreachable"
-spec = "hazard/intake_hazards.qnt"
-main = "intake_bugCapRetryNoAdmission"
-temporal = "ServingReachable"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# Steering concern 3 — quiescence holders and component recoveries (quiescence.qnt): D8a-HOLD,
-# ADR-0124, UP-7, UP-12. Components IpRules and FlowListeners, damage recurring at any time.
-# Instances: quiesce_ok (crash + restart, one repair failure), quiesce_live (no crash, a repair may
-# fail forever).
-[[check]]
-name = "quiescence-safety-tlc"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-live-safety-tlc"
-spec = "quiescence.qnt"
-main = "quiesce_live"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-safety-apalache"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 12
-expect = "holds"
-ci = true
-
-# Progress under each recovery's own fairness only (no fairness for the other recovery or for damage)
-[[check]]
-name = "quiescence-ip-rules-episode-ends"
-spec = "quiescence.qnt"
-main = "quiesce_live"
-temporal = "IpRulesEpisodeEnds"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-flow-listeners-episode-ends"
-spec = "quiescence.qnt"
-main = "quiesce_live"
-temporal = "FlowListenersEpisodeEnds"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-ip-rules-repaired"
-spec = "quiescence.qnt"
-main = "quiesce_live"
-temporal = "IpRulesRepaired"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-ok-ip-rules-repaired"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-temporal = "IpRulesRepaired"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Non-vacuity witnesses (expected violation)
-[[check]]
-name = "quiescence-witness-overlap"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "WitnessNoOverlap"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-witness-still-quiesced"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "WitnessNoStillQuiesced"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-witness-fail-stop"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "WitnessNoFailStop"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth (hazard/quiescence_hazards.qnt)
-[[check]]
-name = "quiescence-hazard-any-restore"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_bugAnyRestore"
-invariant = "NoReopenBeforeRepair"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-any-restore-preempts-repair"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_live_bugAnyRestore"
-temporal = "IpRulesRepaired"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-repair-without-hold"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_bugRepairNoHold"
-invariant = "NoRepairWithoutHold"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# UP-7 hazard (a failed post-repair audit is not a failed attempt). S-6 (U-QP-1): IpRules damage no
-# longer recurs at runtime (the table is absent only from `init` / a failed boot step-8 write, and a
-# repair makes it complete), so the round-9 counterexample against `IpRulesEpisodeEnds` — an IpRules
-# episode kept alive by recurring IpRules damage — LOST ITS COUNTEREXAMPLE: the check below records
-# that, as `holds` (reported to the architect; not restored with a partial table). The hazard keeps its
-# teeth on the component whose damage still recurs, FlowListeners (second check, prediction: violated).
-[[check]]
-name = "quiescence-hazard-redo-not-counted-ip-rules-lost"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_live_bugRedoNoCount"
-temporal = "IpRulesEpisodeEnds"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-redo-not-counted"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_live_bugRedoNoCount"
-temporal = "FlowListenersEpisodeEnds"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-repair-writes-prefix"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_bugOtherRepairsPrefix"
-invariant = "RepairNeverWritesPrefix"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-fail-stop-after-runtime-prefix-write"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_bugOtherRepairsPrefix"
-invariant = "FailStopLeavesPrefixAsBooted"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# Steering concern 4 — the shared nft table left absent by Overdrive (shared_table.qnt): K-D3,
-# U-QP-1 (the table is written and replaced only in single transactions: two states, `absent` and
-# `complete`), D8a-LOOKUP (steering independent of the table), D8a-HOLD (the IpRules recovery).
-# Instances: table_ok (crash at any step; the mTLS worker's transaction failing at boot step 8 and at
-# runtime, unbounded, a failed replacement leaving the table as it was; listener-task exits; one
-# repair failure), table_live (no crash; a repair may fail forever).
-[[check]]
-name = "shared-table-safety-tlc"
-spec = "shared_table.qnt"
-main = "table_ok"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-live-safety-tlc"
-spec = "shared_table.qnt"
-main = "table_live"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-safety-apalache"
-spec = "shared_table.qnt"
-main = "table_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 12
-expect = "holds"
-ci = true
-
-# Progress (D8a-HOLD, concern 4): the IpRules recovery's table repair completes under its hold — the
-# table is complete again — or serve stops, under that recovery's own fairness (and boot) only. Round 5
-# also checked "the leg-C bypass ends"; that holds trivially (the first quiesce closes every intake
-# listener) and is no longer checked.
-[[check]]
-name = "shared-table-repaired"
-spec = "shared_table.qnt"
-main = "table_live"
-temporal = "TableRepaired"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-ok-repaired"
-spec = "shared_table.qnt"
-main = "table_ok"
-temporal = "TableRepaired"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Non-vacuity witnesses / documented behaviour (expected violation)
-[[check]]
-name = "shared-table-witness-bypass"
-spec = "shared_table.qnt"
-main = "table_ok"
-invariant = "WitnessNoBypass"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "shared-table-witness-absent-while-up"
-spec = "shared_table.qnt"
-main = "table_ok"
-invariant = "WitnessNoAbsentWhileUp"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "shared-table-witness-absent-while-down"
-spec = "shared_table.qnt"
-main = "table_ok"
-invariant = "WitnessNoAbsentWhileDown"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth (hazard/shared_table_hazards.qnt)
-[[check]]
-name = "shared-table-hazard-steering-in-nft"
-spec = "hazard/shared_table_hazards.qnt"
-main = "table_bugSteeringInNft"
-invariant = "NoWildcardReached"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "shared-table-hazard-unpinned"
-spec = "hazard/shared_table_hazards.qnt"
-main = "table_bugUnpinned"
-invariant = "NothingDeliveredWhileDown"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "shared-table-hazard-non-loopback"
-spec = "hazard/shared_table_hazards.qnt"
-main = "table_bugNonLoopback"
-invariant = "RemoteNeverDirect"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "shared-table-hazard-any-restore"
-spec = "hazard/shared_table_hazards.qnt"
-main = "table_live_bugAnyRestore"
-temporal = "TableRepaired"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# Deeper bounded run (parity with the first model check's depth); not for CI
-[[check]]
-name = "owner-flows-safety-apalache-deep"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 14
-expect = "holds"
-ci = false
-timeout_secs = 3600
-
-
-# S-2 (conformance instances): `lease_conf_ok` / `lease_conf_live` are `lease_ok` / `lease_live` on the
-# five offsets of the /29 test pool (production pools have 5 or 1 offsets; the design instances use 3).
-# A driver compares only where `walkIdle` (walker == 0). Prediction: Safety holds, EventuallyPlaced
-# holds, the witness is violated. `cid-lease-conf-safety-tlc` takes ~122 s of its own time (> 2 min):
-# ci = false; the other three are under 50 s.
-
-[[check]]
-name = "cid-lease-conf-safety-tlc"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = false
-
-[[check]]
-name = "cid-lease-conf-live-safety-tlc"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-conf-eventually-placed"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-temporal = "EventuallyPlaced"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-conf-witness-running"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-invariant = "WitnessNoRunning"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# S-3: for an adopted link swap goes straight to `route`; `pin` follows a first attach only (no `pin`
-# step exists that `Fail` could refuse for an adopted link). Prediction: holds on the failing instance.
-
-[[check]]
-name = "prefix-boot-pin-only-after-first-attach"
-spec = "prefix_boot.qnt"
-main = "boot_faulty"
-invariant = "PinOnlyAfterFirstAttach"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-
-# S-4: per-side conformance instances of the half-close module. `HcPeerDefectEnd(s)` (a defect of `s`'s
-# own code) is enabled only for the side not under test: `flows_half_host` (host owner under test, the
-# guest's defect enabled), `flows_half_guest` (guest owner under test, the host's defect enabled). A
-# closed flow's fields at a side are history. Prediction: invariant 13 and the three progress properties
-# hold, the three witnesses are violated, on both instances.
-
-[[check]]
-name = "owner-flows-half-host-no-eof-on-peer-loss"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "NoEofOnPeerLoss"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-fin-only-after-ack"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "FinOnlyAfterAck"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-close-completes"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-temporal = "HalfCloseCompletes"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-announce-ends"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-temporal = "AnnounceEnds"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-early-eof-carried"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-temporal = "EarlyEofCarried"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-witness-clean-eof"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "WitnessNoCleanEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-witness-survivor-abort-first"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "WitnessNoSurvivorAbortFirst"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-witness-early-eof"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "WitnessNoEarlyEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-no-eof-on-peer-loss"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "NoEofOnPeerLoss"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-fin-only-after-ack"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "FinOnlyAfterAck"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-close-completes"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-temporal = "HalfCloseCompletes"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-announce-ends"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-temporal = "AnnounceEnds"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-early-eof-carried"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-temporal = "EarlyEofCarried"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-witness-clean-eof"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "WitnessNoCleanEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-witness-survivor-abort-first"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "WitnessNoSurvivorAbortFirst"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-witness-early-eof"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "WitnessNoEarlyEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-
-# ------------------------------------------------------------------------------------------------
-# Named runs (critical scenarios) — executed by `quint test` on the evaluator. DISTILL's conformance
-# drivers pin these with `#[quint_test]`; the README maps each scenario to its run and decision id.
-# Each run ends in an `expect` of its scenario's outcome and checks the module's safety invariants
-# along the way. All are fast (ci = true).
-
-[[check]]
-name = "shared-table-run-ok-happy-path-boot-and-bring-up"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "HappyPathBootAndBringUp"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-ok-table-absent-at-boot-keeps-route-and-steering"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "TableAbsentAtBootKeepsRouteAndSteering"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-ok-ip-rules-recovery-repairs-absent-table"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "IpRulesRecoveryRepairsAbsentTable"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-ok-absent-table-persists-while-down-then-boot-converges"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "AbsentTablePersistsWhileDownThenBootConverges"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-ok-crash-at-each-boot-step-then-restart"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "CrashAtEachBootStepThenRestart"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-ok-runtime-replacement-failure-leaves-table-as-was"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "RuntimeReplacementFailureLeavesTableAsWas"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-ok-flow-listeners-recovery-after-task-exit"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "FlowListenersRecoveryAfterTaskExit"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-ok-second-holder-keeps-forwarding-closed"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "SecondHolderKeepsForwardingClosed"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-ok-repair-failure-retries-under-hold"
-spec = "shared_table.qnt"
-main = "table_ok"
-run = "RepairFailureRetriesUnderHold"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "shared-table-run-live-repair-fails-forever-fail-stops-then-boot-converges"
-spec = "shared_table.qnt"
-main = "table_live"
-run = "RepairFailsForeverFailStopsThenBootConverges"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-first-boot-converges-link-then-route"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "FirstBootConvergesLinkThenRoute"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-steering-and-route-persist-while-serve-down"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "SteeringAndRoutePersistWhileServeDown"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-new-binary-updates-adopted-link-atomically"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "NewBinaryUpdatesAdoptedLinkAtomically"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-load-rejection-refuses-and-keeps-earlier-program"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "LoadRejectionRefusesAndKeepsEarlierProgram"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-first-boot-load-rejection-leaves-nothing-attached"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "FirstBootLoadRejectionLeavesNothingAttached"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-swap-failure-keeps-earlier-program"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "SwapFailureKeepsEarlierProgram"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-pin-failure-leaves-no-link-and-no-route"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "PinFailureLeavesNoLinkAndNoRoute"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-route-write-failure-keeps-pinned-link-then-next-boot-adopts"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "RouteWriteFailureKeepsPinnedLinkThenNextBootAdopts"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-crash-between-attach-and-pin-recovers-on-next-boot"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "CrashBetweenAttachAndPinRecoversOnNextBoot"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-ok-crash-after-swap-before-route-converges-on-restart"
-spec = "prefix_boot.qnt"
-main = "boot_ok"
-run = "CrashAfterSwapBeforeRouteConvergesOnRestart"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-boot-run-faulty-repeated-refusals-then-boot-converges"
-spec = "prefix_boot.qnt"
-main = "boot_faulty"
-run = "RepeatedRefusalsThenBootConverges"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-assign-skips-survivor-claims-launches-and-releases"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "AssignSkipsSurvivorClaimsLaunchesAndReleases"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-survivor-exit-frees-its-cid-for-later-assigns"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "SurvivorExitFreesItsCidForLaterAssigns"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-untaken-claim-released-at-pool-release"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "UntakenClaimReleasedAtPoolRelease"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-create-err-drops-claim-and-placement-retries"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "CreateErrDropsClaimAndPlacementRetries"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-vmm-exits-before-ready-releases-cid-and-retries"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "VmmExitsBeforeReadyReleasesCidAndRetries"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-claim-error-leaves-no-state-change"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "ClaimErrorLeavesNoStateChange"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-serve-crash-with-running-vmm-survives-and-replace-skips-it"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "ServeCrashWithRunningVmmSurvivesAndReplaceSkipsIt"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-serve-crash-claim-in-transit-inherited-survives"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "ServeCrashClaimInTransitInheritedSurvives"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-serve-crash-claim-in-transit-not-inherited-is-released"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "ServeCrashClaimInTransitNotInheritedIsReleased"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-serve-crash-releases-untaken-claim"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "ServeCrashReleasesUntakenClaim"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-ok-all-offsets-held-elsewhere-refuses-then-places-after-exit"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-run = "AllOffsetsHeldElsewhereRefusesThenPlacesAfterExit"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-assign-skips-survivor-claims-launches-and-releases"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "AssignSkipsSurvivorClaimsLaunchesAndReleases"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-survivor-exit-frees-its-cid-for-later-assigns"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "SurvivorExitFreesItsCidForLaterAssigns"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-untaken-claim-released-at-pool-release"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "UntakenClaimReleasedAtPoolRelease"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-create-err-drops-claim-and-placement-retries"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "CreateErrDropsClaimAndPlacementRetries"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-vmm-exits-before-ready-releases-cid-and-retries"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "VmmExitsBeforeReadyReleasesCidAndRetries"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-claim-error-leaves-no-state-change"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "ClaimErrorLeavesNoStateChange"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-serve-crash-with-running-vmm-survives-and-replace-skips-it"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "ServeCrashWithRunningVmmSurvivesAndReplaceSkipsIt"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-serve-crash-claim-in-transit-inherited-survives"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "ServeCrashClaimInTransitInheritedSurvives"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-serve-crash-claim-in-transit-not-inherited-is-released"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "ServeCrashClaimInTransitNotInheritedIsReleased"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-ok-serve-crash-releases-untaken-claim"
-spec = "cid_lease.qnt"
-main = "lease_conf_ok"
-run = "ServeCrashReleasesUntakenClaim"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-assign-skips-survivor-claims-launches-and-releases"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "AssignSkipsSurvivorClaimsLaunchesAndReleases"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-survivor-exit-frees-its-cid-for-later-assigns"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "SurvivorExitFreesItsCidForLaterAssigns"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-untaken-claim-released-at-pool-release"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "UntakenClaimReleasedAtPoolRelease"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-create-err-drops-claim-and-placement-retries"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "CreateErrDropsClaimAndPlacementRetries"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-vmm-exits-before-ready-releases-cid-and-retries"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "VmmExitsBeforeReadyReleasesCidAndRetries"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-claim-error-leaves-no-state-change"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "ClaimErrorLeavesNoStateChange"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-serve-crash-with-running-vmm-survives-and-replace-skips-it"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "ServeCrashWithRunningVmmSurvivesAndReplaceSkipsIt"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-serve-crash-claim-in-transit-inherited-survives"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "ServeCrashClaimInTransitInheritedSurvives"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-serve-crash-claim-in-transit-not-inherited-is-released"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "ServeCrashClaimInTransitNotInheritedIsReleased"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-run-conf-live-serve-crash-releases-untaken-claim"
-spec = "cid_lease.qnt"
-main = "lease_conf_live"
-run = "ServeCrashReleasesUntakenClaim"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-run-ok-ip-rules-recovery-quiesces-repairs-restores"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-run = "IpRulesRecoveryQuiescesRepairsRestores"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-run-ok-flow-listeners-recovery-after-listener-task-exit"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-run = "FlowListenersRecoveryAfterListenerTaskExit"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-run-ok-two-holders-restore-one-keeps-forwarding-quiesced"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-run = "TwoHoldersRestoreOneKeepsForwardingQuiesced"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-run-ok-repair-failure-counts-attempt-then-repairs"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-run = "RepairFailureCountsAttemptThenRepairs"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-run-ok-post-repair-audit-failure-counts-attempt"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-run = "PostRepairAuditFailureCountsAttempt"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-run-ok-crash-during-recovery-then-restart-recovers"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-run = "CrashDuringRecoveryThenRestartRecovers"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "quiescence-run-live-spent-budget-fail-stops-and-restart-converges"
-spec = "quiescence.qnt"
-main = "quiesce_live"
-run = "SpentBudgetFailStopsAndRestartConverges"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-activation-steers-declared-port-and-serves"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "ActivationSteersDeclaredPortAndServes"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-session-loss-closes-listener-and-entry-then-recovers"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "SessionLossClosesListenerAndEntryThenRecovers"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-listen-state-not-listening-closes-listener"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "ListenStateNotListeningClosesListener"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-teardown-closes-listeners-then-release-then-reuse"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "TeardownClosesListenersThenReleaseThenReuse"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-quiescence-closes-listeners-restore-reopens"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "QuiescenceClosesListenersRestoreReopens"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-serve-crash-closes-every-listener-then-restart"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "ServeCrashClosesEveryListenerThenRestart"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-crash-during-activation-leaves-nothing"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "CrashDuringActivationLeavesNothing"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-activation-bind-failure-rolls-back-then-retries"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "ActivationBindFailureRollsBackThenRetries"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-runtime-bind-failure-is-retried"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "RuntimeBindFailureIsRetried"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-steer-kernel-memory-failure-closes-listener-and-retries"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "SteerKernelMemoryFailureClosesListenerAndRetries"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-steer-defect-parks-port-until-wanted-anew"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "SteerDefectParksPortUntilWantedAnew"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-admission-refused-at-capacity-then-admitted-after-release"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "AdmissionRefusedAtCapacityThenAdmittedAfterRelease"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-retiring-lease-keeps-reservation-until-release"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "RetiringLeaseKeepsReservationUntilRelease"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-ok-other-allocation-shares-capacity-and-is-quiesced"
-spec = "intake.qnt"
-main = "intake_ok"
-run = "OtherAllocationSharesCapacityAndIsQuiesced"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "intake-run-two-two-port-activation-rolls-back-every-listener"
-spec = "intake.qnt"
-main = "intake_two"
-run = "TwoPortActivationRollsBackEveryListener"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-datagram-association-claims-pairs-and-routes"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "DatagramAssociationClaimsPairsAndRoutes"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-two-sockets-claim-distinct-slots"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "TwoSocketsClaimDistinctSlots"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-refused-discards-parked-frames-and-only-new-datagram-reassociates"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "RefusedDiscardsParkedFramesAndOnlyNewDatagramReassociates"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-host-abort-of-live-association-ends-it-and-keeps-slot-owned"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-stale-generation-readiness-event-is-discarded"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "StaleGenerationReadinessEventIsDiscarded"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-late-paired-for-released-slot-is-answered-with-abort"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "LatePairedForReleasedSlotIsAnsweredWithAbort"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-lost-release-report-is-found-by-audit"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "LostReleaseReportIsFoundByAudit"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-socket-close-releases-every-slot-it-owns"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "SocketCloseReleasesEverySlotItOwns"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-idle-slot-release-ends-association"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "IdleSlotReleaseEndsAssociation"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-pairing-deadline-aborts-and-late-paired-is-discarded"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "PairingDeadlineAbortsAndLatePairedIsDiscarded"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "udp-slots-run-ok-recycled-slot-never-delivers-previous-owners-frames"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-run = "RecycledSlotNeverDeliversPreviousOwnersFrames"
-backend = "evaluator"
-expect = "holds"
 ci = true
 
 [[check]]
@@ -2874,37 +511,37 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-ok-tcp-accept-pairs-and-routes"
+name = "owner-flows-run-ok-dial-pairs-and-returns-stream"
 spec = "owner_flows.qnt"
 main = "flows_ok"
-run = "TcpAcceptPairsAndRoutes"
+run = "DialPairsAndReturnsStream"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-ok-tcp-accept-refused-closes-host-flow"
+name = "owner-flows-run-ok-dial-refused-returns-typed-error"
 spec = "owner_flows.qnt"
 main = "flows_ok"
-run = "TcpAcceptRefusedClosesHostFlow"
+run = "DialRefusedReturnsTypedError"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-ok-tcp-accept-aborted-before-guest-accepts-ends-by-host-close"
+name = "owner-flows-run-ok-dial-aborted-before-guest-accepts-ends-by-host-close"
 spec = "owner_flows.qnt"
 main = "flows_ok"
-run = "TcpAcceptAbortedBeforeGuestAcceptsEndsByHostClose"
+run = "DialAbortedBeforeGuestAcceptsEndsByHostClose"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-ok-tcp-accept-queued-vg-is-reset-by-host-close"
+name = "owner-flows-run-ok-dial-queued-vg-is-reset-by-host-close"
 spec = "owner_flows.qnt"
 main = "flows_ok"
-run = "TcpAcceptQueuedVgIsResetByHostClose"
+run = "DialQueuedVgIsResetByHostClose"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -2919,19 +556,19 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-ok-session-loss-aborts-tcp-accept-on-both-sides"
+name = "owner-flows-run-ok-session-loss-aborts-dial-on-both-sides"
 spec = "owner_flows.qnt"
 main = "flows_ok"
-run = "SessionLossAbortsTcpAcceptOnBothSides"
+run = "SessionLossAbortsDialOnBothSides"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-ok-quiesce-aborts-tcp-accept-and-sends-abort"
+name = "owner-flows-run-ok-quiesce-aborts-dial-and-sends-abort"
 spec = "owner_flows.qnt"
 main = "flows_ok"
-run = "QuiesceAbortsTcpAcceptAndSendsAbort"
+run = "QuiesceAbortsDialAndSendsAbort"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -2991,599 +628,6 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-tcp-connect-half-close-handshake-delivers-eof"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "TcpConnectHalfCloseHandshakeDeliversEof"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-tcp-accept-half-close-handshake-delivers-eof"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "TcpAcceptHalfCloseHandshakeDeliversEof"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-simultaneous-half-close-closes-cleanly"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "SimultaneousHalfCloseClosesCleanly"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-early-outer-eof-is-carried-out-after-paired"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "EarlyOuterEofIsCarriedOutAfterPaired"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-owner-death-vsock-end-before-session-loss-resets-both-far-ends"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "OwnerDeathVsockEndBeforeSessionLossResetsBothFarEnds"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-owner-death-session-loss-before-vsock-end-resets-both-far-ends"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "OwnerDeathSessionLossBeforeVsockEndResetsBothFarEnds"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-session-drop-aborts-flow-on-both-owners"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "SessionDropAbortsFlowOnBothOwners"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-flow-error-aborts-both-owners-with-abort-message"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "FlowErrorAbortsBothOwnersWithAbortMessage"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-far-end-reset-after-paired-aborts-both-owners"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "FarEndResetAfterPairedAbortsBothOwners"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-unannounced-guest-vsock-end-aborts-host-with-reset"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "UnannouncedGuestVsockEndAbortsHostWithReset"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-unannounced-host-vsock-end-aborts-guest-with-reset"
-spec = "owner_flows.qnt"
-main = "flows_half"
-run = "UnannouncedHostVsockEndAbortsGuestWithReset"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-tcp-connect-half-close-handshake-delivers-eof"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "TcpConnectHalfCloseHandshakeDeliversEof"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-tcp-accept-half-close-handshake-delivers-eof"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "TcpAcceptHalfCloseHandshakeDeliversEof"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-simultaneous-half-close-closes-cleanly"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "SimultaneousHalfCloseClosesCleanly"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-early-outer-eof-is-carried-out-after-paired"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "EarlyOuterEofIsCarriedOutAfterPaired"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-owner-death-vsock-end-before-session-loss-resets-both-far-ends"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "OwnerDeathVsockEndBeforeSessionLossResetsBothFarEnds"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-owner-death-session-loss-before-vsock-end-resets-both-far-ends"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "OwnerDeathSessionLossBeforeVsockEndResetsBothFarEnds"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-session-drop-aborts-flow-on-both-owners"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "SessionDropAbortsFlowOnBothOwners"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-flow-error-aborts-both-owners-with-abort-message"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "FlowErrorAbortsBothOwnersWithAbortMessage"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-far-end-reset-after-paired-aborts-both-owners"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "FarEndResetAfterPairedAbortsBothOwners"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-host-unannounced-guest-vsock-end-aborts-host-with-reset"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "UnannouncedGuestVsockEndAbortsHostWithReset"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-tcp-connect-half-close-handshake-delivers-eof"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "TcpConnectHalfCloseHandshakeDeliversEof"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-tcp-accept-half-close-handshake-delivers-eof"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "TcpAcceptHalfCloseHandshakeDeliversEof"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-simultaneous-half-close-closes-cleanly"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "SimultaneousHalfCloseClosesCleanly"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-early-outer-eof-is-carried-out-after-paired"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "EarlyOuterEofIsCarriedOutAfterPaired"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-owner-death-vsock-end-before-session-loss-resets-both-far-ends"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "OwnerDeathVsockEndBeforeSessionLossResetsBothFarEnds"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-owner-death-session-loss-before-vsock-end-resets-both-far-ends"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "OwnerDeathSessionLossBeforeVsockEndResetsBothFarEnds"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-session-drop-aborts-flow-on-both-owners"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "SessionDropAbortsFlowOnBothOwners"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-flow-error-aborts-both-owners-with-abort-message"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "FlowErrorAbortsBothOwnersWithAbortMessage"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-far-end-reset-after-paired-aborts-both-owners"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "FarEndResetAfterPairedAbortsBothOwners"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-run-half-guest-unannounced-host-vsock-end-aborts-guest-with-reset"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "UnannouncedHostVsockEndAbortsGuestWithReset"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-
-# ------------------------------------------------------------------------------------------------
-# prefix_landing state machine (module landing_machine, QPROJ-8): safety, teeth, named runs.
-
-[[check]]
-name = "prefix-landing-safety"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-landing-no-wildcard-reached"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-invariant = "NoWildcardReached"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-landing-seen-is-lands"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-invariant = "SeenIsLands"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-landing-nothing-delivered-while-down"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-invariant = "NothingDeliveredWhileDown"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-landing-intake-only-through-entry-for-marked"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-invariant = "IntakeOnlyThroughEntryForMarked"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-landing-elsewhere-only-before-first-boot"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-invariant = "ElsewhereOnlyBeforeFirstBoot"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-landing-entries-are-open-listeners"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-invariant = "EntriesAreOpenListeners"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "prefix-landing-hazard-route-first"
-spec = "hazard/prefix_landing_hazards.qnt"
-main = "landing_bugRouteFirst"
-invariant = "NoWildcardReached"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "prefix-landing-hazard-volatile"
-spec = "hazard/prefix_landing_hazards.qnt"
-main = "landing_bugVolatile"
-invariant = "ElsewhereOnlyBeforeFirstBoot"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "prefix-landing-hazard-no-rules"
-spec = "hazard/prefix_landing_hazards.qnt"
-main = "landing_bugNoRules"
-invariant = "IntakeOnlyThroughEntryForMarked"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "landing-run-ok-never-booted"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-run = "NeverBooted"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "landing-run-ok-serving-guest-listening"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-run = "ServingGuestListening"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "landing-run-ok-serving-guest-not-listening"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-run = "ServingGuestNotListening"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "landing-run-ok-serve-killed-refuses-everything"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-run = "ServeKilledRefusesEverything"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "landing-run-ok-serve-restarted-after-kill"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-run = "ServeRestartedAfterKill"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "landing-run-ok-serve-stopped-gracefully"
-spec = "prefix_landing.qnt"
-main = "landing_ok"
-run = "ServeStoppedGracefully"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-
-# ---- Round 2 of the DG-5 remediation (2026-10-10, DG-5-A to DG-5-F)
-# Predictions (written before the run): every design check keeps its verdict; the new invariants hold on
-# their instances; each new hazard violates exactly the property named on its check; the new runs hold.
-
-# DG-5-D drain wait / DG-5-C merged clean close (instance flows_half and the per-side conformance instances)
-[[check]]
-name = "owner-flows-half-no-shut-outer-while-draining"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "NoShutOuterWhileDraining"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-no-announce-while-draining"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "NoAnnounceWhileDraining"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-drain-wait-only-while-open"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "DrainWaitOnlyWhileOpen"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-no-completed-flow-stays-open"
-spec = "owner_flows.qnt"
-main = "flows_half"
-invariant = "NoCompletedFlowStaysOpen"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-no-shut-outer-while-draining"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "NoShutOuterWhileDraining"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-no-announce-while-draining"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "NoAnnounceWhileDraining"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-drain-wait-only-while-open"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "DrainWaitOnlyWhileOpen"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-host-no-completed-flow-stays-open"
-spec = "owner_flows.qnt"
-main = "flows_half_host"
-invariant = "NoCompletedFlowStaysOpen"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-no-shut-outer-while-draining"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "NoShutOuterWhileDraining"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-no-announce-while-draining"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "NoAnnounceWhileDraining"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-drain-wait-only-while-open"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "DrainWaitOnlyWhileOpen"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-half-guest-no-completed-flow-stays-open"
-spec = "owner_flows.qnt"
-main = "flows_half_guest"
-invariant = "NoCompletedFlowStaysOpen"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-# Teeth (DG-5-D, DG-5-C): each rule removed, the property it defends is violated
-# the vsock end shuts the outer leg without the drain wait
-[[check]]
-name = "owner-flows-hazard-no-drain-wait-outer"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugNoDrainWaitOuter"
-invariant = "NoShutOuterWhileDraining"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# HalfClose is sent without the drain wait
-[[check]]
-name = "owner-flows-hazard-no-drain-wait-vsock"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugNoDrainWaitVsock"
-invariant = "NoAnnounceWhileDraining"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# an abort leaves the drain wait armed
-[[check]]
-name = "owner-flows-hazard-abort-keeps-drain"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugAbortKeepsDrain"
-invariant = "DrainWaitOnlyWhileOpen"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# the clean close is a later step
-[[check]]
-name = "owner-flows-hazard-separate-close"
-spec = "hazard/owner_flows_half_hazards.qnt"
-main = "flows_bugSeparateClose"
-invariant = "NoCompletedFlowStaysOpen"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# DG-5-F: no flow of a lost control session outlives the dispatch that observes the loss; DG-5-E: an
-# installed, unrouted V_g is watched. Teeth: the reconnect barrier removed; the watch removed
-[[check]]
-name = "owner-flows-guest-flows-do-not-outlive-session-tlc"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "GuestFlowsDoNotOutliveSession"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
 name = "owner-flows-hazard-reconnect-before-loss-abort"
 spec = "hazard/owner_flows_hazards.qnt"
 main = "flows_bugReconnectBeforeLossAbort"
@@ -3614,7 +658,6 @@ max_steps = 10
 expect = "holds"
 ci = false
 
-# Named runs added or updated in this round
 [[check]]
 name = "owner-flows-run-ok-installed-vg-host-close-ends-flow-silently"
 spec = "owner_flows.qnt"
@@ -3642,110 +685,1758 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
+# Teeth (ATTR-LIVE-CLAIM, beacon): READY compared with the lease's token without the live check — a
+# connection accepted while the launch was live and read after driver.stop takes the claim
 [[check]]
-name = "owner-flows-run-half-half-close-waits-for-drain-then-announces"
+name = "owner-flows-hazard-beacon-no-live-recheck"
+spec = "hazard/owner_flows_beacon_hazards.qnt"
+main = "flows_bugBeaconNoLiveRecheck"
+invariant = "BeaconCurrentLaunch"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-beacon-no-live-recheck-held"
+spec = "hazard/owner_flows_beacon_hazards.qnt"
+main = "flows_bugBeaconNoLiveRecheck"
+invariant = "BeaconNoCrossLaunchHeld"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# Teeth (ATTR-TOKEN, beacon): READY attributed by peer CID alone — a dead launch's buffered READY is
+# released as the next launch's
+[[check]]
+name = "owner-flows-hazard-beacon-peer-cid-only"
+spec = "hazard/owner_flows_beacon_hazards.qnt"
+main = "flows_bugBeaconPeerCidOnly"
+invariant = "BeaconNoCrossLaunchReady"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-beacon-peer-cid-only-current"
+spec = "hazard/owner_flows_beacon_hazards.qnt"
+main = "flows_bugBeaconPeerCidOnly"
+invariant = "BeaconCurrentLaunch"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-run-ok-dial-timed-out-returns-typed-error"
 spec = "owner_flows.qnt"
-main = "flows_half"
-run = "HalfCloseWaitsForDrainThenAnnounces"
+main = "flows_ok"
+run = "DialTimedOutReturnsTypedError"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-vsock-end-awaits-outer-drain-then-shuts"
+name = "owner-flows-run-ok-dial-not-serving-is-atyped-result-with-no-state-change"
 spec = "owner_flows.qnt"
-main = "flows_half"
-run = "VsockEndAwaitsOuterDrainThenShuts"
+main = "flows_ok"
+run = "DialNotServingIsATypedResultWithNoStateChange"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-drain-deadline-aborts-and-sends-abort"
+name = "owner-flows-run-ok-dial-while-quiesced-is-atyped-result-with-no-state-change"
 spec = "owner_flows.qnt"
-main = "flows_half"
-run = "DrainDeadlineAbortsAndSendsAbort"
+main = "flows_ok"
+run = "DialWhileQuiescedIsATypedResultWithNoStateChange"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-outer-drain-deadline-aborts-and-sends-abort"
+name = "owner-flows-run-ok-dial-without-live-session-is-atyped-result-with-no-state-change"
 spec = "owner_flows.qnt"
-main = "flows_half"
-run = "OuterDrainDeadlineAbortsAndSendsAbort"
+main = "flows_ok"
+run = "DialWithoutLiveSessionIsATypedResultWithNoStateChange"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-host-half-close-waits-for-drain-then-announces"
+name = "owner-flows-run-ok-dial-to-agone-vm-is-unreachable"
 spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "HalfCloseWaitsForDrainThenAnnounces"
+main = "flows_ok"
+run = "DialToAGoneVmIsUnreachable"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-host-vsock-end-awaits-outer-drain-then-shuts"
+name = "owner-flows-run-ok-dial-after-observed-session-loss-with-vm-gone-returns-no-session"
 spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "VsockEndAwaitsOuterDrainThenShuts"
+main = "flows_ok"
+run = "DialAfterObservedSessionLossWithVmGoneReturnsNoSession"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-host-drain-deadline-aborts-and-sends-abort"
+name = "owner-flows-run-ok-pairing-deadline-waits-for-the-guest-answer"
 spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "DrainDeadlineAbortsAndSendsAbort"
+main = "flows_ok"
+run = "PairingDeadlineWaitsForTheGuestAnswer"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-host-outer-drain-deadline-aborts-and-sends-abort"
+name = "owner-flows-run-ok-pairing-deadline-fires-only-after-guest-timeout-and-late-reply-is-discarded"
 spec = "owner_flows.qnt"
-main = "flows_half_host"
-run = "OuterDrainDeadlineAbortsAndSendsAbort"
+main = "flows_ok"
+run = "PairingDeadlineFiresOnlyAfterGuestTimeoutAndLateReplyIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# H-1 (r1): a VMM exit while a dial awaits its reply resets V_h: Unreachable { ECONNRESET }, never PairingDeadline
+[[check]]
+name = "owner-flows-run-ok-vm-exit-during-dial-returns-unreachable-reset"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "VmExitDuringDialReturnsUnreachableReset"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-guest-half-close-waits-for-drain-then-announces"
+name = "owner-flows-run-ok-vm-exit-during-dial-leaves-no-pairing-deadline"
 spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "HalfCloseWaitsForDrainThenAnnounces"
+main = "flows_ok"
+run = "VmExitDuringDialLeavesNoPairingDeadline"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# INB-1: PairingDeadline is the outcome for a live VM whose guest never replies
+[[check]]
+name = "owner-flows-run-ok-pairing-deadline-ends-dial-to-a-live-vm-whose-guest-never-replies"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "PairingDeadlineEndsDialToALiveVmWhoseGuestNeverReplies"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# INB-1 cancellation (r1 M-4 / L-9)
+[[check]]
+name = "owner-flows-run-ok-dropped-dial-future-ends-like-the-pairing-deadline"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "DroppedDialFutureEndsLikeThePairingDeadline"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# L-9: a dial ended in flight reports the admission variant of its cause (teardown -> NotServing)
+[[check]]
+name = "owner-flows-run-ok-teardown-ends-pending-dial-with-not-serving"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "TeardownEndsPendingDialWithNotServing"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# L-7 (dial row 5): session loss ends a pending dial with NoSession; a dial after reconnect pairs
+[[check]]
+name = "owner-flows-run-two-dial-after-reconnect-pairs"
+spec = "owner_flows.qnt"
+main = "flows_two"
+run = "DialAfterReconnectPairs"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# G-V3 (L-7): activation with the control session pending; activate after teardown
+[[check]]
+name = "owner-flows-run-ok-activation-is-impossible-while-the-session-is-pending"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+run = "ActivationIsImpossibleWhileTheSessionIsPending"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-guest-vsock-end-awaits-outer-drain-then-shuts"
+name = "owner-flows-run-ok-activation-with-session-pending-returns-pending-then-activates"
 spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "VsockEndAwaitsOuterDrainThenShuts"
+main = "flows_ok"
+run = "ActivationWithSessionPendingReturnsPendingThenActivates"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-guest-drain-deadline-aborts-and-sends-abort"
+name = "owner-flows-run-ok-activate-after-teardown-is-refused-and-changes-nothing"
 spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "DrainDeadlineAbortsAndSendsAbort"
+main = "flows_ok"
+run = "ActivateAfterTeardownIsRefusedAndChangesNothing"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-run-half-guest-outer-drain-deadline-aborts-and-sends-abort"
+name = "owner-flows-run-ok-activate-after-teardown-never-activates"
 spec = "owner_flows.qnt"
-main = "flows_half_guest"
-run = "OuterDrainDeadlineAbortsAndSendsAbort"
+main = "flows_ok"
+run = "ActivateAfterTeardownNeverActivates"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# INB-1 teeth: the owner opens a dial without the Active, live-session, not-quiesced check
+[[check]]
+name = "owner-flows-hazard-dial-no-admission"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugDialNoAdmission"
+invariant = "NoAdmitWhenClosed"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# INB-1 teeth: the owner abandons a dial the guest can still answer
+[[check]]
+name = "owner-flows-hazard-owner-deadline-shorter"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugOwnerDeadlineShorter"
+invariant = "DialDeadlineAfterGuestReply"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-hazard-owner-deadline-shorter-late-paired"
+spec = "hazard/owner_flows_hazards.qnt"
+main = "flows_bugOwnerDeadlineShorter"
+invariant = "NoPairedAfterDialEnded"
+backend = "apalache"
+max_steps = 16
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-witness-dial-ok"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoDialOk"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-witness-dial-timed-out"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoDialTimedOut"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+[[check]]
+name = "owner-flows-witness-dial-deadline"
+spec = "owner_flows.qnt"
+main = "flows_ok"
+invariant = "WitnessNoDialDeadline"
+backend = "apalache"
+max_steps = 14
+expect = "violation"
+ci = true
+
+# INB-1 teeth, NoSession alone (M-5): the session check removed, the Active and quiesce checks kept
+[[check]]
+name = "owner-flows-hazard-dial-no-session-check"
+spec = "hazard/owner_flows_admission_hazards.qnt"
+main = "flows_bugDialNoSessionCheck"
+invariant = "NoAdmitWhenClosed"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# INB-1 teeth (M-5): a typed admission refusal registers and closes the dial slot
+[[check]]
+name = "owner-flows-hazard-refusal-registers"
+spec = "hazard/owner_flows_admission_hazards.qnt"
+main = "flows_bugRefusalRegisters"
+invariant = "TypedRefusalChangesNothing"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# G-V3 teeth (M-5): activate marks the CID Active without a live session or while quiesced
+[[check]]
+name = "owner-flows-hazard-activate-no-guard"
+spec = "hazard/owner_flows_admission_hazards.qnt"
+main = "flows_bugActivateNoGuard"
+invariant = "ActivateOnlyWithLiveSession"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# ==== flow_end: how a flow ends across the VM boundary (R2-END, ADR-0180) and how a half-close drain completes (R2-DRAIN, ADR-0183)
+
+[[check]]
+name = "flow-end-clean-safety-tlc"
+spec = "flow_end.qnt"
+main = "end_clean"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-dv-safety-tlc"
+spec = "flow_end.qnt"
+main = "end_dv"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-do-safety-tlc"
+spec = "flow_end.qnt"
+main = "end_do"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-ring-safety-tlc"
+spec = "flow_end.qnt"
+main = "end_ring"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+[[check]]
+name = "flow-end-abort-safety-tlc"
+spec = "flow_end.qnt"
+main = "end_abort"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-two-safety-tlc"
+spec = "flow_end.qnt"
+main = "end_two"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+# The all-faults instance `end_all` (one byte, every fault) is the instance of the named runs. Exhaustive search
+# of it does not finish (TLC: over 30 min; Apalache: no 7-step bound within 15 min; nor does the abort-side
+# group combined with the guest-side kernel faults), so Safety is checked exhaustively per fault group (clean,
+# dv, do, ring, abort, two). Every named run checks Safety along its scenario on `end_all`.
+
+[[check]]
+name = "flow-end-clean-every-end-resolves"
+spec = "flow_end.qnt"
+main = "end_clean"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-clean-half-close-completes"
+spec = "flow_end.qnt"
+main = "end_clean"
+temporal = "CleanHalfCloseCompletes"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-dv-every-end-resolves"
+spec = "flow_end.qnt"
+main = "end_dv"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-do-every-end-resolves"
+spec = "flow_end.qnt"
+main = "end_do"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-ring-every-end-resolves"
+spec = "flow_end.qnt"
+main = "end_ring"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+[[check]]
+name = "flow-end-abort-every-end-resolves"
+spec = "flow_end.qnt"
+main = "end_abort"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+[[check]]
+name = "flow-end-two-every-end-resolves"
+spec = "flow_end.qnt"
+main = "end_two"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-witness-clean-eof"
+spec = "flow_end.qnt"
+main = "end_clean"
+invariant = "WitnessNoCleanEof"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-witness-both-closed"
+spec = "flow_end.qnt"
+main = "end_clean"
+invariant = "WitnessNoBothDirectionsClosed"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-witness-backstop-wait"
+spec = "flow_end.qnt"
+main = "end_dv"
+invariant = "WitnessNoBackstopFire"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-witness-abort"
+spec = "flow_end.qnt"
+main = "end_abort"
+invariant = "WitnessNoAbort"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-witness-lost-record"
+spec = "flow_end.qnt"
+main = "end_dv"
+invariant = "WitnessNoLost"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-no-tcp-end-check"
+spec = "hazard/flow_end_hazards.qnt"
+main = "end_bugNoTcpEndCheck"
+invariant = "NoEofOnPeerLoss"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-eof-is-half-close"
+spec = "hazard/flow_end_hazards.qnt"
+main = "end_bugEofIsHalfClose"
+invariant = "AbortNeverCleanEof"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-eof-is-half-close-peer-loss"
+spec = "hazard/flow_end_hazards.qnt"
+main = "end_bugEofIsHalfClose"
+invariant = "NoEofOnPeerLoss"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-any-shutdown-aborts"
+spec = "hazard/flow_end_hazards.qnt"
+main = "end_bugAnyShutdownAborts"
+run = "CleanCloseZeroX3IsBenignWhilePeerDrainPending"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-no-unannounced-abort"
+spec = "hazard/flow_end_hazards.qnt"
+main = "end_bugNoUnannouncedAbort"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "violation"
+ci = false
+
+[[check]]
+name = "flow-end-hazard-perf-tracepoint-strands-flow"
+spec = "hazard/flow_end_hazards.qnt"
+main = "end_bugPerfTracepointNoA4"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-perf-tracepoint"
+spec = "hazard/flow_end_hazards.qnt"
+main = "end_bugPerfTracepoint"
+invariant = "AbortOnlyOnFault"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-wake-before-record"
+spec = "hazard/flow_end_hazards.qnt"
+main = "end_bugWakeBeforeRecord"
+invariant = "AbortOnlyOnFault"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-no-epoch"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugNoEpoch"
+invariant = "NoEarlyShutdown"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-no-redirect-notice"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugNoRedirectNotice"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-ignore-ring-drop"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugIgnoreRingDrop"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-no-backstop"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugNoBackstop"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-per-call-counter"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugPerCallCounter"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-arm-first"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugArmFirst"
+invariant = "NoEarlyShutdown"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-read-before-arm"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugReadBeforeArm"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-abort-keeps-armed"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugAbortKeepsArmed"
+invariant = "EndedFlowHoldsNoArmedCell"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-separate-close"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugSeparateClose"
+run = "TcpAcceptDialerBothDirectionsHalfCloseThenCloseCleanly"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-run-tcp-connect-both-directions-half-close-then-close-cleanly"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "TcpConnectBothDirectionsHalfCloseThenCloseCleanly"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-tcp-accept-dialer-both-directions-half-close-then-close-cleanly"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "TcpAcceptDialerBothDirectionsHalfCloseThenCloseCleanly"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-clean-close-zero-x3-is-benign-while-peer-drain-pending"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "CleanCloseZeroX3IsBenignWhilePeerDrainPending"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-recursion-miss-on-last-call-is-covered-by-backstop"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "RecursionMissOnLastCallIsCoveredByBackstop"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-single-program-miss-is-covered-by-the-other-and-kernel-fires"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "SingleProgramMissIsCoveredByTheOtherAndKernelFires"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-ring-drop-aborts-the-flow-and-resets-both-far-ends"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "RingDropAbortsTheFlowAndResetsBothFarEnds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-stale-epoch-record-is-discarded"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "StaleEpochRecordIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-stale-epoch-end-record-is-discarded"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "StaleEpochEndRecordIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-refused-redirect-aborts-the-flow"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "RefusedRedirectAbortsTheFlow"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-unannounced-end-aborts-with-reset"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "UnannouncedEndAbortsWithReset"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-tcp-source-reset-is-abort-not-clean-eof"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "TcpSourceResetIsAbortNotCleanEof"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-far-end-reset-after-paired-aborts-both-owners"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "FarEndResetAfterPairedAbortsBothOwners"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-host-owner-death-gives-guest-an-abort"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "HostOwnerDeathGivesGuestAnAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-guest-pid1-crash-ends-host-flow-with-no-classification-record"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "GuestPid1CrashEndsHostFlowWithNoClassificationRecord"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-session-drop-aborts-flow-at-both-owners"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "SessionDropAbortsFlowAtBothOwners"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-early-outer-eof-is-carried-out-after-paired"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "EarlyOuterEofIsCarriedOutAfterPaired"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-lost-abort-record-still-ends-the-flow"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "LostAbortRecordStillEndsTheFlow"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# A5 (M-2): the classifier skip (same-program recursion) is a fault; a clean flow aborts only on a fault
+[[check]]
+name = "flow-end-skip-safety-tlc"
+spec = "flow_end.qnt"
+main = "end_skip"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-skip-every-end-resolves"
+spec = "flow_end.qnt"
+main = "end_skip"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-witness-classifier-skip-abort"
+spec = "flow_end.qnt"
+main = "end_skip"
+invariant = "WitnessNoAbort"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# H-3 teeth: the counters read only at a record dispatch: a both-skip on the last send (no fault) strands the direction
+[[check]]
+name = "flow-end-hazard-no-periodic-read"
+spec = "hazard/flow_end_read_hazards.qnt"
+main = "end_bugNoPeriodicRead"
+temporal = "CleanHalfCloseCompletes"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-no-periodic-read-every-end"
+spec = "hazard/flow_end_read_hazards.qnt"
+main = "end_bugNoPeriodicRead"
+temporal = "EveryEndResolves"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-end-hazard-no-periodic-read-run"
+spec = "hazard/flow_end_read_hazards.qnt"
+main = "end_bugNoPeriodicRead"
+run = "BothSkipAfterArmIsFoundByTheAuditTick"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+# H-3, A5 named runs
+[[check]]
+name = "flow-end-run-ring-drop-is-not-acted-on-before-the-owner-reads-the-count"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "RingDropIsNotActedOnBeforeTheOwnerReadsTheCount"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-both-skip-after-arm-is-found-by-the-audit-tick"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "BothSkipAfterArmIsFoundByTheAuditTick"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-end-run-classifier-skip-turns-a-clean-end-into-an-abort"
+spec = "flow_end.qnt"
+main = "end_all"
+run = "ClassifierSkipTurnsACleanEndIntoAnAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# ==== cid_lease: the CID lease (CID-NOCLAIM, RESET-EXIT, NO-SURVIVE)
+
+[[check]]
+name = "cid-lease-safety-tlc"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-conf-safety-tlc"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+[[check]]
+name = "cid-lease-live-safety-tlc"
+spec = "cid_lease.qnt"
+main = "lease_live"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-eventually-placed"
+spec = "cid_lease.qnt"
+main = "lease_live"
+temporal = "EventuallyPlaced"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-witness-running"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "WitnessNoRunning"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-witness-orphan"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "WitnessNoOrphan"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-witness-reclaim"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+invariant = "WitnessNoReclaim"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-release-before-vmm"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugReleaseBeforeVmm"
+invariant = "NoLaunchClash"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-release-before-vmm-outlives"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugReleaseBeforeVmm"
+invariant = "LeaseOutlivesVmm"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-assign-before-reclaim"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugAssignBeforeReclaim"
+invariant = "NoLaunchClash"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-assign-before-reclaim-order"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugAssignBeforeReclaim"
+invariant = "AssignAfterReclaim"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-hazard-reset-reboots"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugResetReboots"
+invariant = "GuestResetEndsVmm"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-assign-then-vmm-opens-its-own-device"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "AssignThenVmmOpensItsOwnDevice"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-assign-then-vmm-opens-its-own-device"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "AssignThenVmmOpensItsOwnDevice"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-release-while-the-vmm-runs-is-refused"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ReleaseWhileTheVmmRunsIsRefused"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-release-while-the-vmm-runs-is-refused"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ReleaseWhileTheVmmRunsIsRefused"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-stop-exits-the-vmm-then-release-is-last"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "StopExitsTheVmmThenReleaseIsLast"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-stop-exits-the-vmm-then-release-is-last"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "StopExitsTheVmmThenReleaseIsLast"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-next-fit-continues-from-the-cursor"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "NextFitContinuesFromTheCursor"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-next-fit-continues-from-the-cursor"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "NextFitContinuesFromTheCursor"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-guest-reset-ends-the-vmm-and-placement-retries"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "GuestResetEndsTheVmmAndPlacementRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-guest-reset-ends-the-vmm-and-placement-retries"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "GuestResetEndsTheVmmAndPlacementRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-vmm-crash-frees-its-cid-and-placement-retries"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "VmmCrashFreesItsCidAndPlacementRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-vmm-crash-frees-its-cid-and-placement-retries"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "VmmCrashFreesItsCidAndPlacementRetries"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-serve-crash-orphan-is-reclaimed-before-any-assign"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ServeCrashOrphanIsReclaimedBeforeAnyAssign"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-serve-crash-orphan-is-reclaimed-before-any-assign"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ServeCrashOrphanIsReclaimedBeforeAnyAssign"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-reclamation-releases-the-orphan-device-then-assign-proceeds"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ReclamationReleasesTheOrphanDeviceThenAssignProceeds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-reclamation-releases-the-orphan-device-then-assign-proceeds"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ReclamationReleasesTheOrphanDeviceThenAssignProceeds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-orphan-exits-by-itself-before-reclamation"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "OrphanExitsByItselfBeforeReclamation"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-orphan-exits-by-itself-before-reclamation"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "OrphanExitsByItselfBeforeReclamation"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-serve-crash-with-unlaunched-lease-leaves-nothing-to-reclaim"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "ServeCrashWithUnlaunchedLeaseLeavesNothingToReclaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-serve-crash-with-unlaunched-lease-leaves-nothing-to-reclaim"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ServeCrashWithUnlaunchedLeaseLeavesNothingToReclaim"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# ADR-0156 teeth (M-5): the next-fit assign walk is not atomic under the pool lock
+[[check]]
+name = "cid-lease-hazard-assign-split"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugAssignSplit"
+invariant = "CidUnique"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ==== quiescence: the counted, move-only hold (QHOLD) and the refused boot (ADR-0184)
+
+[[check]]
+name = "quiescence-safety-tlc"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-live-safety-tlc"
+spec = "quiescence.qnt"
+main = "quiesce_live"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-safety-apalache"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 12
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-c1-episode-ends"
+spec = "quiescence.qnt"
+main = "quiesce_live"
+temporal = "C1EpisodeEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-c2-episode-ends"
+spec = "quiescence.qnt"
+main = "quiesce_live"
+temporal = "C2EpisodeEnds"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-c1-repaired"
+spec = "quiescence.qnt"
+main = "quiesce_live"
+temporal = "C1Repaired"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-ok-c1-repaired"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+temporal = "C1Repaired"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-witness-overlap"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+invariant = "WitnessNoOverlap"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-witness-still-quiesced"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+invariant = "WitnessNoStillQuiesced"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-witness-fail-stop"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+invariant = "WitnessNoFailStop"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-witness-dropped-hold"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+invariant = "WitnessNoDroppedHold"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-witness-refused-boot"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+invariant = "WitnessNoRefusedBoot"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-bool-latch"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_bugBoolLatch"
+invariant = "NoReopenBeforeRepair"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-bool-latch-preempts-repair"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_live_bugBoolLatch"
+temporal = "C1Repaired"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-drop-decrements"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_bugDropDecrements"
+invariant = "NoReopenBeforeRepair"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-drop-decrements-count"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_bugDropDecrements"
+invariant = "CountCoversRecoveries"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ADR-0124: the supervisor ignores the leaked-hold count; a recovery whose hold was dropped never ends
+[[check]]
+name = "quiescence-hazard-leak-ignored"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_live_bugLeakIgnored"
+temporal = "C1EpisodeEnds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-repair-without-hold"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_bugRepairNoHold"
+invariant = "NoRepairWithoutHold"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-redo-not-counted"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_live_bugRedoNoCount"
+temporal = "C2EpisodeEnds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-boot-continues"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_bugBootContinues"
+invariant = "ServeRunsOnlyWithTable"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-single-recovery-quiesces-repairs-restores"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "SingleRecoveryQuiescesRepairsRestores"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-two-overlapping-recoveries-keep-forwarding-quiesced-until-the-last-restore"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-no-flow-opens-while-counted-hold-remains"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "NoFlowOpensWhileCountedHoldRemains"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-two-overlapping-recoveries-reopen-only-at-zero"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "TwoOverlappingRecoveriesReopenOnlyAtZero"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-dropped-hold-keeps-forwarding-quiesced-then-fail-stops"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "DroppedHoldKeepsForwardingQuiescedThenFailStops"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-repair-failure-counts-attempt-then-repairs"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "RepairFailureCountsAttemptThenRepairs"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-post-repair-audit-failure-counts-attempt"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "PostRepairAuditFailureCountsAttempt"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-live-spent-budget-fail-stops-and-restart-converges"
+spec = "quiescence.qnt"
+main = "quiesce_live"
+run = "SpentBudgetFailStopsAndRestartConverges"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-crash-during-recovery-then-restart-recovers"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "CrashDuringRecoveryThenRestartRecovers"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "quiescence-run-ok-failed-boot-table-write-refuses-boot-then-retry-succeeds"
+spec = "quiescence.qnt"
+main = "quiesce_ok"
+run = "FailedBootTableWriteRefusesBootThenRetrySucceeds"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# QHOLD teeth (M-5): one hazard per invariant
+[[check]]
+name = "quiescence-hazard-restore-clears-latch"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_bugRestoreClearsLatch"
+invariant = "LatchIffCount"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-quiesce-skips-flows"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_bugQuiesceSkipsFlows"
+invariant = "QuiescedHoldsNoFlow"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "quiescence-hazard-drop-decrements-leaked"
+spec = "hazard/quiescence_hazards.qnt"
+main = "quiesce_bugDropDecrements"
+invariant = "LeakedHoldKeepsForwardingQuiesced"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ==== udp_slots: guest UDP slot pool (D25, SLOT-ABORT, U-2, CELL-RECREATE)
+
+# Guest UDP slots (D25, SLOT-ABORT, U-2). TLC exhaustive on the 1-destination instance.
+# ci = false: the cell generations (CELL-RECREATE) and the queued readiness events enlarge the
+# exhaustive instance (about 300 s own time)
+[[check]]
+name = "udp-slots-safety-tlc"
+spec = "udp_slots.qnt"
+main = "slots_live"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+# ci = false (about 710 s own time; see above)
+[[check]]
+name = "udp-slots-release-liveness"
+spec = "udp_slots.qnt"
+main = "slots_live"
+temporal = "ReleasedSlotBecomesFree"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "udp-slots-safety-apalache"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 8
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "udp-slots-witness-late-paired"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoLatePaired"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-witness-routed"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoRouted"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-witness-two-slots-one-socket"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoTwoSlotsOneSocket"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-witness-reassociation"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoReassociation"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-claim-split"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugClaimSplit"
+invariant = "SlotHeldOnce"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-keep-frames"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugKeepFrames"
+invariant = "ReleasedSlotCarriesNoData"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-late-paired-by-slot-route"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugLatePairedBySlot"
+invariant = "RouteCurrent"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# ci = false: 140.3 s own time (the readiness events enlarge the search)
+[[check]]
+name = "udp-slots-hazard-late-paired-by-slot-data"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugLatePairedBySlot"
+invariant = "ReleasedSlotCarriesNoData"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = false
+
+[[check]]
+name = "udp-slots-hazard-ignore-late-paired"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugIgnoreLatePaired"
+invariant = "LatePairedAborted"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-keep-frames-on-end"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugKeepFramesOnEnd"
+invariant = "NoReassociationWithoutNewDatagram"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-no-audit-fairness"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_liveTeeth"
+temporal = "NoAuditFairness"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# CELL-RECREATE: every end of association recreates the cells (a new cell generation);
+# readiness is dispatched by (slot, generation) and an event of an earlier generation is discarded.
+# Invariant 14 (`NoStaleGenerationStart`) is inside `Safety` (udp-slots-safety-*).
+[[check]]
+name = "udp-slots-witness-stale-event"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+invariant = "WitnessNoStaleEvent"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# Teeth: the cells emptied, not recreated (K-B3 as falsified, P-41) — the residue refills the cell and
+# re-triggers readiness, and the slot re-associates with no new datagram
+[[check]]
+name = "udp-slots-hazard-cells-emptied-only"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugCellsEmptiedOnly"
+invariant = "NoReassociationWithoutNewDatagram"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+# Teeth: readiness dispatched by slot (raw descriptor) only — an event of an earlier generation starts
+# an association with no new datagram
+[[check]]
+name = "udp-slots-hazard-fd-dispatch"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugFdDispatch"
+invariant = "NoReassociationWithoutNewDatagram"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-hazard-fd-dispatch-generation"
+spec = "hazard/udp_slots_hazards.qnt"
+main = "slots_bugFdDispatch"
+invariant = "NoStaleGenerationStart"
+backend = "apalache"
+max_steps = 12
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-datagram-association-claims-pairs-and-routes"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "DatagramAssociationClaimsPairsAndRoutes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-two-sockets-claim-distinct-slots"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "TwoSocketsClaimDistinctSlots"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-refused-discards-parked-frames-and-only-new-datagram-reassociates"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "RefusedDiscardsParkedFramesAndOnlyNewDatagramReassociates"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-host-abort-of-live-association-ends-it-and-keeps-slot-owned"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-stale-generation-readiness-event-is-discarded"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "StaleGenerationReadinessEventIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-late-paired-for-released-slot-is-answered-with-abort"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "LatePairedForReleasedSlotIsAnsweredWithAbort"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-lost-release-report-is-found-by-audit"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "LostReleaseReportIsFoundByAudit"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-socket-close-releases-every-slot-it-owns"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "SocketCloseReleasesEverySlotItOwns"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-idle-slot-release-ends-association"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "IdleSlotReleaseEndsAssociation"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-pairing-deadline-aborts-and-late-paired-is-discarded"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "PairingDeadlineAbortsAndLatePairedIsDiscarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-slots-run-ok-recycled-slot-never-delivers-previous-owners-frames"
+spec = "udp_slots.qnt"
+main = "slots_ok"
+run = "RecycledSlotNeverDeliversPreviousOwnersFrames"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -3866,4 +2557,346 @@ main = "slots_ok"
 run = "AuditTickReleasesOrphansAndIdleSlotsInOneStep"
 backend = "evaluator"
 expect = "holds"
+ci = true
+
+# ==== flow_quota: the per-allocation flow quota counts draining flows (R2-DRAIN, ADR-0183; quota ADR-0147)
+
+[[check]]
+name = "flow-quota-safety-tlc"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-quota-safety-apalache"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 12
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-quota-witness-refusal"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+invariant = "WitnessNoRefusal"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-quota-witness-pending-drain"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+invariant = "WitnessNoPendingDrain"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-quota-witness-cross-allocation-admission"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+invariant = "WitnessNoCrossAllocationAdmission"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# R2-DRAIN off: the quota counts active flows only; a draining flow keeps its slot but not its count
+[[check]]
+name = "flow-quota-hazard-count-active-only-bound"
+spec = "hazard/flow_quota_hazards.qnt"
+main = "quota_bugCountActiveOnly"
+invariant = "QuotaBound"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-quota-hazard-node-wide-quota"
+spec = "hazard/flow_quota_hazards.qnt"
+main = "quota_bugNodeWideQuota"
+invariant = "QuotaRefusalOnlyAtOwnQuota"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# R2-DRAIN off: the slot is released at the half-close while the drain is pending
+[[check]]
+name = "flow-quota-hazard-free-at-half-close"
+spec = "hazard/flow_quota_hazards.qnt"
+main = "quota_bugFreeAtHalfClose"
+invariant = "DrainingFlowHoldsItsSlot"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-quota-run-admission-stops-at-the-allocation-quota"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+run = "AdmissionStopsAtTheAllocationQuota"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-quota-run-draining-flow-still-counts-against-the-quota"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+run = "DrainingFlowStillCountsAgainstTheQuota"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-quota-run-withholding-guest-holds-at-most-its-own-quota"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+run = "WithholdingGuestHoldsAtMostItsOwnQuota"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-quota-run-completed-drain-and-end-release-the-slot"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+run = "CompletedDrainAndEndReleaseTheSlot"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-quota-run-abort-of-draining-flow-releases-slot-and-cell"
+spec = "flow_quota.qnt"
+main = "quota_ok"
+run = "AbortOfDrainingFlowReleasesSlotAndCell"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "flow-quota-hazard-count-active-only-run"
+spec = "hazard/flow_quota_hazards.qnt"
+main = "quota_bugCountActiveOnly"
+run = "DrainingFlowStillCountsAgainstTheQuota"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-quota-hazard-node-wide-quota-run"
+spec = "hazard/flow_quota_hazards.qnt"
+main = "quota_bugNodeWideQuota"
+run = "WithholdingGuestHoldsAtMostItsOwnQuota"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "flow-quota-hazard-free-at-half-close-run"
+spec = "hazard/flow_quota_hazards.qnt"
+main = "quota_bugFreeAtHalfClose"
+run = "DrainingFlowStillCountsAgainstTheQuota"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+
+# ==== udp_empty: the owner's handling of the empty-datagram notice (UDP-EMPTY, ADR-0165)
+
+[[check]]
+name = "udp-empty-safety-tlc"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-empty-safety-apalache"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+invariant = "Safety"
+backend = "apalache"
+max_steps = 14
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-empty-every-empty-eventually-sent"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+temporal = "EveryEmptyEventuallySent"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-empty-witness-discard"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+invariant = "WitnessNoDiscard"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-empty-witness-compensation"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+invariant = "WitnessNoCompensation"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# A2 shape off: a stale notice sends an empty datagram on the new association
+[[check]]
+name = "udp-empty-hazard-no-epoch"
+spec = "hazard/udp_empty_hazards.qnt"
+main = "empty_bugNoEpoch"
+invariant = "NoSpuriousEmpty"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ring-drop compensation off: the owner ignores the lost counter
+[[check]]
+name = "udp-empty-hazard-no-compensation"
+spec = "hazard/udp_empty_hazards.qnt"
+main = "empty_bugNoCompensation"
+temporal = "EveryEmptyEventuallySent"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# the cell's lost counter is not reset at cell reuse: compensation on the new flow for the earlier epoch
+[[check]]
+name = "udp-empty-hazard-no-reset-at-reuse"
+spec = "hazard/udp_empty_hazards.qnt"
+main = "empty_bugNoResetAtReuse"
+invariant = "NoSpuriousEmpty"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-empty-run-empty-frame-notice-sends-one-empty-datagram"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+run = "EmptyFrameNoticeSendsOneEmptyDatagram"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-empty-run-stale-epoch-notice-is-discarded-after-cell-reuse"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+run = "StaleEpochNoticeIsDiscardedAfterCellReuse"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-empty-run-ring-drop-is-compensated-by-the-counted-number"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+run = "RingDropIsCompensatedByTheCountedNumber"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-empty-run-notice-and-compensation-together-send-each-dropped-frame-once"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+run = "NoticeAndCompensationTogetherSendEachDroppedFrameOnce"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-empty-run-lost-count-is-reset-when-the-cell-is-reused-for-a-new-flow"
+spec = "udp_empty.qnt"
+main = "empty_ok"
+run = "LostCountIsResetWhenTheCellIsReusedForANewFlow"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "udp-empty-hazard-no-epoch-run"
+spec = "hazard/udp_empty_hazards.qnt"
+main = "empty_bugNoEpoch"
+run = "StaleEpochNoticeIsDiscardedAfterCellReuse"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-empty-hazard-no-reset-at-reuse-run"
+spec = "hazard/udp_empty_hazards.qnt"
+main = "empty_bugNoResetAtReuse"
+run = "LostCountIsResetWhenTheCellIsReusedForANewFlow"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "udp-empty-hazard-no-compensation-run"
+spec = "hazard/udp_empty_hazards.qnt"
+main = "empty_bugNoCompensation"
+run = "RingDropIsCompensatedByTheCountedNumber"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+# UDP-EMPTY teeth (M-5): the lost count not reset at cell initialisation violates its own invariant
+[[check]]
+name = "udp-empty-hazard-no-reset-at-reuse-lost-count"
+spec = "hazard/udp_empty_hazards.qnt"
+main = "empty_bugNoResetAtReuse"
+invariant = "LostCountResetAtCellInitialisation"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# r2 (L-G): teeth for properties that had none
+# DG-5-C off (the clean close is a step of its own): a flow whose two directions are shut down stays open
+
+[[check]]
+name = "flow-end-hazard-separate-close-completed-flow-open"
+spec = "hazard/flow_end_drain_hazards.qnt"
+main = "end_bugSeparateCloseClean"
+invariant = "NoCompletedFlowStaysOpen"
+backend = "tlc"
+expect = "violation"
+ci = true
+# NO-SURVIVE off (liveness): reclamation never records completion, so assign stays disabled and a waiting workload is never placed
+
+[[check]]
+name = "cid-lease-hazard-reclaim-never-completes"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugReclaimNeverCompletes"
+temporal = "EventuallyPlaced"
+backend = "tlc"
+expect = "violation"
+ci = true
+# ADR-0157 off: driver.stop does not release the beacon claim; the next launch's READY is held out and never released
+
+[[check]]
+name = "owner-flows-hazard-beacon-driver-stop-keeps-claim"
+spec = "hazard/owner_flows_beacon_hazards.qnt"
+main = "flows_bugDriverStopKeepsClaim"
+temporal = "ReadyReleased"
+backend = "tlc"
+expect = "violation"
 ci = true

@@ -1,0 +1,40 @@
+# cid-lease-hazard-assign-before-reclaim: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  reclaimed = TRUE
+  up = TRUE
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  cursor = 0
+  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  bootLeft = -1
+
+State 2 [Assign]
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  cursor = 1
+
+State 3 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "running", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 4 [Crash]
+  reclaimed = FALSE
+  up = FALSE
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  cursor = 0
+
+State 5 [Restart]
+  up = TRUE
+
+State 6 [Assign]
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  cursor = 1
+
+State 7 [Launch]
+  al = << [st |-> "retiring", off |-> 0, retry |-> TRUE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  g = [clash |-> TRUE, rebooted |-> FALSE, reclaimed |-> FALSE]

@@ -2,19 +2,22 @@
 
 State 1
   phantom = FALSE
+  badAct = FALSE
   crossMsg = FALSE
   badPaired = FALSE
   abortDiscarded = {}
   toGuestAbort = {}
   readyCross = FALSE
+  toHostAbort = {}
   alloc = "Absent"
   drvLive = FALSE
   bclaim = 0
+  dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   claim = 0
+  act = "none"
   sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   heldByOther = FALSE
   gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-  hc = [ opener |-> "g", paired |-> [g |-> FALSE, h |-> FALSE], outEof |-> [g |-> FALSE, h |-> FALSE], farHc |-> [g |-> FALSE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]
   hf = <<[st |-> "none", gen |-> 0]>>
   resurrected = FALSE
   toHostPaired = {}
@@ -27,31 +30,31 @@ State 1
   gen = 0
   bHeldByOther = FALSE
 
-State 2 [step]
+State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [step]
+State 3 [VmStart]
   vmUp = TRUE
   vmGen = 1
 
-State 4 [step]
+State 4 [Teardown]
   alloc = "Retiring"
 
 State 5 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 6 [step]
+State 6 [VmStop]
   vmUp = FALSE
 
-State 7 [step]
+State 7 [Release]
   alloc = "Absent"
 
-State 8 [step]
+State 8 [Provision]
   alloc = "Provisioned"
   gen = 2
 
-State 9 [step]
+State 9 [VmStart]
   vmUp = TRUE
   vmGen = 2
 

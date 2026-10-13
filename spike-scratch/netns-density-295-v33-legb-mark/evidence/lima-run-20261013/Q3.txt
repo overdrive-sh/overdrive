@@ -1,0 +1,47 @@
+
+=== Q3: does the pre-marked connect take the same route as the diverted packet?
+Hypothesis:  both packets are delivered over lo through table 100 to leg-C; they differ only in source (127.0.0.1 vs uplink 192.0.2.10)
+Prediction:  lo capture: SYN 127.0.0.1.x > 100.95.0.7.8080 (pre-marked) and SYN 192.0.2.10.y > 100.95.0.7.8080 (unmarked via default route + divert); leg-C accepts both
+Falsification: pre-marked SYN appears on up0 or is not on lo
++ [ns] sysctl (netns v33ns; uname -r=7.0.0-38-generic aarch64)
+net.ipv4.conf.all.route_localnet = 0
+net.ipv4.conf.lo.route_localnet = 0
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.lo.rp_filter = 2
+net.ipv4.ip_forward = 1
++ [ns] ip route add default via 192.0.2.1 dev up0
+[exit=0]
++ [ns] v33-rules   (overdrive-netlink Client::add_fib_rule_fwmark(0x1,100) + add_local_route(100,"lo"))
+production client: fwmark 0x1 -> table 100 rule + local default dev lo table 100 installed
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
++ [ns] ip route get 100.95.0.7 mark 1 from 127.0.0.1
+local 100.95.0.7 from 127.0.0.1 dev lo table 100 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] ip route get 100.95.0.7 mark 1 from 192.0.2.10
+local 100.95.0.7 from 192.0.2.10 dev lo table 100 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --mark 1 --bind 127.0.0.1
+RESULT ok client-local=127.0.0.1:40546 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.2 setup=[mark=1 bind=127.0.0.1]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080
+RESULT ok client-local=192.0.2.10:47932 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.2 setup=[]
+--- capture lo_q3.pcap (IPv4 packets seen):
+  16:49:33.196077 IP 127.0.0.1.40546 > 100.95.0.7.8080: Flags [S], seq 667965169, win 65495, options [mss 65495,sackOK,TS val 419791052 ecr 0,nop,wscale 10], length 0
+  16:49:33.196127 IP 100.95.0.7.8080 > 127.0.0.1.40546: Flags [S.], seq 575286321, ack 667965170, win 65483, options [mss 65495,sackOK,TS val 4089383289 ecr 419791052,nop,wscale 10], length 0
+  16:49:33.196143 IP 127.0.0.1.40546 > 100.95.0.7.8080: Flags [.], ack 1, win 64, options [nop,nop,TS val 419791053 ecr 4089383289], length 0
+  16:49:33.196194 IP 127.0.0.1.40546 > 100.95.0.7.8080: Flags [P.], seq 1:20, ack 1, win 64, options [nop,nop,TS val 419791053 ecr 4089383289], length 19: HTTP
+  16:49:33.196204 IP 100.95.0.7.8080 > 127.0.0.1.40546: Flags [.], ack 20, win 64, options [nop,nop,TS val 4089383289 ecr 419791053], length 0
+  16:49:33.196489 IP 100.95.0.7.8080 > 127.0.0.1.40546: Flags [P.], seq 1:25, ack 20, win 64, options [nop,nop,TS val 4089383289 ecr 419791053], length 24: HTTP
+  16:49:33.196508 IP 127.0.0.1.40546 > 100.95.0.7.8080: Flags [.], ack 25, win 64, options [nop,nop,TS val 419791053 ecr 4089383289], length 0
+  16:49:33.196524 IP 100.95.0.7.8080 > 127.0.0.1.40546: Flags [F.], seq 25, ack 20, win 64, options [nop,nop,TS val 4089383289 ecr 419791053], length 0
+  count=8
+--- leg-C listener log:
+  listener ready port=15001
+  ACCEPT peer=127.0.0.1:40546 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+  ACCEPT peer=192.0.2.10:47932 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+--- host decoy logs:

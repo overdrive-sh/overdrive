@@ -1,0 +1,129 @@
+State 1: <Initial predicate>
+/\ streak_bugReconstruct_probe_count_M = 0
+/\ streak_bugReconstruct_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugReconstruct_probe_count_tseqs = {}
+/\ streak_bugReconstruct_probe_count_runs = 0
+/\ streak_bugReconstruct_probe_count_rsame = 0
+/\ streak_bugReconstruct_probe_count_rat = 0
+/\ streak_bugReconstruct_probe_count_rseq = 0
+/\ streak_bugReconstruct_probe_count_terms = 0
+/\ streak_bugReconstruct_probe_count_psame = 0
+/\ streak_bugReconstruct_probe_count_hist = <<>>
+/\ streak_bugReconstruct_probe_count_running = TRUE
+/\ streak_bugReconstruct_probe_count_fs = 0
+/\ streak_bugReconstruct_probe_count_pst = ""
+/\ streak_bugReconstruct_probe_count_rst = ""
+/\ streak_bugReconstruct_probe_count_clock = 0
+/\ streak_bugReconstruct_probe_count_A = 0
+/\ streak_bugReconstruct_probe_count_pseq = 0
+
+State 2: <streak_bugReconstruct_probe_count_ProbeRun line 348, col 3 to line 413, col 48 of module streak_bugReconstruct>
+/\ streak_bugReconstruct_probe_count_M = 0
+/\ streak_bugReconstruct_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugReconstruct_probe_count_tseqs = {}
+/\ streak_bugReconstruct_probe_count_runs = 1
+/\ streak_bugReconstruct_probe_count_rsame = 1
+/\ streak_bugReconstruct_probe_count_rat = 0
+/\ streak_bugReconstruct_probe_count_rseq = 1
+/\ streak_bugReconstruct_probe_count_terms = 0
+/\ streak_bugReconstruct_probe_count_psame = 1
+/\ streak_bugReconstruct_probe_count_hist = <<"Pass">>
+/\ streak_bugReconstruct_probe_count_running = TRUE
+/\ streak_bugReconstruct_probe_count_fs = 0
+/\ streak_bugReconstruct_probe_count_pst = "Pass"
+/\ streak_bugReconstruct_probe_count_rst = "Pass"
+/\ streak_bugReconstruct_probe_count_clock = 1
+/\ streak_bugReconstruct_probe_count_A = 0
+/\ streak_bugReconstruct_probe_count_pseq = 1
+
+State 3: <streak_bugReconstruct_probe_count_ProbeRun line 348, col 3 to line 413, col 48 of module streak_bugReconstruct>
+/\ streak_bugReconstruct_probe_count_M = 0
+/\ streak_bugReconstruct_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugReconstruct_probe_count_tseqs = {}
+/\ streak_bugReconstruct_probe_count_runs = 2
+/\ streak_bugReconstruct_probe_count_rsame = 2
+/\ streak_bugReconstruct_probe_count_rat = 1
+/\ streak_bugReconstruct_probe_count_rseq = 2
+/\ streak_bugReconstruct_probe_count_terms = 0
+/\ streak_bugReconstruct_probe_count_psame = 2
+/\ streak_bugReconstruct_probe_count_hist = <<"Pass", "Pass">>
+/\ streak_bugReconstruct_probe_count_running = TRUE
+/\ streak_bugReconstruct_probe_count_fs = 0
+/\ streak_bugReconstruct_probe_count_pst = "Pass"
+/\ streak_bugReconstruct_probe_count_rst = "Pass"
+/\ streak_bugReconstruct_probe_count_clock = 2
+/\ streak_bugReconstruct_probe_count_A = 0
+/\ streak_bugReconstruct_probe_count_pseq = 2
+
+State 4: <streak_bugReconstruct_probe_count_ProbeRun line 348, col 3 to line 413, col 48 of module streak_bugReconstruct>
+/\ streak_bugReconstruct_probe_count_M = 0
+/\ streak_bugReconstruct_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugReconstruct_probe_count_tseqs = {}
+/\ streak_bugReconstruct_probe_count_runs = 3
+/\ streak_bugReconstruct_probe_count_rsame = 1
+/\ streak_bugReconstruct_probe_count_rat = 2
+/\ streak_bugReconstruct_probe_count_rseq = 3
+/\ streak_bugReconstruct_probe_count_terms = 0
+/\ streak_bugReconstruct_probe_count_psame = 1
+/\ streak_bugReconstruct_probe_count_hist = <<"Pass", "Pass", "Fail">>
+/\ streak_bugReconstruct_probe_count_running = TRUE
+/\ streak_bugReconstruct_probe_count_fs = 0
+/\ streak_bugReconstruct_probe_count_pst = "Fail"
+/\ streak_bugReconstruct_probe_count_rst = "Fail"
+/\ streak_bugReconstruct_probe_count_clock = 3
+/\ streak_bugReconstruct_probe_count_A = 0
+/\ streak_bugReconstruct_probe_count_pseq = 3
+
+State 5: <streak_bugReconstruct_probe_count_ConsumerLook line 549, col 3 to line 629, col 47 of module streak_bugReconstruct>
+/\ streak_bugReconstruct_probe_count_M = 3
+/\ streak_bugReconstruct_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> TRUE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 3,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugReconstruct_probe_count_tseqs = {3}
+/\ streak_bugReconstruct_probe_count_runs = 3
+/\ streak_bugReconstruct_probe_count_rsame = 1
+/\ streak_bugReconstruct_probe_count_rat = 2
+/\ streak_bugReconstruct_probe_count_rseq = 3
+/\ streak_bugReconstruct_probe_count_terms = 1
+/\ streak_bugReconstruct_probe_count_psame = 1
+/\ streak_bugReconstruct_probe_count_hist = <<"Pass", "Pass", "Fail">>
+/\ streak_bugReconstruct_probe_count_running = TRUE
+/\ streak_bugReconstruct_probe_count_fs = 0
+/\ streak_bugReconstruct_probe_count_pst = "Fail"
+/\ streak_bugReconstruct_probe_count_rst = "Fail"
+/\ streak_bugReconstruct_probe_count_clock = 3
+/\ streak_bugReconstruct_probe_count_A = 0
+/\ streak_bugReconstruct_probe_count_pseq = 3

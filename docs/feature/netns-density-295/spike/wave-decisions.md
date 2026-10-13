@@ -160,3 +160,85 @@
   replaces the current Cloud Hypervisor download, and lands through DESIGN
   (ADR-0146) and DISTILL/DELIVER. The probe and its evidence in
   `spike-scratch/netns-density-295-ch-vhost-vsock/` are retained.
+
+## V-PREFIX-ROUTE — non-local route on lo covering the guest prefix (2026-10-13)
+
+### Assumption Tested
+
+- A main-table route `<guest prefix> dev lo scope link src 127.0.0.1`,
+  tagged with Overdrive's route protocol, gives an unmarked host `connect()`
+  to a guest-prefix address a route and the fixed source `127.0.0.1`, so the
+  intercept's output divert can take the connection to leg-C on a node with
+  no default route; and every other host-originated packet to the prefix is
+  refused by ADR-0172's constant rules.
+
+### Probe Verdict
+
+- **WORKS.** Linux `7.0.0-38-generic` (Lima, run as root, network namespace
+  `ovd-prt-probe2`). Without the route `connect()` fails `ENETUNREACH`; with
+  it the diverted tuple reaches the leg-C stand-in, which sees peer
+  `127.0.0.1`, and the reject counters stay 0 (cases 1–2). Every other prefix
+  address takes a local-delivery route: with the constant rules a TCP connect
+  fails `ECONNREFUSED` and a UDP send fails `EPERM` (case 3); without them a
+  UDP datagram and TCP SYNs reach host sockets (case 5). The gateway's DNS
+  path needs GW-LOCAL (cases 4a, 4b). The leg-C listener is a Python
+  `IP_TRANSPARENT` stand-in; the production leg-C end to end is a Tier-3
+  scenario of the feature delta. See `findings-prefix-route-lo.md` (the run
+  transcript with the probe script inline).
+
+### Promotion Decision
+
+- **DISCARD — superseded by V-LEGB-MARK.** The user's ruling of 2026-10-13
+  ("Leg-B dial contract replaces PREFIX-ROUTE-LO / INB-1-READ") withdrew
+  PREFIX-ROUTE-LO and INB-1-READ before either was implemented; their draft
+  ADRs were deleted and the numbers 0188 and 0189 stay unused. No route
+  covers the guest prefix except the gateway `/32` (GW-LOCAL, ADR-0152).
+  `findings-prefix-route-lo.md` is retained as the record of this probe; it is
+  not a design dependency.
+
+## V-LEGB-MARK — leg-B marks and source-binds same-node VM dials (2026-10-13)
+
+### Assumption Tested
+
+- For a dial whose destination is inside `GUEST_NODE_PREFIX`, leg-B setting
+  `SO_MARK = MTLS_TPROXY_MARK` and `bind(127.0.0.1:0)` before `connect()`
+  gives the connect a route through the existing `fwmark 0x1 -> table 100`
+  rule, so the existing output divert and TPROXY reach leg-C on a node with
+  no default route and no route covering the guest prefix; unmarked and
+  half-set dials fail closed. This replaces PREFIX-ROUTE-LO.
+
+### Probe Verdict
+
+- **WORKS.** Probe `spike-scratch/netns-density-295-v33-legb-mark/`, Linux
+  `7.0.0-38-generic` aarch64 (Lima) and `7.0.0-29-generic` x86_64 (native
+  metal), both with `route_localnet=0` pinned. S1 (no default route) and S2
+  (default route present, zero IPv4 on the uplink) reach leg-C with
+  `peer=127.0.0.1`, `local=100.95.0.7:8080`, reject counters 0. S3: marked
+  dials to unregistered prefix tuples are refused (TCP `ECONNREFUSED`, UDP
+  `EPERM`). S4: both halves are required; mark-only fails `ENETUNREACH`
+  (source = destination is not a local address), bind-only fails
+  `ENETUNREACH`/`EINVAL`. S5: non-prefix dials stay unmarked. S6: bind to
+  `lo` works only together with `bind(127.0.0.1)`. S7: the production
+  netlink client installs the rule at 32765, ahead of main. S8 as specified
+  (real `serve` + `deploy`) could not run: the tree has no production leg-B
+  mark and the vsock owner and guest transport are DESIGN scaffolds. The
+  closest equivalent (marked+bound dial -> TPROXY leg-C stand-in -> vsock ->
+  real Cloud Hypervisor microVM, no default route) answered from inside the
+  guest. Open questions: `GUEST_NODE_PREFIX` is one constant identical on
+  every node; the table-100 route accepts `src 127.0.0.1` (and then the bind
+  is redundant); the pre-marked connect and the diverted packet take the
+  same table-100 route to `lo`. See `findings-v33-legb-mark.md`.
+
+### Promotion Decision
+
+- **PROMOTE — approved by the user on 2026-10-13** as LEGB-DIAL
+  ([ADR-0190](../../../product/architecture/adr-0190-leg-b-marks-and-loopback-binds-same-node-vm-dials.md)):
+  leg-B sets `SO_MARK = MTLS_TPROXY_MARK` and binds `127.0.0.1:0` for a peer
+  inside the guest prefix and neither otherwise; it replaces PREFIX-ROUTE-LO
+  and INB-1-READ. Open question 1 (the prefix is identical on every node) is
+  resolved as a single-node limit: "a peer inside `GUEST_NODE_PREFIX` is a
+  same-node VM" holds while Overdrive is single-node, and cross-node VM
+  addressing is [#317](https://github.com/overdrive-sh/overdrive/issues/317).
+  The bind is chosen over `src 127.0.0.1` on the table-100 route (open
+  question 2). The production-composition run (V-LEGB-SERVE) remains a
+  DELIVER validation item.

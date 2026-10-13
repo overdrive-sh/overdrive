@@ -1,0 +1,22 @@
+# V-LEGB-MARK probe (GH #295). Throwaway, self-contained. Links workspace crates by
+# path only for the S7 probe (the production netlink client installs the ip rule/route).
+[workspace]
+
+[package]
+name = "v33"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "v33"
+path = "src/main.rs"
+
+[[bin]]
+name = "v33-rules"
+path = "src/rules.rs"
+
+[dependencies]
+libc = "0.2"
+tokio = { version = "1", features = ["rt", "macros"] }
+overdrive-netlink = { path = "../../crates/overdrive-netlink" }

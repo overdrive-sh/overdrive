@@ -1,0 +1,37 @@
+State 1: <Initial predicate>
+/\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
+/\ quiesce_ok_quiescence_flowsOpen = 0
+/\ quiesce_ok_quiescence_repLeft = 1
+/\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_ok_quiescence_up = FALSE
+/\ quiesce_ok_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_ok_quiescence_table = FALSE
+/\ quiesce_ok_quiescence_stop = "crash"
+/\ quiesce_ok_quiescence_cnt = 0
+/\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE ]
+/\ quiesce_ok_quiescence_latch = FALSE
+
+State 2: <quiesce_ok_quiescence_RestartWith line 538, col 3 to line 563, col 7 of module quiesce_ok>
+/\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
+/\ quiesce_ok_quiescence_flowsOpen = 0
+/\ quiesce_ok_quiescence_repLeft = 1
+/\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_ok_quiescence_up = FALSE
+/\ quiesce_ok_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_ok_quiescence_table = FALSE
+/\ quiesce_ok_quiescence_stop = "refused"
+/\ quiesce_ok_quiescence_cnt = 0
+/\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> TRUE ]
+/\ quiesce_ok_quiescence_latch = FALSE

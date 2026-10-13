@@ -15,6 +15,10 @@ ADR-0059 (exec-probe cgroup placement). Predecessors: ADR-0029
 (worker crate), ADR-0030 (exec driver), ADR-0035 (reconciler
 runtime), ADR-0048 (rkyv envelope).
 
+**Amended 2026-10-13 by ADR-0191** (#295, PROBE-RUN-COUNT; not yet
+implemented): the probe row carries the producer's run sequence and streak
+and merges by run sequence (§ 5 note).
+
 ## Context
 
 Per `docs/feature/service-health-check-probes/feature-delta.md` and
@@ -338,6 +342,14 @@ backing `redb` table per ADR-0012's `LocalObservationStore`
 convention. Latest-writer-wins is structural (`redb::insert` semantics
 on the composite key); no merge logic needed.
 
+**Amended 2026-10-13 by
+[ADR-0191](adr-0191-every-probe-run-counts-once-through-a-run-sequence-in-the-probe-row.md)
+(#295, PROBE-RUN-COUNT):** the probe row merges by run sequence. Each row
+carries the producer's run sequence for its key and the producer's count of
+consecutive written runs of its status, and a written row replaces
+the stored row only if its run sequence is greater; the observation time no
+longer decides the merge. The row shape is in the #295 feature delta.
+
 Per `.claude/rules/development.md` § "Ordered-collection choice" —
 the return shape is `BTreeMap` not `HashMap` because the reconciler
 iterates it (deciding tick for `Stable` walks every startup probe to
@@ -619,3 +631,5 @@ table for forensic audit; out of scope here.
   `:543`) that nothing consults. ADR-0080 § "A fourth, pre-existing gap
   this ADR deliberately does NOT address" records the decision not to
   close the gap within that ADR's scope.
+- 2026-10-13 — **Amendment (#295, ADR-0191)** — the probe row merges by
+  run sequence, not by observation time or write order (§ 5 note).

@@ -17,15 +17,18 @@ State 1
   toHostPaired = Set()
   toHostRefused = Set()
   toGuestAbort = Set()
+  toHostAbort = Set()
   resurrected = false
   abortDiscarded = Set()
   phantom = false
+  dl = { adm: Set(), earlyDl: false, lateReply: false, res: Map(1 -> "none"), tout: Set() }
   drvLive = false
   bclaim = 0
   bcn = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 0, st: "none" })
   readyCross = false
   bHeldByOther = false
-  hc = { ackDue: Map("g" -> false, "h" -> false), acked: Map("g" -> false, "h" -> false), ann: Map("g" -> "none", "h" -> "none"), ch: Map("g" -> List(), "h" -> List()), ctlDown: false, dead: Map("g" -> false, "h" -> false), earlyShut: false, far: Map("g" -> "none", "h" -> "none"), farHc: Map("g" -> false, "h" -> false), faulted: false, held: Map("g" -> false, "h" -> false), loss: Map("g" -> false, "h" -> false), open: Map("g" -> true, "h" -> true), opener: "g", outEof: Map("g" -> false, "h" -> false), outShut: Map("g" -> false, "h" -> false), paired: Map("g" -> false, "h" -> false), vEnd: Map("g" -> false, "h" -> false), vEndSent: Map("g" -> false, "h" -> false) }
+  act = "none"
+  badAct = false
 
 State 2
   alloc = "Provisioned"
@@ -46,13 +49,15 @@ State 6
   sess = Map(1 -> { gen: 1, st: "live" }, 2 -> { gen: 0, st: "none" })
 
 State 7
-  alloc = "Active"
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "queued" })
 
 State 8
-  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "queued" })
+  alloc = "Active"
+  act = "Activated"
 
 State 9
   flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "accepted" })
+  act = "none"
 
 State 10
   flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 2, st: "read" })
@@ -64,7 +69,8 @@ State 12
   flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: true, req: 2, st: "connecting" })
 
 State 13
-  quiesced = true
+  claim = 0
+  sess = Map(1 -> { gen: 1, st: "closed" }, 2 -> { gen: 0, st: "none" })
   flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: true, req: 2, st: "closed" })
 
 State 14

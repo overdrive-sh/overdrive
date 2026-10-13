@@ -1,0 +1,47 @@
+
+=== Q3: does the pre-marked connect take the same route as the diverted packet?
+Hypothesis:  both packets are delivered over lo through table 100 to leg-C; they differ only in source (127.0.0.1 vs uplink 192.0.2.10)
+Prediction:  lo capture: SYN 127.0.0.1.x > 100.95.0.7.8080 (pre-marked) and SYN 192.0.2.10.y > 100.95.0.7.8080 (unmarked via default route + divert); leg-C accepts both
+Falsification: pre-marked SYN appears on up0 or is not on lo
++ [ns] ip route add default via 192.0.2.1 dev up0
+[exit=0]
++ [ns] ip rule add fwmark 0x1 lookup 100
+[exit=0]
++ [ns] ip route add local 0.0.0.0/0 dev lo table 100
+[exit=0]
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --mark 1 --bind 127.0.0.1
+RESULT ok client-local=127.0.0.1:37170 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.1 setup=[mark=1 bind=127.0.0.1]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080
+RESULT ok client-local=192.0.2.10:34070 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.1 setup=[]
+--- capture lo_q3.pcap (IPv4 packets seen):
+  14:48:25.288422 IP 127.0.0.1.37170 > 100.95.0.7.8080: Flags [S], seq 1807754877, win 65495, options [mss 65495,sackOK,TS val 3237167735 ecr 0,nop,wscale 10], length 0
+  14:48:25.288443 IP 100.95.0.7.8080 > 127.0.0.1.37170: Flags [S.], seq 3500376219, ack 1807754878, win 65483, options [mss 65495,sackOK,TS val 1026730838 ecr 3237167735,nop,wscale 10], length 0
+  14:48:25.288458 IP 127.0.0.1.37170 > 100.95.0.7.8080: Flags [.], ack 1, win 64, options [nop,nop,TS val 3237167735 ecr 1026730838], length 0
+  14:48:25.288489 IP 127.0.0.1.37170 > 100.95.0.7.8080: Flags [P.], seq 1:20, ack 1, win 64, options [nop,nop,TS val 3237167735 ecr 1026730838], length 19: HTTP
+  14:48:25.288496 IP 100.95.0.7.8080 > 127.0.0.1.37170: Flags [.], ack 20, win 64, options [nop,nop,TS val 1026730838 ecr 3237167735], length 0
+  14:48:25.288572 IP 100.95.0.7.8080 > 127.0.0.1.37170: Flags [P.], seq 1:25, ack 20, win 64, options [nop,nop,TS val 1026730838 ecr 3237167735], length 24: HTTP
+  14:48:25.288585 IP 127.0.0.1.37170 > 100.95.0.7.8080: Flags [.], ack 25, win 64, options [nop,nop,TS val 3237167736 ecr 1026730838], length 0
+  14:48:25.288600 IP 100.95.0.7.8080 > 127.0.0.1.37170: Flags [F.], seq 25, ack 20, win 64, options [nop,nop,TS val 1026730839 ecr 3237167736], length 0
+  14:48:25.288758 IP 127.0.0.1.37170 > 100.95.0.7.8080: Flags [F.], seq 20, ack 26, win 64, options [nop,nop,TS val 3237167736 ecr 1026730839], length 0
+  14:48:25.288776 IP 100.95.0.7.8080 > 127.0.0.1.37170: Flags [.], ack 21, win 64, options [nop,nop,TS val 1026730839 ecr 3237167736], length 0
+  14:48:25.290939 IP 192.0.2.10.34070 > 100.95.0.7.8080: Flags [S], seq 4026807247, win 64240, options [mss 1460,sackOK,TS val 21877030 ecr 0,nop,wscale 10], length 0
+  14:48:25.290950 IP 100.95.0.7.8080 > 192.0.2.10.34070: Flags [S.], seq 84438479, ack 4026807248, win 65483, options [mss 65495,sackOK,TS val 3484109861 ecr 21877030,nop,wscale 10], length 0
+  14:48:25.290960 IP 192.0.2.10.34070 > 100.95.0.7.8080: Flags [.], ack 1, win 63, options [nop,nop,TS val 21877030 ecr 3484109861], length 0
+  14:48:25.290984 IP 192.0.2.10.34070 > 100.95.0.7.8080: Flags [P.], seq 1:20, ack 1, win 63, options [nop,nop,TS val 21877030 ecr 3484109861], length 19: HTTP
+  14:48:25.290990 IP 100.95.0.7.8080 > 192.0.2.10.34070: Flags [.], ack 20, win 64, options [nop,nop,TS val 3484109861 ecr 21877030], length 0
+  14:48:25.291017 IP 100.95.0.7.8080 > 192.0.2.10.34070: Flags [P.], seq 1:25, ack 20, win 64, options [nop,nop,TS val 3484109861 ecr 21877030], length 24: HTTP
+  14:48:25.291035 IP 192.0.2.10.34070 > 100.95.0.7.8080: Flags [.], ack 25, win 63, options [nop,nop,TS val 21877030 ecr 3484109861], length 0
+  14:48:25.291052 IP 100.95.0.7.8080 > 192.0.2.10.34070: Flags [F.], seq 25, ack 20, win 64, options [nop,nop,TS val 3484109861 ecr 21877030], length 0
+  14:48:25.291178 IP 192.0.2.10.34070 > 100.95.0.7.8080: Flags [F.], seq 20, ack 26, win 63, options [nop,nop,TS val 21877030 ecr 3484109861], length 0
+  14:48:25.291190 IP 100.95.0.7.8080 > 192.0.2.10.34070: Flags [.], ack 21, win 64, options [nop,nop,TS val 3484109861 ecr 21877030], length 0
+  count=20
+--- leg-C listener log:
+  listener ready port=15001
+  ACCEPT peer=127.0.0.1:37170 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+  ACCEPT peer=192.0.2.10:34070 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+--- host decoy logs:

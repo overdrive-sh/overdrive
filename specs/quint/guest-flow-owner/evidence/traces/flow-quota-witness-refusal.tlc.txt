@@ -1,0 +1,23 @@
+State 1: <Initial predicate>
+/\ quota_ok_flow_quota_slot = << [own |-> 0, st |-> "free", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_ok_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 2: <quota_ok_flow_quota_Admit line 238, col 3 to line 269, col 10 of module quota_ok>
+/\ quota_ok_flow_quota_slot = << [own |-> 1, st |-> "active", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_ok_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 3: <quota_ok_flow_quota_Refuse line 275, col 3 to line 286, col 7 of module quota_ok>
+/\ quota_ok_flow_quota_slot = << [own |-> 1, st |-> "active", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_ok_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> TRUE,
+  otherAdmitted |-> FALSE ]

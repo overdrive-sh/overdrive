@@ -1,0 +1,15 @@
+# flow-quota-witness-cross-allocation-admission: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  slot = << [own |-> 0, st |-> "free", pend |-> FALSE], [own |-> 0, st |-> "free", pend |-> FALSE] >>
+  g = [ refusedUnder |-> FALSE, clash |-> FALSE, refused |-> FALSE, otherAdmitted |-> FALSE ]
+
+State 2 [Admit]
+  slot = << [own |-> 1, st |-> "active", pend |-> FALSE], [own |-> 0, st |-> "free", pend |-> FALSE] >>
+
+State 3 [HalfClose]
+  slot = << [own |-> 1, st |-> "draining", pend |-> TRUE], [own |-> 0, st |-> "free", pend |-> FALSE] >>
+
+State 4 [Admit]
+  slot = << [own |-> 1, st |-> "draining", pend |-> TRUE], [own |-> 2, st |-> "active", pend |-> FALSE] >>
+  g = [ refusedUnder |-> FALSE, clash |-> FALSE, refused |-> FALSE, otherAdmitted |-> TRUE ]

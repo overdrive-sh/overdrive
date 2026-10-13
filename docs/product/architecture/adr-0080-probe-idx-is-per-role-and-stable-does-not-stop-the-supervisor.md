@@ -19,6 +19,19 @@ composite key gains `role`) and completes
 `ProbeDescriptor.idx` field the implementation dropped). Supersedes ADR-0079
 § D2's carry-through containment (§ D5).
 
+**Amended 2026-10-13 by
+[ADR-0191](adr-0191-every-probe-run-counts-once-through-a-run-sequence-in-the-probe-row.md)**
+(#295, PROBE-RUN-COUNT, approved by user 2026-10-13; not yet implemented,
+and § D5 / Stage 2 is not yet implemented either). No reconciler keeps a
+probe streak: the probe runner records each row's `same_status_runs`, and a
+threshold is applied to the latest row when it is read. § D5 therefore
+relocates `compute_backend_healthy` with that read-time rule (the latest
+readiness row is a `Pass` whose `same_status_runs` reaches
+`success_threshold`) and relocates no counter; § D8's addition of
+`readiness_consecutive_successes` to `BackendDiscoveryBridgeView` is
+withdrawn, and that View stays field-less. Which reconciler owns readiness →
+backend membership is unchanged by this amendment (§ D5).
+
 **Scope boundary.** This ADR fixes the defect that readiness and liveness probe
 **0** is never consulted. It deliberately does **not** fix the separate,
 pre-existing defect that probes **1..N** are never consulted — see § "A fourth,
@@ -687,6 +700,11 @@ construction** rather than by discipline.
 `readiness_consecutive_successes: BTreeMap<(AllocationId, ProbeIdx), u32>`
 (`:303`), relocated onto `BackendDiscoveryBridgeView`.
 
+*Amended 2026-10-13 by ADR-0191 (see Status): no counter relocates; the
+relocated `compute_backend_healthy` applies the read-time threshold to the
+latest readiness row's `same_status_runs`. The parameter list and body below
+are retained as the 2026-08-02 record.*
+
 **Deleted outright**, per `development.md` § "Deletion discipline" (production
 code and its tests go together — no gate, no salvage). All in
 `crates/overdrive-core/src/service_lifecycle.rs` unless noted:
@@ -711,7 +729,12 @@ code and its tests go together — no gate, no salvage). All in
 `Action::RestartAllocation` at `:798`; the startup gate; the liveness branch;
 and the `View`'s `startup_attempts_per_alloc`, `liveness_consecutive_failures`
 (`:297`), `stable_announced` (`:309`), `terminal_announced`, `observed`
-(`:338`), `startup_last_fail_seen_at` (`:316`). It does **not** own
+(`:338`), `startup_last_fail_seen_at` (`:316`). ADR-0191 (2026-10-13)
+removes `startup_attempts_per_alloc`, `liveness_consecutive_failures` and
+`startup_last_fail_seen_at` — the thresholds are applied to the probe row's
+producer-recorded `same_status_runs` at read time — and adds
+`liveness_last_acted_run`. It does
+**not** own
 `ServiceSubmitEvent` — that is an API/streaming type, not in this file.
 
 **Bridge state additions**:
@@ -948,6 +971,11 @@ Mutation gate ≥ 80 % per `.claude/rules/testing.md` applies to
 reconciler-logic / durable-boundary surfaces and mandatory targets.
 
 ### D8 — `View` schema evolution
+
+*Amended 2026-10-13 by ADR-0191 (see Status): `BackendDiscoveryBridgeView`
+gains no field, and `readiness_consecutive_successes` leaves
+`ServiceLifecycleView` under ADR-0191 whether or not Stage 2 has landed. The
+bullets below are retained as the 2026-08-02 record.*
 
 Both `View`s are CBOR-encoded in the runtime-owned `ViewStore`, so
 `development.md` § "Reconciler I/O" → "Schema evolution" governs (not the rkyv

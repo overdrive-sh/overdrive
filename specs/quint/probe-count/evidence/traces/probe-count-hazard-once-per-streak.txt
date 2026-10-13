@@ -1,0 +1,70 @@
+# probe-count-hazard-once-per-streak: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  terms = 0
+  hist = <<>>
+  psame = 0
+  pst = ""
+  fs = 0
+  rst = ""
+  pseq = 0
+  clock = 0
+  runs = 0
+  A = 0
+  tseqs = {}
+  M = 0
+  rsame = 0
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 0, stoppedTerm |-> FALSE, missed |-> FALSE ]
+  rat = 0
+  running = TRUE
+  rseq = 0
+
+State 2 [ProbeRun]
+  hist = <<"Fail">>
+  psame = 1
+  pst = "Fail"
+  rst = "Fail"
+  pseq = 1
+  clock = 1
+  runs = 1
+  rsame = 1
+  rseq = 1
+
+State 3 [ProbeRun]
+  hist = <<"Fail", "Fail">>
+  psame = 2
+  pseq = 2
+  clock = 2
+  runs = 2
+  rsame = 2
+  rat = 1
+  rseq = 2
+
+State 4 [ProbeRun]
+  hist = <<"Fail", "Fail", "Fail">>
+  psame = 3
+  pseq = 3
+  clock = 3
+  runs = 3
+  rsame = 3
+  rat = 2
+  rseq = 3
+
+State 5 [ConsumerLook]
+  terms = 1
+  A = 3
+  tseqs = {3}
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 3, stoppedTerm |-> FALSE, missed |-> FALSE ]
+
+State 6 [ProbeRun]
+  hist = <<"Fail", "Fail", "Fail", "Fail">>
+  psame = 4
+  pseq = 4
+  clock = 4
+  runs = 4
+  rsame = 4
+  rat = 3
+  rseq = 4
+
+State 7 [ConsumerLook]
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 4, stoppedTerm |-> FALSE, missed |-> TRUE ]

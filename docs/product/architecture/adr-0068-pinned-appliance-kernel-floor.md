@@ -1,10 +1,13 @@
-# ADR-0068 — Pinned appliance kernel: pin the latest LTS that meets the feature floor (currently 6.18 LTS); the multi-kernel support matrix collapses to "pinned kernel + bpf-next soft-fail"
+# ADR-0068 — Pinned appliance kernel: Overdrive pins the kernel it boots (Linux 7.0 since the amendment of 2026-10-10); the multi-kernel support matrix collapses to "pinned kernel + bpf-next soft-fail"
 
 ## Status
 
 Accepted. 2026-06-11. Decision-makers: Morgan (solution-architecture,
 proposing); ratified by the user 2026-06-11. Tags: phase-2, dataplane,
 kernel, appliance-os, image-factory, mtls, ktls, sockops, test-matrix.
+
+**Amended 2026-10-10** (§6, user ruling: the pinned kernel is Linux 7.0) and
+**2026-10-11** (§5 withdrawn, user ruling UDP-EMPTY of GH #295).
 
 **Tracks**: roadmap 2.4 / [#26](https://github.com/overdrive-sh/overdrive/issues/26)
 (transparent kernel mTLS — sockops + kTLS). This ADR settles the kernel
@@ -54,7 +57,7 @@ appliance framing:
   Overdrive-controlled LTS ("Overdrive controls it") as the premise of
   the recommended architecture.
 
-At a pinned latest-LTS floor (currently 6.18) the degraded tier has no reason
+At a pinned latest-LTS floor (currently Linux 7.0 — § 6 amendment, 2026-10-10; 6.18 when this section was written) the degraded tier has no reason
 to exist: in-kernel TLS 1.3 **TX + RX** is guaranteed, and the platform tests
 exactly the one kernel it ships.
 
@@ -65,14 +68,14 @@ exactly the one kernel it ships.
 Overdrive pins the kernel its appliance OS boots. The pin is the **latest
 LTS that meets the feature floor** (in-kernel TLS 1.3 TX+RX ≥6.0,
 `CONFIG_NET_HANDSHAKE` ≥6.5), **refreshed deliberately at image rebuilds**
-— **currently 6.18 LTS** (released 2025-11-30, EOL Dec 2028). Production
+— **currently Linux 7.0** (§ 6 amendment, 2026-10-10; this section originally pinned 6.18 LTS, released 2025-11-30, EOL Dec 2028; `CONFIG_NET_HANDSHAKE` is an image configuration requirement per § 6). Production
 runs the pinned kernel; no Overdrive node runs a kernel Overdrive did not
 build.
 
 The decision is the **principle** — "track the latest qualifying LTS" — not
 a frozen version number. A bare number goes stale: the prior pin (6.6 LTS,
 EOL Dec 2027) was already two LTS generations behind by this revision, which
-is exactly the trap this framing exists to avoid. 6.18 is today's concrete
+is exactly the trap this framing exists to avoid. 7.0 is today's concrete
 instance of the principle, not the principle itself.
 
 The pin is **advanced deliberately at image rebuilds**, because Overdrive
@@ -87,7 +90,7 @@ The Tier-3 kernel matrix is exactly two entries:
 
 | Kernel | Role |
 |---|---|
-| **6.18 LTS** (the pin) | The one kernel Overdrive ships (latest qualifying LTS; EOL Dec 2028). Every Tier-3 / Tier-4 gate runs here; this is the merge-blocking signal. |
+| **Linux 7.0** (the pin; 6.18 LTS until the §6 amendment of 2026-10-10) | The one kernel Overdrive ships. Every Tier-3 / Tier-4 gate runs here; this is the merge-blocking signal. |
 | **`bpf-next`** | Early-warning only. Soft-fail nightly. Catches upstream verifier / BPF-subsystem changes before a future pin bump adopts them. Never merge-blocking. |
 
 The `5.10`, `5.15`, `6.1`, and `current LTS` entries are **removed**. They
@@ -125,7 +128,8 @@ This is a **requirement to be verified, not an assumption**: the spike's P3
 stock distro `vmlinuz`, which builds vsock as **modules**
 (`CONFIG_VSOCKETS=m`). Confirming vsock is built in on the pinned kernel is
 part of the existing appliance-kernel Tier-3 gate (the merge-blocking
-pinned-6.18 leg of §2's matrix; DISTILL DWD-10's kernel-matrix ownership) —
+pinned-kernel leg of §2's matrix, Linux 7.0 per §6; DISTILL DWD-10's
+kernel-matrix ownership) —
 the same "advancing the pin is a tested image change" discipline §1 already
 mandates. No new work item is minted by recording it.
 
@@ -137,52 +141,55 @@ DWD-21). Built-in is the **production** answer; the module-load is the
 **stock-kernel test** answer; they coexist because a vsock=y kernel simply
 stages no modules and the load becomes a no-op.
 
-### 5 — Amendment (2026-10-08, GH #295): the appliance image configures root-namespace interfaces only at boot
+**Correction (2026-10-05, GH #295, user ruling D2/D13).** Stock Cloud
+Hypervisor's `--vsock` uses a userspace Unix-socket backend, not
+`/dev/vhost-vsock`. The host-side `CONFIG_VHOST_VSOCK=y` requirement above
+serves the vendored fork's `--vsock ...,backend=vhost-kernel` device
+(ADR-0146), which is the only VMM Overdrive runs (ADR-0161).
 
-Accepted — approved by the user 2026-10-08 (decision IMG-IFACE-BOOT of the #295 feature
-delta); independent review r12 of #295 answered; further review waived by the
-user 2026-10-08; #295's DESIGN handed to DISTILL.
+### 5 — Withdrawn (2026-10-11, GH #295, user ruling UDP-EMPTY)
 
-The guest-flow forwarder (#295, ADR-0165) attaches its egress unframe program
-to every root-namespace interface present when `overdrive serve` boots, and
-attaches nothing afterwards. An interface that gains addresses or routes after
-that point would carry guest datagrams without the program. Interface
-configuration is a surface of the appliance image, and this ADR is the image's
-SSOT, so the requirement is pinned here:
+§5 (accepted 2026-10-08) required the appliance image to configure
+root-namespace interfaces only at boot and never to configure a stacked
+root-namespace interface, because the #295 host forwarder attached an egress
+unframe program to every root-namespace interface present at boot. Under the
+user ruling UDP-EMPTY of 2026-10-11 the host's SEQPACKET verdict strips the
+frame of every guest datagram before it reaches a host socket (ADR-0165), so
+no guest-flow program runs on a root-namespace interface. §5's two image
+requirements, its `overdrive serve` boot check and ADR-0181 are withdrawn.
+#295 places no requirement on root-namespace interface configuration.
 
-**The appliance image MUST configure root-namespace network interfaces
-(addresses, routes, link up) only at boot, before `overdrive serve` starts,
-and MUST NOT configure an interface the kernel registers after boot** (a NIC
-whose driver probes late, a hot-added NIC, or one any component creates). The
-image carries no network configuration that matches interfaces generically and
-so would configure a later one — for example a systemd-networkd `[Match]
-Name=*` file, or a DHCP client started on every new link.
+### 6 — Amendment (2026-10-10, user ruling): the pinned kernel is Linux 7.0
 
-**The appliance image MUST NOT configure a root-namespace interface stacked
-on another** — an interface enslaved to a bridge, bond, team or VRF, or a
-`vlan`, `macvlan`, `macvtap`, `ipvlan` or `ipvtap` interface over a lower
-device (decision IFACE-NO-STACK of the #295 feature delta, approved under the
-user's 2026-10-09 remediation directive; ADR-0181). A datagram leaving
-through an upper and its lower passes the unframe program twice, which
-corrupts or loses it (ADR-0165). `overdrive serve` checks this at boot,
-before any boot effect, and refuses startup naming the interface; the image
-requirement keeps that refusal from firing.
+The user ruled on 2026-10-10 that the kernel Overdrive pins is **Linux 7.0**.
+Its source is vendored at `vendors/linux` (tag `v7.0`) and is authoritative
+for every kernel-behaviour claim (CLAUDE.md § "Vendored components";
+`.claude/rules/design.md` § "Ground every kernel claim in the Linux source
+Overdrive runs"). This amendment changes:
 
-Interfaces that `overdrive serve` creates and configures during its own boot
-(ADR-0061's load-balancer veth pair) are Overdrive's, not the image's; the #295
-feature delta orders them before the unframe attach (D5a-SERVE-IFACE).
+- **§1:** the concrete pin is Linux 7.0, not 6.18 LTS. 7.0 carries in-kernel
+  TLS 1.3 TX+RX (≥6.0).
+- **`CONFIG_NET_HANDSHAKE` is an image kernel-configuration requirement, not a
+  version guarantee.** In 7.0 it is a hidden bool that depends on
+  `SUNRPC || NVME_TARGET_TCP || NVME_TCP` (`net/Kconfig:94-97 @ v7.0`), so a
+  kernel of any version has it only if the image's configuration enables one
+  of those. Where §1 and the Consequences call it guaranteed by version, read
+  "required of the image configuration".
+- **§2:** the merge-blocking row of the Tier-3 matrix is Linux 7.0. The
+  `bpf-next` soft-fail row is unchanged. `.claude/rules/testing.md`
+  § "Kernel matrix" carries the same matrix.
+- **§4:** the pinned-kernel Tier-3 gate that confirms the vsock stack is built
+  in is the 7.0 leg.
+- **Evidence:** real-kernel evidence captured on a 7.0 kernel is evidence for
+  the pinned kernel; the #295 spikes ran on 7.0.0-29 and need no re-run on
+  another kernel.
 
-The first requirement is a requirement on the image build, not a runtime
-check: the image's network configuration is reviewed against this section when the image is built
-and whenever it changes, in the same "image change is a tested change"
-discipline as §1. No new work item is minted by recording it.
-
-**Corollary — the dev and metal hosts are not the appliance image.** They run
-a catch-all systemd-networkd configuration that configures later interfaces;
-they are evidence neither for nor against this requirement. A dev or metal
-host that carries a stacked root-namespace interface (for example a bridge
-with enslaved ports) is refused by `overdrive serve`'s boot check like the
-appliance would be.
+7.0 is a mainline release, which Alternative D rejected because a mainline
+line receives upstream fixes only until its stable branch ends. That
+consequence applies to the 7.0 pin; the ruling of 2026-10-10 selects 7.0
+with it. Wherever §1–§4, the Consequences, the Alternatives or the
+Propagation list name 6.18 as the pin, they record the decision of 2026-06-11
+and this section supersedes them.
 
 ## Consequences
 
@@ -397,10 +404,6 @@ this decision:
 - ADR-0053 (same-host backend delivery via `cgroup_sock_addr`) — floor
   back-reference updated.
 - ADR-0059 (exec-probe cgroup placement) — floor back-reference updated.
-- ADR-0165 (guest datagram frame removal; boot-only unframe attachment set)
-  — consumer of § 5.
-- ADR-0061 (single-node load-balancer veth pair) — `serve`-created
-  interfaces, outside § 5.
 - [#26](https://github.com/overdrive-sh/overdrive/issues/26) — transparent
   kernel mTLS (host-socket sockops + kTLS path).
 - [#222](https://github.com/overdrive-sh/overdrive/issues/222) — guest-stack

@@ -2,15 +2,14 @@
 
 ## Status
 
-**Accepted — decision D17 approved by user 2026-10-05; independent review r12 answered;
-further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
-Attachment Replacement DESIGN — PROPOSED 2026-10-05*. Depends on ADR-0146.
+**Accepted — decision D17 approved by user 2026-10-05.** GH #295. Recorded in
+the #295 feature delta, § *[REF] vsock Attachment Replacement DESIGN*. Depends
+on ADR-0146.
 
-If accepted, this ADR **amends ADR-0082 §D4's transport**: the beacon reaches
-the host over a node-shared `AF_VSOCK` listener instead of a per-VM Unix
-socket. The beacon's message set and meanings are unchanged; which launch a
-session belongs to is ADR-0177 (the launch token READY carries; approved
-under the user's 2026-10-09 remediation directive).
+This ADR **amends ADR-0082 §D4's transport** on acceptance: the beacon
+reaches the host over a node-shared `AF_VSOCK` listener instead of a per-VM
+Unix socket. The beacon's message set and meanings are unchanged; which
+launch a session belongs to is ADR-0177 (the launch token READY carries).
 
 ## Context
 
@@ -31,10 +30,10 @@ The CH fork spike (`spike/ch-vhost-vsock-findings.md`, P5–P6) showed:
   with the assigned CID;
 - one guest cannot reach another guest's CID.
 
-Below the socket API, upstream v7.0 `drivers/vhost/vsock.c` delivers guest TX
-packets only when `src_cid` equals the device's guest CID. A crafted guest
-driver forging `src_cid` was not exercised; the distro kernel may carry
-patches. A host vsock listener bound on CID 2 before vhost-vsock loaded failed
+Below the socket API, the vhost transport delivers a guest TX packet only
+when its `src_cid` equals the device's guest CID and its `dst_cid` is the
+host's (`drivers/vhost/vsock.c:551-556 @ v7.0`); any other packet is freed.
+A crafted guest driver forging `src_cid` was not exercised (V-10). A host vsock listener bound on CID 2 before vhost-vsock loaded failed
 with `EADDRNOTAVAIL` (guest-capture spike, increment a); binding
 `VMADDR_CID_ANY` and checking the peer CID worked.
 

@@ -2,9 +2,11 @@
 
 ## Status
 
-**Accepted — decision D10 approved by user 2026-10-05; independent review r12 answered;
-further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
-Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
+**Accepted — decision D10 approved by user 2026-10-05.** GH #295. Recorded in
+the #295 feature delta, § *[REF] vsock Attachment Replacement DESIGN*.
+
+Depends on GW-LOCAL (ADR-0152, accepted 2026-10-13): the guest gateway is
+the one host-local address of the guest prefix.
 
 ## Context
 
@@ -12,6 +14,7 @@ Dial-by-name (ADR-0072, ADR-0116) has the guest resolver send UDP to the node
 DNS responder at the guest gateway address, port 53 (`overdrive.net=…,dns=`
 names the gateway today). ADR-0116's resolver semantics do not depend on the
 transport: one in-agent `DnsResponder` over the `NameIndex`, no DNS in eBPF.
+The responder binds the wildcard address on port 53 (ADR-0116).
 
 A resolver typically sends each query from a fresh unconnected socket. Under
 ADR-0147 each one is a new datagram association, which must be established
@@ -24,9 +27,10 @@ fresh unconnected sockets and 2,000/2,000 from connected ones; neither owner
 made a payload syscall. The first datagram parks in a kernel cell until the
 association is paired (ADR-0150, ADR-0158).
 
-The gateway lies inside the guest prefix, and the prefix is host-local
-(ADR-0152); without an explicit exception the host-internal deny set
-(ADR-0167) and the UDP guest-prefix refusal (#310) would both refuse it.
+The guest prefix is not host-local (ADR-0173). A host socket connected to an
+address that is not local follows the host's routes and does not reach a host
+socket. The gateway therefore reaches the wildcard-bound responder only if it
+alone is made host-local, which is what GW-LOCAL (ADR-0152) decides.
 
 ## Decision
 
@@ -36,15 +40,16 @@ The gateway lies inside the guest prefix, and the prefix is host-local
   local guest address, so `sendmsg4` captures it and the flow becomes an
   ordinary datagram association.
 - The host owner pairs that association with a UDP socket connected to
-  `gateway:53`. The gateway is host-local through the guest prefix's local
-  route (ADR-0152), so the datagram leaves through `lo`, with its frame
-  removed as ADR-0165 decides (in the host verdict, or for an empty datagram
-  on `lo` egress), and is delivered to the `DnsResponder`. `gateway:53` is the
-  one host-local destination the host-internal deny set admits (ADR-0167);
-  the gateway is excluded from the guest-prefix steering rules (ADR-0172).
+  `gateway:53`. The gateway is host-local through its own boot-converged
+  `local` route on `lo` (ADR-0152), so the datagram is delivered through `lo`
+  to the `DnsResponder` addressed to the gateway, and the reply leaves from
+  the gateway, the source the connected socket accepts. The host verdict removes the datagram
+  frame, and an empty datagram is sent by the owner (ADR-0165).
+- `gateway:53` is the one host-local destination the host-internal deny set
+  admits (ADR-0167), and the gateway is excluded from the constant
+  guest-prefix rules (ADR-0172).
 - The responder's resolution semantics and bind rule are unchanged
-  (ADR-0116). The gateway address it falls back to is the same address; it is
-  now local through the `lo` route instead of on the bridge.
+  (ADR-0116).
 
 ## Alternatives considered
 
@@ -54,6 +59,10 @@ The gateway lies inside the guest prefix, and the prefix is host-local
 - **A distinct guest-local DNS address** (`127.0.0.53`). Changes the
   resolver's configured address without need, and requires capturing a
   loopback destination as an exception. Rejected under D15.
+- **Pair DNS associations with a socket connected to a node address instead
+  of the gateway.** Needs a special destination rewrite in the owner for one
+  service, and the responder's gateway fallback (ADR-0116) would no longer
+  match the address the guest queries. Rejected.
 - **Force DNS over TCP.** libc-dependent. Rejected.
 - **Resolve names in eBPF.** ADR-0116 already rejects this.
 
@@ -62,8 +71,8 @@ The gateway lies inside the guest prefix, and the prefix is host-local
 - Every DNS query 4-tuple costs one datagram association. A resolver that
   opens a fresh socket per query pays setup on every query, measured in V-9.
 - An association lasts at most as long as the guest socket that created it, or
-  until the host aborts it (ADR-0160). A host abort leaves the guest's
-  connected UDP socket in place; whether the next datagram on that same
-  socket re-associates was not shown (V-5(c)).
-- There is no time-based expiry, and an association is never shared across
-  sockets.
+  until the host aborts it (ADR-0160). After a host abort the guest's next
+  datagram on the same connected socket starts a new association
+  (CELL-RECREATE, ADR-0150).
+- There is no time-based expiry beyond the guest's idle slot release
+  (ADR-0150), and an association is never shared across sockets.

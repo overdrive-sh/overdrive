@@ -1,0 +1,23 @@
+State 1: <Initial predicate>
+/\ quota_bugFreeAtHalfClose_flow_quota_slot = << [own |-> 0, st |-> "free", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugFreeAtHalfClose_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 2: <quota_bugFreeAtHalfClose_flow_quota_Admit line 319, col 3 to line 361, col 10 of module quota_bugFreeAtHalfClose>
+/\ quota_bugFreeAtHalfClose_flow_quota_slot = << [own |-> 1, st |-> "active", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugFreeAtHalfClose_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 3: <quota_bugFreeAtHalfClose_flow_quota_HalfClose line 285, col 3 to line 308, col 46 of module quota_bugFreeAtHalfClose>
+/\ quota_bugFreeAtHalfClose_flow_quota_slot = << [own |-> 0, st |-> "free", pend |-> TRUE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugFreeAtHalfClose_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]

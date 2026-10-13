@@ -1,0 +1,26 @@
+# cid-lease-hazard-assign-split: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  reclaimed = TRUE
+  cursor = 0
+  bootLeft = -1
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  up = TRUE
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 2 [AssignPick]
+  al = << [st |-> "picked", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 3 [AssignPick]
+  al = << [st |-> "picked", off |-> 0, retry |-> FALSE], [st |-> "picked", off |-> 0, retry |-> FALSE] >>
+
+State 4 [AssignTake]
+  cursor = 1
+  lease = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "picked", off |-> 0, retry |-> FALSE], [st |-> "leased", off |-> 0, retry |-> FALSE] >>
+
+State 5 [AssignTake]
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "leased", off |-> 0, retry |-> FALSE] >>

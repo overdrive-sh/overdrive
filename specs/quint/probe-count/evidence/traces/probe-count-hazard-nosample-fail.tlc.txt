@@ -1,0 +1,51 @@
+State 1: <Initial predicate>
+/\ streak_bugNoSampleFail_probe_count_terms = 0
+/\ streak_bugNoSampleFail_probe_count_rseq = 0
+/\ streak_bugNoSampleFail_probe_count_running = TRUE
+/\ streak_bugNoSampleFail_probe_count_psame = 0
+/\ streak_bugNoSampleFail_probe_count_rat = 0
+/\ streak_bugNoSampleFail_probe_count_hist = <<>>
+/\ streak_bugNoSampleFail_probe_count_clock = 0
+/\ streak_bugNoSampleFail_probe_count_fs = 0
+/\ streak_bugNoSampleFail_probe_count_pseq = 0
+/\ streak_bugNoSampleFail_probe_count_pst = ""
+/\ streak_bugNoSampleFail_probe_count_rst = ""
+/\ streak_bugNoSampleFail_probe_count_tseqs = {}
+/\ streak_bugNoSampleFail_probe_count_rsame = 0
+/\ streak_bugNoSampleFail_probe_count_A = 0
+/\ streak_bugNoSampleFail_probe_count_runs = 0
+/\ streak_bugNoSampleFail_probe_count_M = 0
+/\ streak_bugNoSampleFail_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+
+State 2: <streak_bugNoSampleFail_probe_count_ProbeRun line 348, col 3 to line 413, col 49 of module streak_bugNoSampleFail>
+/\ streak_bugNoSampleFail_probe_count_terms = 0
+/\ streak_bugNoSampleFail_probe_count_rseq = 1
+/\ streak_bugNoSampleFail_probe_count_running = TRUE
+/\ streak_bugNoSampleFail_probe_count_psame = 1
+/\ streak_bugNoSampleFail_probe_count_rat = 0
+/\ streak_bugNoSampleFail_probe_count_hist = <<>>
+/\ streak_bugNoSampleFail_probe_count_clock = 1
+/\ streak_bugNoSampleFail_probe_count_fs = 0
+/\ streak_bugNoSampleFail_probe_count_pseq = 1
+/\ streak_bugNoSampleFail_probe_count_pst = "Fail"
+/\ streak_bugNoSampleFail_probe_count_rst = "Fail"
+/\ streak_bugNoSampleFail_probe_count_tseqs = {}
+/\ streak_bugNoSampleFail_probe_count_rsame = 1
+/\ streak_bugNoSampleFail_probe_count_A = 0
+/\ streak_bugNoSampleFail_probe_count_runs = 1
+/\ streak_bugNoSampleFail_probe_count_M = 0
+/\ streak_bugNoSampleFail_probe_count_g = [ missTouched |-> TRUE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]

@@ -1,0 +1,23 @@
+
+  empty_bugNoResetAtReuse
+    1) empty_bugNoResetAtReuse::udp_empty::LostCountIsResetWhenTheCellIsReusedForANewFlow failed after 1 test(s)
+
+  1 failed
+
+  1) empty_bugNoResetAtReuse::udp_empty::LostCountIsResetWhenTheCellIsReusedForANewFlow:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/udp_empty.qnt:162:56
+        162:   run LostCountIsResetWhenTheCellIsReusedForANewFlow = init
+                                                                    ^^^^
+        163:     .then(Start).then(Empty(true)).then(Remove)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        164:     .expect(Safety and lost == 1 and sent == 0 and not(live))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        165:     .then(Start).expect(Safety and ep == 2 and lost == 0 and seen == 0 and owed == 0 and not(g.spurious))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x8bc7d04e4fc7673 --match=empty_bugNoResetAtReuse::udp_empty::LostCountIsResetWhenTheCellIsReusedForANewFlow to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/udp_empty_hazards.qnt
+error: Tests failed

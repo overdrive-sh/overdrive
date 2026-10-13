@@ -1,11 +1,11 @@
-# owner-flows-alt-tombstone-misses-close: counterexample, 16 state(s) (from the TLC trace)
+# owner-flows-alt-tombstone-misses-close: counterexample, 12 state(s) (from the TLC trace)
 
 State 1
   sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   bclaim = 0
   alloc = "Absent"
   gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-  hc = [ opener |-> "g", paired |-> [g |-> FALSE, h |-> FALSE], outEof |-> [g |-> FALSE, h |-> FALSE], farHc |-> [g |-> FALSE, h |-> FALSE], ann |-> [g |-> "none", h |-> "none"], acked |-> [g |-> FALSE, h |-> FALSE], ackDue |-> [g |-> FALSE, h |-> FALSE], outShut |-> [g |-> FALSE, h |-> FALSE], open |-> [g |-> TRUE, h |-> TRUE], far |-> [g |-> "none", h |-> "none"], dead |-> [g |-> FALSE, h |-> FALSE], loss |-> [g |-> FALSE, h |-> FALSE], ctlDown |-> FALSE, ch |-> [g |-> <<>>, h |-> <<>>], vEnd |-> [g |-> FALSE, h |-> FALSE], vEndSent |-> [g |-> FALSE, h |-> FALSE], held |-> [g |-> FALSE, h |-> FALSE], earlyShut |-> FALSE, faulted |-> FALSE ]
   hf = <<[st |-> "none", gen |-> 0]>>
   toGuestAbort = {}
   phantom = FALSE
@@ -13,7 +13,9 @@ State 1
   bHeldByOther = FALSE
   vmUp = FALSE
   abortDiscarded = {}
+  act = "none"
   quiesced = FALSE
+  toHostAbort = {}
   toHostRefused = {}
   heldByOther = FALSE
   badPaired = FALSE
@@ -25,58 +27,51 @@ State 1
   vmGen = 0
   crossMsg = FALSE
   toHostPaired = {}
+  badAct = FALSE
   gen = 0
 
-State 2 [step]
+State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [step]
+State 3 [Teardown]
   alloc = "Retiring"
 
-State 4 [step]
+State 4 [Release]
   alloc = "Absent"
 
-State 5 [step]
+State 5 [Provision]
   alloc = "Provisioned"
   gen = 2
 
-State 6 [step]
+State 6 [VmStart]
   vmUp = TRUE
   vmGen = 2
 
 State 7 [step]
-  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-
-State 8 [step]
   sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
-State 9 [step]
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
+State 8 [step]
+  sess = <<[st |-> "reading", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
-State 10 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+State 9 [step]
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "none", gen |-> 0]>>
+  claim = 1
+
+State 10 [Activate]
+  alloc = "Active"
+  act = "Activated"
 
 State 11 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "reading", gen |-> 2]>>
-
-State 12 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "live", gen |-> 2]>>
-  claim = 2
-
-State 13 [step]
-  alloc = "Active"
-
-State 14 [step]
+  dl = [ res |-> <<"pending">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   hf = <<[st |-> "req", gen |-> 2]>>
+  act = "none"
 
-State 15 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+State 12 [Teardown]
+  sess = <<[st |-> "closed", gen |-> 2], [st |-> "none", gen |-> 0]>>
+  dl = [ res |-> <<"NotServing">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   alloc = "Retiring"
   hf = <<[st |-> "closed", gen |-> 2]>>
   claim = 0
 
-State 16 [step]
-  flows = << [st |-> "queued", gen |-> 2, req |-> 0, inFlight |-> FALSE], [st |-> "closed", gen |-> 2, req |-> 0, inFlight |-> FALSE] >>
-
--> stutters forever in State 16
+-> stutters forever in State 12

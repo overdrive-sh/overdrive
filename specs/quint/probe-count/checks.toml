@@ -1,0 +1,309 @@
+# Checks the `cargo xtask quint` runner executes for specs/quint/probe-count/.
+# Main instance probe_streak (the approved rule); hazard/ instances switch one rule off each.
+
+# ---- main instance: every invariant holds
+
+[[check]]
+name = "probe-count-no-early-terminate"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "NoEarlyTerminate"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-no-react-on-same-row"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "NoReactOnSameRow"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-no-terminate-when-stopped"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "NoTerminateWhenStopped"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-no-missed-terminate"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "NoMissedTerminate"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-no-early-ready"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "NoEarlyReady"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-streak-exact"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "StreakExact"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-missing-sample-inert"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "MissingSampleInert"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-store-holds-latest"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "StoreHoldsLatest"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-no-stale-change"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "NoStaleChange"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-safety"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+# ---- non-vacuity witnesses
+
+[[check]]
+name = "probe-count-witness-terminates"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "WitnessNeverTerminates"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-witness-ready"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "WitnessNeverReady"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ---- hazards
+
+[[check]]
+name = "probe-count-hazard-reconstruct"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugReconstruct"
+invariant = "NoEarlyTerminate"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-hazard-no-act-once"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugNoActOnce"
+invariant = "NoReactOnSameRow"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-hazard-once-per-streak"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugOncePerStreak"
+invariant = "NoMissedTerminate"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-hazard-once-ever"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugOnceEver"
+invariant = "NoMissedTerminate"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-hazard-nosample-fail"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugNoSampleFail"
+invariant = "MissingSampleInert"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-hazard-lww-observed-at"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugLwwObservedAt"
+invariant = "StoreHoldsLatest"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ---- named runs on the main instance
+
+[[check]]
+name = "probe-count-run-happy-path-three-fails-terminate-at-threshold"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "HappyPathThreeFailsTerminateAtThreshold"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-run-coalesced-fails-terminate-on-first-look"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "CoalescedFailsTerminateOnFirstLook"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-run-missing-sample-changes-nothing"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "MissingSampleChangesNothing"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-run-re-read-after-failed-stop-does-not-re-terminate"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "ReReadAfterFailedStopDoesNotReTerminate"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-run-failed-stop-retried-on-next-row"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "FailedStopRetriedOnNextRow"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-run-new-streak-after-pass-terminates-again"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "NewStreakAfterPassTerminatesAgain"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-run-flip-between-looks-no-early-terminate"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "FlipBetweenLooksNoEarlyTerminate"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-run-readiness-reaches-threshold"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "ReadinessReachesThreshold"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "probe-count-run-clock-step-back-does-not-lose-row"
+spec = "probe_count.qnt"
+main = "probe_streak"
+run = "ClockStepBackDoesNotLoseRow"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# ---- the failing run of each hazard
+
+[[check]]
+name = "probe-count-run-hazard-reconstruct"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugReconstruct"
+run = "FlipBetweenLooksNoEarlyTerminate"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-run-hazard-no-act-once"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugNoActOnce"
+run = "ReReadAfterFailedStopDoesNotReTerminate"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-run-hazard-nosample-fail"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugNoSampleFail"
+run = "MissingSampleChangesNothing"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-run-hazard-lww-observed-at"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugLwwObservedAt"
+run = "ClockStepBackDoesNotLoseRow"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-run-hazard-once-per-streak"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugOncePerStreak"
+run = "FailedStopRetriedOnNextRow"
+backend = "evaluator"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "probe-count-run-hazard-once-ever"
+spec = "hazard/probe_count_hazards.qnt"
+main = "streak_bugOnceEver"
+run = "FailedStopRetriedOnNextRow"
+backend = "evaluator"
+expect = "violation"
+ci = true

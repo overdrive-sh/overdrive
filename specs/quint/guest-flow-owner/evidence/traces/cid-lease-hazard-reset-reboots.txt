@@ -1,0 +1,23 @@
+# cid-lease-hazard-reset-reboots: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  cursor = 0
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  up = TRUE
+  reclaimed = TRUE
+  bootLeft = -1
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 2 [Assign]
+  cursor = 1
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 3 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [st |-> "running", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 4 [GuestReset]
+  g = [clash |-> FALSE, rebooted |-> TRUE, reclaimed |-> FALSE]

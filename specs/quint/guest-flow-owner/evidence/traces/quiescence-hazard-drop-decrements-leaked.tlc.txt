@@ -1,0 +1,75 @@
+State 1: <Initial predicate>
+/\ quiesce_bugDropDecrements_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
+/\ quiesce_bugDropDecrements_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_bugDropDecrements_quiescence_repLeft = 1
+/\ quiesce_bugDropDecrements_quiescence_g = [ reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE ]
+/\ quiesce_bugDropDecrements_quiescence_up = TRUE
+/\ quiesce_bugDropDecrements_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_bugDropDecrements_quiescence_flowsOpen = 0
+/\ quiesce_bugDropDecrements_quiescence_cnt = 0
+/\ quiesce_bugDropDecrements_quiescence_stop = "none"
+/\ quiesce_bugDropDecrements_quiescence_table = TRUE
+/\ quiesce_bugDropDecrements_quiescence_latch = FALSE
+
+State 2: <quiesce_bugDropDecrements_quiescence_Damage line 271, col 3 to line 299, col 47 of module quiesce_bugDropDecrements>
+/\ quiesce_bugDropDecrements_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_bugDropDecrements_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_bugDropDecrements_quiescence_repLeft = 1
+/\ quiesce_bugDropDecrements_quiescence_g = [ reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE ]
+/\ quiesce_bugDropDecrements_quiescence_up = TRUE
+/\ quiesce_bugDropDecrements_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_bugDropDecrements_quiescence_flowsOpen = 0
+/\ quiesce_bugDropDecrements_quiescence_cnt = 0
+/\ quiesce_bugDropDecrements_quiescence_stop = "none"
+/\ quiesce_bugDropDecrements_quiescence_table = TRUE
+/\ quiesce_bugDropDecrements_quiescence_latch = FALSE
+
+State 3: <quiesce_bugDropDecrements_quiescence_RecQuiesce line 362, col 3 to line 393, col 7 of module quiesce_bugDropDecrements>
+/\ quiesce_bugDropDecrements_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_bugDropDecrements_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_bugDropDecrements_quiescence_repLeft = 1
+/\ quiesce_bugDropDecrements_quiescence_g = [ reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE ]
+/\ quiesce_bugDropDecrements_quiescence_up = TRUE
+/\ quiesce_bugDropDecrements_quiescence_rec = [C1 |-> "held", C2 |-> "idle"]
+/\ quiesce_bugDropDecrements_quiescence_flowsOpen = 0
+/\ quiesce_bugDropDecrements_quiescence_cnt = 1
+/\ quiesce_bugDropDecrements_quiescence_stop = "none"
+/\ quiesce_bugDropDecrements_quiescence_table = TRUE
+/\ quiesce_bugDropDecrements_quiescence_latch = TRUE
+
+State 4: <quiesce_bugDropDecrements_quiescence_RecDropHold line 522, col 3 to line 552, col 51 of module quiesce_bugDropDecrements>
+/\ quiesce_bugDropDecrements_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_bugDropDecrements_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_bugDropDecrements_quiescence_repLeft = 1
+/\ quiesce_bugDropDecrements_quiescence_g = [ reopenEarly |-> TRUE,
+  repairNoHold |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> TRUE,
+  refusedBoot |-> FALSE ]
+/\ quiesce_bugDropDecrements_quiescence_up = TRUE
+/\ quiesce_bugDropDecrements_quiescence_rec = [C1 |-> "dropped", C2 |-> "idle"]
+/\ quiesce_bugDropDecrements_quiescence_flowsOpen = 0
+/\ quiesce_bugDropDecrements_quiescence_cnt = 0
+/\ quiesce_bugDropDecrements_quiescence_stop = "none"
+/\ quiesce_bugDropDecrements_quiescence_table = TRUE
+/\ quiesce_bugDropDecrements_quiescence_latch = FALSE

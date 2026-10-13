@@ -1,0 +1,32 @@
+# udp-empty-hazard-no-reset-at-reuse: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+  ep = 0
+  sent = 0
+  lost = 0
+  live = FALSE
+  ring = <<>>
+  seen = 0
+  owed = 0
+
+State 2 [Start]
+  ep = 1
+  live = TRUE
+
+State 3 [Empty]
+  lost = 1
+  owed = 1
+
+State 4 [Remove]
+  live = FALSE
+
+State 5 [Start]
+  ep = 2
+  live = TRUE
+  owed = 0
+
+State 6 [OwnReadLost]
+  g = [spurious |-> TRUE, discarded |-> FALSE, compensated |-> TRUE]
+  sent = 1
+  seen = 1

@@ -1,0 +1,29 @@
+# udp-empty-hazard-no-compensation: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  sent = 0
+  lost = 0
+  live = FALSE
+  ring = <<>>
+  seen = 0
+  owed = 0
+  ep = 0
+  g = [spurious |-> FALSE, discarded |-> FALSE, compensated |-> FALSE]
+
+State 2 [Start]
+  live = TRUE
+  ep = 1
+
+State 3 [Empty]
+  lost = 1
+  owed = 1
+
+State 4 [Empty]
+  ring = <<1>>
+  owed = 2
+
+State 5 [OwnNotice]
+  sent = 1
+  ring = <<>>
+
+-> stutters forever in State 5

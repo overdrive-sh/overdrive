@@ -35,23 +35,23 @@ State 1: <Initial predicate>
 /\ slots_liveTeeth_udp_slots_toGuestPaired = {}
 /\ slots_liveTeeth_udp_slots_toGuestRefused = {}
 
-State 2: <slots_liveTeeth_udp_slots_SockCloseReportLost line 1164, col 3 to line 1202, col 42 of module slots_liveTeeth>
+State 2: <slots_liveTeeth_udp_slots_AppClaim line 478, col 3 to line 536, col 45 of module slots_liveTeeth>
 /\ slots_liveTeeth_udp_slots_toHostAbort = {}
 /\ slots_liveTeeth_udp_slots_misdelivered = FALSE
-/\ slots_liveTeeth_udp_slots_ready = {}
+/\ slots_liveTeeth_udp_slots_ready = {<<0, TRUE>>}
 /\ slots_liveTeeth_udp_slots_toHostEnd = {}
 /\ slots_liveTeeth_udp_slots_endedNoNew = {}
 /\ slots_liveTeeth_udp_slots_picks = {}
 /\ slots_liveTeeth_udp_slots_toGuestAbort = {}
 /\ slots_liveTeeth_udp_slots_nextFid = 1
 /\ slots_liveTeeth_udp_slots_slots = ( 0 :>
-      [ owned |-> FALSE,
-        sock |-> 0,
-        dest |-> 0,
+      [ owned |-> TRUE,
+        sock |-> 1,
+        dest |-> 1,
         fid |-> 0,
         routed |-> FALSE,
-        parked |-> {},
-        holders |-> 0 ] @@
+        parked |-> {<<1, 1>>},
+        holders |-> 1 ] @@
   1 :>
       [ owned |-> FALSE,
         sock |-> 0,
@@ -64,7 +64,7 @@ State 2: <slots_liveTeeth_udp_slots_SockCloseReportLost line 1164, col 3 to line
 /\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
 /\ slots_liveTeeth_udp_slots_guestEnded = {}
 /\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
-/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, TRUE>>
+/\ slots_liveTeeth_udp_slots_sockAlive = <<TRUE, TRUE>>
 /\ slots_liveTeeth_udp_slots_host = << [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0],
    [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
 /\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
@@ -72,81 +72,7 @@ State 2: <slots_liveTeeth_udp_slots_SockCloseReportLost line 1164, col 3 to line
 /\ slots_liveTeeth_udp_slots_toGuestPaired = {}
 /\ slots_liveTeeth_udp_slots_toGuestRefused = {}
 
-State 3: <slots_liveTeeth_udp_slots_AppClaim line 469, col 3 to line 527, col 45 of module slots_liveTeeth>
-/\ slots_liveTeeth_udp_slots_toHostAbort = {}
-/\ slots_liveTeeth_udp_slots_misdelivered = FALSE
-/\ slots_liveTeeth_udp_slots_ready = {<<1, TRUE>>}
-/\ slots_liveTeeth_udp_slots_toHostEnd = {}
-/\ slots_liveTeeth_udp_slots_endedNoNew = {}
-/\ slots_liveTeeth_udp_slots_picks = {}
-/\ slots_liveTeeth_udp_slots_toGuestAbort = {}
-/\ slots_liveTeeth_udp_slots_nextFid = 1
-/\ slots_liveTeeth_udp_slots_slots = ( 0 :>
-      [ owned |-> FALSE,
-        sock |-> 0,
-        dest |-> 0,
-        fid |-> 0,
-        routed |-> FALSE,
-        parked |-> {},
-        holders |-> 0 ] @@
-  1 :>
-      [ owned |-> TRUE,
-        sock |-> 2,
-        dest |-> 1,
-        fid |-> 0,
-        routed |-> FALSE,
-        parked |-> {<<2, 1>>},
-        holders |-> 1 ] )
-/\ slots_liveTeeth_udp_slots_lateIgnored = FALSE
-/\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
-/\ slots_liveTeeth_udp_slots_guestEnded = {}
-/\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
-/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, TRUE>>
-/\ slots_liveTeeth_udp_slots_host = << [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0],
-   [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
-/\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
-/\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
-/\ slots_liveTeeth_udp_slots_toGuestPaired = {}
-/\ slots_liveTeeth_udp_slots_toGuestRefused = {}
-
-State 4: <slots_liveTeeth_udp_slots_SockCloseReportLost line 1164, col 3 to line 1202, col 42 of module slots_liveTeeth>
-/\ slots_liveTeeth_udp_slots_toHostAbort = {}
-/\ slots_liveTeeth_udp_slots_misdelivered = FALSE
-/\ slots_liveTeeth_udp_slots_ready = {<<1, TRUE>>}
-/\ slots_liveTeeth_udp_slots_toHostEnd = {}
-/\ slots_liveTeeth_udp_slots_endedNoNew = {}
-/\ slots_liveTeeth_udp_slots_picks = {}
-/\ slots_liveTeeth_udp_slots_toGuestAbort = {}
-/\ slots_liveTeeth_udp_slots_nextFid = 1
-/\ slots_liveTeeth_udp_slots_slots = ( 0 :>
-      [ owned |-> FALSE,
-        sock |-> 0,
-        dest |-> 0,
-        fid |-> 0,
-        routed |-> FALSE,
-        parked |-> {},
-        holders |-> 0 ] @@
-  1 :>
-      [ owned |-> TRUE,
-        sock |-> 2,
-        dest |-> 1,
-        fid |-> 0,
-        routed |-> FALSE,
-        parked |-> {<<2, 1>>},
-        holders |-> 1 ] )
-/\ slots_liveTeeth_udp_slots_lateIgnored = FALSE
-/\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
-/\ slots_liveTeeth_udp_slots_guestEnded = {}
-/\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
-/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, FALSE>>
-/\ slots_liveTeeth_udp_slots_host = << [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0],
-   [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
-/\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
-/\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
-/\ slots_liveTeeth_udp_slots_toGuestPaired = {}
-/\ slots_liveTeeth_udp_slots_toGuestRefused = {}
-
-State 5: <slots_liveTeeth_udp_slots_dispatchReady line 1292, col 3 to line 1295, col 6 of module slots_liveTeeth>
+State 3: <slots_liveTeeth_udp_slots_dispatchReady line 1301, col 3 to line 1304, col 6 of module slots_liveTeeth>
 /\ slots_liveTeeth_udp_slots_toHostAbort = {}
 /\ slots_liveTeeth_udp_slots_misdelivered = FALSE
 /\ slots_liveTeeth_udp_slots_ready = {}
@@ -156,18 +82,55 @@ State 5: <slots_liveTeeth_udp_slots_dispatchReady line 1292, col 3 to line 1295,
 /\ slots_liveTeeth_udp_slots_toGuestAbort = {}
 /\ slots_liveTeeth_udp_slots_nextFid = 2
 /\ slots_liveTeeth_udp_slots_slots = ( 0 :>
+      [ owned |-> TRUE,
+        sock |-> 1,
+        dest |-> 1,
+        fid |-> 1,
+        routed |-> FALSE,
+        parked |-> {<<1, 1>>},
+        holders |-> 1 ] @@
+  1 :>
       [ owned |-> FALSE,
         sock |-> 0,
         dest |-> 0,
         fid |-> 0,
         routed |-> FALSE,
         parked |-> {},
-        holders |-> 0 ] @@
+        holders |-> 0 ] )
+/\ slots_liveTeeth_udp_slots_lateIgnored = FALSE
+/\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
+/\ slots_liveTeeth_udp_slots_guestEnded = {}
+/\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
+/\ slots_liveTeeth_udp_slots_sockAlive = <<TRUE, TRUE>>
+/\ slots_liveTeeth_udp_slots_host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 0],
+   [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+/\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
+/\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
+/\ slots_liveTeeth_udp_slots_toGuestPaired = {}
+/\ slots_liveTeeth_udp_slots_toGuestRefused = {}
+
+State 4: <slots_liveTeeth_udp_slots_AppClaim line 478, col 3 to line 536, col 45 of module slots_liveTeeth>
+/\ slots_liveTeeth_udp_slots_toHostAbort = {}
+/\ slots_liveTeeth_udp_slots_misdelivered = FALSE
+/\ slots_liveTeeth_udp_slots_ready = {<<1, TRUE>>}
+/\ slots_liveTeeth_udp_slots_toHostEnd = {}
+/\ slots_liveTeeth_udp_slots_endedNoNew = {}
+/\ slots_liveTeeth_udp_slots_picks = {}
+/\ slots_liveTeeth_udp_slots_toGuestAbort = {}
+/\ slots_liveTeeth_udp_slots_nextFid = 2
+/\ slots_liveTeeth_udp_slots_slots = ( 0 :>
+      [ owned |-> TRUE,
+        sock |-> 1,
+        dest |-> 1,
+        fid |-> 1,
+        routed |-> FALSE,
+        parked |-> {<<1, 1>>},
+        holders |-> 1 ] @@
   1 :>
       [ owned |-> TRUE,
         sock |-> 2,
         dest |-> 1,
-        fid |-> 1,
+        fid |-> 0,
         routed |-> FALSE,
         parked |-> {<<2, 1>>},
         holders |-> 1 ] )
@@ -175,15 +138,15 @@ State 5: <slots_liveTeeth_udp_slots_dispatchReady line 1292, col 3 to line 1295,
 /\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
 /\ slots_liveTeeth_udp_slots_guestEnded = {}
 /\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
-/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, FALSE>>
-/\ slots_liveTeeth_udp_slots_host = << [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1],
+/\ slots_liveTeeth_udp_slots_sockAlive = <<TRUE, TRUE>>
+/\ slots_liveTeeth_udp_slots_host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 0],
    [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
 /\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
 /\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
 /\ slots_liveTeeth_udp_slots_toGuestPaired = {}
 /\ slots_liveTeeth_udp_slots_toGuestRefused = {}
 
-State 6: <slots_liveTeeth_udp_slots_HostRefuse line 812, col 3 to line 850, col 45 of module slots_liveTeeth>
+State 5: <slots_liveTeeth_udp_slots_dispatchReady line 1301, col 3 to line 1304, col 6 of module slots_liveTeeth>
 /\ slots_liveTeeth_udp_slots_toHostAbort = {}
 /\ slots_liveTeeth_udp_slots_misdelivered = FALSE
 /\ slots_liveTeeth_udp_slots_ready = {}
@@ -191,20 +154,20 @@ State 6: <slots_liveTeeth_udp_slots_HostRefuse line 812, col 3 to line 850, col 
 /\ slots_liveTeeth_udp_slots_endedNoNew = {}
 /\ slots_liveTeeth_udp_slots_picks = {}
 /\ slots_liveTeeth_udp_slots_toGuestAbort = {}
-/\ slots_liveTeeth_udp_slots_nextFid = 2
+/\ slots_liveTeeth_udp_slots_nextFid = 3
 /\ slots_liveTeeth_udp_slots_slots = ( 0 :>
-      [ owned |-> FALSE,
-        sock |-> 0,
-        dest |-> 0,
-        fid |-> 0,
+      [ owned |-> TRUE,
+        sock |-> 1,
+        dest |-> 1,
+        fid |-> 1,
         routed |-> FALSE,
-        parked |-> {},
-        holders |-> 0 ] @@
+        parked |-> {<<1, 1>>},
+        holders |-> 1 ] @@
   1 :>
       [ owned |-> TRUE,
         sock |-> 2,
         dest |-> 1,
-        fid |-> 1,
+        fid |-> 2,
         routed |-> FALSE,
         parked |-> {<<2, 1>>},
         holders |-> 1 ] )
@@ -212,23 +175,97 @@ State 6: <slots_liveTeeth_udp_slots_HostRefuse line 812, col 3 to line 850, col 
 /\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
 /\ slots_liveTeeth_udp_slots_guestEnded = {}
 /\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
-/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, FALSE>>
-/\ slots_liveTeeth_udp_slots_host = << [sock |-> 2, dest |-> 1, st |-> "closed", slot |-> 1],
-   [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+/\ slots_liveTeeth_udp_slots_sockAlive = <<TRUE, TRUE>>
+/\ slots_liveTeeth_udp_slots_host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 0],
+   [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1] >>
 /\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
 /\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
 /\ slots_liveTeeth_udp_slots_toGuestPaired = {}
-/\ slots_liveTeeth_udp_slots_toGuestRefused = {1}
+/\ slots_liveTeeth_udp_slots_toGuestRefused = {}
 
-State 7: <slots_liveTeeth_udp_slots_GuestRecvEnd line 1317, col 3 to line 1396, col 45 of module slots_liveTeeth>
+State 6: <slots_liveTeeth_udp_slots_SockCloseReportLost line 1173, col 3 to line 1211, col 42 of module slots_liveTeeth>
 /\ slots_liveTeeth_udp_slots_toHostAbort = {}
+/\ slots_liveTeeth_udp_slots_misdelivered = FALSE
+/\ slots_liveTeeth_udp_slots_ready = {}
+/\ slots_liveTeeth_udp_slots_toHostEnd = {}
+/\ slots_liveTeeth_udp_slots_endedNoNew = {}
+/\ slots_liveTeeth_udp_slots_picks = {}
+/\ slots_liveTeeth_udp_slots_toGuestAbort = {}
+/\ slots_liveTeeth_udp_slots_nextFid = 3
+/\ slots_liveTeeth_udp_slots_slots = ( 0 :>
+      [ owned |-> TRUE,
+        sock |-> 1,
+        dest |-> 1,
+        fid |-> 1,
+        routed |-> FALSE,
+        parked |-> {<<1, 1>>},
+        holders |-> 1 ] @@
+  1 :>
+      [ owned |-> TRUE,
+        sock |-> 2,
+        dest |-> 1,
+        fid |-> 2,
+        routed |-> FALSE,
+        parked |-> {<<2, 1>>},
+        holders |-> 1 ] )
+/\ slots_liveTeeth_udp_slots_lateIgnored = FALSE
+/\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
+/\ slots_liveTeeth_udp_slots_guestEnded = {}
+/\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
+/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, TRUE>>
+/\ slots_liveTeeth_udp_slots_host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 0],
+   [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1] >>
+/\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
+/\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
+/\ slots_liveTeeth_udp_slots_toGuestPaired = {}
+/\ slots_liveTeeth_udp_slots_toGuestRefused = {}
+
+State 7: <slots_liveTeeth_udp_slots_GuestPairingTimeout line 1411, col 3 to line 1467, col 47 of module slots_liveTeeth>
+/\ slots_liveTeeth_udp_slots_toHostAbort = {2}
 /\ slots_liveTeeth_udp_slots_misdelivered = FALSE
 /\ slots_liveTeeth_udp_slots_ready = {}
 /\ slots_liveTeeth_udp_slots_toHostEnd = {}
 /\ slots_liveTeeth_udp_slots_endedNoNew = {1}
 /\ slots_liveTeeth_udp_slots_picks = {}
 /\ slots_liveTeeth_udp_slots_toGuestAbort = {}
-/\ slots_liveTeeth_udp_slots_nextFid = 2
+/\ slots_liveTeeth_udp_slots_nextFid = 3
+/\ slots_liveTeeth_udp_slots_slots = ( 0 :>
+      [ owned |-> TRUE,
+        sock |-> 1,
+        dest |-> 1,
+        fid |-> 1,
+        routed |-> FALSE,
+        parked |-> {<<1, 1>>},
+        holders |-> 1 ] @@
+  1 :>
+      [ owned |-> TRUE,
+        sock |-> 2,
+        dest |-> 1,
+        fid |-> 0,
+        routed |-> FALSE,
+        parked |-> {},
+        holders |-> 1 ] )
+/\ slots_liveTeeth_udp_slots_lateIgnored = FALSE
+/\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
+/\ slots_liveTeeth_udp_slots_guestEnded = {2}
+/\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
+/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, TRUE>>
+/\ slots_liveTeeth_udp_slots_host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 0],
+   [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1] >>
+/\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
+/\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
+/\ slots_liveTeeth_udp_slots_toGuestPaired = {}
+/\ slots_liveTeeth_udp_slots_toGuestRefused = {}
+
+State 8: <slots_liveTeeth_udp_slots_GuestAuditIdle line 1568, col 3 to line 1618, col 45 of module slots_liveTeeth>
+/\ slots_liveTeeth_udp_slots_toHostAbort = {2}
+/\ slots_liveTeeth_udp_slots_misdelivered = FALSE
+/\ slots_liveTeeth_udp_slots_ready = {}
+/\ slots_liveTeeth_udp_slots_toHostEnd = {1}
+/\ slots_liveTeeth_udp_slots_endedNoNew = {1}
+/\ slots_liveTeeth_udp_slots_picks = {}
+/\ slots_liveTeeth_udp_slots_toGuestAbort = {}
+/\ slots_liveTeeth_udp_slots_nextFid = 3
 /\ slots_liveTeeth_udp_slots_slots = ( 0 :>
       [ owned |-> FALSE,
         sock |-> 0,
@@ -247,14 +284,88 @@ State 7: <slots_liveTeeth_udp_slots_GuestRecvEnd line 1317, col 3 to line 1396, 
         holders |-> 1 ] )
 /\ slots_liveTeeth_udp_slots_lateIgnored = FALSE
 /\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
-/\ slots_liveTeeth_udp_slots_guestEnded = {}
+/\ slots_liveTeeth_udp_slots_guestEnded = {2}
 /\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
-/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, FALSE>>
-/\ slots_liveTeeth_udp_slots_host = << [sock |-> 2, dest |-> 1, st |-> "closed", slot |-> 1],
-   [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, TRUE>>
+/\ slots_liveTeeth_udp_slots_host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 0],
+   [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1] >>
 /\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
 /\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
 /\ slots_liveTeeth_udp_slots_toGuestPaired = {}
 /\ slots_liveTeeth_udp_slots_toGuestRefused = {}
 
-State 8: Stuttering
+State 9: <slots_liveTeeth_udp_slots_SockCloseReportLost line 1173, col 3 to line 1211, col 42 of module slots_liveTeeth>
+/\ slots_liveTeeth_udp_slots_toHostAbort = {2}
+/\ slots_liveTeeth_udp_slots_misdelivered = FALSE
+/\ slots_liveTeeth_udp_slots_ready = {}
+/\ slots_liveTeeth_udp_slots_toHostEnd = {1}
+/\ slots_liveTeeth_udp_slots_endedNoNew = {1}
+/\ slots_liveTeeth_udp_slots_picks = {}
+/\ slots_liveTeeth_udp_slots_toGuestAbort = {}
+/\ slots_liveTeeth_udp_slots_nextFid = 3
+/\ slots_liveTeeth_udp_slots_slots = ( 0 :>
+      [ owned |-> FALSE,
+        sock |-> 0,
+        dest |-> 0,
+        fid |-> 0,
+        routed |-> FALSE,
+        parked |-> {},
+        holders |-> 0 ] @@
+  1 :>
+      [ owned |-> TRUE,
+        sock |-> 2,
+        dest |-> 1,
+        fid |-> 0,
+        routed |-> FALSE,
+        parked |-> {},
+        holders |-> 1 ] )
+/\ slots_liveTeeth_udp_slots_lateIgnored = FALSE
+/\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
+/\ slots_liveTeeth_udp_slots_guestEnded = {2}
+/\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
+/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, FALSE>>
+/\ slots_liveTeeth_udp_slots_host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 0],
+   [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1] >>
+/\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
+/\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
+/\ slots_liveTeeth_udp_slots_toGuestPaired = {}
+/\ slots_liveTeeth_udp_slots_toGuestRefused = {}
+
+State 10: <slots_liveTeeth_udp_slots_HostRecvEnd line 1072, col 3 to line 1121, col 42 of module slots_liveTeeth>
+/\ slots_liveTeeth_udp_slots_toHostAbort = {2}
+/\ slots_liveTeeth_udp_slots_misdelivered = FALSE
+/\ slots_liveTeeth_udp_slots_ready = {}
+/\ slots_liveTeeth_udp_slots_toHostEnd = {}
+/\ slots_liveTeeth_udp_slots_endedNoNew = {1}
+/\ slots_liveTeeth_udp_slots_picks = {}
+/\ slots_liveTeeth_udp_slots_toGuestAbort = {}
+/\ slots_liveTeeth_udp_slots_nextFid = 3
+/\ slots_liveTeeth_udp_slots_slots = ( 0 :>
+      [ owned |-> FALSE,
+        sock |-> 0,
+        dest |-> 0,
+        fid |-> 0,
+        routed |-> FALSE,
+        parked |-> {},
+        holders |-> 0 ] @@
+  1 :>
+      [ owned |-> TRUE,
+        sock |-> 2,
+        dest |-> 1,
+        fid |-> 0,
+        routed |-> FALSE,
+        parked |-> {},
+        holders |-> 1 ] )
+/\ slots_liveTeeth_udp_slots_lateIgnored = FALSE
+/\ slots_liveTeeth_udp_slots_staleGenStart = FALSE
+/\ slots_liveTeeth_udp_slots_guestEnded = {2}
+/\ slots_liveTeeth_udp_slots_residue = (0 :> {} @@ 1 :> {})
+/\ slots_liveTeeth_udp_slots_sockAlive = <<FALSE, FALSE>>
+/\ slots_liveTeeth_udp_slots_host = << [sock |-> 1, dest |-> 1, st |-> "closed", slot |-> 0],
+   [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1] >>
+/\ slots_liveTeeth_udp_slots_staleReassoc = FALSE
+/\ slots_liveTeeth_udp_slots_releasePending = <<FALSE, FALSE>>
+/\ slots_liveTeeth_udp_slots_toGuestPaired = {}
+/\ slots_liveTeeth_udp_slots_toGuestRefused = {}
+
+State 11: Stuttering

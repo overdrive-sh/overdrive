@@ -1,35 +1,48 @@
-# quiescence-hazard-redo-not-counted: counterexample, 6 state(s) (from the TLC trace)
+# quiescence-hazard-redo-not-counted: counterexample, 10 state(s) (from the TLC trace)
 
 State 1
-  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
-  att = [IpRules |-> 0, FlowListeners |-> 0]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  att = [C1 |-> 0, C2 |-> 0]
   stop = "none"
-  prefix = "booted"
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
   up = TRUE
-  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
-  holders = {}
+  flowsOpen = 0
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  cnt = 0
+  table = TRUE
   repLeft = -1
-  lis = TRUE
   latch = FALSE
 
 State 2 [Damage]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
 
 State 3 [RecQuiesce]
-  rec = [IpRules |-> "idle", FlowListeners |-> "held"]
-  holders = {"FlowListeners"}
-  lis = FALSE
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
   latch = TRUE
 
 State 4 [RepFail]
-  att = [IpRules |-> 0, FlowListeners |-> 1]
+  att = [C1 |-> 1, C2 |-> 0]
 
-State 5 [RecRepair]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
-  rec = [IpRules |-> "idle", FlowListeners |-> "repaired"]
+State 5 [RepFail]
+  att = [C1 |-> 2, C2 |-> 0]
 
 State 6 [Damage]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> TRUE]
+  dmg = [C1 |-> TRUE, C2 |-> TRUE]
 
--> loops back to State 4
+State 7 [RecQuiesce]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  rec = [C1 |-> "held", C2 |-> "held"]
+  cnt = 2
+
+State 8 [RepFail]
+  att = [C1 |-> 2, C2 |-> 1]
+
+State 9 [RecRepair]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+  rec = [C1 |-> "held", C2 |-> "repaired"]
+
+State 10 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> TRUE]
+
+-> loops back to State 8

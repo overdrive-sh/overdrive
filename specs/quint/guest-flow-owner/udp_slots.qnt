@@ -1,18 +1,18 @@
 // -*- mode: Bluespec; -*-
 /**
- * Guest-flow owner (netns-density-295) — module B: guest UDP slot pool and datagram associations.
+ * Guest-flow owner (netns-density-295) — guest UDP slot pool and datagram associations.
  *
  * Design artifact and DISTILL oracle. Models the design text, not an implementation.
  *
  * Source of truth: feature-delta.md § Per-kind total orders ("Datagram association", "UDP slot
- * release"), § Guest adaptation contract (D25 guest intake model — PROPOSED), user ruling SLOT-ABORT
+ * release"), § Guest adaptation contract (D25), user ruling SLOT-ABORT
  * (late Paired for a released slot → Abort), § Control session (Paired / Refused / Abort), spike
  * evidence P-35 (slot recycling hazard); and the user decision of 2026-10-06 that followed the first
  * model check (spike/quint-owner-findings.md U-2):
  *   U-2 After `Refused` / `Abort` the slot's parked frames are discarded; the slot stays owned by
  *          its (socket, destination) and does not re-associate for that association — only a new
  *          datagram from the application starts a new association (A-18).
- * and the round-2 remediation decision of 2026-10-09 (§ Spike remediation decisions, round 2):
+ * and the remediation decision of 2026-10-09 (§ Spike remediation decisions):
  *   CELL-RECREATE Every end of an association (slot release and U-2) discards the parked frames by
  *          RECREATING the slot's framing and reassembly cells (a new cell generation), never by
  *          emptying them; overdrive-init dispatches each readiness event by its registration's
@@ -51,7 +51,7 @@
  *
  * ASSUMPTIONS:
  *   K-B1  Closing T_g / Q_g is observed by the host as the association's end, even when the host
- *         accepts them after the guest closed them ......................... P-22 / V-2 (bounded)
+ *         accepts them after the guest closed them ......................... P-22; P-37
  *   K-B2  The guest `sock_release` hook reports a released socket, or the report is lost and the
  *         level-triggered audit (sock_diag) finds slots whose cookie no longer exists ....... R5-14
  *   K-B3  Recreating a slot's framing and reassembly cells discards every parked frame; EMPTYING

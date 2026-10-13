@@ -1,18 +1,21 @@
-# quiescence-hazard-repair-without-hold: counterexample, 2 state(s) (from the TLC trace)
+# quiescence-hazard-repair-without-hold: counterexample, 3 state(s) (from the TLC trace)
 
 State 1
+  table = TRUE
   repLeft = 1
-  rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  flowsOpen = 0
   latch = FALSE
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
-  lis = TRUE
-  dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+  cnt = 0
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
   stop = "none"
   up = TRUE
-  att = [IpRules |-> 0, FlowListeners |-> 0]
-  prefix = "booted"
-  holders = {}
+  att = [C1 |-> 0, C2 |-> 0]
 
-State 2 [RecRepairNoHold]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> TRUE, prefixWritten |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE ]
-  dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
+State 2 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+
+State 3 [RecRepairNoHold]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> TRUE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]

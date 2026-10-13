@@ -2,17 +2,15 @@
 
 ## Status
 
-**Accepted — decision D26 (raised by independent DESIGN review finding B-1) approved by
-user 2026-10-06; independent review r12 answered; further review waived by
-user 2026-10-08; handed to DISTILL.** Its rule construction (D26-PINS:
-masked mark bit, position before any accept, plain `reject`, one-transaction
-replacement, the UDP projection, and the non-unicast match) approved under
-the user's 2026-10-09 remediation directive after V-21.
-GH #295. Recorded in the #295 feature delta, § *[REF] Per-flow policy and the
-host-internal deny set*.
+**Accepted — decision D26 approved by user 2026-10-06; its rule construction
+(D26-PINS: masked mark bit, position before any accept, plain `reject`,
+one-transaction replacement, the UDP projection and the non-unicast match)
+approved by user directive 2026-10-09.** GH #295. Recorded in the #295
+feature delta, § *[REF] vsock Attachment Replacement DESIGN* (per-flow policy
+and the host-internal deny set).
 
-Amends on acceptance: ADR-0162 (non-mesh egress is forwarded to its
-destination — except the destinations below).
+Non-mesh guest egress is forwarded to its destination (ADR-0162) except to
+the destinations this decision refuses.
 
 ## Context
 
@@ -25,10 +23,9 @@ make the host connect to:
   debugging endpoints bound to loopback because loopback is trusted;
 - link-local addresses (`169.254.0.0/16`), including cloud instance metadata
   at `169.254.169.254`, which hands out host credentials;
-- any address local to the node: the host's interface addresses, the guest
-  gateway, and every `workload_addr` (local through the shared route,
-  ADR-0152), where a wildcard-bound host service (`sshd`, the operator API)
-  would answer.
+- any address local to the node: the host's interface addresses and the
+  guest gateway (GW-LOCAL, ADR-0152), where a
+  wildcard-bound host service (the operator API) would answer.
 
 Today's bridge topology (#295 code before this replacement) is not a safe
 baseline either: guest TCP to any destination is TPROXYed to leg-F, and
@@ -50,19 +47,20 @@ backends are chosen by the platform's own service map and may be host-local.
   2. `169.254.0.0/16` (link-local, including instance metadata);
   3. any address the host kernel would deliver locally — its FIB route type
      for the destination is `local` — which covers the host's interface
-     addresses, the guest gateway and the whole guest prefix — and any
-     address whose route type is `broadcast`, `multicast` or `anycast` (each
-     also delivers to the host);
+     addresses and the guest gateway (GW-LOCAL, ADR-0152) — and any address whose route type is
+     `broadcast`, `multicast` or `anycast` (each also delivers to the host);
 
   with exactly two exceptions:
   - the guest gateway on port 53 (UDP and TCP), which reaches the node DNS
-    responder (ADR-0154);
+    responder through GW-LOCAL (ADR-0152, ADR-0154);
   - a TCP destination that the owner's mesh resolution classifies as mesh:
     it is never connected directly; the owner connects to leg-F (ADR-0153).
 
   The existing `Policy` refusals stay: `0.0.0.0/8`, multicast `224.0.0.0/4`,
   limited broadcast, and UDP to the guest prefix (#310). `240.0.0.0/4`
-  (reserved) joins `Policy`.
+  (reserved) joins `Policy`. The rest of the guest prefix is not host-local
+  (ADR-0173); a packet to it that is not diverted to leg-C is refused by the
+  constant guest-prefix rules of ADR-0172, not by this deny set.
 - **Order.** Static ranges first; then mesh resolution for TCP; then the
   local-delivery check for every flow the owner would connect directly.
 - **Atomic kernel enforcement.** Every host socket the owner connects directly
@@ -79,10 +77,9 @@ backends are chosen by the platform's own service map and may be host-local.
     Overdrive mark; the rule matches that bit under its mask, so a packet
     carrying the bit with other bits set is still matched.
   - **Position.** The `gateway:53` accept and the reject are the first rules
-    of the output chain that also holds the guest-prefix rules' conntrack
-    accepts (ADR-0172), ahead of every `accept` in it; a conntrack accept
+    of the output chain, ahead of every `accept` in it; a conntrack accept
     ahead of them let a marked UDP socket reusing an earlier flow's source
-    port reach a local service.
+    port reach a local service (V-21).
   - **Verdict.** Plain `reject`: TCP connects fail `ECONNREFUSED`, UDP sends
     `EPERM`. `reject with tcp reset` let UDP through; `drop` left TCP
     hanging until its timeout.

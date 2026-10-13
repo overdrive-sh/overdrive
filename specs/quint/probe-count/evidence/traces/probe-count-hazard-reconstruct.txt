@@ -1,0 +1,59 @@
+# probe-count-hazard-reconstruct: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  M = 0
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 0, stoppedTerm |-> FALSE, missed |-> FALSE ]
+  tseqs = {}
+  runs = 0
+  rsame = 0
+  rat = 0
+  rseq = 0
+  terms = 0
+  psame = 0
+  hist = <<>>
+  running = TRUE
+  fs = 0
+  pst = ""
+  rst = ""
+  clock = 0
+  A = 0
+  pseq = 0
+
+State 2 [ProbeRun]
+  runs = 1
+  rsame = 1
+  rseq = 1
+  psame = 1
+  hist = <<"Pass">>
+  pst = "Pass"
+  rst = "Pass"
+  clock = 1
+  pseq = 1
+
+State 3 [ProbeRun]
+  runs = 2
+  rsame = 2
+  rat = 1
+  rseq = 2
+  psame = 2
+  hist = <<"Pass", "Pass">>
+  clock = 2
+  pseq = 2
+
+State 4 [ProbeRun]
+  runs = 3
+  rsame = 1
+  rat = 2
+  rseq = 3
+  psame = 1
+  hist = <<"Pass", "Pass", "Fail">>
+  pst = "Fail"
+  rst = "Fail"
+  clock = 3
+  pseq = 3
+
+State 5 [ConsumerLook]
+  M = 3
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> TRUE, pt |-> 0, ready |-> FALSE, seen |-> 3, stoppedTerm |-> FALSE, missed |-> FALSE ]
+  tseqs = {3}
+  terms = 1

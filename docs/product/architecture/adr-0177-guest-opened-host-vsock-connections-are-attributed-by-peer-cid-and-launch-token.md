@@ -2,13 +2,12 @@
 
 ## Status
 
-**Accepted — decisions ATTR-TOKEN and ATTR-LIVE-CLAIM approved under the
-user's 2026-10-09 remediation directive** ("if design needs changing, then
-you remediate, and then proceed to DISTILL"), answering the falsification of
-validation item V-22 and the formal model's round-9 counterexample. GH #295. Recorded in the #295 feature delta, § *[REF] vsock Attachment
-Replacement DESIGN* (§ *Spike remediation decisions — 2026-10-09*). Depends on
-ADR-0157 (beacon), ADR-0166 (control session), ADR-0158 (flow requests) and
-ADR-0170 (the lease's CID claim).
+**Accepted — decisions ATTR-TOKEN and ATTR-LIVE-CLAIM approved by user
+directive 2026-10-09; its dependence on RESET-EXIT (ADR-0182) approved by
+user 2026-10-11.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+Attachment Replacement DESIGN*. Depends on ADR-0157 (beacon), ADR-0166
+(control session), ADR-0158 (flow requests), ADR-0156 (the lease's CID) and
+ADR-0182 (a guest reset ends the VMM).
 
 Amends on acceptance: ADR-0082 §D4's READY line (a `launch` field is added;
 the message set and READY's meaning are unchanged).
@@ -41,9 +40,10 @@ free of races was not measured.
 ## Decision
 
 - **A launch token per lease.** Admission (`GuestAddressPool::assign`) draws
-  a 16-byte, never-zero token from the injected entropy port together with
-  the lease's CID claim. It identifies that launch: the lease, its claimed
-  CID and the one VMM that runs on it. It is not persisted and not a secret.
+  a 16-byte, never-zero token from the injected entropy port when it assigns
+  the lease. It identifies that launch: the lease, its CID and the one VMM
+  that runs on it, which runs one guest boot (ADR-0182). It is not persisted
+  and not a secret.
 - **The guest learns it at boot** from its kernel command line, beside the
   workload address and the gateway.
 - **Every guest-opened connection's first record carries it:** the control
@@ -88,14 +88,15 @@ session*, § *Beacon intake*).
   dead VM from a live guest that aborted with a reset, and its freedom from
   races was not measured; it infers a fact the token states exactly.
   Rejected.
-- **A host-side generation counter per CID.** Not unique across `serve`
-  restarts, while a VMM can survive a restart and hold its CID. Rejected.
+- **A host-side generation counter per CID.** Unique only within one `serve`
+  process, and it needs per-CID state that outlives each lease; a token drawn
+  at assignment needs neither. Rejected.
 - **The allocation id on the wire.** Variable length, and an identity the
   guest has no other use for. Rejected.
 - **Keep attribution by peer CID and rely on the kernel.** Falsified by V-22.
   Rejected.
 - **Check the CID's state at accept and compare the token at the later read
-  against the lease's token.** The formal model's round 9 found the
+  against the lease's token.** The formal model finds the
   counterexample: a dead launch's queued control connection, accepted while
   the CID is still Provisioned and read after teardown (which found no
   session to close), matches the Retiring lease's token and takes the
@@ -115,7 +116,7 @@ session*, § *Beacon intake*).
   comparison (buffered bytes).
 - The flow request is 32 bytes (its fields and the token), the control
   session opens with a 24-byte record, and READY's line carries a `launch`
-  field; golden bytes pin each. Only control records grow; no payload crosses userspace.
+  field. Only control records grow; no payload crosses userspace.
 - The session and beacon claims are taken in the token comparison's step
   against a live launch token, so a stale queued connection can never hold a
   claim against the next launch, and no claim outlives the launch it names.
@@ -124,11 +125,12 @@ session*, § *Beacon intake*).
   continuously and the guest's session and beacon connects retry.
 - The token is readable inside the guest; knowing its own launch's token
   gives a guest application nothing it could not already do from that VM.
-- One token per launch rests on the claim being taken once (ADR-0170) and on
-  the fork consuming the claimed descriptor once, so a guest reboot ends the
-  VMM instead of running a second guest under the same token; the next
-  launch draws a new one.
-- The session and flow admission rules are part of the formal model of the
-  guest-flow owner (ADR-0168, `specs/quint/guest-flow-owner/`, module
-  `owner_flows`), whose round 9 replaces the falsified assumption with the
-  measured kernel behaviour.
+- **The token is sound only with RESET-EXIT.** It reaches the guest on the
+  kernel command line, which does not change when a guest reboots inside the
+  same VMM; the fork reboots a reset guest in place unless it carries the
+  change of ADR-0182 (V-30: same VMM pid, CID and token, new `boot_id`).
+  ADR-0182 makes every guest reset end the VMM, so one token names one guest
+  boot and the next launch draws a new one.
+- The session and flow admission rules are covered by the feature delta's
+  § *Formal protocol model*, which models the measured kernel behaviour of
+  V-22.

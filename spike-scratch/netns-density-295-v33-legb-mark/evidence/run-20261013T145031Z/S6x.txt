@@ -1,0 +1,37 @@
+
+=== S6x: why does SO_BINDTODEVICE=lo WITHOUT bind() time out?
+Hypothesis:  the on-link fallback picks the source via inet_select_addr; the SYN leaves lo with an unexpected source and the handshake dies
+Prediction:  capture on lo shows the SYN source; if it is 127.0.0.1 the loss is after the divert
+Falsification: SYN source is 127.0.0.1 and the connect still fails for a reason not visible on lo
++ [ns] sysctl (netns v33ns; uname -r=7.0.0-29-generic x86_64)
+net.ipv4.conf.all.route_localnet = 0
+net.ipv4.conf.lo.route_localnet = 0
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.lo.rp_filter = 0
+net.ipv4.ip_forward = 1
++ [ns] ip rule add fwmark 0x1 lookup 100
+[exit=0]
++ [ns] ip route add local 0.0.0.0/0 dev lo table 100
+[exit=0]
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
++ [ns] ip route get 100.95.0.7 oif lo
+100.95.0.7 dev lo src 192.0.2.10 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --dev lo --timeout-ms 600
+RESULT connect-fail errno=110 ETIMEDOUT elapsed_ms=600.8 setup=[dev=lo]
+--- capture lo_s6x.pcap (IPv4 packets seen):
+  14:50:39.041061 IP 192.0.2.10.43492 > 100.95.0.7.8080: Flags [S], seq 1054217496, win 65495, options [mss 65495,sackOK,TS val 2185738748 ecr 0,nop,wscale 10], length 0
+  14:50:39.041080 IP 100.95.0.7.8080 > 192.0.2.10.43492: Flags [S.], seq 4273945249, ack 1054217497, win 65483, options [mss 65495,sackOK,TS val 766652440 ecr 2185738748,nop,wscale 10], length 0
+  count=2
+--- leg-C listener log:
+  listener ready port=15001
+--- host decoy logs:
+--- reject/drop counters:
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 0 bytes 0 reject with tcp reset
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 reject

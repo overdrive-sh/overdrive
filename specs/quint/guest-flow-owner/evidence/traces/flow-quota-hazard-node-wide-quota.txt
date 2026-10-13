@@ -1,0 +1,11 @@
+# flow-quota-hazard-node-wide-quota: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  slot = << [own |-> 0, st |-> "free", pend |-> FALSE], [own |-> 0, st |-> "free", pend |-> FALSE] >>
+  g = [ refusedUnder |-> FALSE, clash |-> FALSE, refused |-> FALSE, otherAdmitted |-> FALSE ]
+
+State 2 [Admit]
+  slot = << [own |-> 1, st |-> "active", pend |-> FALSE], [own |-> 0, st |-> "free", pend |-> FALSE] >>
+
+State 3 [Refuse]
+  g = [ refusedUnder |-> TRUE, clash |-> FALSE, refused |-> TRUE, otherAdmitted |-> FALSE ]

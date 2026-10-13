@@ -1,35 +1,56 @@
 State 1: <Initial predicate>
+/\ quiesce_bugRepairNoHold_quiescence_table = TRUE
 /\ quiesce_bugRepairNoHold_quiescence_repLeft = 1
-/\ quiesce_bugRepairNoHold_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+/\ quiesce_bugRepairNoHold_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_bugRepairNoHold_quiescence_flowsOpen = 0
 /\ quiesce_bugRepairNoHold_quiescence_latch = FALSE
+/\ quiesce_bugRepairNoHold_quiescence_cnt = 0
 /\ quiesce_bugRepairNoHold_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
-  prefixWritten |-> FALSE,
   overlapped |-> FALSE,
   stillQuiesced |-> FALSE,
-  failStopped |-> FALSE ]
-/\ quiesce_bugRepairNoHold_quiescence_lis = TRUE
-/\ quiesce_bugRepairNoHold_quiescence_dmg = [IpRules |-> TRUE, FlowListeners |-> FALSE]
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE ]
+/\ quiesce_bugRepairNoHold_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugRepairNoHold_quiescence_stop = "none"
 /\ quiesce_bugRepairNoHold_quiescence_up = TRUE
-/\ quiesce_bugRepairNoHold_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ quiesce_bugRepairNoHold_quiescence_prefix = "booted"
-/\ quiesce_bugRepairNoHold_quiescence_holders = {}
+/\ quiesce_bugRepairNoHold_quiescence_att = [C1 |-> 0, C2 |-> 0]
 
-State 2: <quiesce_bugRepairNoHold_quiescence_RecRepairNoHold line 484, col 3 to line 511, col 7 of module quiesce_bugRepairNoHold>
+State 2: <quiesce_bugRepairNoHold_quiescence_Damage line 271, col 3 to line 299, col 45 of module quiesce_bugRepairNoHold>
+/\ quiesce_bugRepairNoHold_quiescence_table = TRUE
 /\ quiesce_bugRepairNoHold_quiescence_repLeft = 1
-/\ quiesce_bugRepairNoHold_quiescence_rec = [IpRules |-> "idle", FlowListeners |-> "idle"]
+/\ quiesce_bugRepairNoHold_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_bugRepairNoHold_quiescence_flowsOpen = 0
 /\ quiesce_bugRepairNoHold_quiescence_latch = FALSE
+/\ quiesce_bugRepairNoHold_quiescence_cnt = 0
+/\ quiesce_bugRepairNoHold_quiescence_g = [ reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE ]
+/\ quiesce_bugRepairNoHold_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_bugRepairNoHold_quiescence_stop = "none"
+/\ quiesce_bugRepairNoHold_quiescence_up = TRUE
+/\ quiesce_bugRepairNoHold_quiescence_att = [C1 |-> 0, C2 |-> 0]
+
+State 3: <quiesce_bugRepairNoHold_quiescence_RecRepairNoHold line 598, col 3 to line 634, col 7 of module quiesce_bugRepairNoHold>
+/\ quiesce_bugRepairNoHold_quiescence_table = TRUE
+/\ quiesce_bugRepairNoHold_quiescence_repLeft = 1
+/\ quiesce_bugRepairNoHold_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_bugRepairNoHold_quiescence_flowsOpen = 0
+/\ quiesce_bugRepairNoHold_quiescence_latch = FALSE
+/\ quiesce_bugRepairNoHold_quiescence_cnt = 0
 /\ quiesce_bugRepairNoHold_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> TRUE,
-  prefixWritten |-> FALSE,
   overlapped |-> FALSE,
   stillQuiesced |-> FALSE,
-  failStopped |-> FALSE ]
-/\ quiesce_bugRepairNoHold_quiescence_lis = TRUE
-/\ quiesce_bugRepairNoHold_quiescence_dmg = [IpRules |-> FALSE, FlowListeners |-> FALSE]
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE ]
+/\ quiesce_bugRepairNoHold_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugRepairNoHold_quiescence_stop = "none"
 /\ quiesce_bugRepairNoHold_quiescence_up = TRUE
-/\ quiesce_bugRepairNoHold_quiescence_att = [IpRules |-> 0, FlowListeners |-> 0]
-/\ quiesce_bugRepairNoHold_quiescence_prefix = "booted"
-/\ quiesce_bugRepairNoHold_quiescence_holders = {}
+/\ quiesce_bugRepairNoHold_quiescence_att = [C1 |-> 0, C2 |-> 0]

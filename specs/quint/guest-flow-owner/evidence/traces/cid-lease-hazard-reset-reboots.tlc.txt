@@ -1,0 +1,43 @@
+State 1: <Initial predicate>
+/\ lease_bugResetReboots_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_bugResetReboots_cid_lease_cursor = 0
+/\ lease_bugResetReboots_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_up = TRUE
+/\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
+/\ lease_bugResetReboots_cid_lease_bootLeft = -1
+/\ lease_bugResetReboots_cid_lease_al = << [st |-> "wait", off |-> -1, retry |-> FALSE],
+   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 2: <lease_bugResetReboots_cid_lease_Assign line 664, col 3 to line 703, col 78 of module lease_bugResetReboots>
+/\ lease_bugResetReboots_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_bugResetReboots_cid_lease_cursor = 1
+/\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_up = TRUE
+/\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
+/\ lease_bugResetReboots_cid_lease_bootLeft = -1
+/\ lease_bugResetReboots_cid_lease_al = << [st |-> "leased", off |-> 0, retry |-> FALSE],
+   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 3: <lease_bugResetReboots_cid_lease_Launch line 109, col 3 to line 161, col 49 of module lease_bugResetReboots>
+/\ lease_bugResetReboots_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_bugResetReboots_cid_lease_cursor = 1
+/\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_up = TRUE
+/\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
+/\ lease_bugResetReboots_cid_lease_bootLeft = -1
+/\ lease_bugResetReboots_cid_lease_al = << [st |-> "running", off |-> 0, retry |-> FALSE],
+   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+
+State 4: <lease_bugResetReboots_cid_lease_GuestReset line 306, col 3 to line 329, col 10 of module lease_bugResetReboots>
+/\ lease_bugResetReboots_cid_lease_g = [clash |-> FALSE, rebooted |-> TRUE, reclaimed |-> FALSE]
+/\ lease_bugResetReboots_cid_lease_cursor = 1
+/\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_up = TRUE
+/\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
+/\ lease_bugResetReboots_cid_lease_bootLeft = -1
+/\ lease_bugResetReboots_cid_lease_al = << [st |-> "running", off |-> 0, retry |-> FALSE],
+   [st |-> "wait", off |-> -1, retry |-> FALSE] >>

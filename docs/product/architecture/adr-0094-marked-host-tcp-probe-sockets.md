@@ -11,6 +11,21 @@ target projection, probe descriptors or persistence, TCP timeout/error
 semantics, HTTP, UDP, rules/routes, lifecycle ownership/states, CLI, protocol,
 daemon, or dependencies.
 
+**Amended 2026-10-11** by ADR-0173 (#295, INB-1, approved by user
+2026-10-11). A VM target — a destination inside the guest prefix — is no
+longer probed with a host TCP socket: the VM probe runner dials it through the
+guest-flow owner's `GuestStreamDial` port, which opens a vsock flow to the
+guest. A TCP-connect probe of a VM target is healthy if and only if the dial
+yields a stream; an HTTP probe runs over that stream. The probe-socket mark
+decided below applies to exec and process targets only. The Decision text
+below is otherwise unchanged; see ADR-0173 and the #295 feature delta
+§ *[REF] VM probe runner*.
+
+**Amended 2026-10-13** by ADR-0187 (#295, PROBE-NOSAMPLE, approved by user
+2026-10-13). A VM probe dial stands outside its allocation's flow quota, and
+one refused for node flow-slot capacity or because node forwarding is
+quiesced records no sample. Exec and process probes are unaffected.
+
 ## Context
 
 ADR-0090 correctly projects a VM Service's inferred or explicit TCP target to

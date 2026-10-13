@@ -3,32 +3,32 @@
 ## Status
 
 **Accepted — decision D6 approved by user 2026-10-05; decision D25, the guest
-intake model (independent DESIGN review finding H-2: reserved ports, slot
-identity and release, pool sizes, exhaustion outcomes, deploy refusal of a
-reserved port) with its residual D15 differences D15-R2, approved by user
-2026-10-06; the exact bind-refusal scope (D25-BIND) and the end of an
-unpaired or aborted datagram association (U-2), approved by user 2026-10-06;
-independent review r12 answered; further review waived by user 2026-10-08;
-handed to DISTILL.** Cells recreated (never merely emptied), the
+intake model (reserved ports, slot identity and release, pool sizes,
+exhaustion outcomes, deploy refusal of a reserved port) with its residual D15
+differences D15-R2, approved by user 2026-10-06; the exact bind-refusal scope
+(D25-BIND) and the end of an unpaired or aborted datagram association (U-2),
+approved by user 2026-10-06; cells recreated (never merely emptied), the
 end-of-association order and registration-identity dispatch (CELL-RECREATE)
-approved under the user's 2026-10-09 remediation directive after V-5(c)
-(feature delta P-41). GH #295. Recorded in the #295
-feature delta, § *[REF] vsock Attachment Replacement DESIGN — PROPOSED
-2026-10-05*, § *[REF] Guest adaptation contract* and § *[REF] Core
-vocabulary* (intake constants and the deploy refusal's typed error).
+approved by user directive 2026-10-09; the guest side of
+INB-1, UDP-EMPTY with its residual D15-R4, R2-END, R2-DRAIN and UDP-SEQ
+approved by user 2026-10-11.** GH #295. Recorded in the #295 feature delta,
+§ *[REF] vsock Attachment Replacement DESIGN* (§ *[REF] Guest adaptation
+contract*, § *[REF] Core vocabulary* for the intake constants and the deploy
+refusal's typed error).
 
-Two user rulings of 2026-10-05 shape it and are recorded there:
+Two user rulings of 2026-10-05 shape it:
 
 - **D15 (APPROVED):** guests keep today's network behaviour wherever the
   kernel allows it — the workload address is present in the guest and is what
-  `getsockname` returns; programs see original peer addresses; inbound shows
-  the real client address; UDP is general, not DNS-only; early data is never
-  silently lost. Deferred: IPv6 (#308), UDP above 59,000 bytes (#309),
-  inbound UDP service to VMs (#310), ICMP (#311).
+  `getsockname` returns; programs see the original peers of their outbound
+  connections; UDP is general, not DNS-only; early data is never silently
+  lost. Inbound connections appear from the guest gateway, as today
+  (ADR-0174). Deferred: IPv6 (#308), UDP above 59,000 bytes (#309), inbound
+  UDP service to VMs (#310), ICMP (#311).
 - **Guest-side mechanism accepted at its real size** (APPROVED): the
   mechanism listed in the Decision below.
 
-ADR-0082 §D4's READY meaning is **unchanged** (§ Consequences).
+ADR-0082 §D4's READY meaning is unchanged (§ Consequences).
 
 ## Context
 
@@ -37,37 +37,48 @@ hold no platform material. ADR-0145 removes the guest NIC, so a guest
 `connect()`, `sendto()` or `accept()` has no route of its own.
 
 The guest-capture spike (`spike/guest-vsock-capture-findings.md`, WORKS on
-stock 7.0.0-29 host and guest, qualified metal, the CH fork with
+7.0.0-29 host and guest, native metal, the vendored Cloud Hypervisor fork with
 `backend=vhost-kernel`) ran unmodified `curl`, `sshd`/`ssh`/`scp`, `getent`,
 `dig` and busybox `nslookup` in a booted guest with only `lo` and a dummy
 device. It established:
 
 - D15 holds: the workload address is on the dummy device and in
-  `getsockname`; `getpeername` and `recvfrom` return the original peer; `sshd`
-  logged and exported the host's real client address; UDP of sizes 0 to
-  59,000 bytes worked connected and unconnected.
+  `getsockname`; `getpeername` and `recvfrom` return the original peer; UDP of
+  sizes 0 to 59,000 bytes worked connected and unconnected.
 - Early data is never lost: 10,000/10,000 in each stress (client writes then
   FINs, serial and 8-way; server speaks first, outbound and inbound; client
   writes immediately inbound; first UDP datagram, unconnected and connected).
 - Only 8- and 16-byte control I/O crossed either owner's syscalls during
   64 MiB TCP, 8 MiB scp, DNS and 59,000-byte UDP.
 
-It also established kernel facts that force the mechanism's shape (v7.0
-source, reproduced on 7.0.0-29):
+It also established kernel facts that force the mechanism's shape:
 
-1. A TCP socket can be inserted into a SockHash only while `ESTABLISHED`; a
-   client that writes and then FINs before the owner acts cannot be installed
-   later (100/100 refused).
-2. UDP and vsock deliver one skb per `data_ready` and have no re-arm, so bytes
-   queued before install stay stranded (30/30 UDP; 18/100 vsock).
+1. A TCP socket can be inserted into a SockHash only while `ESTABLISHED` or
+   listening (`net/core/sock_map.c:541-551 @ v7.0`); a client that writes and
+   then FINs before the owner acts cannot be installed later (100/100
+   refused).
+2. UDP and vsock deliver one skb per `data_ready` and have no re-arm
+   (`net/vmw_vsock/virtio_transport_common.c:1751-1773 @ v7.0` for vsock), so
+   bytes queued before install stay stranded (30/30 UDP; 18/100 vsock).
 3. A TCP child installed before `accept()` ignores `data_ready` until it has a
    `struct socket`; `SO_RCVLOWAT` after `accept()` re-arms it without reading
    payload.
 4. A FIN-only skb redirected to egress disables the target's TX with `EPIPE`.
 5. Guest virtio-vsock RX splits host data into ≤4 KiB skbs.
 6. `FIONREAD` on a psock TCP socket reports the psock queue, not the TCP queue.
-7. Killing the guest owner made an in-flight application see a clean EOF with
-   0 bytes, not an error (no `SO_LINGER{1,0}` was set).
+7. Closing the owner's application-side sockets normally made an in-flight
+   application see a clean EOF with 0 bytes, not an error (no
+   `SO_LINGER{1,0}` was set).
+
+V-32 (`spike/findings-v32-udp-seqpacket.md`) found that a guest strparser cell
+dies on variable-size datagrams: the BPF parser runs on the skb as received
+(`net/core/skmsg.c:1143-1158 @ v7.0`), while a message that starts mid-skb is
+recorded only in the strparser's private offset
+(`net/strparser/strparser.c:169-188 @ v7.0`), so the parser reads a stale
+header. Messages start mid-skb because the sending TCP socket coalesces small
+writes while earlier data is unacknowledged. Seven of seven variable-size
+cells stalled with default options; with `TCP_NODELAY` on the cell's sender,
+15 cells (1.5 million datagrams) had no stall and no parser error.
 
 ## Decision
 
@@ -85,7 +96,8 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
   intake child into the SockHash at `PASSIVE_ESTABLISHED`, and each
   acceptor-side active socket (armed before `connect()`) at
   `ACTIVE_ESTABLISHED`. `overdrive-init` re-arms an intake child with
-  `SO_RCVLOWAT` immediately after `accept()`.
+  `SO_RCVLOWAT` immediately after `accept()`. A flow vsock `overdrive-init`
+  opens is installed at `connect()` (ADR-0158, ADR-0183).
 - **Kernel parking.** Until a flow is paired, an intake child's bytes are
   redirected into a pooled loopback TCP parking cell, never left in a queue
   that cannot be re-armed.
@@ -100,16 +112,24 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
   `EADDRINUSE` every time only on a port that holds an intake of the same
   protocol: TCP on the TCP intake port, UDP on a slot port. A TCP bind on a
   slot port, or a UDP bind on the TCP intake port, succeeds (the reservation
-  covers ephemeral assignment only). The TCP intake is never
-  reported as an application listener (ADR-0163). A workload spec that
-  declares a listener port inside the reserved range, of either protocol, is
-  refused at deploy, with a typed spec-validation error naming the port and
-  the range.
+  covers ephemeral assignment only). A workload spec that declares a listener
+  port inside the reserved range, of either protocol, is refused at deploy,
+  with a typed spec-validation error naming the port and the range.
+- **TCP intake receive buffer.** The guest TCP intake listener carries a
+  4 MiB `SO_RCVBUF`, inherited by its children (ADR-0183, T4(a)).
 - **UDP.** Each guest UDP slot owns an intake that is SockHash-installed from
   boot. Its verdict frames every datagram (ADR-0149) into a strparser cell
-  that feeds exactly one frame per verdict to the association's SEQPACKET.
-  Host→guest frames are reassembled by a second strparser cell; a TCX program
-  on guest `lo` removes the frame before the application receives it.
+  whose verdict linearises the whole frame (`bpf_skb_pull_data`) and redirects
+  exactly one frame to the association's SEQPACKET. Host→guest frames are
+  reassembled by a second strparser cell; a TCX program on guest `lo` removes
+  the frame before the application receives it.
+- **Strparser cell senders.** The sending socket of every strparser cell — the
+  framing cell's sender and any other cell of the same shape — sets
+  `TCP_NODELAY`.
+- **Verdict invariants.** Every guest UDP and SEQPACKET verdict follows
+  ADR-0165's invariants: it never passes or redirects a zero-length skb, and
+  linearises the whole datagram before every redirect to a UDP or SEQPACKET
+  target.
 - **UDP slot identity (D25).** A slot belongs to one (application socket,
   original destination) pair; one application socket that sends to N
   destinations holds N slots. `overdrive-init` holds the authoritative
@@ -138,49 +158,52 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
   dispatches every readiness event by the identity of its registration —
   slot index and the cell generation it was registered for — never by raw
   descriptor number. A recreated cell may reuse a descriptor number, and an
-  event of the old generation must not start an association on the new one
-  (V-5(c) saw spurious associations with raw-descriptor dispatch and none
-  with registration identity). A released slot is
-  never re-associated with the departed application's destination; a late
-  `Paired` for its flow is answered with `Abort` (user ruling 2026-10-06).
-  (The off-host spike showed the hazard: released slots returned to the pool
-  still holding frames, were re-associated to the old destination, and later
-  first datagrams on those slots failed, 12/200; the spike's release path
-  also returned only the last slot of a multi-destination socket.)
+  event of the old generation must not start an association on the new one.
+  A released slot is never re-associated with the departed application's
+  destination; a late `Paired` for its flow is answered with `Abort` (user
+  ruling 2026-10-06).
 - **An ended association does not re-associate by itself (U-2, user ruling
   2026-10-06).** When an association whose slot is still owned ends without
   pairing or is aborted — `Refused`, `Abort`, or the pairing deadline — the
   guest discards every frame parked in the slot's cells (by recreating them,
   in the end-of-association order above) and keeps the slot for its
-  (application socket, destination). The discarded frames never start
-  a new association; only a datagram the application sends after the end
-  does. A destination that refuses every attempt is therefore tried at most
-  once per pairing round trip, driven by the application's own sends, never
-  by a retry loop.
+  (application socket, destination). The discarded frames never start a new
+  association; only a datagram the application sends after the end does. A
+  destination that refuses every attempt is therefore tried at most once per
+  pairing round trip, driven by the application's own sends, never by a retry
+  loop.
 - **Pool exhaustion (D25).** With no free parking cell, a new outbound TCP
   connection is not installed and the application sees a reset. With no free
   UDP slot, the capture program refuses the application's `connect()` or
   `sendmsg()` to a new destination (`EPERM`). Both are counted.
-- **Inbound.** The guest socket that connects to the application binds the
-  real client address with `IP_TRANSPARENT` and a platform `SO_MARK`; a
-  fwmark rule to the local table returns the application's replies to it, and
+- **Inbound.** For a flow the host opens (ADR-0173), `overdrive-init` accepts
+  the flow vsock on its inbound listener, reads the request, installs the
+  vsock, and connects to the application's declared port with a socket bound
+  by `IP_TRANSPARENT` to the address and port the request names — the guest
+  gateway with port 0 (ADR-0174) — carrying a platform `SO_MARK`. A fwmark
+  rule to the local table returns the application's replies to it, and
   `net.ipv4.fwmark_reflect=1` makes the guest kernel's own replies (a reset
   for a port with no listener) carry the mark, so a refusal is delivered at
-  once instead of after the connect timeout.
-- **FIN and half-close.** Every TCP verdict drops zero-length skbs. FIN is
-  propagated by the owner with `shutdown(SHUT_WR)` only after the drain signal
-  shows the forwarding backlog has drained (ADR-0160), and across the VM
-  boundary only through the acknowledged `HalfClose` handshake (ADR-0180).
-- **Owner-crash visibility.** Owner-held TCP sockets on the application side
-  carry `SO_LINGER{1,0}` from creation, so `overdrive-init`'s exit resets the
-  application's connection rather than ending it cleanly. A clean close clears
-  linger first (ADR-0160). When the host owner dies instead, `overdrive-init`
-  sees the flow vsock end with no acknowledged `HalfClose` and aborts the
-  flow, resetting the application's connection (ADR-0180). Measured by V-13
-  (feature delta P-42).
+  once. The connect is bounded by the guest's inbound connect timeout, which
+  is below the host's pairing deadline for a dialled flow (values in the
+  feature delta); `overdrive-init` answers on the control session with
+  `Paired`, `Refused` carrying the errno, or a timeout carrying the errno.
+- **Flow ends.** `overdrive-init` holds the flow-end classifier (a raw
+  tracepoint on vsock packet receipt) and classifies every end of a flow
+  vsock as a clean half-close or an abort (ADR-0180). A clean half-close is
+  propagated with `shutdown(SHUT_WR)` only after the direction has drained,
+  signalled by the guest's drain programs and flow-event ring (ADR-0183).
+  Every TCP verdict drops zero-length skbs; FIN is propagated by the owner,
+  never redirected.
+- **Abort visibility.** Owner-held TCP sockets on the application side carry
+  `SO_LINGER{1,0}` from creation, so when `overdrive-init` aborts a flow,
+  closing them resets the application's connection rather than ending it
+  cleanly. A clean close clears linger first (ADR-0160). When the host owner
+  dies, every flow vsock receives `0x3` while open and `overdrive-init`
+  aborts the flow, resetting the application's connection (ADR-0180).
 - **Loss of the owner fails closed.** Every guest program attachment is a BPF
-  link held by `overdrive-init`; its exit detaches the hooks, so new
-  connections fail with `ENETUNREACH` instead of reaching anything.
+  link held by `overdrive-init`; no attachment outlives it, and its death
+  ends the VM (below).
 - **Control.** `overdrive-init` opens the per-VM control session (ADR-0166),
   writes 32-byte flow requests carrying its launch token on flow vsock
   connections (ADR-0177), and installs and removes guest pairs.
@@ -196,35 +219,45 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
 - **A guest userspace shim.** Payload would cross guest userspace. Rejected by
   constraint.
 - **vsock-aware workloads.** Breaks the unmodified-workload model. Rejected.
-- **Present inbound peers as loopback.** The kernel does not force it
-  (`IP_TRANSPARENT` works), so it would break D15. Rejected.
+- **Present inbound peers as the guest's own address.** The application would
+  see itself as its client. Rejected (ADR-0174).
+- **Leave `TCP_NODELAY` unset on strparser cell senders.** The cell stalls
+  permanently on the first mis-cut frame (V-32). Rejected.
 
 ## Consequences
 
-- **READY keeps its meaning.** Today READY means guest platform init,
-  including guest network configuration, completed (ADR-0082 §D4). Guest
-  network configuration is now: the dummy device carries the workload address,
-  the fwmark rule and `fwmark_reflect` are set, the guest programs are loaded
-  and attached, the listener map is seeded (ADR-0163), and the inbound vsock
-  listener is bound. READY waits for exactly that and adds no
-  dependency on the host. The per-VM control session is **not** a READY
-  precondition; host activation requires it instead (feature delta, G-V3).
+- **READY keeps its meaning.** READY means guest platform init, including
+  guest network configuration, completed (ADR-0082 §D4). Guest network
+  configuration is: the dummy device carries the workload address, the fwmark
+  rule and `fwmark_reflect` are set, the guest programs are loaded and
+  attached, and the inbound vsock listener is bound. READY waits for exactly
+  that and adds no dependency on the host. The per-VM control session is
+  **not** a READY precondition; host activation requires it instead (feature
+  delta, G-V3).
 - **`overdrive-init` is the forwarding owner and is PID 1.** If it dies the
-  guest kernel panics and the VM ends. Its own exit paths and the window
-  before a panic are covered by the link-detach and `SO_LINGER` rules above.
+  guest kernel panics before its files close
+  (`kernel/exit.c:929-930`, `:971 @ v7.0`), so no guest socket closes and no
+  linger fires; the VM ends (ADR-0182) and the host's flows of that guest are
+  reset by the device-release orphan sweep (ADR-0146).
 - **Guest kernel requirements:** BPF with BTF, cgroup-v2 socket hooks,
   `sock_ops`, SK_SKB with strparser, sockmap for TCP, UDP and vsock STREAM and
-  SEQPACKET, TCX, `fexit`, `CONFIG_VIRTIO_VSOCKETS`, `CONFIG_DUMMY`,
-  `CONFIG_INET_DIAG` and `CONFIG_INET_TCP_DIAG` (present in the guest image,
-  built in or as modules the image carries), policy routing, and
-  `IP_TRANSPARENT`. Observed on stock 7.0.0-29 only.
-- **Residual D15 differences (D15-R2, approved with D25):** a reserved port
-  range on the guest is
-  unavailable to applications; a VM can hold at most the pinned number of
-  concurrent UDP (socket, destination) pairs and outbound TCP flows; an idle
-  UDP association ends after the idle period.
+  SEQPACKET, TCX, `fentry`/`fexit`, raw tracepoints, BPF ring buffers and
+  mmapable arrays, `CONFIG_VIRTIO_VSOCKETS`, `CONFIG_DUMMY`, policy routing,
+  and `IP_TRANSPARENT`. Observed on stock 7.0.0-29.
+- **Residual D15 differences:**
+  - **D15-R2 (approved with D25, 2026-10-06):** a reserved port range on the
+    guest is unavailable to applications; a VM can hold at most the pinned
+    number of concurrent UDP (socket, destination) pairs and outbound TCP
+    flows; an idle UDP association ends after the idle period.
+  - **D15-R4 (approved 2026-10-11):** an empty UDP datagram may be reordered
+    relative to its neighbouring datagrams of the same association; the
+    order of non-empty datagrams is unaffected (ADR-0165).
+
+  D15-R1 and D15-R3 are recorded in the feature delta's D15 re-derivation.
 - **Both owners' `connect()` calls are non-blocking** (ADR-0158).
 - **Guest kernel command line** gains a transport token carrying the workload
-  address (feature delta, § *Guest adaptation contract*).
+  address (feature delta, § *[REF] Guest adaptation contract*).
 - **Inbound UDP service** would need TC-level classification because an
   SK_SKB verdict on an unconnected UDP socket sees payload only (#310).
+- **Validation:** the guest cells are validated with variable-size datagrams;
+  every fixed-size test passes them by accident (V-32).

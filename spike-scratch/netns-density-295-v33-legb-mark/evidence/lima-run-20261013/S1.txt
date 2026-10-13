@@ -1,0 +1,97 @@
+
+=== S1: marked+bound dial, NO default route, NO prefix route
+Hypothesis:  leg-B mark=0x1 + bind(127.0.0.1) gives connect() a route via fwmark->table 100; divert/TPROXY hand it to leg-C
+Prediction:  round trip; leg-C sees peer=127.0.0.1:<eph> local=100.95.0.7:8080; counters 0; 'ip route get 100.95.0.7 mark 1 from 127.0.0.1' = local dev lo
+Falsification: ENETUNREACH/EINVAL, other peer/local pair, non-zero reject counter
++ [ns] sysctl (netns v33ns; uname -r=7.0.0-38-generic aarch64)
+net.ipv4.conf.all.route_localnet = 0
+net.ipv4.conf.lo.route_localnet = 0
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.lo.rp_filter = 2
+net.ipv4.ip_forward = 1
++ [ns] v33-rules   (overdrive-netlink Client::add_fib_rule_fwmark(0x1,100) + add_local_route(100,"lo"))
+production client: fwmark 0x1 -> table 100 rule + local default dev lo table 100 installed
++ [ns] ip route add local 100.95.0.1/32 dev lo proto 247
+[exit=0]
+[nft load exit=0]
++ [ns] nft add element ip overdrive-mtls inbound_destinations { 100.95.0.7 . 8080 }
+[exit=0]
++ [ns] ip rule show
+0:	from all lookup local
+32765:	from all fwmark 0x1 lookup 100
+32766:	from all lookup main
+32767:	from all lookup default
+[exit=0]
++ [ns] ip route show table all
+local default dev lo table 100 proto static scope host 
+192.0.2.0/24 dev up0 proto kernel scope link src 192.0.2.10 
+local 100.95.0.1 dev lo table local proto 247 scope host 
+local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1 
+local 192.0.2.10 dev up0 table local proto kernel scope host src 192.0.2.10 
+broadcast 192.0.2.255 dev up0 table local proto kernel scope link src 192.0.2.10 
+fe80::/64 dev up0 proto kernel metric 256 pref medium
+local ::1 dev lo table local proto kernel metric 0 pref medium
+local fe80::7874:ccff:fe1b:7beb dev up0 table local proto kernel metric 0 pref medium
+multicast ff00::/8 dev up0 table local proto kernel metric 256 pref medium
+[exit=0]
++ [ns] nft list ruleset
+table ip overdrive-mtls {
+	set inbound_destinations {
+		type ipv4_addr . inet_service
+		elements = { 100.95.0.7 . 8080 }
+	}
+
+	chain prerouting {
+		type filter hook prerouting priority mangle; policy accept;
+		meta mark 0x00000002 accept
+		ip daddr . tcp dport @inbound_destinations tproxy to 127.0.0.1:15001 meta mark set 0x00000001 accept
+		ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+	}
+
+	chain output {
+		type route hook output priority mangle; policy accept;
+		meta mark 0x00000002 accept
+		ip daddr . tcp dport @inbound_destinations meta mark != 0x00000002 meta mark set 0x00000001 accept
+		ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 0 bytes 0 reject with tcp reset
+		ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 reject
+	}
+}
+[exit=0]
++ [ns] ip route get 100.95.0.7 mark 1 from 127.0.0.1
+local 100.95.0.7 from 127.0.0.1 dev lo table 100 mark 1 uid 0 
+    cache <local> 
+[exit=0]
++ [ns] ip route get 100.95.0.7
+RTNETLINK answers: Network is unreachable
+[exit=2]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --mark 1 --bind 127.0.0.1
+RESULT ok client-local=127.0.0.1:43004 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.2 setup=[mark=1 bind=127.0.0.1]
++ [ns] v33 dial --ip 100.95.0.7 --port 8080 --leg-b
+RESULT ok client-local=127.0.0.1:43012 client-peer=100.95.0.7:8080 reply="RESP:REQ-100.95.0.7:8080" elapsed_ms=0.1 setup=[mark=1 bind=127.0.0.1]
+--- capture lo_s1.pcap (IPv4 packets seen):
+  16:49:22.725520 IP 127.0.0.1.43004 > 100.95.0.7.8080: Flags [S], seq 867653660, win 65495, options [mss 65495,sackOK,TS val 2273360379 ecr 0,nop,wscale 10], length 0
+  16:49:22.725547 IP 100.95.0.7.8080 > 127.0.0.1.43004: Flags [S.], seq 1817610303, ack 867653661, win 65483, options [mss 65495,sackOK,TS val 4230781353 ecr 2273360379,nop,wscale 10], length 0
+  16:49:22.725565 IP 127.0.0.1.43004 > 100.95.0.7.8080: Flags [.], ack 1, win 64, options [nop,nop,TS val 2273360379 ecr 4230781353], length 0
+  16:49:22.725617 IP 127.0.0.1.43004 > 100.95.0.7.8080: Flags [P.], seq 1:20, ack 1, win 64, options [nop,nop,TS val 2273360379 ecr 4230781353], length 19: HTTP
+  16:49:22.725626 IP 100.95.0.7.8080 > 127.0.0.1.43004: Flags [.], ack 20, win 64, options [nop,nop,TS val 4230781353 ecr 2273360379], length 0
+  16:49:22.725868 IP 100.95.0.7.8080 > 127.0.0.1.43004: Flags [P.], seq 1:25, ack 20, win 64, options [nop,nop,TS val 4230781353 ecr 2273360379], length 24: HTTP
+  16:49:22.725888 IP 127.0.0.1.43004 > 100.95.0.7.8080: Flags [.], ack 25, win 64, options [nop,nop,TS val 2273360379 ecr 4230781353], length 0
+  16:49:22.725906 IP 100.95.0.7.8080 > 127.0.0.1.43004: Flags [F.], seq 25, ack 20, win 64, options [nop,nop,TS val 4230781353 ecr 2273360379], length 0
+  16:49:22.726121 IP 127.0.0.1.43004 > 100.95.0.7.8080: Flags [F.], seq 20, ack 26, win 64, options [nop,nop,TS val 2273360379 ecr 4230781353], length 0
+  16:49:22.726140 IP 100.95.0.7.8080 > 127.0.0.1.43004: Flags [.], ack 21, win 64, options [nop,nop,TS val 4230781353 ecr 2273360379], length 0
+  16:49:22.727617 IP 127.0.0.1.43012 > 100.95.0.7.8080: Flags [S], seq 1991136845, win 65495, options [mss 65495,sackOK,TS val 3356869688 ecr 0,nop,wscale 10], length 0
+  16:49:22.727632 IP 100.95.0.7.8080 > 127.0.0.1.43012: Flags [S.], seq 2243912686, ack 1991136846, win 65483, options [mss 65495,sackOK,TS val 844772562 ecr 3356869688,nop,wscale 10], length 0
+  16:49:22.727643 IP 127.0.0.1.43012 > 100.95.0.7.8080: Flags [.], ack 1, win 64, options [nop,nop,TS val 3356869688 ecr 844772562], length 0
+  16:49:22.727679 IP 127.0.0.1.43012 > 100.95.0.7.8080: Flags [P.], seq 1:20, ack 1, win 64, options [nop,nop,TS val 3356869688 ecr 844772562], length 19: HTTP
+  count=14
+--- leg-C listener log:
+  listener ready port=15001
+  ACCEPT peer=127.0.0.1:43004 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+  ACCEPT peer=127.0.0.1:43012 local=100.95.0.7:8080 req="REQ-100.95.0.7:8080"
+--- host decoy logs:
+--- reject/drop counters:
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 drop
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 meta l4proto tcp counter packets 0 bytes 0 reject with tcp reset
+  ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 counter packets 0 bytes 0 reject

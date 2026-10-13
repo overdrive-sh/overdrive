@@ -1,0 +1,28 @@
+# cid-lease-witness-orphan: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  cursor = 0
+  bootLeft = -1
+  reclaimed = TRUE
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  up = TRUE
+
+State 2 [Assign]
+  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 1
+
+State 3 [Launch]
+  al = << [st |-> "running", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+
+State 4 [Crash]
+  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 0
+  reclaimed = FALSE
+  dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+  up = FALSE

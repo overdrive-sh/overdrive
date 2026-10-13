@@ -1,0 +1,28 @@
+# quiescence-hazard-drop-decrements-leaked: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  att = [C1 |-> 0, C2 |-> 0]
+  repLeft = 1
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  up = TRUE
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  flowsOpen = 0
+  cnt = 0
+  stop = "none"
+  table = TRUE
+  latch = FALSE
+
+State 2 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+
+State 3 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
+  latch = TRUE
+
+State 4 [RecDropHold]
+  g = [ reopenEarly |-> TRUE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE ]
+  rec = [C1 |-> "dropped", C2 |-> "idle"]
+  cnt = 0
+  latch = FALSE

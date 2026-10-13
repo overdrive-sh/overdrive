@@ -1,0 +1,11 @@
+[workspace]
+[package]
+name = "v33"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[[bin]]
+name = "v33"
+path = "src/main.rs"
+[dependencies]
+libc = "0.2"

@@ -1,0 +1,23 @@
+
+  streak_bugReconstruct
+    1) streak_bugReconstruct::probe_count::FlipBetweenLooksNoEarlyTerminate failed after 1 test(s)
+
+  1 failed
+
+  1) streak_bugReconstruct::probe_count::FlipBetweenLooksNoEarlyTerminate:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:284:42
+        284:   run FlipBetweenLooksNoEarlyTerminate = init
+                                                      ^^^^
+        285:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        286:     .then(ProbeRun("Pass", "")).then(ProbeRun("Fail", ""))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        287:     .then(ConsumerLook(true)).expect(terms == 0 and rsame == 1 and Safety)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x793c48ab61d32886 --match=streak_bugReconstruct::probe_count::FlipBetweenLooksNoEarlyTerminate to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/hazard/probe_count_hazards.qnt
+error: Tests failed

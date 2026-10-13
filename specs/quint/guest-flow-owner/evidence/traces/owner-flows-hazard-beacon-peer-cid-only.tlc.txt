@@ -17,34 +17,23 @@ State 1: <Initial predicate>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 2: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3541, col 56 of module flows_bugBeaconPeerCidOnly>
+State 2: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to line 1234, col 51 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -63,34 +52,23 @@ State 2: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 3: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3541, col 56 of module flows_bugBeaconPeerCidOnly>
+State 3: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to line 819, col 53 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -109,34 +87,23 @@ State 3: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 4: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3541, col 56 of module flows_bugBeaconPeerCidOnly>
+State 4: <flows_bugBeaconPeerCidOnly_owner_flows_Teardown line 1300, col 3 to line 1354, col 51 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -155,34 +122,23 @@ State 4: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 5: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3544, col 9 to line 3545, col 58 of module flows_bugBeaconPeerCidOnly>
+State 5: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3584, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -201,34 +157,23 @@ State 5: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3544, col 9 to line 3
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 6: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3541, col 56 of module flows_bugBeaconPeerCidOnly>
+State 6: <flows_bugBeaconPeerCidOnly_owner_flows_VmStop line 825, col 3 to line 1014, col 53 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -247,34 +192,23 @@ State 6: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 7: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3544, col 9 to line 3545, col 58 of module flows_bugBeaconPeerCidOnly>
+State 7: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3584, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -293,34 +227,23 @@ State 7: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3544, col 9 to line 3
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3544, col 9 to line 3545, col 58 of module flows_bugBeaconPeerCidOnly>
+State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3584, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -339,34 +262,23 @@ State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3544, col 9 to line 3
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 9: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3541, col 56 of module flows_bugBeaconPeerCidOnly>
+State 9: <flows_bugBeaconPeerCidOnly_owner_flows_Release line 1360, col 3 to line 1382, col 51 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -385,34 +297,23 @@ State 9: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 10: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3541, col 56 of module flows_bugBeaconPeerCidOnly>
+State 10: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to line 1234, col 51 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -431,34 +332,23 @@ State 10: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 11: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 3541, col 56 of module flows_bugBeaconPeerCidOnly>
+State 11: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to line 819, col 53 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 2
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -477,34 +367,23 @@ State 11: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3540, col 4 to line 
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 12: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3544, col 9 to line 3545, col 58 of module flows_bugBeaconPeerCidOnly>
+State 12: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3584, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 2
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -523,29 +402,18 @@ State 12: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3544, col 9 to line 
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE

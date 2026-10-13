@@ -1,0 +1,18 @@
+# quiescence-witness-refused-boot: counterexample, 2 state(s) (from the TLC trace)
+
+State 1
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  flowsOpen = 0
+  repLeft = 1
+  att = [C1 |-> 0, C2 |-> 0]
+  up = FALSE
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  table = FALSE
+  stop = "crash"
+  cnt = 0
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  latch = FALSE
+
+State 2 [RestartWith]
+  stop = "refused"
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> TRUE ]

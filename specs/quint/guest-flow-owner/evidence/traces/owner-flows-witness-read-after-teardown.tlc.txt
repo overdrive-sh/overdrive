@@ -8,6 +8,7 @@ State 1: <Initial predicate>
 /\ flows_ok_owner_flows_resurrected = FALSE
 /\ flows_ok_owner_flows_vmUp = FALSE
 /\ flows_ok_owner_flows_crossMsg = FALSE
+/\ flows_ok_owner_flows_act = "none"
 /\ flows_ok_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_ok_owner_flows_toHostRefused = {}
@@ -15,36 +16,24 @@ State 1: <Initial predicate>
 /\ flows_ok_owner_flows_vmGen = 0
 /\ flows_ok_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_readyCross = FALSE
+/\ flows_ok_owner_flows_toHostAbort = {}
+/\ flows_ok_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_ok_owner_flows_phantom = FALSE
 /\ flows_ok_owner_flows_badPaired = FALSE
 /\ flows_ok_owner_flows_toGuestAbort = {}
+/\ flows_ok_owner_flows_badAct = FALSE
 /\ flows_ok_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_ok_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_ok_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_gen = 0
 /\ flows_ok_owner_flows_quiesced = FALSE
 /\ flows_ok_owner_flows_bHeldByOther = FALSE
 /\ flows_ok_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 
-State 2: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of module flows_ok>
+State 2: <flows_ok_owner_flows_Provision line 966, col 3 to line 979, col 33 of module flows_ok>
 /\ flows_ok_owner_flows_alloc = "Provisioned"
 /\ flows_ok_owner_flows_bclaim = 0
 /\ flows_ok_owner_flows_claim = 0
@@ -54,6 +43,7 @@ State 2: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of mod
 /\ flows_ok_owner_flows_resurrected = FALSE
 /\ flows_ok_owner_flows_vmUp = FALSE
 /\ flows_ok_owner_flows_crossMsg = FALSE
+/\ flows_ok_owner_flows_act = "none"
 /\ flows_ok_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_ok_owner_flows_toHostRefused = {}
@@ -61,36 +51,24 @@ State 2: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of mod
 /\ flows_ok_owner_flows_vmGen = 0
 /\ flows_ok_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_readyCross = FALSE
+/\ flows_ok_owner_flows_toHostAbort = {}
+/\ flows_ok_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_ok_owner_flows_phantom = FALSE
 /\ flows_ok_owner_flows_badPaired = FALSE
 /\ flows_ok_owner_flows_toGuestAbort = {}
+/\ flows_ok_owner_flows_badAct = FALSE
 /\ flows_ok_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_ok_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_ok_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_gen = 1
 /\ flows_ok_owner_flows_quiesced = FALSE
 /\ flows_ok_owner_flows_bHeldByOther = FALSE
 /\ flows_ok_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 
-State 3: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of module flows_ok>
+State 3: <flows_ok_owner_flows_VmStart line 682, col 3 to line 701, col 35 of module flows_ok>
 /\ flows_ok_owner_flows_alloc = "Provisioned"
 /\ flows_ok_owner_flows_bclaim = 0
 /\ flows_ok_owner_flows_claim = 0
@@ -100,6 +78,7 @@ State 3: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of mod
 /\ flows_ok_owner_flows_resurrected = FALSE
 /\ flows_ok_owner_flows_vmUp = TRUE
 /\ flows_ok_owner_flows_crossMsg = FALSE
+/\ flows_ok_owner_flows_act = "none"
 /\ flows_ok_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_ok_owner_flows_toHostRefused = {}
@@ -107,36 +86,24 @@ State 3: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of mod
 /\ flows_ok_owner_flows_vmGen = 1
 /\ flows_ok_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_readyCross = FALSE
+/\ flows_ok_owner_flows_toHostAbort = {}
+/\ flows_ok_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_ok_owner_flows_phantom = FALSE
 /\ flows_ok_owner_flows_badPaired = FALSE
 /\ flows_ok_owner_flows_toGuestAbort = {}
+/\ flows_ok_owner_flows_badAct = FALSE
 /\ flows_ok_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_ok_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_ok_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_gen = 1
 /\ flows_ok_owner_flows_quiesced = FALSE
 /\ flows_ok_owner_flows_bHeldByOther = FALSE
 /\ flows_ok_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 
-State 4: <flows_ok_owner_flows_step line 2721, col 9 to line 2721, col 66 of module flows_ok>
+State 4: <flows_ok_owner_flows_step line 2631, col 9 to line 2631, col 66 of module flows_ok>
 /\ flows_ok_owner_flows_alloc = "Provisioned"
 /\ flows_ok_owner_flows_bclaim = 0
 /\ flows_ok_owner_flows_claim = 0
@@ -146,6 +113,7 @@ State 4: <flows_ok_owner_flows_step line 2721, col 9 to line 2721, col 66 of mod
 /\ flows_ok_owner_flows_resurrected = FALSE
 /\ flows_ok_owner_flows_vmUp = TRUE
 /\ flows_ok_owner_flows_crossMsg = FALSE
+/\ flows_ok_owner_flows_act = "none"
 /\ flows_ok_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_ok_owner_flows_toHostRefused = {}
@@ -153,36 +121,24 @@ State 4: <flows_ok_owner_flows_step line 2721, col 9 to line 2721, col 66 of mod
 /\ flows_ok_owner_flows_vmGen = 1
 /\ flows_ok_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_readyCross = FALSE
+/\ flows_ok_owner_flows_toHostAbort = {}
+/\ flows_ok_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_ok_owner_flows_phantom = FALSE
 /\ flows_ok_owner_flows_badPaired = FALSE
 /\ flows_ok_owner_flows_toGuestAbort = {}
+/\ flows_ok_owner_flows_badAct = FALSE
 /\ flows_ok_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_ok_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_ok_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_gen = 1
 /\ flows_ok_owner_flows_quiesced = FALSE
 /\ flows_ok_owner_flows_bHeldByOther = FALSE
 /\ flows_ok_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 5: <flows_ok_owner_flows_step line 2721, col 9 to line 2721, col 66 of module flows_ok>
+State 5: <flows_ok_owner_flows_step line 2631, col 9 to line 2631, col 66 of module flows_ok>
 /\ flows_ok_owner_flows_alloc = "Provisioned"
 /\ flows_ok_owner_flows_bclaim = 0
 /\ flows_ok_owner_flows_claim = 0
@@ -192,6 +148,7 @@ State 5: <flows_ok_owner_flows_step line 2721, col 9 to line 2721, col 66 of mod
 /\ flows_ok_owner_flows_resurrected = FALSE
 /\ flows_ok_owner_flows_vmUp = TRUE
 /\ flows_ok_owner_flows_crossMsg = FALSE
+/\ flows_ok_owner_flows_act = "none"
 /\ flows_ok_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_ok_owner_flows_toHostRefused = {}
@@ -199,36 +156,24 @@ State 5: <flows_ok_owner_flows_step line 2721, col 9 to line 2721, col 66 of mod
 /\ flows_ok_owner_flows_vmGen = 1
 /\ flows_ok_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_readyCross = FALSE
+/\ flows_ok_owner_flows_toHostAbort = {}
+/\ flows_ok_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_ok_owner_flows_phantom = FALSE
 /\ flows_ok_owner_flows_badPaired = FALSE
 /\ flows_ok_owner_flows_toGuestAbort = {}
+/\ flows_ok_owner_flows_badAct = FALSE
 /\ flows_ok_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_ok_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_ok_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_gen = 1
 /\ flows_ok_owner_flows_quiesced = FALSE
 /\ flows_ok_owner_flows_bHeldByOther = FALSE
 /\ flows_ok_owner_flows_sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 6: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of module flows_ok>
+State 6: <flows_ok_owner_flows_Teardown line 1035, col 3 to line 1072, col 33 of module flows_ok>
 /\ flows_ok_owner_flows_alloc = "Retiring"
 /\ flows_ok_owner_flows_bclaim = 0
 /\ flows_ok_owner_flows_claim = 0
@@ -238,6 +183,7 @@ State 6: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of mod
 /\ flows_ok_owner_flows_resurrected = FALSE
 /\ flows_ok_owner_flows_vmUp = TRUE
 /\ flows_ok_owner_flows_crossMsg = FALSE
+/\ flows_ok_owner_flows_act = "none"
 /\ flows_ok_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_ok_owner_flows_toHostRefused = {}
@@ -245,29 +191,17 @@ State 6: <flows_ok_owner_flows_step line 2720, col 4 to line 2720, col 62 of mod
 /\ flows_ok_owner_flows_vmGen = 1
 /\ flows_ok_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_readyCross = FALSE
+/\ flows_ok_owner_flows_toHostAbort = {}
+/\ flows_ok_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
 /\ flows_ok_owner_flows_phantom = FALSE
 /\ flows_ok_owner_flows_badPaired = FALSE
 /\ flows_ok_owner_flows_toGuestAbort = {}
+/\ flows_ok_owner_flows_badAct = FALSE
 /\ flows_ok_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_ok_owner_flows_hc = [ opener |-> "g",
-  paired |-> [g |-> FALSE, h |-> FALSE],
-  outEof |-> [g |-> FALSE, h |-> FALSE],
-  farHc |-> [g |-> FALSE, h |-> FALSE],
-  ann |-> [g |-> "none", h |-> "none"],
-  acked |-> [g |-> FALSE, h |-> FALSE],
-  ackDue |-> [g |-> FALSE, h |-> FALSE],
-  outShut |-> [g |-> FALSE, h |-> FALSE],
-  open |-> [g |-> TRUE, h |-> TRUE],
-  far |-> [g |-> "none", h |-> "none"],
-  dead |-> [g |-> FALSE, h |-> FALSE],
-  loss |-> [g |-> FALSE, h |-> FALSE],
-  ctlDown |-> FALSE,
-  ch |-> [g |-> <<>>, h |-> <<>>],
-  vEnd |-> [g |-> FALSE, h |-> FALSE],
-  vEndSent |-> [g |-> FALSE, h |-> FALSE],
-  held |-> [g |-> FALSE, h |-> FALSE],
-  earlyShut |-> FALSE,
-  faulted |-> FALSE ]
 /\ flows_ok_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_ok_owner_flows_gen = 1
 /\ flows_ok_owner_flows_quiesced = FALSE

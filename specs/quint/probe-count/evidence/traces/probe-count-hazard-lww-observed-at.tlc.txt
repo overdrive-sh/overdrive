@@ -1,0 +1,129 @@
+State 1: <Initial predicate>
+/\ streak_bugLwwObservedAt_probe_count_fs = 0
+/\ streak_bugLwwObservedAt_probe_count_clock = 0
+/\ streak_bugLwwObservedAt_probe_count_runs = 0
+/\ streak_bugLwwObservedAt_probe_count_A = 0
+/\ streak_bugLwwObservedAt_probe_count_M = 0
+/\ streak_bugLwwObservedAt_probe_count_rseq = 0
+/\ streak_bugLwwObservedAt_probe_count_tseqs = {}
+/\ streak_bugLwwObservedAt_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugLwwObservedAt_probe_count_rsame = 0
+/\ streak_bugLwwObservedAt_probe_count_running = TRUE
+/\ streak_bugLwwObservedAt_probe_count_rat = 0
+/\ streak_bugLwwObservedAt_probe_count_hist = <<>>
+/\ streak_bugLwwObservedAt_probe_count_terms = 0
+/\ streak_bugLwwObservedAt_probe_count_pseq = 0
+/\ streak_bugLwwObservedAt_probe_count_psame = 0
+/\ streak_bugLwwObservedAt_probe_count_pst = ""
+/\ streak_bugLwwObservedAt_probe_count_rst = ""
+
+State 2: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 414, col 50 of module streak_bugLwwObservedAt>
+/\ streak_bugLwwObservedAt_probe_count_fs = 0
+/\ streak_bugLwwObservedAt_probe_count_clock = 1
+/\ streak_bugLwwObservedAt_probe_count_runs = 1
+/\ streak_bugLwwObservedAt_probe_count_A = 0
+/\ streak_bugLwwObservedAt_probe_count_M = 0
+/\ streak_bugLwwObservedAt_probe_count_rseq = 1
+/\ streak_bugLwwObservedAt_probe_count_tseqs = {}
+/\ streak_bugLwwObservedAt_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugLwwObservedAt_probe_count_rsame = 1
+/\ streak_bugLwwObservedAt_probe_count_running = TRUE
+/\ streak_bugLwwObservedAt_probe_count_rat = 0
+/\ streak_bugLwwObservedAt_probe_count_hist = <<"Pass">>
+/\ streak_bugLwwObservedAt_probe_count_terms = 0
+/\ streak_bugLwwObservedAt_probe_count_pseq = 1
+/\ streak_bugLwwObservedAt_probe_count_psame = 1
+/\ streak_bugLwwObservedAt_probe_count_pst = "Pass"
+/\ streak_bugLwwObservedAt_probe_count_rst = "Pass"
+
+State 3: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 414, col 50 of module streak_bugLwwObservedAt>
+/\ streak_bugLwwObservedAt_probe_count_fs = 0
+/\ streak_bugLwwObservedAt_probe_count_clock = 2
+/\ streak_bugLwwObservedAt_probe_count_runs = 2
+/\ streak_bugLwwObservedAt_probe_count_A = 0
+/\ streak_bugLwwObservedAt_probe_count_M = 0
+/\ streak_bugLwwObservedAt_probe_count_rseq = 2
+/\ streak_bugLwwObservedAt_probe_count_tseqs = {}
+/\ streak_bugLwwObservedAt_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugLwwObservedAt_probe_count_rsame = 2
+/\ streak_bugLwwObservedAt_probe_count_running = TRUE
+/\ streak_bugLwwObservedAt_probe_count_rat = 1
+/\ streak_bugLwwObservedAt_probe_count_hist = <<"Pass", "Pass">>
+/\ streak_bugLwwObservedAt_probe_count_terms = 0
+/\ streak_bugLwwObservedAt_probe_count_pseq = 2
+/\ streak_bugLwwObservedAt_probe_count_psame = 2
+/\ streak_bugLwwObservedAt_probe_count_pst = "Pass"
+/\ streak_bugLwwObservedAt_probe_count_rst = "Pass"
+
+State 4: <streak_bugLwwObservedAt_probe_count_ClockBack line 189, col 3 to line 223, col 46 of module streak_bugLwwObservedAt>
+/\ streak_bugLwwObservedAt_probe_count_fs = 0
+/\ streak_bugLwwObservedAt_probe_count_clock = 0
+/\ streak_bugLwwObservedAt_probe_count_runs = 2
+/\ streak_bugLwwObservedAt_probe_count_A = 0
+/\ streak_bugLwwObservedAt_probe_count_M = 0
+/\ streak_bugLwwObservedAt_probe_count_rseq = 2
+/\ streak_bugLwwObservedAt_probe_count_tseqs = {}
+/\ streak_bugLwwObservedAt_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugLwwObservedAt_probe_count_rsame = 2
+/\ streak_bugLwwObservedAt_probe_count_running = TRUE
+/\ streak_bugLwwObservedAt_probe_count_rat = 1
+/\ streak_bugLwwObservedAt_probe_count_hist = <<"Pass", "Pass">>
+/\ streak_bugLwwObservedAt_probe_count_terms = 0
+/\ streak_bugLwwObservedAt_probe_count_pseq = 2
+/\ streak_bugLwwObservedAt_probe_count_psame = 2
+/\ streak_bugLwwObservedAt_probe_count_pst = "Pass"
+/\ streak_bugLwwObservedAt_probe_count_rst = "Pass"
+
+State 5: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 414, col 50 of module streak_bugLwwObservedAt>
+/\ streak_bugLwwObservedAt_probe_count_fs = 0
+/\ streak_bugLwwObservedAt_probe_count_clock = 1
+/\ streak_bugLwwObservedAt_probe_count_runs = 3
+/\ streak_bugLwwObservedAt_probe_count_A = 0
+/\ streak_bugLwwObservedAt_probe_count_M = 0
+/\ streak_bugLwwObservedAt_probe_count_rseq = 2
+/\ streak_bugLwwObservedAt_probe_count_tseqs = {}
+/\ streak_bugLwwObservedAt_probe_count_g = [ missTouched |-> FALSE,
+  staleChange |-> FALSE,
+  early |-> FALSE,
+  pt |-> 0,
+  ready |-> FALSE,
+  seen |-> 0,
+  stoppedTerm |-> FALSE,
+  missed |-> FALSE ]
+/\ streak_bugLwwObservedAt_probe_count_rsame = 2
+/\ streak_bugLwwObservedAt_probe_count_running = TRUE
+/\ streak_bugLwwObservedAt_probe_count_rat = 1
+/\ streak_bugLwwObservedAt_probe_count_hist = <<"Pass", "Pass", "Pass">>
+/\ streak_bugLwwObservedAt_probe_count_terms = 0
+/\ streak_bugLwwObservedAt_probe_count_pseq = 3
+/\ streak_bugLwwObservedAt_probe_count_psame = 3
+/\ streak_bugLwwObservedAt_probe_count_pst = "Pass"
+/\ streak_bugLwwObservedAt_probe_count_rst = "Pass"

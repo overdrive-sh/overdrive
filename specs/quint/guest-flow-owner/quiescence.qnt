@@ -1,311 +1,339 @@
 // -*- mode: Bluespec; -*-
 /**
- * Guest-flow owner (netns-density-295) — steering concern 3: named quiescence holders and the
- * per-component recoveries of the runtime supervisor (D8a-HOLD, ADR-0124 bounded recovery, UP-7,
- * UP-12).
+ * Guest-flow owner (netns-density-295) — forwarding quiescence as a counted, move-only hold (QHOLD,
+ * ADR-0169), the per-component recoveries of the runtime supervisor (ADR-0124 bounded recovery, UP-7)
+ * and the boot write of the shared mTLS nft table that refuses boot on failure (ADR-0184).
  *
  * Design artifact and DISTILL oracle. Models the design text, not an implementation.
  * Source of truth: feature-delta.md § "vsock Attachment Replacement DESIGN" — § Owner and provisioner
- * (`quiesce_forwarding`, `restore_forwarding`, `QuiescenceHolder`, `QuiescenceHold`,
- * `converge_shared` as a runtime repair, `audit_shared`), Gate G-V5, § Revision 9 decisions item 7
- * (UP-7, UP-12 kept); ADR-0169 (D8a-HOLD), ADR-0124 (1 s audit, bounded attempts, fail-stop).
+ * (`quiesce_forwarding`, `restore_forwarding`, `QuiescenceHold`), ADR-0169 (QHOLD), ADR-0184 (a failed
+ * boot write of the shared table refuses boot), ADR-0124 (1 s audit, bounded attempts, fail-stop).
  *
  * The rules modelled:
- *   - quiesce_forwarding(Recovery(c)) adds c to the holder set; the first holder latches admission
- *     and closes every intake listener (each close removes its entry). restore_forwarding(hold)
- *     removes only that holder and reopens (latch cleared, listeners brought back) only when no
- *     holder remains.
- *   - each recovery: the audit finds c damaged → quiesce under its own holder → repair c
- *     (`converge_shared` for c only: never the steering program or the route) → audit → restore with
- *     its hold. A failed repair or a failed post-repair audit is a failed attempt (UP-7); the budget
- *     is per component recovery; when spent, serve fail-stops. Node-global objects (the route,
- *     which has the single form `local`, and the pinned steering boot converged) stay as they are
- *     (UP-12).
+ *   - `quiesce_forwarding()` increments the hold count and returns a move-only `QuiescenceHold`; the first
+ *     hold performs the quiesce (admission latch, abort every open flow). `restore_forwarding(hold)`
+ *     consumes the hold, decrements, and reopens admission only when the count reaches zero. A hold
+ *     dropped without a restore keeps the count (fail closed) and increments the owner's leaked-hold
+ *     count (no I/O in Drop): forwarding stays quiesced, and the guest-network owner's recovery
+ *     supervisor (ADR-0124) treats a leaked-hold count above zero as an exhausted recovery — the typed
+ *     fail-stop of serve; the supervisor restart converges on boot. A boolean latch is rejected: the first recovery's
+ *     restore would reopen while a second recovery is still repairing.
+ *   - each recovery: the audit finds component c damaged → quiesce, holding → repair c → audit → restore
+ *     with its hold. A failed repair or a failed post-repair audit is a failed attempt (UP-7); the budget
+ *     is per component recovery; when spent, serve fail-stops.
+ *   - boot step 8 writes the shared nft table in one transaction. A failed write refuses boot (typed,
+ *     before forwarding opens); the supervisor restart retries it (converge-on-boot). Nothing leaves the
+ *     table absent while serving, so no component recovery covers it.
  *
  * Abstraction:
- *   - Components IpRules (damage = the shared nft table left ABSENT: the table is written only in
- *     single transactions (U-QP-1), so the mTLS worker leaves it absent only where boot step 8's
- *     transaction failed on a node with no table; concern 4 models the table itself) and
- *     FlowListeners (a listener-task exit, recurring at any time, unbounded). No Overdrive write
- *     leaves the table absent while serving, so IpRules damage is drawn at `init` and at `Restart`
- *     only. The audit's finding and the recovery's quiesce are one step. `holders` is the SET of
- *     current holders (D8a-HOLD, U-QP-3): every component under repair is a member, and recovery
- *     progress is per component (`rec`, `att`).
- *   - ONE wanted intake listener (`lis`) stands for the owner's intake listeners (concern 2).
- *   - Crash / restart: process-scoped state is lost; an absent table persists and boot step 8
- *     writes it again (its transaction fails and leaves the table absent, or succeeds).
+ *   - Two generic runtime components C1 and C2 (a component damage is a task exit, recurring at any time,
+ *     unbounded). `flowsOpen` stands for the open flows the first hold aborts.
+ *   - Crash / restart: process-scoped state (the count, the holds, the latch, the flows) is lost; the
+ *     table persists across the crash. Boot step 8 either writes the table (then serve runs) or fails
+ *     (serve refuses to start; the supervisor tries again).
  *
  * OFF names design rules switched off (hazard/quiescence_hazards.qnt):
- *   anyRestore         D8a-HOLD: one latch — any recovery's restore reopens; every hold ends
- *   repairNoHold       D8a-HOLD: a recovery repairs without holding quiescence
- *   redoNoCount        UP-7: a failed post-repair audit is not a failed attempt
- *   otherRepairsPrefix the repair also performs a runtime write of the route or the steering (any
- *                      such write; a failed repair leaves it interrupted)
+ *   boolLatch       QHOLD: a boolean latch — any restore reopens and ends every hold
+ *   dropDecrements  QHOLD: a dropped hold decrements the count (the guard's drop releases)
+ *   repairNoHold    a recovery repairs without holding quiescence
+ *   redoNoCount     UP-7: a failed post-repair audit is not a failed attempt
+ *   leakIgnored     ADR-0124: the supervisor does not consult the leaked-hold count (only a spent attempt budget
+ *                   fail-stops), so a leaked hold keeps forwarding quiesced for good
+ *   bootContinues   ADR-0184: boot continues with serve running after a failed table write
+ *   restoreClearsLatch QHOLD: a restore reopens admission (clears the latch) whatever the remaining count
+ *   quiesceSkipsFlows  QHOLD: the first hold latches admission but does not abort the open flows
+ *
+ * ASSUMPTIONS (each is an input the model takes as given; the discharging item follows the statement):
+ *   Q-1  A task exit of a runtime component is detected by the 1 s audit; a repair that returns `Err` is a failed attempt
+ *         Discharged by: OPEN validation item: DST invariant under UP-7 (ADR-0124)
  */
 module quiescence {
   const OFF: Set[str]
   const CFG: str   // "ok" | "live"
 
   def bug(r: str): bool = OFF.contains(r)
-  val COMPONENTS: Set[str] = Set("IpRules", "FlowListeners")
+  val COMPONENTS: Set[str] = Set("C1", "C2")
   val MAXATT: int = 2
   val ALLOW_CRASH: bool = CFG == "ok"
   val REPAIR_FAILS: int = if (CFG == "ok") 1 else -1   // -1: a repair may fail forever
 
   type Ghost = {
-    reopenEarly: bool,   // forwarding reopened while another recovery held without having repaired
+    reopenEarly: bool,   // forwarding reopened while some recovery had not repaired
     repairNoHold: bool,  // a repair ran without its recovery's hold
-    prefixWritten: bool, // a recovery's repair wrote the steering program or the route
-    overlapped: bool,    // two holders held at once (witness)
-    stillQuiesced: bool, // a restore returned StillQuiesced (witness)
+    overlapped: bool,    // two holds held at once (witness)
+    stillQuiesced: bool, // a restore left the count above zero (witness)
     failStopped: bool,   // a recovery fail-stopped (witness)
+    dropped: bool,       // a hold was dropped without a restore (witness)
+    refusedBoot: bool,   // a boot attempt was refused (witness)
   }
-  val g0: Ghost = { reopenEarly: false, repairNoHold: false, prefixWritten: false, overlapped: false,
-                    stillQuiesced: false, failStopped: false }
+  val g0: Ghost = { reopenEarly: false, repairNoHold: false, overlapped: false, stillQuiesced: false,
+                    failStopped: false, dropped: false, refusedBoot: false }
 
   var up: bool
   var stop: str              // none | crash | failstop
-  var holders: Set[str]
+  var table: bool            // the shared nft table is written (persists across crash and restart)
+  var cnt: int               // the hold count
   var latch: bool            // admission quiesced
-  var rec: str -> str        // per component recovery: idle | held | repaired
-  var dmg: str -> bool       // per component damage (IpRules: the table is absent)
+  var rec: str -> str        // per component recovery: idle | held | repaired | dropped
+  var dmg: str -> bool       // per component damage
   var att: str -> int        // failed attempts of the current episode (process-scoped)
   var repLeft: int
-  var lis: bool              // the wanted intake listener is open (and steered)
-  var prefix: str            // booted | written: the route (`local`) and the pinned steering are as
-                             // boot converged them, or a runtime step wrote one of them
+  var flowsOpen: int         // open flows (0 or 1)
   var g: Ghost
 
   val recIdle: str -> str = COMPONENTS.mapBy(c => "idle")
   val att0: str -> int = COMPONENTS.mapBy(c => 0)
   def dec(x: int): int = if (x < 0) x else x - 1
+  // a recovery that has quiesced and not yet restored
+  def unrepaired(c: str): bool = rec.get(c).in(Set("held", "dropped"))
+  // the owner's leaked-hold count: holds dropped without a restore (process-scoped, like the holds)
+  val leaked: int = COMPONENTS.filter(c => rec.get(c) == "dropped").size()
 
-  action keepState = all { holders' = holders, latch' = latch, rec' = rec, att' = att, lis' = lis }
-  action keepEnv = all { up' = up, stop' = stop, dmg' = dmg, repLeft' = repLeft, prefix' = prefix }
+  action keepEnv = all { up' = up, stop' = stop, table' = table, dmg' = dmg, repLeft' = repLeft }
 
-  action init = {
-    // boot step 8's transaction failed on a node with no table (absent), or succeeded
-    nondet ipAbsent0 = Set(false, true).oneOf()
-    InitWith(ipAbsent0)
+  action init = any { InitWith(0), InitWith(1), InitDown }
+  // a fresh node before its first boot: serve is down and the shared table is not yet written
+  action InitDown = all {
+    up' = false, stop' = "crash", table' = false, cnt' = 0, latch' = false, rec' = recIdle,
+    dmg' = COMPONENTS.mapBy(c => false), att' = att0, repLeft' = REPAIR_FAILS, flowsOpen' = 0, g' = g0,
   }
-  action InitWith(ipAbsent0: bool): bool = {
-    all {
-    up' = true, stop' = "none", holders' = Set(), latch' = false, rec' = recIdle,
-    dmg' = COMPONENTS.mapBy(c => false).set("IpRules", ipAbsent0), att' = att0, repLeft' = REPAIR_FAILS, lis' = true,
-    prefix' = "booted", g' = g0,
-    }
+  // `fl`: whether a flow is open when the first hold is taken
+  action InitWith(fl: int): bool = all {
+    up' = true, stop' = "none", table' = true, cnt' = 0, latch' = false, rec' = recIdle,
+    dmg' = COMPONENTS.mapBy(c => false), att' = att0, repLeft' = REPAIR_FAILS, flowsOpen' = fl, g' = g0,
   }
 
   // ------------------------------------------------------------------ environment
-  // Overdrive's own failure damages a component; `step` applies it to FlowListeners only (a listener
-  // task exits). There is no `Damage("IpRules")` action: no Overdrive write leaves the shared table absent while serving (U-QP-1)
-  action Damage(c: str): bool = all { up, not(dmg.get(c)),
-    dmg' = dmg.set(c, true), up' = up, stop' = stop, repLeft' = repLeft, prefix' = prefix, keepState, g' = g }
-  action Crash = all { ALLOW_CRASH, up,
-    up' = false, stop' = "crash", holders' = Set(), latch' = false, rec' = recIdle, att' = att0,
-    lis' = false, dmg' = dmg.set("FlowListeners", false), repLeft' = repLeft, prefix' = prefix, g' = g }
-  // boot: step 8 writes the table in one transaction — it fails and the table stays absent, or it
-  // succeeds (`partial` reads "the write fails"); the route and the pinned steering are converged at
-  // step 9 (concern 1) — as booted here
+  // a component task exits (recurring)
+  action Damage(c: str): bool = all {
+    up, not(dmg.get(c)),
+    dmg' = dmg.set(c, true), up' = up, stop' = stop, table' = table, repLeft' = repLeft,
+    cnt' = cnt, latch' = latch, rec' = rec, att' = att, flowsOpen' = flowsOpen, g' = g,
+  }
+  // a new flow opens while admission is open
+  action OpenFlow = all {
+    up, not(latch), flowsOpen == 0,
+    flowsOpen' = 1, cnt' = cnt, latch' = latch, rec' = rec, att' = att, keepEnv, g' = g,
+  }
+  action Crash = all {
+    ALLOW_CRASH, up,
+    up' = false, stop' = "crash", cnt' = 0, latch' = false, rec' = recIdle, att' = att0, flowsOpen' = 0,
+    dmg' = COMPONENTS.mapBy(c => false), table' = table, repLeft' = repLeft, g' = g,
+  }
+  // boot step 8 writes the table in one transaction. It succeeds (serve runs, forwarding opens), or fails and
+  // boot is refused: serve stays down and the supervisor tries again. bootContinues: serve runs anyway.
   action Restart = {
-    nondet partial = Set(false, dmg.get("IpRules")).oneOf()
-    RestartWith(partial)
+    nondet writeOk = Set(true, false).oneOf()
+    RestartWith(writeOk)
   }
-  action RestartWith(partial: bool): bool = {
-    all { not(up), partial implies dmg.get("IpRules"),
-      up' = true, stop' = "none", dmg' = dmg.set("IpRules", partial), holders' = holders,
-      latch' = latch, rec' = rec, att' = att, lis' = lis, repLeft' = repLeft, prefix' = "booted", g' = g }
+  action RestartWith(writeOk: bool): bool = all {
+    not(up), stop != "none",
+    up' = (writeOk or bug("bootContinues")), stop' = if (writeOk or bug("bootContinues")) "none" else "refused",
+    table' = (table or writeOk),
+    cnt' = cnt, latch' = latch, rec' = rec, att' = att, flowsOpen' = flowsOpen, dmg' = dmg, repLeft' = repLeft,
+    g' = { ...g, refusedBoot: g.refusedBoot or not(writeOk) },
   }
-
-  // ------------------------------------------------------------------ owner
-  // restore / boot: the owner brings the wanted listener back (bind, listen, steer)
-  action BringUp = all { up, not(latch), not(lis),
-    lis' = true, holders' = holders, latch' = latch, rec' = rec, att' = att, keepEnv, g' = g }
 
   // ------------------------------------------------------------------ recovery of component c
-  // the audit finds c damaged → quiesce_forwarding(Recovery(c))
+  // the audit finds c damaged → quiesce_forwarding(): count + 1; the first hold latches admission and aborts the flows
   action RecQuiesce(c: str): bool = all {
-    up, rec.get(c) == "idle", dmg.get(c), not(bug("repairNoHold")), not(holders.contains(c)),
-    holders' = holders.union(Set(c)), latch' = true, rec' = rec.set(c, "held"), att' = att,
-    lis' = if (holders == Set()) false else lis, keepEnv,
-    g' = { ...g, overlapped: g.overlapped or holders != Set() },
+    up, rec.get(c) == "idle", dmg.get(c), not(bug("repairNoHold")),
+    cnt' = cnt + 1, latch' = true, rec' = rec.set(c, "held"), att' = att,
+    flowsOpen' = if (cnt == 0 and not(bug("quiesceSkipsFlows"))) 0 else flowsOpen, keepEnv,
+    g' = { ...g, overlapped: g.overlapped or cnt > 0 },
   }
-  // the repair: converge_shared for c only (never the steering program or the route)
+  // the repair of c
   action RecRepair(c: str): bool = all {
-    up, rec.get(c) == "held", holders.contains(c), att.get(c) < MAXATT,
+    up, rec.get(c) == "held", att.get(c) < MAXATT,
     dmg' = dmg.set(c, false), rec' = rec.set(c, "repaired"),
-    prefix' = if (bug("otherRepairsPrefix")) "written" else prefix, holders' = holders, latch' = latch, att' = att, lis' = lis,
-    up' = up, stop' = stop, repLeft' = repLeft,
-    g' = { ...g, prefixWritten: g.prefixWritten or bug("otherRepairsPrefix") },
+    cnt' = cnt, latch' = latch, att' = att, flowsOpen' = flowsOpen, up' = up, stop' = stop, table' = table,
+    repLeft' = repLeft, g' = g,
   }
-  // the repair returns Err: a failed attempt (otherRepairsPrefix: its runtime write of the route or the
-  // steering is left interrupted)
+  // the repair returns Err: a failed attempt
   action RepFail(c: str): bool = all {
-    up, rec.get(c) == "held", holders.contains(c), att.get(c) < MAXATT, repLeft != 0,
+    up, rec.get(c) == "held", att.get(c) < MAXATT, repLeft != 0,
     att' = att.set(c, att.get(c) + 1), repLeft' = dec(repLeft),
-    prefix' = if (bug("otherRepairsPrefix")) "written" else prefix,
-    holders' = holders, latch' = latch, rec' = rec, lis' = lis, up' = up, stop' = stop, dmg' = dmg,
-    g' = { ...g, prefixWritten: g.prefixWritten or bug("otherRepairsPrefix") },
+    cnt' = cnt, latch' = latch, rec' = rec, flowsOpen' = flowsOpen, up' = up, stop' = stop, dmg' = dmg, table' = table, g' = g,
   }
   // the post-repair audit finds c damaged again: a failed attempt (UP-7); repair again under the hold
   action RecRedo(c: str): bool = all {
     up, rec.get(c) == "repaired", dmg.get(c),
     rec' = rec.set(c, "held"),
     att' = if (bug("redoNoCount")) att else att.set(c, att.get(c) + 1),
-    holders' = holders, latch' = latch, lis' = lis, keepEnv, g' = g,
+    cnt' = cnt, latch' = latch, flowsOpen' = flowsOpen, keepEnv, g' = g,
   }
-  // clean audit → restore_forwarding(hold): removes only c; reopens only if no holder remains.
-  // anyRestore: one latch — the restore reopens and every other recovery loses its hold.
+  // clean audit → restore_forwarding(hold): the hold is consumed, the count decremented; admission reopens only
+  // when the count reaches zero. boolLatch: the restore reopens and ends every hold.
   action RecRestore(c: str): bool = all {
     up, rec.get(c) == "repaired", not(dmg.get(c)),
-    val others = holders.exclude(Set(c))
-    val reopens = bug("anyRestore") or others == Set()
-    val early = reopens and COMPONENTS.exists(d => d != c and rec.get(d) == "held")
+    val newCnt = if (bug("boolLatch")) 0 else cnt - 1
+    val reopens = newCnt == 0
+    val early = reopens and COMPONENTS.exists(d => d != c and unrepaired(d))
     all {
-      holders' = if (bug("anyRestore")) Set() else others,
-      latch' = not(reopens),
-      rec' = if (bug("anyRestore")) recIdle else rec.set(c, "idle"),
-      att' = if (bug("anyRestore")) att0 else att.set(c, 0),
+      cnt' = newCnt,
+      latch' = if (bug("restoreClearsLatch")) false else not(reopens),
+      rec' = if (bug("boolLatch")) COMPONENTS.mapBy(d => if (d == c or rec.get(d) == "held") "idle" else rec.get(d))
+             else rec.set(c, "idle"),
+      att' = if (bug("boolLatch")) att0 else att.set(c, 0),
       g' = { ...g, reopenEarly: g.reopenEarly or early, stillQuiesced: g.stillQuiesced or not(reopens) },
     },
-    lis' = lis, keepEnv,
+    flowsOpen' = flowsOpen, keepEnv,
   }
-  // ADR-0124: the attempt budget is spent — serve fail-stops; node-global objects stay as they are
+  // a recovery's hold is dropped without a restore (a panic path): the count is kept, forwarding stays quiesced
+  // (fail closed); dropDecrements: the drop releases the count
+  action RecDropHold(c: str): bool = all {
+    up, rec.get(c) == "held",
+    rec' = rec.set(c, "dropped"),
+    cnt' = if (bug("dropDecrements")) cnt - 1 else cnt,
+    latch' = if (bug("dropDecrements")) cnt - 1 > 0 else latch,
+    g' = { ...g, dropped: true,
+           reopenEarly: g.reopenEarly or (bug("dropDecrements") and cnt - 1 == 0) },
+    att' = att, flowsOpen' = flowsOpen, keepEnv,
+  }
+  // ADR-0124, the recovery supervisor: the attempt budget of an unrepaired recovery is spent, or the owner's
+  // leaked-hold count is above zero — serve fail-stops (c: the recovery whose episode the supervisor ends)
   action FailStop(c: str): bool = all {
-    up, rec.get(c) == "held", att.get(c) >= MAXATT,
-    up' = false, stop' = "failstop", holders' = Set(), latch' = false, rec' = recIdle, att' = att0,
-    lis' = false, dmg' = dmg.set("FlowListeners", false), repLeft' = repLeft, prefix' = prefix,
+    up, (unrepaired(c) and att.get(c) >= MAXATT) or (leaked > 0 and not(bug("leakIgnored"))),
+    up' = false, stop' = "failstop", cnt' = 0, latch' = false, rec' = recIdle, att' = att0, flowsOpen' = 0,
+    dmg' = COMPONENTS.mapBy(d => false), table' = table, repLeft' = repLeft,
     g' = { ...g, failStopped: true },
   }
   // repairNoHold: the recovery repairs without quiescing
   action RecRepairNoHold(c: str): bool = all {
     bug("repairNoHold"), up, rec.get(c) == "idle", dmg.get(c),
-    dmg' = dmg.set(c, false), up' = up, stop' = stop, repLeft' = repLeft, prefix' = prefix, keepState,
+    dmg' = dmg.set(c, false), cnt' = cnt, latch' = latch, rec' = rec, att' = att, flowsOpen' = flowsOpen,
+    up' = up, stop' = stop, table' = table, repLeft' = repLeft,
     g' = { ...g, repairNoHold: true },
   }
 
   action recStep(c: str): bool = any {
-    RecQuiesce(c), RecRepair(c), RecRedo(c), RecRestore(c), FailStop(c), RecRepairNoHold(c),
+    RecQuiesce(c), RecRepair(c), RecRedo(c), RecRestore(c), RecDropHold(c), FailStop(c), RecRepairNoHold(c),
   }
   action step = {
     nondet c = COMPONENTS.oneOf()
-    any { recStep(c), RepFail(c), Damage("FlowListeners"), Crash, Restart, BringUp }
+    any { recStep(c), RepFail(c), Damage(c), OpenFlow, Crash, Restart }
   }
 
   // ------------------------------------------------------------------ invariants
-  // (10, D8a-HOLD) forwarding is quiesced exactly while some holder holds
-  val LatchIffHolders: bool = latch == (holders != Set())
-  // (10, D8a-HOLD) a recovery that holds is in the holder set: no restore ended another's hold
-  val HeldIsHolder: bool = COMPONENTS.forall(c => rec.get(c) != "idle" implies holders.contains(c))
-  // (10, D8a-HOLD) forwarding never reopens while another recovery holds without having repaired
+  // LatchIffCount (QHOLD): admission is quiesced exactly while the hold count is above zero
+  val LatchIffCount: bool = latch == (cnt > 0)
+  // every recovery between quiesce and restore accounts for one hold in the count
+  val CountCoversRecoveries: bool = cnt >= COMPONENTS.filter(c => rec.get(c) != "idle" and rec.get(c) != "repaired").size()
+  // NoReopenBeforeRepair (QHOLD): forwarding never reopens while a recovery is between quiesce and repair
   val NoReopenBeforeRepair: bool = not(g.reopenEarly)
-  // (10, D8a-HOLD) no repair runs without that recovery's hold
+  // no repair runs without that recovery's hold
   val NoRepairWithoutHold: bool = not(g.repairNoHold)
-  // (10, M-7) quiescence closes every intake listener
-  val QuiescedClosesListeners: bool = latch implies not(lis)
-  // (6, G-V5) no recovery's repair writes the steering program or the route
-  val RepairNeverWritesPrefix: bool = not(g.prefixWritten)
-  // (UP-12, 6) another component's fail-stop leaves the route `local` and the pinned steering as boot
-  // converged them: no runtime step wrote either
-  val FailStopLeavesPrefixAsBooted: bool = (not(up) and stop == "failstop") implies prefix == "booted"
-
+  // quiescence aborted every flow, and none opens while quiesced
+  val QuiescedHoldsNoFlow: bool = latch implies flowsOpen == 0
+  // BootRefusedOnTableWriteFailure (ADR-0184): serve runs only with the shared table written
+  val ServeRunsOnlyWithTable: bool = up implies table
+  // LeakedHoldKeepsForwardingQuiesced (QHOLD): while the leaked-hold count is above zero the hold count is too
+  // (a dropped hold never releases admission); only the supervisor's fail-stop clears both
+  val LeakedHoldKeepsForwardingQuiesced: bool = leaked > 0 implies (cnt >= leaked and latch)
   val Safety: bool = and {
-    LatchIffHolders, HeldIsHolder, NoReopenBeforeRepair, NoRepairWithoutHold, QuiescedClosesListeners,
-    RepairNeverWritesPrefix, FailStopLeavesPrefixAsBooted,
+    LeakedHoldKeepsForwardingQuiesced, LatchIffCount, CountCoversRecoveries, NoReopenBeforeRepair, NoRepairWithoutHold, QuiescedHoldsNoFlow,
+    ServeRunsOnlyWithTable,
   }
 
   // ------------------------------------------------------------------ named runs (critical scenarios)
-  // Deterministic scenarios (`InitWith` / `RestartWith` fix boot step 8's outcome), each ending in an
-  // `expect` of its outcome with `Safety` checked along the way. Runs on `quiesce_ok` unless noted.
-  // D8a-HOLD, IpRules: the audit finds the table absent, the recovery quiesces under its own holder
-  // (closing every intake listener), repairs the table only, restores, and the owner brings the
-  // listener back
-  run IpRulesRecoveryQuiescesRepairsRestores = InitWith(true)
-    .expect(Safety and lis and dmg.get("IpRules") and not(latch))
-    .then(RecQuiesce("IpRules")).expect(Safety and latch and not(lis) and holders == Set("IpRules"))
-    .then(RecRepair("IpRules")).expect(Safety and not(dmg.get("IpRules")) and rec.get("IpRules") == "repaired" and latch)
-    .then(RecRestore("IpRules")).expect(Safety and not(latch) and holders == Set() and rec.get("IpRules") == "idle" and prefix == "booted")
-    .then(BringUp).expect(Safety and lis)
-  // FlowListeners: a listener-task exit, then the same episode
-  run FlowListenersRecoveryAfterListenerTaskExit = InitWith(false)
-    .then(Damage("FlowListeners")).expect(Safety and dmg.get("FlowListeners") and lis)
-    .then(RecQuiesce("FlowListeners")).expect(Safety and not(lis) and holders == Set("FlowListeners"))
-    .then(RecRepair("FlowListeners")).then(RecRestore("FlowListeners"))
-    .expect(Safety and not(latch) and holders == Set() and not(dmg.get("FlowListeners")))
-    .then(BringUp).expect(Safety and lis)
-  // D8a-HOLD: two recoveries hold at once; the first restore removes only its own holder and
-  // forwarding stays quiesced until the other has repaired and restored
-  run TwoHoldersRestoreOneKeepsForwardingQuiesced = InitWith(true)
-    .then(Damage("FlowListeners"))
-    .then(RecQuiesce("IpRules")).then(RecQuiesce("FlowListeners"))
-    .expect(Safety and holders == Set("IpRules", "FlowListeners") and g.overlapped and latch)
-    .then(RecRepair("IpRules")).then(RecRestore("IpRules"))
-    .expect(Safety and holders == Set("FlowListeners") and latch and not(lis) and g.stillQuiesced and not(g.reopenEarly))
-    .then(RecRepair("FlowListeners")).then(RecRestore("FlowListeners"))
-    .expect(Safety and holders == Set() and not(latch))
-    .then(BringUp).expect(Safety and lis)
+  // Deterministic scenarios (`InitWith` / `RestartWith` fix the open flow and boot step 8's outcome), each
+  // ending in an `expect` of its outcome with `Safety` checked along the way. Runs on `quiesce_ok`.
+  // QHOLD, one recovery: quiesce takes the first hold (latch, flows aborted), repair, restore reopens at zero
+  run SingleRecoveryQuiescesRepairsRestores = InitWith(1)
+    .expect(Safety and cnt == 0 and not(latch) and flowsOpen == 1)
+    .then(Damage("C1")).then(RecQuiesce("C1"))
+    .expect(Safety and cnt == 1 and latch and flowsOpen == 0 and rec.get("C1") == "held")
+    .then(RecRepair("C1")).then(RecRestore("C1"))
+    .expect(Safety and cnt == 0 and not(latch) and rec.get("C1") == "idle" and not(g.stillQuiesced))
+    .then(OpenFlow).expect(Safety and flowsOpen == 1)
+  // QHOLD: two recoveries overlap; the first restore leaves the count above zero and forwarding stays quiesced
+  // until the second recovery has repaired and restored
+  run TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore = InitWith(1)
+    .then(Damage("C1")).then(Damage("C2"))
+    .then(RecQuiesce("C1")).then(RecQuiesce("C2"))
+    .expect(Safety and cnt == 2 and latch and g.overlapped and flowsOpen == 0)
+    .then(RecRepair("C1")).then(RecRestore("C1"))
+    .expect(Safety and cnt == 1 and latch and g.stillQuiesced and not(g.reopenEarly) and rec.get("C2") == "held")
+  // ... and no flow opens while the count is above zero
+  run NoFlowOpensWhileCountedHoldRemains = TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore
+    .then(OpenFlow).fail()
+  run TwoOverlappingRecoveriesReopenOnlyAtZero = TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore
+    .then(RecRepair("C2")).then(RecRestore("C2"))
+    .expect(Safety and cnt == 0 and not(latch) and not(g.reopenEarly))
+    .then(OpenFlow).expect(Safety and flowsOpen == 1)
+  // QHOLD: a hold dropped without a restore keeps forwarding quiesced (fail closed) and raises the leaked-hold
+  // count; the recovery supervisor fail-stops serve on a leaked-hold count above zero; the restart converges from a clean count
+  run DroppedHoldKeepsForwardingQuiescedThenFailStops = InitWith(1)
+    .then(Damage("C1")).then(RecQuiesce("C1")).then(RecDropHold("C1"))
+    .expect(Safety and cnt == 1 and latch and rec.get("C1") == "dropped" and g.dropped and leaked == 1)
+    .then(FailStop("C1")).expect(Safety and not(up) and stop == "failstop" and cnt == 0 and not(latch) and g.failStopped and leaked == 0)
+    .then(RestartWith(true)).expect(Safety and up and stop == "none" and cnt == 0 and leaked == 0)
+    .then(OpenFlow).expect(Safety and flowsOpen == 1)
   // UP-7: a repair that returns Err is a failed attempt; the recovery repairs again under its hold
-  run RepairFailureCountsAttemptThenRepairs = InitWith(true)
-    .then(RecQuiesce("IpRules")).then(RepFail("IpRules"))
-    .expect(Safety and att.get("IpRules") == 1 and holders == Set("IpRules") and latch and dmg.get("IpRules"))
-    .then(RecRepair("IpRules")).then(RecRestore("IpRules"))
-    .expect(Safety and not(latch) and att.get("IpRules") == 0 and holders == Set())
+  run RepairFailureCountsAttemptThenRepairs = InitWith(0)
+    .then(Damage("C1")).then(RecQuiesce("C1")).then(RepFail("C1"))
+    .expect(Safety and att.get("C1") == 1 and cnt == 1 and latch and dmg.get("C1"))
+    .then(RecRepair("C1")).then(RecRestore("C1"))
+    .expect(Safety and not(latch) and att.get("C1") == 0 and cnt == 0)
   // UP-7: the post-repair audit finds the component damaged again: a failed attempt, repaired again under the hold
-  run PostRepairAuditFailureCountsAttempt = InitWith(false)
-    .then(Damage("FlowListeners")).then(RecQuiesce("FlowListeners")).then(RecRepair("FlowListeners"))
-    .then(Damage("FlowListeners")).expect(Safety and rec.get("FlowListeners") == "repaired" and dmg.get("FlowListeners"))
-    .then(RecRedo("FlowListeners")).expect(Safety and rec.get("FlowListeners") == "held" and att.get("FlowListeners") == 1)
-    .then(RecRepair("FlowListeners")).then(RecRestore("FlowListeners"))
-    .expect(Safety and not(latch) and holders == Set())
-  // ADR-0124 / UP-12 (quiesce_live: a repair may fail forever): the budget is spent, serve fail-stops; the
-  // route and the pinned steering stay as boot converged them; the restart converges again
-  run SpentBudgetFailStopsAndRestartConverges = InitWith(true)
-    .then(RecQuiesce("IpRules")).then(RepFail("IpRules")).then(RepFail("IpRules"))
-    .expect(Safety and att.get("IpRules") == MAXATT and latch)
-    .then(FailStop("IpRules"))
-    .expect(Safety and not(up) and stop == "failstop" and holders == Set() and not(latch) and prefix == "booted" and g.failStopped)
-    .then(RestartWith(false)).expect(Safety and up and not(dmg.get("IpRules")) and prefix == "booted")
-    .then(BringUp).expect(Safety and lis)
-  // crash during a recovery: the process-scoped hold vanishes; an absent table persists; boot step 8
-  // writes it again (or its transaction fails again and a new episode repairs it)
-  run CrashDuringRecoveryThenRestartRecovers = InitWith(true)
-    .then(RecQuiesce("IpRules")).then(Crash)
-    .expect(Safety and not(up) and stop == "crash" and holders == Set() and not(latch) and dmg.get("IpRules"))
-    .then(RestartWith(true)).expect(Safety and up and dmg.get("IpRules") and prefix == "booted")
-    .then(RecQuiesce("IpRules")).then(RecRepair("IpRules")).then(RecRestore("IpRules")).then(BringUp)
-    .expect(Safety and lis and not(latch) and not(dmg.get("IpRules")))
+  run PostRepairAuditFailureCountsAttempt = InitWith(0)
+    .then(Damage("C2")).then(RecQuiesce("C2")).then(RecRepair("C2"))
+    .then(Damage("C2")).expect(Safety and rec.get("C2") == "repaired" and dmg.get("C2"))
+    .then(RecRedo("C2")).expect(Safety and rec.get("C2") == "held" and att.get("C2") == 1)
+    .then(RecRepair("C2")).then(RecRestore("C2"))
+    .expect(Safety and not(latch) and cnt == 0)
+  // ADR-0124 (quiesce_live: a repair may fail forever): the budget is spent, serve fail-stops; the restart
+  // converges again
+  run SpentBudgetFailStopsAndRestartConverges = InitWith(0)
+    .then(Damage("C1")).then(RecQuiesce("C1")).then(RepFail("C1")).then(RepFail("C1"))
+    .expect(Safety and att.get("C1") == MAXATT and latch)
+    .then(FailStop("C1"))
+    .expect(Safety and not(up) and stop == "failstop" and cnt == 0 and not(latch) and g.failStopped)
+    .then(RestartWith(true)).expect(Safety and up and cnt == 0)
+  // crash during a recovery: the process-scoped hold vanishes with the process; the restart's boot step 8
+  // writes the table again
+  run CrashDuringRecoveryThenRestartRecovers = InitWith(1)
+    .then(Damage("C1")).then(RecQuiesce("C1")).then(Crash)
+    .expect(Safety and not(up) and stop == "crash" and cnt == 0 and not(latch))
+    .then(RestartWith(true)).expect(Safety and up and cnt == 0 and not(latch))
+    .then(OpenFlow).expect(Safety and flowsOpen == 1)
+  // ADR-0184: boot step 8's write of the shared table fails: boot is refused, nothing opens, the supervisor
+  // restart retries; the next write succeeds
+  run FailedBootTableWriteRefusesBootThenRetrySucceeds = InitDown
+    .then(RestartWith(false))
+    .expect(Safety and not(up) and stop == "refused" and g.refusedBoot)
+    .then(RestartWith(false)).expect(Safety and not(up) and stop == "refused")
+    .then(RestartWith(true)).expect(Safety and up and stop == "none" and table)
 
   // ------------------------------------------------------------------ witnesses (expected violated)
   val WitnessNoOverlap: bool = not(g.overlapped)
   val WitnessNoStillQuiesced: bool = not(g.stillQuiesced)
   val WitnessNoFailStop: bool = not(g.failStopped)
+  val WitnessNoDroppedHold: bool = not(g.dropped)
+  val WitnessNoRefusedBoot: bool = not(g.refusedBoot)
 
   // ------------------------------------------------------------------ liveness (TLC)
-  // fairness of component c's own recovery steps only (no fairness for any other recovery, for
-  // damage, crash, restart or the owner)
+  // fairness of component c's own recovery steps only (no fairness for any other recovery, for damage,
+  // crash, restart)
   temporal OwnFair(c: str): bool = and {
-    weakFair(RecQuiesce(c), (rec, holders, dmg)), weakFair(RecRepair(c), (rec, holders, dmg)),
-    weakFair(RecRedo(c), (rec, holders, dmg)), weakFair(RecRestore(c), (rec, holders, dmg)),
-    weakFair(FailStop(c), (rec, holders, dmg, up)),
+    weakFair(RecQuiesce(c), (rec, cnt, dmg)), weakFair(RecRepair(c), (rec, cnt, dmg)),
+    weakFair(RecRedo(c), (rec, cnt, dmg)), weakFair(RecRestore(c), (rec, cnt, dmg)),
+    weakFair(FailStop(c), (rec, cnt, dmg, up)),
   }
-  // (D8a-HOLD, ADR-0124, UP-7) a recovery episode ends — restored, or serve stopped — under the
-  // recovery's own fairness, whatever the other recovery and recurring damage do
-  temporal IpRulesEpisodeEnds =
-    OwnFair("IpRules").implies(always((rec.get("IpRules") != "idle").implies(
-      eventually(rec.get("IpRules") == "idle" or not(up)))))
-  temporal FlowListenersEpisodeEnds =
-    OwnFair("FlowListeners").implies(always((rec.get("FlowListeners") != "idle").implies(
-      eventually(rec.get("FlowListeners") == "idle" or not(up)))))
-  // (D8a-HOLD) damage of IpRules is repaired (or serve stops) under its own recovery's fairness only:
-  // no other recovery can pre-empt the repair forever
-  temporal IpRulesRepaired =
-    OwnFair("IpRules").implies(always(dmg.get("IpRules").implies(
-      eventually(not(dmg.get("IpRules")) or not(up)))))
+  // (QHOLD, ADR-0124, UP-7) a recovery episode ends — restored, or serve stopped — under the recovery's own
+  // fairness, whatever the other recovery and recurring damage do
+  temporal C1EpisodeEnds =
+    OwnFair("C1").implies(always((rec.get("C1") != "idle").implies(eventually(rec.get("C1") == "idle" or not(up)))))
+  temporal C2EpisodeEnds =
+    OwnFair("C2").implies(always((rec.get("C2") != "idle").implies(eventually(rec.get("C2") == "idle" or not(up)))))
+  // (QHOLD) a damaged component is repaired (or serve stops) under its own recovery's fairness only: no other
+  // recovery can pre-empt the repair forever
+  temporal C1Repaired =
+    OwnFair("C1").implies(always(dmg.get("C1").implies(eventually(not(dmg.get("C1")) or not(up)))))
 }
 
 // ------------------------------------------------------------------ design instances
-// crash + restart (boot's step-8 write may fail and leave the table absent again), one repair failure,
-// recurring FlowListeners damage
+// crash + restart (boot step 8's write may fail and refuse boot), one repair failure, recurring damage
 module quiesce_ok { import quiescence(OFF = Set(), CFG = "ok").* from "./quiescence" }
-// no crash; a repair may fail forever; recurring FlowListeners damage
+// no crash; a repair may fail forever; recurring damage
 module quiesce_live { import quiescence(OFF = Set(), CFG = "live").* from "./quiescence" }

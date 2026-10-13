@@ -2,19 +2,19 @@
 
 ## Status
 
-**Accepted — decision D9 approved by user 2026-10-05; VIP recognition in the resolution
-(decision D24a, independent DESIGN review finding H-3) approved by user
-2026-10-06; independent review r12 answered; further review waived by user
-2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
-Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
+**Accepted — decision D9 approved by user 2026-10-05; VIP recognition in the
+resolution (decision D24a) approved by user 2026-10-06; the inbound side's
+path to a VM (INB-1) and the END-STATE ruling for #303 approved by user
+2026-10-11.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
+Attachment Replacement DESIGN*.
 
-Non-mesh guest egress is ADR-0162, which records ruling **D14 (APPROVED
-2026-10-05)**: non-mesh egress is forwarded in the kernel and leg-F's
-userspace cleartext relay is removed. Mesh flows keep leg-F's existing
-kernel-splice data path, which the user accepted as kernel forwarding.
+Non-mesh guest egress is ADR-0162 (ruling D14, approved 2026-10-05):
+non-mesh egress is forwarded in the kernel and leg-F's userspace cleartext
+relay is removed. Mesh flows keep leg-F's existing kernel-splice data path,
+which the user accepted as kernel forwarding.
 
-When accepted, this ADR **supersedes ADR-0115** (TCX classification feeds
-transparent mTLS) and **ADR-0139** (the R18 intercept-mark guard).
+This ADR **supersedes ADR-0115** (TCX classification feeds transparent mTLS)
+and **ADR-0139** (the R18 intercept-mark guard).
 
 ## Context
 
@@ -27,10 +27,10 @@ destination through `MtlsResolve` into one of three outcomes:
   `tokio::io::copy_bidirectional` relay);
 - `MeshUnreachable` → refuse, never cleartext.
 
-Under ADR-0145 there is no TPROXY interception point. A guest flow arrives at
-the host as an explicit request naming its destination, before any payload.
-All workloads are VMs, so leg-F's TPROXY outbound path serves only guest
-traffic.
+Under ADR-0145 there is no TPROXY interception point for guest traffic. A
+guest flow arrives at the host as an explicit request naming its destination,
+before any payload. All workloads are VMs, so leg-F's TPROXY outbound path
+serves only guest traffic.
 
 The guest-capture spike carried a remote server's banner
 (`curl telnet://github.com:22` → `SSH-2.0-…`) and 10,000/10,000 egress
@@ -62,9 +62,16 @@ needs no write gate.
    `SO_LINGER{1,0}` until a clean close (ADR-0160).
 4. **No unregistered mesh path.** If leg-F is unavailable or the allocation is
    not intercept-live, a mesh flow is refused.
-5. **Inbound is unchanged as far as leg-S.** Leg-S's plaintext then ends at the
-   ADR-0173 intake.
-6. **This ADR does not decide #303.**
+5. **Inbound ends at leg-S, then crosses on an owner-opened flow.** Leg-C
+   terminates inbound mTLS as today. For a VM backend, leg-S delivers the
+   plaintext by dialling the guest-flow owner's `GuestStreamDial` and relaying
+   between its kTLS socket and the returned vsock stream (ADR-0173, ADR-0186). That relay
+   is temporary and is deleted when #303 lands.
+6. **This ADR does not decide #303.** Under the END-STATE ruling, in-guest
+   kernel mTLS (#303) adapts to the NIC-less, vsock-only guest: the guest's
+   kTLS socket reaches the host through a guest-local loopback peer redirected
+   into vsock, and the host forwards ciphertext over the existing kernel
+   redirect.
 
 ## Alternatives considered
 
@@ -74,8 +81,15 @@ needs no write gate.
   set can disagree (TOCTOU). Rejected.
 - **Bypass leg-F for mesh destinations and wait for #303.** VM mesh traffic
   would be cleartext or blocked. Rejected.
-- **kTLS on a host pair socket inside the SockHash.** TLS rejects a socket
-  with an attached psock. Rejected.
+- **kTLS on a host pair socket inside the SockHash.** The sockmap refuses an
+  inet socket that already has a ULP (`net/core/skmsg.c:756-758 @ v7.0`), so
+  a socket whose TLS ULP is set after the handshake cannot then be installed.
+  The other order is accepted by the kernel — the TLS ULP checks no psock
+  (`net/ipv4/tcp_ulp.c:130-155`; `tls_init` in
+  `net/tls/tls_main.c:1047-1083 @ v7.0`), and kTLS polls a socket that has
+  one (`net/tls/tls_main.c:401-430 @ v7.0`) — but a socket installed at
+  establishment (ADR-0158) has every received byte redirected by the verdict,
+  so the userspace TLS handshake never sees the peer's records. Rejected.
 
 ## Consequences
 
@@ -83,6 +97,8 @@ needs no write gate.
   `getsockname`; ADR-0120 is revalidated against that.
 - The leg-F outbound TPROXY path, its cleartext pass-through and the
   guest-sourced nft rules 2–3 and `outbound_sources` are deleted. Rules 1 and
-  4–8 remain.
+  4–8 remain (rules 5 and 8 as ADR-0172 restates them).
 - Single-loss fail-closure is re-proven for the forwarder (V-8).
-- #303 would have to amend this ADR and re-validate against a NIC-less guest.
+- When #303 lands it amends this ADR and deletes ADR-0186: mesh traffic then
+  reaches the guest as ciphertext, and leg-S's relay for VM backends is
+  deleted.

@@ -1,0 +1,31 @@
+State 1: <Initial predicate>
+/\ quota_ok_flow_quota_slot = << [own |-> 0, st |-> "free", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_ok_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 2: <quota_ok_flow_quota_Admit line 239, col 3 to line 270, col 10 of module quota_ok>
+/\ quota_ok_flow_quota_slot = << [own |-> 1, st |-> "active", pend |-> FALSE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_ok_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 3: <quota_ok_flow_quota_HalfClose line 213, col 3 to line 228, col 54 of module quota_ok>
+/\ quota_ok_flow_quota_slot = << [own |-> 1, st |-> "draining", pend |-> TRUE],
+   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_ok_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> FALSE ]
+
+State 4: <quota_ok_flow_quota_Admit line 239, col 3 to line 270, col 10 of module quota_ok>
+/\ quota_ok_flow_quota_slot = << [own |-> 1, st |-> "draining", pend |-> TRUE],
+   [own |-> 2, st |-> "active", pend |-> FALSE] >>
+/\ quota_ok_flow_quota_g = [ refusedUnder |-> FALSE,
+  clash |-> FALSE,
+  refused |-> FALSE,
+  otherAdmitted |-> TRUE ]

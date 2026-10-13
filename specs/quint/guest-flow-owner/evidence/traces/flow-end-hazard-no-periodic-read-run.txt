@@ -1,0 +1,31 @@
+
+  end_bugNoPeriodicRead
+    1) end_bugNoPeriodicRead::flow_end::BothSkipAfterArmIsFoundByTheAuditTick failed after 1 test(s)
+
+  1 failed
+
+  1) end_bugNoPeriodicRead::flow_end::BothSkipAfterArmIsFoundByTheAuditTick:
+       Error [QNT508]: Cannot continue to "expect"
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/flow_end.qnt:701:47
+        701:   run BothSkipAfterArmIsFoundByTheAuditTick = InitWith("g")
+                                                           ^^^^^^^^^^^^^
+        702:     .then(HcPair).then(HcRecvPaired).then(FarWrite("g")).then(FarFin("g")).then(OwnSeesEof("g"))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        703:     .then(OwnGoal("Vg")).then(OwnArm("Vg")).then(OwnRead("Vg"))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        704:     .expect(Safety and f.dr.get("Vg") == "waiting" and f.armShort.get("Vg"))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        705:     .then(OwnBackstop("Vg")).expect(Safety and not(f.armShort.get("Vg")) and not(f.cell.get("Vg").fired))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        706:     .then(EnvMiss1("g")).then(EnvMiss2("g")).then(KSend("Vg"))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        707:     .expect(Safety and f.miss.get("g") == 2 and f.obsMiss.get("g") == 0 and f.cell.get("Vg").sent == 0 and f.ring.get("g") == List())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        708:     .then(OwnAuditTick("g")).expect(Safety and f.obsMiss.get("g") == 2)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0xb3b54baea41bbdf5 --match=end_bugNoPeriodicRead::flow_end::BothSkipAfterArmIsFoundByTheAuditTick to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/flow_end_read_hazards.qnt
+error: Tests failed

@@ -2,11 +2,10 @@
 
 ## Status
 
-**Accepted — decision D11 approved by user 2026-10-05; independent review r12 answered;
-further review waived by user 2026-10-08; handed to DISTILL.** GH #295. Recorded in the #295 feature delta, § *[REF] vsock
-Attachment Replacement DESIGN — PROPOSED 2026-10-05*.
+**Accepted — decision D11 approved by user 2026-10-05.** GH #295. Recorded in
+the #295 feature delta, § *[REF] vsock Attachment Replacement DESIGN*.
 
-When accepted, this ADR **supersedes ADR-0117** (initial shared-bridge density
+This ADR **supersedes ADR-0117** (initial shared-bridge density
 target). ADR-0117's premise that attachments attach reproducibly is falsified
 for the bridge (E18). Its framing of 16,384 as a placeholder, not a guarantee,
 and its rejection of 32,768 and 100,000 still hold and are carried forward.
@@ -20,12 +19,14 @@ memory). E18 showed the shared bridge imposes a kernel ceiling of about 1,023
 ports.
 
 Under ADR-0145 an attachment is one vhost-vsock device with its CID, its
-kernel vhost worker task, one CH device thread, its control session, and its
-intake listeners. The benchmark measured 16,384 Aya owners (16,466 kernel
+kernel vhost worker task, one CH device thread, and its control session. The
+benchmark measured 16,384 Aya owners (16,466 kernel
 tasks; 2.794 GiB unreclaimable slab for UDP owners) in a private kernel with
 synthetic drivers. The CH fork adds one vhost worker task and one parked
 device thread per VM. Kernel vhost-vsock admits any 32-bit CID except reserved
-values and duplicates; the lease derives the CID (ADR-0156).
+values (`drivers/vhost/vsock.c:792-799 @ v7.0`), a CID the host's own
+guest-to-host transport uses (`:804-805`), and duplicates (`:807-813`); the
+lease derives the CID (ADR-0156).
 
 ## Decision
 
@@ -57,6 +58,8 @@ values and duplicates; the lease derives the CID (ADR-0156).
   sockets, with no netdevices.
 - Concurrent flows are a separate, workload-driven dimension (ADR-0147) with
   their own pinned capacity, sized at four concurrent flows per attachment at
-  the target. Exhausting it refuses individual flows, never attachments.
+  the target. Exhausting it refuses individual flows, never attachments. A
+  draining (half-closed, not yet completed) flow counts against its
+  allocation's quota (ADR-0183).
 - Hardware CPU and memory limits remain real (#261). Below the target, a
   measured hardware limit is a finding, not a design ceiling.
