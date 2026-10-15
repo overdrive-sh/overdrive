@@ -1,0 +1,8 @@
+{
+  "preflight": {
+    "host_uname_r": "7.0.0-29-generic",
+    "kvm_api": 12,
+    "other_cloud_hypervisors_at_start": "",
+    "systemd_detect_virt": "none"
+  }
+}

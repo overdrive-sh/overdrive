@@ -1,0 +1,63 @@
+[1m[92m   Compiling[0m qt1-conf-step v0.0.0 (/Users/marcus/conductor/workspaces/helios/wellington-v2/spike-scratch/netns-density-295-qt1)
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+────────────
+[32;1m Nextest run[0m ID [1m3a81d5fe-346d-4a44-8c59-55c6c429d792[0m with nextest profile: [1mdefault[0m
+[32;1m    Starting[0m [1m1[0m test across [1m1[0m binary ([1m8[0m tests [33;1mskipped[0m)
+[31;1m        FAIL[0m [   0.267s] (1/1) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mprobe_non_recording_main_named_run[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::probe_non_recording_main_named_run ... FAILED
+
+    failures:
+
+    failures:
+        conformance::probe_non_recording_main_named_run
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.26s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for probe_non_recording_main_named_run
+       Generating 100 traces using `0xe7eb416d` as random seed ...
+       Replaying traces ...
+       [Trace 1]
+       [Step 0]
+       Action taken: Init
+       Nondet picks: <none>
+       Next state:
+       + bank_mc::bank::a: 0
+       + bank_mc::bank::b: 0
+       + bank_mc::bank::conf_step: Init
+
+       [Step 1]
+       Action taken: Init
+       Nondet picks: <none>
+       Next state:
+       + bank_mc::bank::a: 3
+       + bank_mc::bank::b: 0
+       + bank_mc::bank::conf_step: Init
+
+       Specification and implementation states diverge
+       --- specification
+       +++ implementation
+       @@ -1,4 +1,4 @@
+        BankState {
+       -    a: 3,
+       +    a: 0,
+            b: 0,
+        }
+
+       [FAIL] probe_non_recording_main_named_run 
+       Reproduce this error with `QUINT_SEED=0xe7eb416d`
+
+
+    [0m[31;1mthread 'conformance::probe_non_recording_main_named_run' (201769) panicked at src/lib.rs:177:5:[0m
+    [31;1mState invariant failed[0m
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+[31;1m  Cancelling[0m due to [31;1mtest failure[0m
+────────────
+[31;1m     Summary[0m [   0.268s] [1m1[0m test run: [1m0[0m [32;1mpassed[0m, [1m1[0m [31;1mfailed[0m, [1m8[0m [33;1mskipped[0m
+[31;1m        FAIL[0m [   0.267s] (1/1) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mprobe_non_recording_main_named_run[0m
+[31;1merror[0m: test run failed
+exit=100

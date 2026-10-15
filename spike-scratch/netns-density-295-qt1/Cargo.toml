@@ -1,0 +1,23 @@
+# Throwaway spike (netns-density-295, D-UP-1): does a write-only `conf_step` sum-type
+# state var + Config::nondet make quint-connect 0.1.2 #[quint_test] named runs replay?
+# Standalone workspace; not a member of the root workspace.
+[workspace]
+
+[package]
+name = "qt1-conf-step"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[features]
+# Deliberately breaks the owner (Withdraw subtracts one too few) to prove the
+# per-step state comparison is real.
+broken_owner = []
+
+[dependencies]
+
+[dev-dependencies]
+quint-connect = "=0.1.2"
+itf = "0.4"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }

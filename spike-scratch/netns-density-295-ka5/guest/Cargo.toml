@@ -1,0 +1,15 @@
+[package]
+name = "ka5g"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone throwaway spike probe (K-A5) - NOT a workspace member.
+[workspace]
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = 2
+debug = false

@@ -1,0 +1,5 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_LOCAL_CID 3260
+GUEST_CMD_LOOP_END
+GUEST_AGENT_EXITED rc=0
+[    2.353645] reboot: Power down

@@ -1,0 +1,10 @@
+{
+  "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst": "0483edc8e3794b93ed747f7a481d0d97a2b3012490d9170149aad5cf636763d1",
+  "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst": "478dc2790cab03b9c494133a8a20d96ca4c126b43ad226b69e2df57968e27306",
+  "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst": "dcab15ab168919bfe43d49d3a9f5ba8d8b884acfe62e090d4684ea73eb43c680",
+  "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock_diag.ko.zst": "156381f9a7712de415f8e45a1018709190d459bd3f3bcd62dd6e82f225be752e",
+  "fork_ch": "a62186bcb9a9a14b3fa64c3b50bb47746c7560d9027d2a505c518df1b38ccd3d",
+  "guest_kernel": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+  "guest_probe": "25bb81d9fa0dc6dd94c199b0f797cf95df512f865bbb091d9377ab837485a54f",
+  "initramfs": "da225d428e49f3047648e3af7e6ceec7e2ddfa9c031e0d651c302b76db995679"
+}

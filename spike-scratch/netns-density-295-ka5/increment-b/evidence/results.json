@@ -1,0 +1,276 @@
+{
+  "calibration": {
+    "clock_offset_error_bound_us": {
+      "max": 75.969,
+      "median": 33.065,
+      "n": 41
+    }
+  },
+  "cases": {
+    "c1-host-close-epoll": {
+      "latency_us": {
+        "max": 185.185,
+        "min": 141.605,
+        "p50": 161.925,
+        "p99": 185.185
+      },
+      "observations": {
+        "('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c1-host-close-read": {
+      "latency_us": {
+        "max": 243.972,
+        "min": 210.321,
+        "p50": 221.624,
+        "p99": 243.972
+      },
+      "observations": {
+        "('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c2-host-linger0-epoll": {
+      "latency_us": {
+        "max": 203.622,
+        "min": 136.982,
+        "p50": 181.129,
+        "p99": 203.622
+      },
+      "observations": {
+        "('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c2-host-linger0-read": {
+      "latency_us": {
+        "max": 138.489,
+        "min": 89.36,
+        "p50": 132.075,
+        "p99": 138.489
+      },
+      "observations": {
+        "('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c3-host-sigkill-epoll": {
+      "latency_us": {
+        "max": 935.975,
+        "min": 720.986,
+        "p50": 820.601,
+        "p99": 935.975
+      },
+      "observations": {
+        "('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c3-host-sigkill-read": {
+      "latency_us": {
+        "max": 954.513,
+        "min": 840.33,
+        "p50": 916.004,
+        "p99": 954.513
+      },
+      "observations": {
+        "('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c3b-host-sigkill-unaccepted-epoll": {
+      "latency_us": {
+        "max": 664.34,
+        "min": 649.153,
+        "p50": 652.068,
+        "p99": 664.34
+      },
+      "observations": {
+        "('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c4a-no-listener": {
+      "connect_latency_us": {
+        "max": 62.724,
+        "min": 37.646,
+        "p50": 41.292,
+        "p99": 62.724
+      },
+      "observations": {
+        "(None, None, None, None, 'ECONNRESET')": 3
+      },
+      "results": {
+        "CONNECT-FAIL": 3
+      },
+      "trials": 3
+    },
+    "c4b-backlog-full-refused": {
+      "connect_latency_us": {
+        "max": 40.301,
+        "min": 40.301,
+        "p50": 40.301,
+        "p99": 40.301
+      },
+      "observations": {
+        "(None, None, None, None, 'ECONNRESET')": 1
+      },
+      "results": {
+        "CONNECT-FAIL": 1
+      },
+      "trials": 1
+    },
+    "c4b-filler-after-listener-close": {
+      "latency_us": {
+        "max": 100.192,
+        "min": 100.192,
+        "p50": 100.192,
+        "p99": 100.192
+      },
+      "observations": {
+        "('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 1
+      },
+      "results": {
+        "END": 1
+      },
+      "trials": 1
+    },
+    "c4c-listener-close-queued-epoll": {
+      "latency_us": {
+        "max": 263.608,
+        "min": 176.572,
+        "p50": 187.764,
+        "p99": 263.608
+      },
+      "observations": {
+        "('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c4d-connect-vs-listener-close-race": {
+      "connect_latency_us": {
+        "max": 70.997,
+        "min": 51.628,
+        "p50": 63.586,
+        "p99": 70.997
+      },
+      "latency_us": {
+        "max": 89.194,
+        "min": 46.725,
+        "p50": 77.707,
+        "p99": 89.194
+      },
+      "observations": {
+        "('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 7,
+        "(None, None, None, None, 'ECONNRESET')": 3
+      },
+      "results": {
+        "CONNECT-FAIL": 3,
+        "END": 7
+      },
+      "trials": 10
+    },
+    "c5-data-then-close-epoll": {
+      "latency_us": {
+        "max": 181.124,
+        "min": 112.985,
+        "p50": 124.037,
+        "p99": 181.124
+      },
+      "observations": {
+        "('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "c5-data-then-close-read": {
+      "latency_us": {
+        "max": 174.177,
+        "min": 118.991,
+        "p50": 173.382,
+        "p99": 174.177
+      },
+      "observations": {
+        "('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 3
+      },
+      "results": {
+        "END": 3
+      },
+      "trials": 3
+    },
+    "ctl-idle-epoll": {
+      "observations": {
+        "(None, None, None, None, None)": 3
+      },
+      "results": {
+        "STILL-OPEN": 3
+      },
+      "trials": 3
+    },
+    "ctl-idle-read": {
+      "observations": {
+        "(None, None, None, None, None)": 3
+      },
+      "results": {
+        "STILL-OPEN": 3
+      },
+      "trials": 3
+    }
+  },
+  "cleanup": {
+    "modules_added_and_left": []
+  },
+  "control": {
+    "unrelated_idle_connection": {
+      "false_end_detail": [],
+      "false_end_events": 0,
+      "final_byte_received": true
+    }
+  },
+  "done": {
+    "ok": true
+  },
+  "guest": {
+    "hello": {
+      "h": 5336860653332749,
+      "k": "hello",
+      "local_cid": 3260,
+      "t": 280923065,
+      "uname_r": "7.0.0-29-generic"
+    },
+    "serial_boot": "GUEST_BOOT uname_r=7.0.0-29-generic\nGUEST_LOCAL_CID 3260\n"
+  },
+  "preflight": {
+    "host_uname_r": "7.0.0-29-generic",
+    "kvm_api": 12,
+    "other_cloud_hypervisors_at_start": "",
+    "systemd_detect_virt": "none"
+  }
+}

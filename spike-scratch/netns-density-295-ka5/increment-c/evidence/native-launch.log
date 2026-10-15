@@ -1,0 +1,80 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/netns-density-295-ka5/increment-c/run.py suite=full n=250`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to <metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=01b95018a98f398f0fa1bf89 pid=2062515
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> <metal-target>:/home/ubuntu/overdrive
+
+sent 1,004,066 bytes  received 5,248 bytes  155,279.08 bytes/sec
+total size is 1,503,269,361  speedup is 1,489.40
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[07:58:14] === preflight (fail-closed substrate probes)
+[07:58:14] $ uname -a; grep -m1 'model name' /proc/cpuinfo; nproc; free -m | head -2; ls -l /dev/kvm /dev/vhost-vsock  (rc=0)
+[07:58:14]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[07:58:14]     model name	: AMD EPYC 8024P 8-Core Processor
+[07:58:14]     16
+[07:58:14]                    total        used        free      shared  buff/cache   available
+[07:58:14]     Mem:           63868        2747       24070         793       38560       61121
+[07:58:14]     crw-rw---- 1 root kvm 10, 232 Oct 15 07:58 /dev/kvm
+[07:58:14]     crw-rw---- 1 root kvm 10, 241 Oct  8 22:11 /dev/vhost-vsock
+[07:58:14] === build
+[07:58:14] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[07:58:14]         Finished `release` profile [optimized] target(s) in 0.12s
+[07:58:14] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/guest/Cargo.toml  (rc=0)
+[07:58:14]         Updating crates.io index
+[07:58:14]          Locking 1 package to latest Rust 1.95.0 compatible version
+[07:58:14]         Finished `release` profile [optimized] target(s) in 0.10s
+[07:58:14] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/guest-target/x86_64-unknown-linux-gnu/release/ka5g /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/ch-target/release/cloud-hypervisor; /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/ch-target/release/cloud-hypervisor --version  (rc=0)
+[07:58:14]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/guest-target/x86_64-unknown-linux-gnu/release/ka5g: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=bfebe110d62488d9f48c8ba4b2269c79c8c49448, not stripped
+[07:58:14]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/ch-target/release/cloud-hypervisor:                 ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=0f8a02c7e9a2fced04448cb5cb06b52114f41e8b, stripped
+[07:58:14]     cloud-hypervisor v53.0.0
+[07:58:14]     Migration Protocol Versions: 0
+[07:58:14] $ modprobe --show-depends vmw_vsock_virtio_transport  (rc=0)
+[07:58:14]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[07:58:14]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst 
+[07:58:14]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst
+[07:58:14] $ modprobe --show-depends vsock_diag  (rc=0)
+[07:58:14]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst 
+[07:58:14]     insmod /lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock_diag.ko.zst
+[07:58:15] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/increment-c/initramfs-root && find . | cpio -o -H newc --quiet | gzip -9 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/increment-c/initramfs.cpio.gz  (rc=0)
+[07:58:15] === boot guest CID 3260
+[07:58:15] launch: /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/increment-c/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/increment-c/vm-3260-1792051095292/serial.log --console off --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/increment-c/vm-3260-1792051095292/ch.log -v --vsock cid=3260,backend=vhost-kernel
+[07:58:15] guest hello: {'k': 'hello', 'uname_r': '7.0.0-29-generic', 'local_cid': 3260, 't': 290114138, 'h': 5336902625963313}
+[07:58:15] $ /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/ch-target/release/cloud-hypervisor --version  (rc=0)
+[07:58:15]     cloud-hypervisor v53.0.0
+[07:58:15]     Migration Protocol Versions: 0
+[07:59:06] ctl-idle-read: {"trials": 250, "results": {"STILL-OPEN": 250}, "observations": {"(None, None, None, None, None)": 250}}
+[07:59:56] ctl-idle-epoll: {"trials": 250, "results": {"STILL-OPEN": 250}, "observations": {"(None, None, None, None, None)": 250}}
+[08:00:02] c1-host-close-read: {"trials": 250, "results": {"END": 250}, "observations": {"('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 111.635, "p50": 148.78, "p99": 227.879, "max": 305.796}}
+[08:00:08] c2-host-linger0-read: {"trials": 250, "results": {"END": 250}, "observations": {"('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 107.8, "p50": 150.768, "p99": 243.813, "max": 302.856}}
+[08:00:18] c3-host-sigkill-read: {"trials": 250, "results": {"END": 250}, "observations": {"('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 593.34, "p50": 865.84, "p99": 1251.103, "max": 1285.679}}
+[08:00:25] c5-data-then-close-read: {"trials": 250, "results": {"END": 250}, "observations": {"('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 133.616, "p50": 188.809, "p99": 270.362, "max": 335.735}}
+[08:00:32] c1-host-close-epoll: {"trials": 250, "results": {"END": 250}, "observations": {"('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 104.016, "p50": 155.96, "p99": 259.901, "max": 304.223}}
+[08:00:39] c2-host-linger0-epoll: {"trials": 250, "results": {"END": 250}, "observations": {"('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 92.496, "p50": 136.62, "p99": 239.737, "max": 245.309}}
+[08:00:50] c3-host-sigkill-epoll: {"trials": 250, "results": {"END": 250}, "observations": {"('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 638.072, "p50": 883.734, "p99": 1206.895, "max": 1310.151}}
+[08:00:58] c5-data-then-close-epoll: {"trials": 250, "results": {"END": 250}, "observations": {"('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 81.675, "p50": 179.185, "p99": 272.951, "max": 277.266}}
+[08:01:10] c3b-host-sigkill-unaccepted-epoll: {"trials": 250, "results": {"END": 250}, "observations": {"('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 669.844, "p50": 764.005, "p99": 1003.153, "max": 1139.56}}
+[08:01:22] c3b-host-sigkill-unaccepted-read: {"trials": 250, "results": {"END": 250}, "observations": {"('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 683.317, "p50": 796.028, "p99": 959.622, "max": 1016.202}}
+[08:01:23] c4a-no-listener: {"trials": 250, "results": {"CONNECT-FAIL": 250}, "observations": {"(None, None, None, None, 'ECONNRESET')": 250}, "connect_latency_us": {"min": 53.21, "p50": 63.395, "p99": 192.12, "max": 208.153}}
+[08:01:34] c4b-backlog-full-refused: {"trials": 250, "results": {"CONNECT-FAIL": 250}, "observations": {"(None, None, None, None, 'ECONNRESET')": 250}, "connect_latency_us": {"min": 57.396, "p50": 76.074, "p99": 122.374, "max": 154.352}}
+[08:01:34] c4b-filler-after-listener-close: {"trials": 250, "results": {"END": 250}, "observations": {"('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 65.836, "p50": 102.481, "p99": 229.562, "max": 241.535}}
+[08:01:43] c4c-listener-close-queued-epoll: {"trials": 250, "results": {"END": 250}, "observations": {"('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 111.33, "p50": 201.091, "p99": 329.513, "max": 331.782}}
+[08:01:52] c4c-listener-close-queued-read: {"trials": 250, "results": {"END": 250}, "observations": {"('read=EOF', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 250}, "latency_us": {"min": 122.272, "p50": 225.097, "p99": 317.087, "max": 375.911}}
+[08:01:56] c4d-connect-vs-listener-close-race: {"trials": 500, "results": {"END": 424, "CONNECT-FAIL": 76}, "observations": {"('epoll=IN|RDHUP', 'eof', 'IN|OUT|RDHUP', 'EPIPE', None)": 424, "(None, None, None, None, 'ECONNRESET')": 76}, "latency_us": {"min": 27.926, "p50": 50.691, "p99": 87.076, "max": 202.324}, "connect_latency_us": {"min": 54.252, "p50": 66.19, "p99": 192.73, "max": 210.547}}
+[08:01:56] unrelated idle connection: false_ends=0 final_byte=True
+[08:01:56] === teardown
+[08:01:56] $ ss --vsock -a -n -p > /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/increment-c/evidence/host-ss-vsock-end.txt 2>&1; head -20 /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/increment-c/evidence/host-ss-vsock-end.txt  (rc=0)
+[08:01:56]     Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:Port      Process                               
+[08:01:56]     v_str LISTEN 0      0                  *:52520            *:*          users:(("python3",pid=2062866,fd=8)) 
+[08:01:56]     v_str ESTAB  0      0                  2:52520         3260:1777449274 users:(("python3",pid=2062866,fd=9)) 
+[08:01:56]     v_str ESTAB  0      0                  2:52521         3260:1777449275 users:(("python3",pid=2062866,fd=11))
+[08:01:56] $ pgrep -af 'cloud-hypervisor' | grep -v pgrep || true  (rc=0)
+{"launcher_rc": 0, "wall_s": 248.6}

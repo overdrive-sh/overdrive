@@ -1,0 +1,16 @@
+{
+  "ch_commits_since_v53": "41a619d19 vmm: Add backend=vhost-kernel to --vsock\n9b68dbb57 virtio-devices: vsock: Add vhost-kernel backed vsock device",
+  "ch_submodule_branch": "overdrive/vhost-kernel-vsock",
+  "ch_submodule_dirty": "",
+  "ch_submodule_head": "41a619d191f6472f79a3f22bcb9576c2a516906c",
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-ka5/increment-a/run.py suite=smoke",
+  "spike_sources": {
+    "spike-scratch/netns-density-295-ka5/guest-init.sh": "e9130db947a2a3179343686567755338c90a86d4bc99768b96a03ab0c1bc58a2",
+    "spike-scratch/netns-density-295-ka5/guest/Cargo.toml": "e1138310afa951e8ed16846d227c632396dde843856a37d5d7c3d47bd6db0487",
+    "spike-scratch/netns-density-295-ka5/holder.py": "bf5c68de08821fdd8dfabea4fb3e29fb14930916a4499ffe64be4a9f802489e4",
+    "spike-scratch/netns-density-295-ka5/increment-a/run.py": "1ad944e0772539bc4b05f3b416c22c8c804c130fe7c89378e5805ad617c7e160",
+    "spike-scratch/netns-density-295-ka5/launch.py": "66f24dcfff87eaa285704ca754b841f7ac04d0167964e33f3b62d5cfcd90b47a",
+    "spike-scratch/netns-density-295-ka5/rsync-owned-filter.sh": "273c186cd9d8a7cf56fc18be23f4b72641c9fc5faad67be32fb2e6932ae13de8"
+  },
+  "superproject_head": "b71c774889388fbf0174fd786a6dfe537eef6f10"
+}

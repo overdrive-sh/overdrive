@@ -1,0 +1,120 @@
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+────────────
+[32;1m Nextest run[0m ID [1mc050e085-8836-4255-a2aa-970c5bfa9dd9[0m with nextest profile: [1mdefault[0m
+[32;1m    Starting[0m [1m9[0m tests across [1m1[0m binary
+[32;1m        PASS[0m [   0.426s] (1/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_as_instance[0m
+[31;1m        FAIL[0m [   0.440s] (2/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mprobe_segmented_path[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::probe_segmented_path ... FAILED
+
+    failures:
+
+    failures:
+        conformance::probe_segmented_path
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.43s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for probe_segmented_path
+       Generating 100 traces using `0xc42d602c` as random seed ...
+       Replaying traces ...
+       [FAIL] probe_segmented_path 
+       Reproduce this error with `QUINT_SEED=0xc42d602c`
+
+
+    [0m[31;1mthread 'conformance::probe_segmented_path' (201220) panicked at src/lib.rs:171:5:[0m
+    [31;1mCan not find a Record at "bank_ok" in path: ["bank_ok", "bank", "conf_step"][0m
+    Current state: { bank_ok::bank::a: 0, bank_ok::bank::b: 0, bank_ok::bank::conf_step: Init }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+[31;1m        FAIL[0m [   0.441s] (3/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mprobe_bare_path[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::probe_bare_path ... FAILED
+
+    failures:
+
+    failures:
+        conformance::probe_bare_path
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.44s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for probe_bare_path
+       Generating 100 traces using `0xcea2f7eb` as random seed ...
+       Replaying traces ...
+       [FAIL] probe_bare_path 
+       Reproduce this error with `QUINT_SEED=0xcea2f7eb`
+
+
+    [0m[31;1mthread 'conformance::probe_bare_path' (201222) panicked at src/lib.rs:166:5:[0m
+    [31;1mCan not find a Record at "conf_step" in path: ["conf_step"][0m
+    Current state: { bank_ok::bank::a: 0, bank_ok::bank::b: 0, bank_ok::bank::conf_step: Init }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+[32;1m        PASS[0m [   0.447s] (4/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_deposit_then_withdraw[0m
+[32;1m        PASS[0m [   0.454s] (5/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_deposit_transfer_deposit[0m
+[31;1m        FAIL[0m [   0.455s] (6/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mred_mbt_named_run[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::red_mbt_named_run ... FAILED
+
+    failures:
+
+    failures:
+        conformance::red_mbt_named_run
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.45s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for red_mbt_named_run
+       Generating 100 traces using `0x877e4321` as random seed ...
+       Replaying traces ...
+       [FAIL] red_mbt_named_run 
+       Reproduce this error with `QUINT_SEED=0x877e4321`
+
+
+    [0m[31;1mthread 'conformance::red_mbt_named_run' (201219) panicked at src/lib.rs:133:5:[0m
+    [31;1mMissing `mbt::actionTaken` variable in the trace[0m
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+[31;1m        FAIL[0m [   0.460s] (7/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mprobe_non_recording_main_named_run[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::probe_non_recording_main_named_run ... FAILED
+
+    failures:
+
+    failures:
+        conformance::probe_non_recording_main_named_run
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.46s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for probe_non_recording_main_named_run
+       Generating 100 traces using `0x817a4b9` as random seed ...
+       Replaying traces ...
+       Specification and implementation states diverge
+       [FAIL] probe_non_recording_main_named_run 
+       Reproduce this error with `QUINT_SEED=0x817a4b9`
+
+
+    [0m[31;1mthread 'conformance::probe_non_recording_main_named_run' (201228) panicked at src/lib.rs:177:5:[0m
+    [31;1mState invariant failed[0m
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+[32;1m        PASS[0m [   0.491s] (8/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mcontrol_run_mbt_default_config[0m
+[32;1m        PASS[0m [   0.504s] (9/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_run_random[0m
+────────────
+[31;1m     Summary[0m [   0.505s] [1m9[0m tests run: [1m5[0m [32;1mpassed[0m, [1m4[0m [31;1mfailed[0m, [1m0[0m [33;1mskipped[0m
+[31;1m        FAIL[0m [   0.440s] (2/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mprobe_segmented_path[0m
+[31;1m        FAIL[0m [   0.441s] (3/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mprobe_bare_path[0m
+[31;1m        FAIL[0m [   0.455s] (6/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mred_mbt_named_run[0m
+[31;1m        FAIL[0m [   0.460s] (7/9) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mprobe_non_recording_main_named_run[0m
+[31;1merror[0m: test run failed
+full-suite exit=100

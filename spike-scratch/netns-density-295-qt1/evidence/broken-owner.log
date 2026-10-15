@@ -1,0 +1,299 @@
+[1m[92m   Compiling[0m quint-connect v0.1.2
+[1m[92m   Compiling[0m qt1-conf-step v0.0.0 (/Users/marcus/conductor/workspaces/helios/wellington-v2/spike-scratch/netns-density-295-qt1)
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+────────────
+[32;1m Nextest run[0m ID [1mea3dd49f-ff1b-49a6-8208-7f03c6821065[0m with nextest profile: [1mdefault[0m
+[32;1m    Starting[0m [1m4[0m tests across [1m1[0m binary ([1m5[0m tests [33;1mskipped[0m)
+[31;1m        FAIL[0m [   0.288s] (1/4) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_deposit_then_withdraw[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::green_named_deposit_then_withdraw ... FAILED
+
+    failures:
+
+    failures:
+        conformance::green_named_deposit_then_withdraw
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.29s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for green_named_deposit_then_withdraw
+       Generating 100 traces using `0xfde74d` as random seed ...
+       Replaying traces ...
+       [Trace 1]
+       [Step 0]
+       Action taken: Init
+       Nondet picks: <none>
+       Next state:
+       + bank_ok::bank::a: 0
+       + bank_ok::bank::b: 0
+       + bank_ok::bank::conf_step: Init
+
+       [Step 1]
+       Action taken: Deposit
+       Nondet picks:
+       + acct: "a"
+       + amt: 3
+       Next state:
+       + bank_ok::bank::a: 3
+       + bank_ok::bank::b: 0
+       + bank_ok::bank::conf_step: Deposit({ acct: "a", amt: 3 })
+
+       [Step 2]
+       Action taken: Withdraw
+       Nondet picks:
+       + acct: "a"
+       + amt: 2
+       Next state:
+       + bank_ok::bank::a: 1
+       + bank_ok::bank::b: 0
+       + bank_ok::bank::conf_step: Withdraw({ acct: "a", amt: 2 })
+
+       Specification and implementation states diverge
+       --- specification
+       +++ implementation
+       @@ -1,4 +1,4 @@
+        BankState {
+       -    a: 1,
+       +    a: 2,
+            b: 0,
+        }
+
+       [FAIL] green_named_deposit_then_withdraw 
+       Reproduce this error with `QUINT_SEED=0xfde74d`
+
+
+    [0m[31;1mthread 'conformance::green_named_deposit_then_withdraw' (201541) panicked at src/lib.rs:139:5:[0m
+    [31;1mState invariant failed[0m
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+[31;1m        FAIL[0m [   0.289s] (2/4) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_as_instance[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::green_named_as_instance ... FAILED
+
+    failures:
+
+    failures:
+        conformance::green_named_as_instance
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.29s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for green_named_as_instance
+       Generating 100 traces using `0x8fa8c0a2` as random seed ...
+       Replaying traces ...
+       [Trace 1]
+       [Step 0]
+       Action taken: Init
+       Nondet picks: <none>
+       Next state:
+       + bank_as::inst::a: 0
+       + bank_as::inst::b: 0
+       + bank_as::inst::conf_step: Init
+
+       [Step 1]
+       Action taken: Deposit
+       Nondet picks:
+       + acct: "a"
+       + amt: 3
+       Next state:
+       + bank_as::inst::a: 3
+       + bank_as::inst::b: 0
+       + bank_as::inst::conf_step: Deposit({ acct: "a", amt: 3 })
+
+       [Step 2]
+       Action taken: Withdraw
+       Nondet picks:
+       + acct: "a"
+       + amt: 2
+       Next state:
+       + bank_as::inst::a: 1
+       + bank_as::inst::b: 0
+       + bank_as::inst::conf_step: Withdraw({ acct: "a", amt: 2 })
+
+       Specification and implementation states diverge
+       --- specification
+       +++ implementation
+       @@ -1,4 +1,4 @@
+        BankState {
+       -    a: 1,
+       +    a: 2,
+            b: 0,
+        }
+
+       [FAIL] green_named_as_instance 
+       Reproduce this error with `QUINT_SEED=0x8fa8c0a2`
+
+
+    [0m[31;1mthread 'conformance::green_named_as_instance' (201542) panicked at src/lib.rs:160:5:[0m
+    [31;1mState invariant failed[0m
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+[31;1m        FAIL[0m [   0.290s] (3/4) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_deposit_transfer_deposit[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::green_named_deposit_transfer_deposit ... FAILED
+
+    failures:
+
+    failures:
+        conformance::green_named_deposit_transfer_deposit
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.29s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for green_named_deposit_transfer_deposit
+       Generating 100 traces using `0xc403519b` as random seed ...
+       Replaying traces ...
+       [Trace 1]
+       [Step 0]
+       Action taken: Init
+       Nondet picks: <none>
+       Next state:
+       + bank_ok::bank::a: 0
+       + bank_ok::bank::b: 0
+       + bank_ok::bank::conf_step: Init
+
+       [Step 1]
+       Action taken: Deposit
+       Nondet picks:
+       + acct: "a"
+       + amt: 2
+       Next state:
+       + bank_ok::bank::a: 2
+       + bank_ok::bank::b: 0
+       + bank_ok::bank::conf_step: Deposit({ acct: "a", amt: 2 })
+
+       [Step 2]
+       Action taken: Transfer
+       Nondet picks:
+       + amt: 2
+       Next state:
+       + bank_ok::bank::a: 0
+       + bank_ok::bank::b: 2
+       + bank_ok::bank::conf_step: Transfer({ amt: 2 })
+
+       [Step 3]
+       Action taken: Deposit
+       Nondet picks:
+       + acct: "b"
+       + amt: 1
+       Next state:
+       + bank_ok::bank::a: 0
+       + bank_ok::bank::b: 3
+       + bank_ok::bank::conf_step: Deposit({ acct: "b", amt: 1 })
+
+       [Step 4]
+       Action taken: Withdraw
+       Nondet picks:
+       + acct: "b"
+       + amt: 1
+       Next state:
+       + bank_ok::bank::a: 0
+       + bank_ok::bank::b: 2
+       + bank_ok::bank::conf_step: Withdraw({ acct: "b", amt: 1 })
+
+       Specification and implementation states diverge
+       --- specification
+       +++ implementation
+       @@ -1,4 +1,4 @@
+        BankState {
+            a: 0,
+       -    b: 2,
+       +    b: 3,
+        }
+
+       [FAIL] green_named_deposit_transfer_deposit 
+       Reproduce this error with `QUINT_SEED=0xc403519b`
+
+
+    [0m[31;1mthread 'conformance::green_named_deposit_transfer_deposit' (201539) panicked at src/lib.rs:144:5:[0m
+    [31;1mState invariant failed[0m
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+[31;1m        FAIL[0m [   0.318s] (4/4) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_run_random[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test conformance::green_run_random ... FAILED
+
+    failures:
+
+    failures:
+        conformance::green_run_random
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.32s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+    == Running model based tests for green_run_random
+       Generating 50 traces using `0x5da8823e` as random seed ...
+       Replaying traces ...
+       [Trace 1]
+       [Step 0]
+       Action taken: Init
+       Nondet picks: <none>
+       Next state:
+       + bank_ok::bank::a: 0
+       + bank_ok::bank::b: 0
+       + bank_ok::bank::conf_step: Init
+
+       [Step 1]
+       Action taken: Deposit
+       Nondet picks:
+       + acct: "a"
+       + amt: 1
+       Next state:
+       + bank_ok::bank::a: 1
+       + bank_ok::bank::b: 0
+       + bank_ok::bank::conf_step: Deposit({ acct: "a", amt: 1 })
+
+       [Step 2]
+       Action taken: Deposit
+       Nondet picks:
+       + acct: "b"
+       + amt: 2
+       Next state:
+       + bank_ok::bank::a: 1
+       + bank_ok::bank::b: 2
+       + bank_ok::bank::conf_step: Deposit({ acct: "b", amt: 2 })
+
+       [Step 3]
+       Action taken: Withdraw
+       Nondet picks:
+       + acct: "b"
+       + amt: 1
+       Next state:
+       + bank_ok::bank::a: 1
+       + bank_ok::bank::b: 1
+       + bank_ok::bank::conf_step: Withdraw({ acct: "b", amt: 1 })
+
+       Specification and implementation states diverge
+       --- specification
+       +++ implementation
+       @@ -1,4 +1,4 @@
+        BankState {
+            a: 1,
+       -    b: 1,
+       +    b: 2,
+        }
+
+       [FAIL] green_run_random 
+       Reproduce this error with `QUINT_SEED=0x5da8823e`
+
+
+    [0m[31;1mthread 'conformance::green_run_random' (201540) panicked at src/lib.rs:149:5:[0m
+    [31;1mState invariant failed[0m
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+────────────
+[31;1m     Summary[0m [   0.319s] [1m4[0m tests run: [1m0[0m [32;1mpassed[0m, [1m4[0m [31;1mfailed[0m, [1m5[0m [33;1mskipped[0m
+[31;1m        FAIL[0m [   0.288s] (1/4) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_deposit_then_withdraw[0m
+[31;1m        FAIL[0m [   0.289s] (2/4) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_as_instance[0m
+[31;1m        FAIL[0m [   0.290s] (3/4) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_named_deposit_transfer_deposit[0m
+[31;1m        FAIL[0m [   0.318s] (4/4) [35;1mqt1-conf-step[0m [36mconformance[0m[36m::[0m[34;1mgreen_run_random[0m
+[31;1merror[0m: test run failed
+broken-owner exit=100

@@ -1,0 +1,59 @@
+[07:55:09] === preflight (fail-closed substrate probes)
+[07:55:09] $ uname -a; grep -m1 'model name' /proc/cpuinfo; nproc; free -m | head -2; ls -l /dev/kvm /dev/vhost-vsock  (rc=0)
+[07:55:09]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[07:55:09]     model name	: AMD EPYC 8024P 8-Core Processor
+[07:55:09]     16
+[07:55:09]                    total        used        free      shared  buff/cache   available
+[07:55:09]     Mem:           63868        2740       25202         793       37435       61128
+[07:55:09]     crw-rw---- 1 root kvm 10, 232 Oct 15 07:55 /dev/kvm
+[07:55:09]     crw-rw---- 1 root kvm 10, 241 Oct  8 22:11 /dev/vhost-vsock
+[07:55:09] === build
+[07:55:11] $ cp -a /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/cargo-home /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/cargo-home  (rc=0)
+[07:55:11] $ cp -a /home/ubuntu/overdrive/spike-scratch/netns-density-295-v24/out/ch-target /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/out/ch-target  (rc=0)
+[07:56:24] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[07:56:24]        Compiling option_parser v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/option_parser)
+[07:56:24]        Compiling env_filter v2.0.0
+[07:56:24]        Compiling darling_macro v0.23.0
+[07:56:24]        Compiling num_enum v0.7.6
+[07:56:24]        Compiling env_logger v0.11.11
+[07:56:24]        Compiling vm-allocator v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-allocator)
+[07:56:24]        Compiling linux-loader v0.13.2
+[07:56:24]        Compiling darling v0.23.0
+[07:56:24]        Compiling serde_with_macros v3.21.0
+[07:56:24]        Compiling clap v4.6.1
+[07:56:24]        Compiling serde_with v3.21.0
+[07:56:24]        Compiling vmm-sys-util v0.15.0
+[07:56:24]        Compiling event_monitor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/event_monitor)
+[07:56:24]        Compiling tracer v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tracer)
+[07:56:24]        Compiling vfio-bindings v0.6.2
+[07:56:24]        Compiling iommufd-ioctls v0.2.0
+[07:56:24]        Compiling virtio-queue v0.17.0
+[07:56:24]        Compiling rate_limiter v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/rate_limiter)
+[07:56:24]        Compiling tpm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/tpm)
+[07:56:24]        Compiling vhost v0.16.0
+[07:56:24]        Compiling vm-virtio v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-virtio)
+[07:56:24]        Compiling vfio_user v0.1.3
+[07:56:24]        Compiling api_client v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/api_client)
+[07:56:24]        Compiling net_util v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/net_util)
+[07:56:24]        Compiling rustls-webpki v0.103.13
+[07:56:24]        Compiling kvm-bindings v0.14.1
+[07:56:24]        Compiling acpi_tables v0.2.1
+[07:56:24]        Compiling zstd v0.13.3
+[07:56:24]        Compiling block v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/block)
+[07:56:24]        Compiling vfio-ioctls v0.7.0
+[07:56:24]        Compiling vm-migration v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-migration)
+[07:56:24]        Compiling hypervisor v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/hypervisor)
+[07:56:24]        Compiling vm-device v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vm-device)
+[07:56:24]        Compiling arch v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/arch)
+[07:56:24]        Compiling pci v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/pci)
+[07:56:24]        Compiling devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/devices)
+[07:56:24]        Compiling virtio-devices v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/virtio-devices)
+[07:56:24]        Compiling vmm v0.1.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/vmm)
+[07:56:24]        Compiling cloud-hypervisor v53.0.0 (/home/ubuntu/overdrive/vendors/cloud-hypervisor/cloud-hypervisor)
+[07:56:24]         Finished `release` profile [optimized] target(s) in 1m 12s
+[07:56:24] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/guest/Cargo.toml  (rc=101)
+[07:56:24]     error: failed to parse manifest at `/home/ubuntu/overdrive/spike-scratch/netns-density-295-ka5/guest/Cargo.toml`
+[07:56:24]     
+[07:56:24]     Caused by:
+[07:56:24]       no targets specified in the manifest
+[07:56:24]       either src/lib.rs, src/main.rs, a [lib] section, or [[bin]] section must be present
