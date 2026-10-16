@@ -1,0 +1,15 @@
+7.0.0-29-generic
+{"row":"env","uname_r":"7.0.0-29-generic"}
+{"row":"btf","vmlinux_types":168880,"vmlinux_funcs":69482}
+---ctx
+1013
+page_pool_alloc_netmems	NULL
+vmlinux
+vmw_vsock_virtio_transport
+vmw_vsock_virtio_transport_common
+vsock
+
+thread 'main' (121) panicked at src/main.rs:44:14:
+range start index 2815802 out of range for slice of length 2529
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+cat: can't open '/sys/kernel/security/lsm': No such file or directory

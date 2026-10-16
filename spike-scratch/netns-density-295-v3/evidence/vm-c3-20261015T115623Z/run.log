@@ -1,0 +1,55 @@
+[11:56:23] === v3 vm stage c3 {'abort': '100', 'sample_ms': '20'}
+[11:56:23] === preflight (fail closed)
+[11:56:23] substrate: {"host_uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16, "meminfo_head": ["MemTotal:       65401772 kB", "MemFree:        22492720 kB", "MemAvailable:   61325412 kB"]}
+[11:56:23] $ modprobe vhost_vsock; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[11:56:23]     vsock_diag             12288  0
+[11:56:23]     vhost_vsock            28672  0
+[11:56:23]     vhost                  69632  1 vhost_vsock
+[11:56:23]     vhost_iotlb            16384  1 vhost
+[11:56:23]     vsock_loopback         12288  0
+[11:56:23]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[11:56:23]     vmw_vsock_vmci_transport    53248  0
+[11:56:23]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[11:56:23]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[11:56:23] === guest image
+[11:56:24] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "72f6d451a1a9", "v3probe": "6b109ad127aa", "bpf_obj": "746e211f6a21", "cloud_hypervisor": "eadddf1bbcdc"}
+[11:56:24] launch VM: /tmp/v3-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v3-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=1024M --serial file=/tmp/v3-work/out/vm-c3-20261015T115623Z/serial.log --console off --vsock cid=3370,backend=vhost-kernel --log-file /tmp/v3-work/out/vm-c3-20261015T115623Z/ch.log -v
+[11:56:24] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[11:56:24] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+MemTotal:         977368 kB
+MemFree:          879468 kB
+MemAvailable:     832068 kB
+-r--------    1 0        0                0 Oct 15 11:56 /proc/slabinfo
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[11:56:28] post-run guest state: MemAvailable:     814464 kB
+SUnreclaim:        19460 kB
+
+[11:56:28] t=   0.02s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.04s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.07s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.10s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.12s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.15s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.17s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.20s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.22s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   2.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.25s fwd=      0.0MiB sent=      0.0MiB queued=      0.0MiB avail=   794.2MiB sunrec=    18.4MiB slab=    19.8MiB tcpmem=   1.0MiB skb_head=     367 outq=0 peer_inq=0 src_inq=0 sendfail=0 drops=0 errno=0 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['kmalloc-rnd-07-4k', 1]]
+t=   0.27s fwd=     49.6MiB sent=      2.5MiB queued=     47.1MiB avail=   745.1MiB sunrec=    20.1MiB slab=    21.5MiB tcpmem=   3.0MiB skb_head=     367 outq=2594331 peer_inq=112650 src_inq=0 sendfail=15 drops=0 errno=11 top=[['kernfs_node_cache', 3], ['task_struct', 1], ['skbuff_small_head', 1]]
+t=   0.30s fwd=    103.5MiB sent=      2.6MiB queued=    100.9MiB avail=   689.3MiB sunrec=    22.2MiB slab=    23.6MiB tcpmem=   3.0MiB skb_head=     367 outq=2608758 peer_inq=112650 src_inq=0 sendfail=29 drops=0 errno=11 top=[['kernfs_node_cache', 3], ['skbuff_small_head', 2], ['pool_workqueue', 1]]
+[11:56:28] $ pgrep -af 'cloud-hypervisor|v3probe' | grep -v pgrep; true (rc=0)

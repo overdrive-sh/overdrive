@@ -1,0 +1,10 @@
+{
+  "qemu_exit": 0,
+  "passed": true,
+  "elapsed_s": 553.6189907388762,
+  "variant": "kernel",
+  "protocol": "tcp",
+  "max_population": 16384,
+  "repeat": 1,
+  "private_kernel_only": true
+}

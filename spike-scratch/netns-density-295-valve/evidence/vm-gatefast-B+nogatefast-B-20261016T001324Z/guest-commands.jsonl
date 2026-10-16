@@ -1,0 +1,3 @@
+{"t": 1792109605.8106704, "cmd": "uname -r; ls /sys/kernel/btf/vmlinux; grep -E 'MemTotal|MemAvailable' /proc/meminfo", "rc": 0, "out": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\nMemTotal:         977368 kB\nMemAvailable:     831920 kB\n"}
+{"t": 1792109607.8142042, "cmd": "/valveprobe send --cid 2 --port 7157 --bytes 536870912 --trials 100 --label gatefast-B --fast-gen 1 > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}
+{"t": 1792109856.490592, "cmd": "/valveprobe send --cid 2 --port 7158 --bytes 536870912 --trials 40 --label nogatefast-B --fast-gen 1 > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}

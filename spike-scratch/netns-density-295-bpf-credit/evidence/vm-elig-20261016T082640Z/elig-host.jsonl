@@ -1,0 +1,6 @@
+{"row":"env","uname_r":"7.0.0-29-generic"}
+{"row":"btf","vmlinux_types":168880,"vmlinux_funcs":69482}
+
+thread 'main' (2116547) panicked at src/main.rs:44:14:
+range start index 2815802 out of range for slice of length 2529
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

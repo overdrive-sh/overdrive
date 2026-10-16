@@ -1,0 +1,33 @@
+aesni_intel            98304  0 
+tls                   163840  0 
+name         : gcm(aes)
+driver       : generic-gcm-vaes-avx512
+priority     : 800
+name         : gcm(aes)
+driver       : generic-gcm-vaes-avx2
+priority     : 600
+name         : gcm(aes)
+driver       : generic-gcm-aesni-avx
+priority     : 500
+name         : gcm(aes)
+driver       : generic-gcm-aesni
+priority     : 400
+cpu MHz		: 2396.400
+flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_
+TlsCurrTxSw                     	0
+TlsCurrRxSw                     	0
+TlsCurrTxDevice                 	0
+TlsCurrRxDevice                 	0
+TlsTxSw                         	0
+TlsRxSw                         	0
+TlsTxDevice                     	0
+TlsRxDevice                     	0
+TlsDecryptError                 	0
+TlsRxDeviceResync               	0
+TlsDecryptRetry                 	0
+TlsRxNoPadViolation             	0
+TlsRxRekeyOk                    	0
+TlsRxRekeyError                 	0
+TlsTxRekeyOk                    	0
+TlsTxRekeyError                 	0
+TlsRxRekeyReceived              	0

@@ -1,0 +1,6 @@
+{
+  "all_pass": true,
+  "cells": "evmod-tcp:0",
+  "maximum": 1,
+  "physical_modules_links_preserved": true
+}

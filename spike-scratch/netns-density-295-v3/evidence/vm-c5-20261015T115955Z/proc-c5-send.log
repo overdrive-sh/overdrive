@@ -1,0 +1,3 @@
+{"ev":"send_ready","label":"c5","uname":"7.0.0-29-generic","cid":3370,"port":7005,"total":268435456,"trials":1}
+{"ev":"send_prog","label":"c5","trial":0,"t_ms":3024,"sent":11993088,"max_send_ms":3000,"slow_sends":1}
+{"ev":"send_end","label":"c5","trial":0,"outcome":"err_32","sent":77485944,"secs":3.149,"mbps":23.5,"max_send_ms":3000,"slow_sends":1,"sends":1184,"peer_closed_read":0}

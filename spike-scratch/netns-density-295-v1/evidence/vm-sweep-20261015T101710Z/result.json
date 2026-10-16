@@ -1,0 +1,6 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "exception": "ValueError('too many values to unpack (expected 8, got 10)')"
+}

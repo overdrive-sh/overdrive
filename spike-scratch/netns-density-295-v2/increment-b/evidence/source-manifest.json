@@ -1,0 +1,17 @@
+{
+  "ch_commits_since_v53": "41a619d19 vmm: Add backend=vhost-kernel to --vsock\n9b68dbb57 virtio-devices: vsock: Add vhost-kernel backed vsock device",
+  "ch_submodule_branch": "overdrive/vhost-kernel-vsock",
+  "ch_submodule_dirty": "",
+  "ch_submodule_head": "41a619d191f6472f79a3f22bcb9576c2a516906c",
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-v2/increment-b/run.py suite=full n=250",
+  "spike_sources": {
+    "spike-scratch/netns-density-295-v2/guest-init.sh": "0f32f706a891be1e525abe0c8c001fb0a1d24857389e8f4883ff59f446e3384f",
+    "spike-scratch/netns-density-295-v2/guest/Cargo.toml": "e5e44a55e3ed13a55849c40274e8adb89f5779de0804948f2fe6f01291a453b5",
+    "spike-scratch/netns-density-295-v2/guest/src/main.rs": "77f17c1b41b4b7bd40af991fbb7d7c00cdea9213c5883867afdcf525d51586b7",
+    "spike-scratch/netns-density-295-v2/increment-a/run.py": "08f037a5c16717ab98b4e895535a30aa990ac7f213fec141e5469c4bd3b6da81",
+    "spike-scratch/netns-density-295-v2/increment-b/run.py": "08f037a5c16717ab98b4e895535a30aa990ac7f213fec141e5469c4bd3b6da81",
+    "spike-scratch/netns-density-295-v2/launch.py": "50fa5ddb0a6fd7fc9fa3c9e10fe808f347319069ff4c6afa78675a4712cec769",
+    "spike-scratch/netns-density-295-v2/rsync-owned-filter.sh": "96ffc55f8472838ac7e0e8b60859635a4437f52f325c9d11238fc047c1dd0f0c"
+  },
+  "superproject_head": "3bab7b132ee81cd04a210ca207c281fda72f9b66"
+}

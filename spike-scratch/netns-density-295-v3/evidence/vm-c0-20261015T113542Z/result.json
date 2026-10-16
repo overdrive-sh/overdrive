@@ -1,0 +1,54 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "sink_trial_end": [
+   {
+    "ev": "trial_end",
+    "label": "c0",
+    "kind": "plain",
+    "src": "vsock",
+    "trial": 0,
+    "outcome": "plateau_idle",
+    "secs": 6.06,
+    "samples": 9,
+    "fwd": 0,
+    "sent": 0,
+    "queued_end": 0,
+    "peak_queued": 0,
+    "peak_queued_at_ms": 0,
+    "verdicts": 0,
+    "drops": 0,
+    "send_calls": 0,
+    "send_fail": 0,
+    "app_sent": 0,
+    "app_state": 0,
+    "avail_start_kb": 830268,
+    "avail_end_kb": 837968,
+    "avail_after_close_kb": 839656,
+    "sunreclaim_start_kb": 19084,
+    "sunreclaim_end_kb": 19208,
+    "sunreclaim_after_close_kb": 19152
+   }
+  ],
+  "send_end": [
+   {
+    "ev": "send_end",
+    "label": "c0",
+    "trial": 0,
+    "outcome": "err_32",
+    "sent": 262144,
+    "secs": 4.559,
+    "mbps": 0.1,
+    "max_send_ms": 4558,
+    "slow_sends": 1,
+    "sends": 5,
+    "peer_closed_read": 0
+   }
+  ],
+  "max_src_inq": 262144,
+  "bad_json_lines": 0
+ }
+}

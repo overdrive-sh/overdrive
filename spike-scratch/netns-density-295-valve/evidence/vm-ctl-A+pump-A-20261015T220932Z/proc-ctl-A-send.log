@@ -1,0 +1,4 @@
+{"ev":"send_ready","label":"ctl-A","uname":"7.0.0-29-generic","cid":3370,"port":7100,"bytes":268435456,"trials":3}
+{"ev":"send_end","label":"ctl-A","trial":0,"outcome":"err_32","sent":177537024,"secs":0.266,"mibps":635.4,"max_send_ms":2,"sent_at_longest_block_start":1703936,"blocks":[],"off_ns":-5387979870775427,"best_rtt_ns":49584,"t_start_ns":5387981944720865,"peer_closed_read":0}
+{"ev":"send_end","label":"ctl-A","trial":1,"outcome":"err_32","sent":172425216,"secs":0.322,"mibps":511.4,"max_send_ms":0,"sent_at_longest_block_start":0,"blocks":[],"off_ns":-5387979870764241,"best_rtt_ns":55063,"t_start_ns":5387983722777827,"peer_closed_read":0}
+{"ev":"send_end","label":"ctl-A","trial":2,"outcome":"err_32","sent":171101208,"secs":0.326,"mibps":500.8,"max_send_ms":0,"sent_at_longest_block_start":0,"blocks":[],"off_ns":-5387979870771142,"best_rtt_ns":46961,"t_start_ns":5387985551874461,"peer_closed_read":0}

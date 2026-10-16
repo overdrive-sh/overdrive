@@ -1,0 +1,628 @@
+{
+ "host_uname_r": "7.0.0-38-generic",
+ "scenarios": {
+  "leak-ctl": {
+   "scenario": "leak-ctl",
+   "dir": "leak",
+   "wall_s": 0,
+   "outcomes": {},
+   "cycles": 300,
+   "control": true,
+   "failures": 0,
+   "snaps": [
+    [
+     0,
+     820496,
+     19944,
+     21272
+    ],
+    [
+     30,
+     820156,
+     20048,
+     21588
+    ],
+    [
+     60,
+     821784,
+     20204,
+     21888
+    ],
+    [
+     90,
+     821136,
+     20368,
+     22096
+    ],
+    [
+     120,
+     822504,
+     20436,
+     22164
+    ],
+    [
+     150,
+     822304,
+     20452,
+     22180
+    ],
+    [
+     180,
+     821676,
+     20520,
+     22248
+    ],
+    [
+     210,
+     822612,
+     20544,
+     22272
+    ],
+    [
+     240,
+     824120,
+     20580,
+     22308
+    ],
+    [
+     270,
+     823868,
+     20604,
+     22332
+    ],
+    [
+     300,
+     825688,
+     20620,
+     22348
+    ]
+   ],
+   "SUnreclaim_slope_KiB_per_cycle": 2.172,
+   "Slab_slope_KiB_per_cycle": 3.046,
+   "MemAvailable_slope_KiB_per_cycle": 15.133,
+   "named_start_end": {
+    "AF_VSOCK": [
+     24,
+     24
+    ],
+    "TCP": [
+     12,
+     48
+    ],
+    "sock_inode_cache": [
+     112,
+     140
+    ],
+    "skbuff_head_cache": [
+     340,
+     368
+    ],
+    "skbuff_fclone_cache": [
+     0,
+     0
+    ],
+    "skbuff_small_head": [
+     84,
+     112
+    ]
+   },
+   "slab_objs_delta_top": {
+    "eventpoll_epi": 780,
+    "vmap_area": 600,
+    "tw_sock_TCP": 336,
+    "lsm_file_cache": 180,
+    "dentry": 120,
+    "file_lock_cache": 120,
+    "filp": 120,
+    "kmalloc-rnd-11-32": 120,
+    "kmalloc-rnd-13-96": 120,
+    "request_sock_TCP": 84,
+    "kmalloc-rnd-12-32": 60,
+    "seq_file": 60
+   },
+   "module_loaded_after": true
+  },
+  "leak-mod": {
+   "scenario": "leak-mod",
+   "dir": "leak",
+   "wall_s": 0,
+   "outcomes": {},
+   "cycles": 300,
+   "control": false,
+   "failures": 0,
+   "snaps": [
+    [
+     0,
+     828936,
+     20356,
+     22084
+    ],
+    [
+     30,
+     827252,
+     20508,
+     22236
+    ],
+    [
+     60,
+     825600,
+     20544,
+     22272
+    ],
+    [
+     90,
+     823148,
+     20592,
+     22352
+    ],
+    [
+     120,
+     824584,
+     20624,
+     22384
+    ],
+    [
+     150,
+     824464,
+     20656,
+     22416
+    ],
+    [
+     180,
+     824696,
+     20680,
+     22440
+    ],
+    [
+     210,
+     823880,
+     20688,
+     22448
+    ],
+    [
+     240,
+     822800,
+     20736,
+     22496
+    ],
+    [
+     270,
+     822908,
+     20744,
+     22520
+    ],
+    [
+     300,
+     823032,
+     20796,
+     22572
+    ]
+   ],
+   "SUnreclaim_slope_KiB_per_cycle": 1.202,
+   "Slab_slope_KiB_per_cycle": 1.362,
+   "MemAvailable_slope_KiB_per_cycle": -16.279,
+   "named_start_end": {
+    "AF_VSOCK": [
+     24,
+     24
+    ],
+    "TCP": [
+     48,
+     60
+    ],
+    "sock_inode_cache": [
+     140,
+     140
+    ],
+    "skbuff_head_cache": [
+     368,
+     368
+    ],
+    "skbuff_fclone_cache": [
+     0,
+     0
+    ],
+    "skbuff_small_head": [
+     112,
+     112
+    ]
+   },
+   "slab_objs_delta_top": {
+    "eventpoll_epi": 600,
+    "tw_sock_TCP": 308,
+    "kmalloc-rnd-15-16": 240,
+    "kernfs_node_cache": 120,
+    "kmalloc-rnd-01-16": 120,
+    "kmalloc-rnd-01-32": 120,
+    "kmalloc-rnd-13-96": 120,
+    "kmalloc-rnd-15-32": 120,
+    "kmalloc-rnd-15-8": 120,
+    "kmalloc-rnd-12-256": 84,
+    "filp": 60,
+    "kmalloc-rnd-01-8": 60
+   },
+   "module_loaded_after": false
+  },
+  "ev-unload-stress-A": {
+   "unload_output": null,
+   "scenario": "ev-unload-stress-A",
+   "dir": "A",
+   "probe": "ev",
+   "wall_s": 647.4,
+   "trials_planned": 30,
+   "trial_end": 0,
+   "send_end": 30,
+   "vread_trial_end": 0,
+   "outcomes": {},
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "main_stream_ok": "0/0",
+   "main_stream_first_bad": [],
+   "main_hash_eq": "0/0",
+   "eof_seen": "0/0",
+   "extra_after_eof": 0,
+   "bytes_verified_MiB": 0.0,
+   "peak_pipe_MiB(src_inq+tgt_outq+peer_inq)": null,
+   "peak_src_inq_KiB": null,
+   "peak_tgt_outq_KiB": null,
+   "peak_peer_inq_KiB": null,
+   "peak_ap_outq_KiB": null,
+   "guest_unreclaim_rise_MiB(max-start)": null,
+   "guest_avail_drop_MiB(start-min)": null,
+   "guest_unreclaim_after_close_minus_start_MiB": null,
+   "max_skb_head": null,
+   "module_moved_MiB": null,
+   "module_stall_dst": null,
+   "module_stall_src": null,
+   "module_runs": null,
+   "module_requeue": null,
+   "module_err": 0,
+   "pairs_aborted": 0,
+   "pairs_completed": 0,
+   "live_end": [],
+   "short_consume": 0,
+   "fault_hits": 0,
+   "pair_self_completed_before_detach": 0,
+   "tasks_start": null,
+   "tasks_max": null,
+   "reader_MiBps": null,
+   "sys_busy_ms": null,
+   "trial_secs": null,
+   "cpu_core_s_per_GiB": null,
+   "back_ok": "0/0",
+   "sender_back_ok": "0/0",
+   "sender_outcomes": {
+    "connect_fail": 30
+   },
+   "sender_MiBps": null,
+   "sender_max_send_ms": null,
+   "sender_sent_at_longest_block_start_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 30
+   },
+   "writer_max_send_ms": null,
+   "writer_sent_at_longest_block_start_MiB": null,
+   "writer_outcomes": {},
+   "host_unreclaim_rise_MiB(max-start)": null,
+   "host_peak_vsock_inq_KiB": null,
+   "resume_latency_ms(stall_end->sender_unblocked)": null,
+   "reader_end": {},
+   "writer_outcomes_all": {
+    "connect_fail": 30
+   }
+  },
+  "ev-unload-stress-G": {
+   "unload_output": null,
+   "scenario": "ev-unload-stress-G",
+   "dir": "G",
+   "probe": "ev",
+   "wall_s": 65.9,
+   "trials_planned": 30,
+   "trial_end": 30,
+   "send_end": 0,
+   "vread_trial_end": 30,
+   "outcomes": {
+    "complete": 30
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "main_stream_ok": "30/30",
+   "main_stream_first_bad": [],
+   "main_hash_eq": "30/30",
+   "eof_seen": "30/30",
+   "extra_after_eof": 0,
+   "bytes_verified_MiB": 1920.0,
+   "peak_pipe_MiB(src_inq+tgt_outq+peer_inq)": {
+    "min": 0.06,
+    "p50": 0.27,
+    "max": 0.96,
+    "n": 30
+   },
+   "peak_src_inq_KiB": {
+    "min": 18.2,
+    "p50": 184.4,
+    "max": 591.8,
+    "n": 30
+   },
+   "peak_tgt_outq_KiB": {
+    "min": 0.0,
+    "p50": 126.6,
+    "max": 793.9,
+    "n": 30
+   },
+   "peak_peer_inq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 30
+   },
+   "peak_ap_outq_KiB": {
+    "min": 1215.0,
+    "p50": 2255.85,
+    "max": 3657.2,
+    "n": 30
+   },
+   "guest_unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.1,
+    "n": 30
+   },
+   "guest_avail_drop_MiB(start-min)": {
+    "min": 0.0,
+    "p50": 2.1,
+    "max": 11.0,
+    "n": 30
+   },
+   "guest_unreclaim_after_close_minus_start_MiB": {
+    "min": -0.5,
+    "p50": -0.5,
+    "max": -0.4,
+    "n": 30
+   },
+   "max_skb_head": {
+    "min": 368,
+    "p50": 480.0,
+    "max": 536,
+    "n": 30
+   },
+   "module_moved_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 30
+   },
+   "module_stall_dst": {
+    "min": 0,
+    "p50": 0.0,
+    "max": 0,
+    "n": 30
+   },
+   "module_stall_src": {
+    "min": 0,
+    "p50": 0.0,
+    "max": 0,
+    "n": 30
+   },
+   "module_runs": {
+    "min": 0,
+    "p50": 0.0,
+    "max": 0,
+    "n": 30
+   },
+   "module_requeue": {
+    "min": 0,
+    "p50": 0.0,
+    "max": 0,
+    "n": 30
+   },
+   "module_err": 0,
+   "pairs_aborted": 0,
+   "pairs_completed": 0,
+   "live_end": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "short_consume": 0,
+   "fault_hits": 0,
+   "pair_self_completed_before_detach": 30,
+   "tasks_start": {
+    "min": 83,
+    "p50": 86.0,
+    "max": 86,
+    "n": 30
+   },
+   "tasks_max": {
+    "min": 84,
+    "p50": 86.0,
+    "max": 87,
+    "n": 30
+   },
+   "reader_MiBps": {
+    "min": 454.2,
+    "p50": 532.85,
+    "max": 738.8,
+    "n": 30
+   },
+   "sys_busy_ms": {
+    "min": 100,
+    "p50": 150.0,
+    "max": 200,
+    "n": 30
+   },
+   "trial_secs": {
+    "min": 0.29,
+    "p50": 0.32,
+    "max": 0.34,
+    "n": 30
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 100000000.0,
+    "p50": 150000000.0,
+    "max": 200000000.0,
+    "n": 30
+   },
+   "back_ok": "30/30",
+   "sender_back_ok": "0/0",
+   "sender_outcomes": {},
+   "sender_MiBps": null,
+   "sender_max_send_ms": null,
+   "sender_sent_at_longest_block_start_MiB": null,
+   "writer_max_send_ms": {
+    "min": 1,
+    "p50": 23.0,
+    "max": 33,
+    "n": 30
+   },
+   "writer_sent_at_longest_block_start_MiB": {
+    "min": 3.25,
+    "p50": 21.0,
+    "max": 39.88,
+    "n": 30
+   },
+   "writer_outcomes": {
+    "done": 30
+   },
+   "host_unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.2,
+    "max": 0.7,
+    "n": 30
+   },
+   "host_peak_vsock_inq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 128.0,
+    "n": 30
+   },
+   "resume_latency_ms(stall_end->sender_unblocked)": null,
+   "reader_end": {
+    "bytes": 30
+   },
+   "writer_outcomes_all": {
+    "done": 30
+   },
+   "unload": {
+    "trials": 30,
+    "rmmod_rc": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "rmmod_ms": {
+     "min": 20,
+     "p50": 23.0,
+     "max": 33,
+     "n": 30
+    },
+    "pairs_live_at_rmmod": "30/30",
+    "rmmod_stderr": [],
+    "pump_moved_MiB": {
+     "min": 1.76,
+     "p50": 44.7,
+     "max": 63.23,
+     "n": 30
+    },
+    "pump_lost_wakeups": 0,
+    "pump_eof": "30/30",
+    "pump_errors": []
+   },
+   "leak_check": {
+    "ev": "leak_check",
+    "label": "ev-unload-stress-G",
+    "module_loaded": false,
+    "avail_delta_kb": -1124,
+    "sunreclaim_delta_kb": -36,
+    "slab_delta_kb": -4,
+    "named_start_end": {
+     "AF_VSOCK": [
+      24,
+      36
+     ],
+     "TCP": [
+      60,
+      60
+     ],
+     "sock_inode_cache": [
+      168,
+      168
+     ],
+     "skbuff_head_cache": [
+      368,
+      480
+     ],
+     "skbuff_fclone_cache": [
+      0,
+      0
+     ],
+     "skbuff_small_head": [
+      112,
+      224
+     ]
+    },
+    "slab_objs_delta_top": {
+     "eventpoll_epi": -180,
+     "pde_opener": 180,
+     "kmalloc-rnd-10-128": 120,
+     "kmalloc-rnd-10-96": 120,
+     "pool_workqueue": 112,
+     "skbuff_head_cache": 112,
+     "skbuff_small_head": 112,
+     "kmalloc-rnd-12-16": 60,
+     "kmalloc-rnd-14-96": 60,
+     "proc_inode_cache": 56,
+     "kmalloc-rnd-14-4k": -44,
+     "kmalloc-rnd-09-2k": 36
+    }
+   },
+   "per_trial_series_after_close": {
+    "SUnreclaim_KiB_first_last": [
+     21464,
+     21836
+    ],
+    "SUnreclaim_slope_KiB_per_trial": 5.67,
+    "MemAvailable_KiB_first_last": [
+     824300,
+     823292
+    ],
+    "MemAvailable_slope_KiB_per_trial": -321.57,
+    "n": 30
+   }
+  }
+ },
+ "guest_boot": "7.0.0-29-generic\nMemTotal:         977368 kB\nMemAvailable:     822160 kB\nevmod                  28672  0 \nvmw_vsock_virtio_transport    20480  1 \nvmw_vsock_virtio_transport_common    57344  1 vmw_vsock_virtio_transport\nvsock                  73728  7 vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common\nlive=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=248 buf_bytes=65536\ncrw-------    1 0        0          10, 263 Oct 16 16:29 /dev/evmod\ntcp_rmem=4096 131072 7284416\ntcp_wmem=4096 16384 4194304\ntcp_mem=10668 14227 21336\nrmem_max=4194304\nvsock_buf_default\n4\n0-3\n",
+ "physical_modules_unchanged": false
+}

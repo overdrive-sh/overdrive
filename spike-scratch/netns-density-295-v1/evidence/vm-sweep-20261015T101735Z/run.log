@@ -1,0 +1,64 @@
+[10:17:35] === v27 vm stage sweep ['/tmp/v1-work/spec-pilot.json']
+[10:17:35] === preflight (fail closed)
+[10:17:36] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[10:17:36] $ modprobe vhost_vsock; modprobe vsock_loopback; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[10:17:36]     vsock_diag             12288  0
+[10:17:36]     vhost_vsock            28672  0
+[10:17:36]     vhost                  69632  1 vhost_vsock
+[10:17:36]     vhost_iotlb            16384  1 vhost
+[10:17:36]     vsock_loopback         12288  0
+[10:17:36]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[10:17:36]     vmw_vsock_vmci_transport    53248  0
+[10:17:36]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[10:17:36]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[10:17:36] === guest image
+[10:17:36] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "01c9805cea03", "drainprobe": "d11b2812d8bf", "bpf_obj": "7dfb4344b9d6", "cloud_hypervisor": "eadddf1bbcdc"}
+[10:17:36] launch VM: /tmp/v1-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v1-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v1-work/out/vm-sweep-20261015T101735Z/serial.log --console off --vsock cid=3360,backend=vhost-kernel --log-file /tmp/v1-work/out/vm-sweep-20261015T101735Z/ch.log -v
+[10:17:37] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[10:17:37] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+
+/sys/kernel/tracing/events/vsock/virtio_transport_recv_pkt:
+1024	65535
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[10:17:37] ##### cell G-65536: --n 0 --m 65536 --srv-pause 0 --cli-pause never --trials 4 --conc 4 --arm owner --flows 256 --hold-ms 6000 --settle-ms 2000 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:17:44] guest rc=0 GUEST_DONE
+
+[10:17:45] ##### cell H-65536: --n 65536 --m 0 --srv-pause never --cli-pause 0 --trials 4 --conc 4 --arm owner --flows 256 --hold-ms 6000 --settle-ms 2000 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:17:52] guest rc=0 GUEST_DONE
+
+[10:17:53] ##### cell G-131072: --n 0 --m 131072 --srv-pause 0 --cli-pause never --trials 4 --conc 4 --arm owner --flows 256 --hold-ms 6000 --settle-ms 2000 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:18:00] guest rc=0 GUEST_DONE
+
+[10:18:00] ##### cell H-131072: --n 131072 --m 0 --srv-pause never --cli-pause 0 --trials 4 --conc 4 --arm owner --flows 256 --hold-ms 6000 --settle-ms 2000 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:18:08] guest rc=0 GUEST_DONE
+
+[10:18:08] ##### cell G-1048576: --n 0 --m 1048576 --srv-pause 0 --cli-pause never --trials 4 --conc 4 --arm owner --flows 256 --hold-ms 6000 --settle-ms 2000 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:18:16] guest rc=0 GUEST_DONE
+
+[10:18:16] ##### cell H-1048576: --n 1048576 --m 0 --srv-pause never --cli-pause 0 --trials 4 --conc 4 --arm owner --flows 256 --hold-ms 6000 --settle-ms 2000 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:18:24] guest rc=0 GUEST_DONE
+
+[10:18:24] ##### cell G-4194304: --n 0 --m 4194304 --srv-pause 0 --cli-pause never --trials 4 --conc 4 --arm owner --flows 256 --hold-ms 6000 --settle-ms 2000 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:18:32] guest rc=0 GUEST_DONE
+
+[10:18:32] ##### cell H-4194304: --n 4194304 --m 0 --srv-pause never --cli-pause 0 --trials 4 --conc 4 --arm owner --flows 256 --hold-ms 6000 --settle-ms 2000 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:18:39] guest rc=0 GUEST_DONE
+
+[10:18:40] $ pgrep -af cloud-hypervisor | grep -v pgrep; ls -d /sys/fs/cgroup/v1-* 2>&1; true (rc=0)
+[10:18:40]     ls: cannot access '/sys/fs/cgroup/v1-*': No such file or directory

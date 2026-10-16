@@ -1,0 +1,14 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "sink_trial_end": [],
+  "n_samples": 0,
+  "peak_queued_MiB": 0.0,
+  "peak_tcp_mem_MiB": 0.0,
+  "last_sample": null,
+  "bad_json_lines": 0
+ }
+}

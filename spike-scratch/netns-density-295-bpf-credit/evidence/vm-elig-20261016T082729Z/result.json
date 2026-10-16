@@ -1,0 +1,10 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "scenarios": {
+  "elig": {
+   "host_rows": 155,
+   "guest_rc": 0
+  }
+ },
+ "guest_boot": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\nMemTotal:         977364 kB\nMemAvailable:     827980 kB\n"
+}

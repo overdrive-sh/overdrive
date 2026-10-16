@@ -1,0 +1,388 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "scenarios": {
+  "ctl-A": {
+   "scenario": "ctl-A",
+   "dir": "A",
+   "probe": "valve",
+   "wall_s": 7.4,
+   "trials_planned": 3,
+   "trial_end": 3,
+   "send_end": 3,
+   "vread_trial_end": 0,
+   "outcomes": {
+    "abort_cap": 3
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "app_ok": "0/3",
+   "peak_queued_MiB": {
+    "min": 160.37,
+    "p50": 160.47,
+    "max": 161.06,
+    "n": 3
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 160.0,
+    "p50": 177.8,
+    "max": 179.4,
+    "n": 3
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 162.8,
+    "p50": 181.2,
+    "max": 182.9,
+    "n": 3
+   },
+   "reader_MiBps": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "sys_busy_ms": {
+    "min": 380,
+    "p50": 400,
+    "max": 400,
+    "n": 3
+   },
+   "trial_secs": {
+    "min": 0.4,
+    "p50": 0.43,
+    "max": 0.44,
+    "n": 3
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 380000000.0,
+    "p50": 400000000.0,
+    "max": 400000000.0,
+    "n": 3
+   },
+   "sender_max_send_ms": {
+    "min": 0,
+    "p50": 0,
+    "max": 1,
+    "n": 3
+   },
+   "sender_outcomes": {
+    "err_32": 3
+   }
+  },
+  "ctl-T": {
+   "scenario": "ctl-T",
+   "dir": "T",
+   "probe": "valve",
+   "wall_s": 5.5,
+   "trials_planned": 3,
+   "trial_end": 3,
+   "send_end": 0,
+   "vread_trial_end": 0,
+   "outcomes": {
+    "abort_cap": 3
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "app_ok": "0/3",
+   "peak_queued_MiB": {
+    "min": 161.73,
+    "p50": 162.73,
+    "max": 163.98,
+    "n": 3
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 4.4,
+    "p50": 4.6,
+    "max": 5.1,
+    "n": 3
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 135.3,
+    "p50": 139.2,
+    "max": 144.9,
+    "n": 3
+   },
+   "reader_MiBps": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "sys_busy_ms": {
+    "min": 120,
+    "p50": 120,
+    "max": 120,
+    "n": 3
+   },
+   "trial_secs": {
+    "min": 0.12,
+    "p50": 0.12,
+    "max": 0.12,
+    "n": 3
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 120000000.0,
+    "p50": 120000000.0,
+    "max": 120000000.0,
+    "n": 3
+   },
+   "sender_max_send_ms": null,
+   "sender_outcomes": {}
+  },
+  "tp-sockmap-A": {
+   "scenario": "tp-sockmap-A",
+   "dir": "A",
+   "probe": "valve",
+   "wall_s": 41.7,
+   "trials_planned": 10,
+   "trial_end": 10,
+   "send_end": 10,
+   "vread_trial_end": 0,
+   "outcomes": {
+    "complete": 10
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "app_ok": "10/10",
+   "peak_queued_MiB": {
+    "min": 0.51,
+    "p50": 0.53,
+    "max": 6.88,
+    "n": 10
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 0.1,
+    "p50": 0.3,
+    "max": 0.3,
+    "n": 10
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 0.3,
+    "p50": 2.35,
+    "max": 7.7,
+    "n": 10
+   },
+   "reader_MiBps": {
+    "min": 410.2,
+    "p50": 467.85,
+    "max": 497.0,
+    "n": 10
+   },
+   "sys_busy_ms": {
+    "min": 3250,
+    "p50": 3515.0,
+    "max": 4000,
+    "n": 10
+   },
+   "trial_secs": {
+    "min": 2.26,
+    "p50": 2.4,
+    "max": 2.7,
+    "n": 10
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 3.25,
+    "p50": 3.51,
+    "max": 4.0,
+    "n": 10
+   },
+   "sender_max_send_ms": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 11,
+    "n": 10
+   },
+   "sender_outcomes": {
+    "done": 10
+   }
+  },
+  "tp-pump-A": {
+   "scenario": "tp-pump-A",
+   "dir": "A",
+   "probe": "valve",
+   "wall_s": 34.8,
+   "trials_planned": 10,
+   "trial_end": 10,
+   "send_end": 10,
+   "vread_trial_end": 0,
+   "outcomes": {
+    "complete": 10
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "app_ok": "10/10",
+   "peak_queued_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 10
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.1,
+    "n": 10
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 0.0,
+    "p50": 0.1,
+    "max": 1.6,
+    "n": 10
+   },
+   "reader_MiBps": {
+    "min": 624.8,
+    "p50": 646.2,
+    "max": 700.0,
+    "n": 10
+   },
+   "sys_busy_ms": {
+    "min": 2090,
+    "p50": 2425.0,
+    "max": 2630,
+    "n": 10
+   },
+   "trial_secs": {
+    "min": 1.71,
+    "p50": 1.82,
+    "max": 1.89,
+    "n": 10
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 2.09,
+    "p50": 2.42,
+    "max": 2.63,
+    "n": 10
+   },
+   "sender_max_send_ms": {
+    "min": 0,
+    "p50": 10.0,
+    "max": 21,
+    "n": 10
+   },
+   "sender_outcomes": {
+    "done": 10
+   }
+  },
+  "tp-sockmap-T": {
+   "scenario": "tp-sockmap-T",
+   "dir": "T",
+   "probe": "valve",
+   "wall_s": 26.6,
+   "trials_planned": 10,
+   "trial_end": 10,
+   "send_end": 0,
+   "vread_trial_end": 0,
+   "outcomes": {
+    "complete": 10
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "app_ok": "10/10",
+   "peak_queued_MiB": {
+    "min": 7.12,
+    "p50": 15.5,
+    "max": 60.66,
+    "n": 10
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 1.4,
+    "n": 10
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 0.0,
+    "p50": 9.9,
+    "max": 57.1,
+    "n": 10
+   },
+   "reader_MiBps": {
+    "min": 1002.9,
+    "p50": 1092.45,
+    "max": 1697.0,
+    "n": 10
+   },
+   "sys_busy_ms": {
+    "min": 1090,
+    "p50": 1350.0,
+    "max": 1440,
+    "n": 10
+   },
+   "trial_secs": {
+    "min": 0.81,
+    "p50": 1.16,
+    "max": 1.23,
+    "n": 10
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 1.09,
+    "p50": 1.35,
+    "max": 1.44,
+    "n": 10
+   },
+   "sender_max_send_ms": null,
+   "sender_outcomes": {}
+  },
+  "tp-pump-T": {
+   "scenario": "tp-pump-T",
+   "dir": "T",
+   "probe": "valve",
+   "wall_s": 26.1,
+   "trials_planned": 10,
+   "trial_end": 10,
+   "send_end": 0,
+   "vread_trial_end": 0,
+   "outcomes": {
+    "complete": 10
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "app_ok": "10/10",
+   "peak_queued_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 10
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.1,
+    "n": 10
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 0.0,
+    "p50": 0.8,
+    "max": 4.5,
+    "n": 10
+   },
+   "reader_MiBps": {
+    "min": 1215.2,
+    "p50": 1260.95,
+    "max": 1309.1,
+    "n": 10
+   },
+   "sys_busy_ms": {
+    "min": 1260,
+    "p50": 1460.0,
+    "max": 1630,
+    "n": 10
+   },
+   "trial_secs": {
+    "min": 1.01,
+    "p50": 1.05,
+    "max": 1.09,
+    "n": 10
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 1.26,
+    "p50": 1.46,
+    "max": 1.63,
+    "n": 10
+   },
+   "sender_max_send_ms": null,
+   "sender_outcomes": {}
+  }
+ },
+ "guest_boot": "7.0.0-29-generic\nMemTotal:         977368 kB\nMemAvailable:     821424 kB\nevmod                  24576  0 \nvmw_vsock_virtio_transport    20480  1 \nvmw_vsock_virtio_transport_common    57344  1 vmw_vsock_virtio_transport\nvsock                  73728  7 vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common\nlive=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=248 pool_bytes=16777216\ncrw-------    1 0        0          10, 263 Oct 16 11:19 /dev/evmod\n",
+ "physical_modules_unchanged": false
+}

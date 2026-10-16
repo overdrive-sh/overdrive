@@ -1,0 +1,3 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}

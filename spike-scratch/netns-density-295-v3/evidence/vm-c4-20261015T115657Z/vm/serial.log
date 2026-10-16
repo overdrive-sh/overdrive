@@ -1,0 +1,10 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}
+HB up=0.34 0.78 MemAvailable:836072 SUnreclaim:17564 
+HB up=1.34 4.78 MemAvailable:835508 SUnreclaim:17780 
+HB up=2.35 8.80 MemAvailable:835452 SUnreclaim:17912 
+{"ev":"send_ready","label":"c4guest","uname":"7.0.0-29-generic","cid":2,"port":7004,"total":402653184,"trials":1}
+{"ev":"send_end","label":"c4guest","trial":0,"outcome":"done","sent":402653184,"secs":0.180,"mbps":2136.1,"max_send_ms":0,"slow_sends":0,"sends":6144,"peer_closed_read":0}
+HB up=3.36 12.59 MemAvailable:838776 SUnreclaim:17960 
+HB up=4.36 16.61 MemAvailable:839712 SUnreclaim:17964 

@@ -1,0 +1,5 @@
+{"ev": "sample", "label": "ev-fault2-G", "side": "host", "trial": 0, "t_ms": 2, "src_inq": 0, "app_read": 0, "mem_avail_kb": 63981188, "sunreclaim_kb": 169816}
+{"ev": "sample", "label": "ev-fault2-G", "side": "host", "trial": 0, "t_ms": 53, "src_inq": 0, "app_read": 16777224, "mem_avail_kb": 63982160, "sunreclaim_kb": 169720}
+{"ev": "sample", "label": "ev-fault2-G", "side": "host", "trial": 0, "t_ms": 105, "src_inq": 0, "app_read": 16777224, "mem_avail_kb": 63982160, "sunreclaim_kb": 169720}
+{"ev": "sample", "label": "ev-fault2-G", "side": "host", "trial": 0, "t_ms": 157, "src_inq": 0, "app_read": 16777224, "mem_avail_kb": 63982160, "sunreclaim_kb": 169720}
+{"ev": "sample", "label": "ev-fault2-G", "side": "host", "trial": 0, "t_ms": 208, "src_inq": 0, "app_read": 16777224, "mem_avail_kb": 63982160, "sunreclaim_kb": 169720}

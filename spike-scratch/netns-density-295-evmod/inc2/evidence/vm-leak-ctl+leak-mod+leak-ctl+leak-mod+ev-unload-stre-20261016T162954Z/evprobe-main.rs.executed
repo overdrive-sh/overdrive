@@ -1,0 +1,1478 @@
+//! evprobe (netns-density-295 spike "evmod"): V-3 / valve scenarios against the event-driven in-kernel forwarder evmod.ko.
+//! One static binary, run on the guest and/or the host. No BPF.
+//!   evprobe agent                          guest command agent on vsock port 4000
+//!   evprobe sink  --kind vsock|tcpsrc|tcp2vsock ...
+//!        the owner. It builds the two sockets, hands them to /dev/evmod (EVMOD_ATTACH) and only OBSERVES:
+//!          vsock     A: accepts a vsock flow (sender on the other side), target = loopback TCP whose peer is the target app
+//!          tcpsrc    T: source = a local TCP flow written by a source app, target = loopback TCP whose peer is the target app
+//!          tcp2vsock G: source = a local TCP flow written by a source app, target = a vsock connection to a host `vread`
+//!        The "target app" is a reader that follows a stall / slow / fast schedule and verifies every byte.
+//!   evprobe send  --cid C --port P ...     pattern sender over vsock (A)
+//!   evprobe vread --port P ...             host-side vsock reader for G
+//! Every stream is the splitmix64 sequence word k = splitmix(k ^ salt) (little endian); forward salt 0, backward salt BACK_SALT.
+//! The reader compares every 8-byte word with an independently generated expected word and keeps an order-sensitive hash of both,
+//! so loss, reorder and duplication all show up as first_bad / hash mismatch / byte shortfall. All measurements are JSON lines.
+use std::collections::HashMap;
+use std::fs;
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+const BACK_SALT: u64 = 0x5eed_ba5e_0000_0001;
+
+// ---------------------------------------------------------------- small helpers
+fn arg(a: &[String], k: &str) -> Option<String> {
+    a.iter().position(|x| x == k).and_then(|i| a.get(i + 1)).cloned()
+}
+fn argn(a: &[String], k: &str, d: u64) -> u64 {
+    arg(a, k).map(|v| v.parse().expect("number")).unwrap_or(d)
+}
+fn uname() -> String {
+    let mut u: libc::utsname = unsafe { std::mem::zeroed() };
+    unsafe { libc::uname(&mut u) };
+    unsafe { std::ffi::CStr::from_ptr(u.release.as_ptr()) }.to_string_lossy().into_owned()
+}
+fn out(s: String) {
+    // one write(2) per line so concurrent writers on the serial console cannot split it
+    let mut line = s.into_bytes();
+    line.push(b'\n');
+    let mut o = std::io::stdout().lock();
+    let _ = o.write_all(&line);
+    let _ = o.flush();
+}
+fn mono_ns() -> u64 {
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
+}
+fn splitmix(k: u64) -> u64 {
+    let mut z = k.wrapping_add(0x9E37_79B9_7F4A_7C15).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+const HK: u64 = 0x9E37_79B9_7F4A_7C15;
+
+// ---------------------------------------------------------------- vsock helpers
+#[repr(C)]
+struct SockaddrVm {
+    family: u16,
+    reserved: u16,
+    port: u32,
+    cid: u32,
+    flags: u8,
+    zero: [u8; 3],
+}
+fn vm_addr(cid: u32, port: u32) -> SockaddrVm {
+    SockaddrVm { family: libc::AF_VSOCK as u16, reserved: 0, port, cid, flags: 0, zero: [0; 3] }
+}
+fn cvt(r: i32) -> std::io::Result<i32> {
+    if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(r) }
+}
+fn set_vsock_buf(fd: RawFd, bytes: u64) {
+    // SOL_VSOCK = 40, SO_VM_SOCKETS_BUFFER_SIZE = 0, SO_VM_SOCKETS_BUFFER_MAX_SIZE = 2
+    unsafe {
+        libc::setsockopt(fd, 40, 2, &bytes as *const _ as *const _, 8);
+        libc::setsockopt(fd, 40, 0, &bytes as *const _ as *const _, 8);
+    }
+}
+fn vsock_listen(port: u32, buf: u64) -> std::io::Result<OwnedFd> {
+    let fd = cvt(unsafe { libc::socket(libc::AF_VSOCK, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) })?;
+    let o = unsafe { OwnedFd::from_raw_fd(fd) };
+    if buf > 0 {
+        set_vsock_buf(fd, buf);
+    }
+    let a = vm_addr(libc::VMADDR_CID_ANY, port);
+    cvt(unsafe { libc::bind(fd, &a as *const _ as *const _, 16) })?;
+    cvt(unsafe { libc::listen(fd, 128) })?;
+    Ok(o)
+}
+fn vsock_connect(cid: u32, port: u32) -> std::io::Result<OwnedFd> {
+    let fd = cvt(unsafe { libc::socket(libc::AF_VSOCK, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) })?;
+    let o = unsafe { OwnedFd::from_raw_fd(fd) };
+    let a = vm_addr(cid, port);
+    cvt(unsafe { libc::connect(fd, &a as *const _ as *const _, 16) })?;
+    Ok(o)
+}
+fn accept(fd: RawFd) -> std::io::Result<OwnedFd> {
+    let n = cvt(unsafe { libc::accept4(fd, std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_CLOEXEC) })?;
+    Ok(unsafe { OwnedFd::from_raw_fd(n) })
+}
+fn set_tmo(fd: RawFd, opt: i32, ms: u64) {
+    let tv = libc::timeval { tv_sec: (ms / 1000) as i64, tv_usec: ((ms % 1000) * 1000) as i64 };
+    unsafe { libc::setsockopt(fd, libc::SOL_SOCKET, opt, &tv as *const _ as *const _, 16) };
+}
+fn setsockopt_i32(fd: RawFd, lvl: i32, opt: i32, v: i32) -> i32 {
+    unsafe { libc::setsockopt(fd, lvl, opt, &v as *const _ as *const _, 4) }
+}
+fn ioctl_i32(fd: RawFd, req: u64) -> i64 {
+    let mut v: i32 = 0;
+    if unsafe { libc::ioctl(fd, req as _, &mut v) } < 0 { -1 } else { v as i64 }
+}
+const SIOCINQ: u64 = 0x541B;
+const SIOCOUTQ: u64 = 0x5411;
+fn read_fd(fd: RawFd, buf: &mut [u8]) -> isize {
+    unsafe { libc::read(fd, buf.as_mut_ptr() as *mut _, buf.len()) }
+}
+fn write_fd(fd: RawFd, buf: &[u8]) -> isize {
+    unsafe { libc::write(fd, buf.as_ptr() as *const _, buf.len()) }
+}
+fn would_block(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut || e.raw_os_error() == Some(libc::EINTR)
+}
+
+// ---------------------------------------------------------------- evmod control
+const EVMOD_ATTACH: u64 = 0xC010_4501; // _IOWR('E', 1, struct evmod_attach)
+const EVMOD_DETACH: u64 = 0x4004_4502; // _IOW('E', 2, u32)
+#[repr(C)]
+struct EvAttach {
+    fd_a: i32,
+    fd_b: i32,
+    flags: u32,
+    id: u32,
+}
+struct Evmod {
+    fd: OwnedFd,
+}
+impl Evmod {
+    fn open() -> Result<Evmod, String> {
+        let f = fs::OpenOptions::new().read(true).write(true).open("/dev/evmod").map_err(|e| format!("open /dev/evmod: {e}"))?;
+        Ok(Evmod { fd: f.into() })
+    }
+    fn attach(&self, a: RawFd, b: RawFd) -> Result<u32, String> {
+        let mut x = EvAttach { fd_a: a, fd_b: b, flags: 0, id: 0 };
+        let rc = unsafe { libc::ioctl(self.fd.as_raw_fd(), EVMOD_ATTACH as _, &mut x as *mut EvAttach) };
+        if rc != 0 {
+            return Err(format!("EVMOD_ATTACH: {}", std::io::Error::last_os_error()));
+        }
+        Ok(x.id)
+    }
+    /// ENOENT = the pair already ran to completion by itself.
+    fn detach(&self, id: u32) -> Result<bool, String> {
+        let rc = unsafe { libc::ioctl(self.fd.as_raw_fd(), EVMOD_DETACH as _, &id as *const u32) };
+        if rc == 0 {
+            return Ok(true);
+        }
+        let e = std::io::Error::last_os_error();
+        if e.raw_os_error() == Some(libc::ENOENT) { Ok(false) } else { Err(format!("EVMOD_DETACH {id}: {e}")) }
+    }
+}
+fn ev_stats() -> HashMap<String, i64> {
+    let mut m = HashMap::new();
+    for kv in fs::read_to_string("/proc/evmod").unwrap_or_default().split_whitespace() {
+        if let Some((k, v)) = kv.split_once('=') {
+            if let Ok(n) = v.parse::<i64>() {
+                m.insert(k.to_string(), n);
+            }
+        }
+    }
+    m
+}
+fn evs(m: &HashMap<String, i64>, k: &str) -> i64 {
+    m.get(k).copied().unwrap_or(0)
+}
+fn ev_moved(m: &HashMap<String, i64>) -> i64 {
+    evs(m, "bytes_v2t") + evs(m, "bytes_t2v") + evs(m, "bytes_t2t")
+}
+
+
+// ---------------------------------------------------------------- kTLS (TLS 1.3 AES-128-GCM). The handshake is replaced by fixed test keys installed
+// directly with setsockopt(SOL_TLS): the kernel record layer, the ULP and the socket callbacks are exactly what a userspace
+// handshake (rustls) would leave behind.
+const SOL_TLS: i32 = 282;
+const TLS_TX: i32 = 1;
+const TLS_RX: i32 = 2;
+const TLS_SET_RECORD_TYPE: i32 = 1;
+const TCP_ULP: i32 = 31;
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TlsInfoGcm128 {
+    version: u16,
+    cipher_type: u16,
+    iv: [u8; 8],
+    key: [u8; 16],
+    salt: [u8; 4],
+    rec_seq: [u8; 8],
+}
+fn tls_key(seed: u8) -> TlsInfoGcm128 {
+    let mut k = TlsInfoGcm128 { version: 0x0304, cipher_type: 51, iv: [0; 8], key: [0; 16], salt: [0; 4], rec_seq: [0; 8] };
+    for i in 0..8 {
+        k.iv[i] = seed.wrapping_mul(31).wrapping_add(i as u8 * 7 + 1);
+    }
+    for i in 0..16 {
+        k.key[i] = seed.wrapping_mul(17).wrapping_add(i as u8 * 13 + 5);
+    }
+    for i in 0..4 {
+        k.salt[i] = seed.wrapping_mul(7).wrapping_add(i as u8 * 3 + 9);
+    }
+    k
+}
+fn ktls_enable(fd: RawFd, tx: &TlsInfoGcm128, rx: &TlsInfoGcm128) -> Result<(), String> {
+    let rc = unsafe { libc::setsockopt(fd, libc::IPPROTO_TCP, TCP_ULP, b"tls\0".as_ptr() as *const _, 4) };
+    if rc != 0 {
+        return Err(format!("TCP_ULP tls: {}", std::io::Error::last_os_error()));
+    }
+    for (opt, k) in [(TLS_TX, tx), (TLS_RX, rx)] {
+        let rc = unsafe { libc::setsockopt(fd, SOL_TLS, opt, k as *const _ as *const _, std::mem::size_of::<TlsInfoGcm128>() as u32) };
+        if rc != 0 {
+            return Err(format!("SOL_TLS opt {}: {}", opt, std::io::Error::last_os_error()));
+        }
+    }
+    Ok(())
+}
+/// a's TX key is b's RX key and vice versa.
+fn ktls_pair(a: RawFd, b: RawFd, seed: u8) -> Result<(), String> {
+    let (k1, k2) = (tls_key(seed), tls_key(seed.wrapping_add(1)));
+    ktls_enable(a, &k1, &k2)?;
+    ktls_enable(b, &k2, &k1)
+}
+/// Send one TLS record of an explicit content type (alert = 21) through the kTLS TX path (cmsg TLS_SET_RECORD_TYPE).
+fn ktls_send_record(fd: RawFd, rtype: u8, data: &[u8]) -> isize {
+    let mut cbuf = [0u8; 64];
+    let mut iov = libc::iovec { iov_base: data.as_ptr() as *mut _, iov_len: data.len() };
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cbuf.as_mut_ptr() as *mut _;
+    msg.msg_controllen = unsafe { libc::CMSG_SPACE(1) } as _;
+    unsafe {
+        let c = libc::CMSG_FIRSTHDR(&msg);
+        (*c).cmsg_level = SOL_TLS;
+        (*c).cmsg_type = TLS_SET_RECORD_TYPE;
+        (*c).cmsg_len = libc::CMSG_LEN(1) as _;
+        *libc::CMSG_DATA(c) = rtype;
+        libc::sendmsg(fd, &msg, libc::MSG_NOSIGNAL)
+    }
+}
+fn tls_stat() -> String {
+    let v: Vec<String> = fs::read_to_string("/proc/net/tls_stat")
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            Some(format!("\"{}\":{}", it.next()?, it.next()?))
+        })
+        .collect();
+    format!("{{{}}}", v.join(","))
+}
+fn ss_ulp_lines() -> String {
+    let o = std::process::Command::new("/usr/bin/ss").args(["-tni"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    let l: Vec<&str> = o.lines().filter(|l| l.contains("ulp")).take(4).collect();
+    format!("{:?}", l.join(" | "))
+}
+fn slab_snapshot() -> std::collections::BTreeMap<String, i64> {
+    let mut m = std::collections::BTreeMap::new();
+    for l in fs::read_to_string("/proc/slabinfo").unwrap_or_default().lines().skip(2) {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        if f.len() > 2 {
+            m.insert(f[0].to_string(), f[1].parse().unwrap_or(0));
+        }
+    }
+    m
+}
+fn slab_diff_json(a: &std::collections::BTreeMap<String, i64>, b: &std::collections::BTreeMap<String, i64>) -> String {
+    let mut d: Vec<(String, i64)> = b.iter().map(|(k, v)| (k.clone(), v - a.get(k).copied().unwrap_or(0))).filter(|(_, d)| *d != 0).collect();
+    d.sort_by_key(|(_, d)| -d.abs());
+    let items: Vec<String> = d.iter().take(12).map(|(k, v)| format!("\"{}\":{}", k, v)).collect();
+    format!("{{{}}}", items.join(","))
+}
+fn module_loaded() -> bool {
+    std::path::Path::new("/proc/evmod").exists()
+}
+fn ensure_module(params: &str) -> Result<(), String> {
+    if !module_loaded() {
+        let mut c = std::process::Command::new("/bin/insmod");
+        c.arg("/mods/evmod.ko");
+        for p in params.split_whitespace() {
+            c.arg(p);
+        }
+        let o = c.output().map_err(|e| format!("insmod spawn: {e}"))?;
+        if !o.status.success() {
+            return Err(format!("insmod failed: {}", String::from_utf8_lossy(&o.stderr)));
+        }
+    }
+    for _ in 0..100 {
+        if std::path::Path::new("/dev/evmod").exists() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Err("/dev/evmod did not appear".into())
+}
+
+/// What a plain userspace process does with the two sockets after the module is gone: continue the stream from exactly where the
+/// module left it. It relies on the sockets' own wakeups (poll), so a callback that was not restored shows up as a lost wakeup.
+#[derive(Default)]
+struct PumpStats {
+    moved: AtomicU64,
+    lost_wakeups: AtomicU64,
+    eof: AtomicBool,
+    done: AtomicBool,
+    err: Mutex<String>,
+}
+fn pump(src: RawFd, dst: RawFd, st: Arc<PumpStats>) {
+    let mut buf = vec![0u8; 65536];
+    let deadline = Instant::now() + Duration::from_secs(120);
+    'outer: while Instant::now() < deadline {
+        let n = unsafe { libc::recv(src, buf.as_mut_ptr() as *mut _, buf.len(), libc::MSG_DONTWAIT) };
+        if n > 0 {
+            let n = n as usize;
+            let mut off = 0;
+            while off < n {
+                let w = unsafe { libc::send(dst, buf[off..n].as_ptr() as *const _, n - off, libc::MSG_NOSIGNAL | libc::MSG_DONTWAIT) };
+                if w > 0 {
+                    off += w as usize;
+                    st.moved.fetch_add(w as u64, Ordering::Relaxed);
+                } else {
+                    let e = std::io::Error::last_os_error();
+                    if e.raw_os_error() == Some(libc::EAGAIN) {
+                        let mut p = libc::pollfd { fd: dst, events: libc::POLLOUT, revents: 0 };
+                        let r = unsafe { libc::poll(&mut p, 1, 5000) };
+                        if r == 0 {
+                            // 5 s with no POLLOUT: only a real stall (target reader still stalled) is legitimate; counted, not fatal
+                            st.lost_wakeups.fetch_add(1, Ordering::Relaxed);
+                        }
+                        if Instant::now() > deadline {
+                            *st.err.lock().unwrap() = "deadline".into();
+                            break 'outer;
+                        }
+                    } else {
+                        *st.err.lock().unwrap() = format!("send_{}", e.raw_os_error().unwrap_or(0));
+                        break 'outer;
+                    }
+                }
+            }
+        } else if n == 0 {
+            unsafe { libc::shutdown(dst, libc::SHUT_WR) };
+            st.eof.store(true, Ordering::Relaxed);
+            break;
+        } else {
+            let e = std::io::Error::last_os_error();
+            if e.raw_os_error() == Some(libc::EAGAIN) {
+                let mut p = libc::pollfd { fd: src, events: libc::POLLIN, revents: 0 };
+                let r = unsafe { libc::poll(&mut p, 1, 5000) };
+                if r == 0 && ioctl_i32(src, SIOCINQ) > 0 {
+                    st.lost_wakeups.fetch_add(1, Ordering::Relaxed); // data is queued but poll never reported it
+                }
+            } else {
+                *st.err.lock().unwrap() = format!("recv_{}", e.raw_os_error().unwrap_or(0));
+                break;
+            }
+        }
+    }
+    st.done.store(true, Ordering::Relaxed);
+}
+
+// ---------------------------------------------------------------- memory sampling
+fn cpu_busy_jiffies() -> u64 {
+    let t = fs::read_to_string("/proc/stat").unwrap_or_default();
+    let l = t.lines().next().unwrap_or("");
+    let v: Vec<u64> = l.split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
+    // user nice system irq softirq (idle, iowait, steal excluded)
+    v.get(0).copied().unwrap_or(0) + v.get(1).copied().unwrap_or(0) + v.get(2).copied().unwrap_or(0) + v.get(5).copied().unwrap_or(0) + v.get(6).copied().unwrap_or(0)
+}
+fn meminfo_kb(keys: &[&str]) -> Vec<u64> {
+    let t = fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    keys.iter()
+        .map(|k| t.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)).and_then(|v| v.parse().ok()).unwrap_or(0))
+        .collect()
+}
+fn skb_active() -> u64 {
+    for l in fs::read_to_string("/proc/slabinfo").unwrap_or_default().lines().skip(2) {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        if f.len() > 2 && f[0] == "skbuff_head_cache" {
+            return f[1].parse().unwrap_or(0);
+        }
+    }
+    0
+}
+fn ntasks() -> usize {
+    fs::read_dir("/proc").map(|d| d.filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().parse::<u32>().is_ok()).count()).unwrap_or(0)
+}
+
+// ---------------------------------------------------------------- pattern verify + generate
+struct Verifier {
+    k: u64,
+    salt: u64,
+    carry: [u8; 8],
+    clen: usize,
+    hash: u64,
+    ehash: u64,
+    first_bad: Option<u64>,
+}
+impl Verifier {
+    fn new(salt: u64) -> Self {
+        Verifier { k: 0, salt, carry: [0; 8], clen: 0, hash: 0, ehash: 0, first_bad: None }
+    }
+    #[inline(always)]
+    fn word(&mut self, w: u64) {
+        let e = splitmix(self.k ^ self.salt);
+        if w != e && self.first_bad.is_none() {
+            self.first_bad = Some(self.k * 8);
+        }
+        self.hash = (self.hash.rotate_left(5) ^ w).wrapping_mul(HK);
+        self.ehash = (self.ehash.rotate_left(5) ^ e).wrapping_mul(HK);
+        self.k += 1;
+    }
+    fn feed(&mut self, mut d: &[u8]) {
+        while self.clen > 0 && self.clen < 8 && !d.is_empty() {
+            self.carry[self.clen] = d[0];
+            self.clen += 1;
+            d = &d[1..];
+        }
+        if self.clen == 8 {
+            let w = u64::from_le_bytes(self.carry);
+            self.word(w);
+            self.clen = 0;
+        }
+        if self.clen > 0 {
+            return;
+        }
+        let mut ch = d.chunks_exact(8);
+        for c in &mut ch {
+            self.word(u64::from_le_bytes(c.try_into().unwrap()));
+        }
+        let r = ch.remainder();
+        self.carry[..r.len()].copy_from_slice(r);
+        self.clen = r.len();
+    }
+    fn ok(&self) -> bool {
+        self.first_bad.is_none() && self.hash == self.ehash && self.clen == 0
+    }
+}
+fn gen_fill(buf: &mut [u8], first_word: u64, salt: u64) {
+    for (i, c) in buf.chunks_exact_mut(8).enumerate() {
+        c.copy_from_slice(&splitmix((first_word + i as u64) ^ salt).to_le_bytes());
+    }
+}
+
+// ---------------------------------------------------------------- the target app (reader)
+#[derive(Clone, Debug)]
+enum Phase {
+    Stall(u64),
+    Rate(u64, Option<u64>), // MiB/s, optional duration ms
+    Fast(Option<u64>),
+}
+fn parse_phases(s: &str) -> Vec<Phase> {
+    s.split(',')
+        .map(|p| {
+            let (head, dur) = match p.split_once(':') {
+                Some((h, d)) => (h, Some(d.to_string())),
+                None => (p, None),
+            };
+            let dms = dur.as_ref().and_then(|d| d.parse::<u64>().ok());
+            match head.chars().next() {
+                Some('s') => Phase::Stall(head[1..].parse().expect("stall ms")),
+                Some('r') => Phase::Rate(head[1..].parse().expect("rate MiB/s"), dms),
+                Some('f') => Phase::Fast(dms),
+                _ => panic!("bad phase {p}"),
+            }
+        })
+        .collect()
+}
+
+#[derive(Default)]
+struct RStats {
+    read: AtomicU64,
+    done: AtomicBool,
+    abort: AtomicBool,
+    first_byte_ns: AtomicU64,
+    done_ns: AtomicU64,
+    res: Mutex<Option<RRes>>,
+    stall_ends: Mutex<Vec<(u64, u64)>>, // (mono ns at end of a stall phase, bytes read at that time)
+}
+struct RRes {
+    ok: bool,
+    first_bad: Option<u64>,
+    hash: u64,
+    ehash: u64,
+    bytes: u64,
+    eof_seen: bool,
+    extra: u64,
+    end: String, // bytes | eof | err_<errno> | abort | cut
+}
+
+/// The target app. `fd` must stay open (owned by the caller) until the thread is joined.
+fn reader(fd: RawFd, total: u64, phases: Vec<Phase>, st: Arc<RStats>, verify: bool, eof: bool, cut_after: u64, cut_rst: bool) {
+    set_tmo(fd, libc::SO_RCVTIMEO, 50);
+    let mut v = Verifier::new(0);
+    let mut buf = vec![0u8; 65536];
+    let mut got = 0u64;
+    let mut idx = 0usize;
+    let mut ph_start = Instant::now();
+    let mut ph_bytes = 0u64;
+    let mut end = "bytes".to_string();
+    'outer: while got < total && !st.abort.load(Ordering::Relaxed) {
+        let ph = phases.get(idx).cloned().unwrap_or(Phase::Fast(None));
+        let dur = match &ph {
+            Phase::Stall(ms) => Some(*ms),
+            Phase::Rate(_, d) | Phase::Fast(d) => *d,
+        };
+        if let Some(ms) = dur {
+            if ph_start.elapsed() >= Duration::from_millis(ms) {
+                if let Phase::Stall(_) = ph {
+                    st.stall_ends.lock().unwrap().push((mono_ns(), got));
+                }
+                idx += 1;
+                ph_start = Instant::now();
+                ph_bytes = 0;
+                continue;
+            }
+        }
+        if let Phase::Stall(_) = ph {
+            std::thread::sleep(Duration::from_millis(2));
+            continue;
+        }
+        let n = read_fd(fd, &mut buf);
+        if n < 0 {
+            let e = std::io::Error::last_os_error();
+            if would_block(&e) {
+                continue;
+            }
+            end = format!("err_{}", e.raw_os_error().unwrap_or(0));
+            break 'outer;
+        }
+        if n == 0 {
+            end = "eof".to_string();
+            break;
+        }
+        let n = n as usize;
+        if got == 0 {
+            st.first_byte_ns.store(mono_ns(), Ordering::Relaxed);
+        }
+        if verify {
+            v.feed(&buf[..n]);
+        }
+        got += n as u64;
+        ph_bytes += n as u64;
+        st.read.store(got, Ordering::Relaxed);
+        if cut_after > 0 && got >= cut_after {
+            // abrupt end of the target app mid-stream: the forwarder must notice, tear the pair down and leak nothing
+            if cut_rst {
+                // the target process dies: the connection is reset (connect(AF_UNSPEC) = tcp_disconnect -> RST), not half-closed
+                let sa = libc::sockaddr { sa_family: libc::AF_UNSPEC as u16, sa_data: [0; 14] };
+                unsafe { libc::connect(fd, &sa, 16) };
+            } else {
+                unsafe { libc::shutdown(fd, libc::SHUT_RDWR) };
+            }
+            end = "cut".to_string();
+            break 'outer;
+        }
+        if let Phase::Rate(mibps, _) = ph {
+            let allowed_t = ph_bytes as f64 / (mibps as f64 * 1048576.0);
+            let el = ph_start.elapsed().as_secs_f64();
+            if allowed_t > el {
+                std::thread::sleep(Duration::from_secs_f64(allowed_t - el));
+            }
+        }
+    }
+    let (mut eof_seen, mut extra) = (false, 0u64);
+    if eof && got == total {
+        // the stream must end exactly here: the forwarder has to propagate the sender's FIN, with nothing extra before it
+        let end = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < end && !st.abort.load(Ordering::Relaxed) {
+            let n = read_fd(fd, &mut buf);
+            if n < 0 {
+                if would_block(&std::io::Error::last_os_error()) {
+                    continue;
+                }
+                break;
+            }
+            if n == 0 {
+                eof_seen = true;
+                break;
+            }
+            extra += n as u64;
+        }
+    }
+    st.done_ns.store(mono_ns(), Ordering::Relaxed);
+    *st.res.lock().unwrap() = Some(RRes {
+        ok: got == total && (!verify || v.ok()) && (!eof || (eof_seen && extra == 0)),
+        first_bad: v.first_bad,
+        hash: v.hash,
+        ehash: v.ehash,
+        bytes: got,
+        eof_seen,
+        extra,
+        end: if st.abort.load(Ordering::Relaxed) && end == "bytes" && got < total { "abort".to_string() } else { end },
+    });
+    st.done.store(true, Ordering::Relaxed);
+}
+
+/// Reads the backward stream (salt BACK_SALT) until EOF, a deadline or the abort flag; verifies the first `total` bytes.
+struct BackRes {
+    bytes: u64,
+    ok: bool,
+    first_bad: Option<u64>,
+    eof_seen: bool,
+    extra: u64,
+}
+fn back_reader(fd: OwnedFd, total: u64, abort: Arc<AtomicBool>, deadline_s: u64, stop_at_total: bool) -> BackRes {
+    let raw = fd.as_raw_fd();
+    set_tmo(raw, libc::SO_RCVTIMEO, 50);
+    let mut v = Verifier::new(BACK_SALT);
+    let mut buf = vec![0u8; 65536];
+    let (mut got, mut extra) = (0u64, 0u64);
+    let mut eof_seen = false;
+    let end = Instant::now() + Duration::from_secs(deadline_s);
+    while Instant::now() < end && !abort.load(Ordering::Relaxed) && !(stop_at_total && got >= total) {
+        let n = read_fd(raw, &mut buf);
+        if n < 0 {
+            if would_block(&std::io::Error::last_os_error()) {
+                continue;
+            }
+            break;
+        }
+        if n == 0 {
+            eof_seen = true;
+            break;
+        }
+        let n = n as usize;
+        let room = total.saturating_sub(got) as usize;
+        let take = n.min(room);
+        v.feed(&buf[..take]);
+        got += take as u64;
+        extra += (n - take) as u64;
+        if stop_at_total && got >= total {
+            break;
+        }
+    }
+    BackRes { bytes: got, ok: got == total && v.ok() && extra == 0, first_bad: v.first_bad, eof_seen, extra }
+}
+fn back_json(b: &Option<BackRes>) -> String {
+    match b {
+        None => "null".into(),
+        Some(b) => format!("{{\"bytes\":{},\"ok\":{},\"first_bad\":{},\"eof_seen\":{},\"extra\":{}}}", b.bytes, b.ok, b.first_bad.map(|x| x as i64).unwrap_or(-1), b.eof_seen, b.extra),
+    }
+}
+
+// ---------------------------------------------------------------- pattern writer
+struct WStats {
+    sent: u64,
+    secs: f64,
+    max_send_ms: u128,
+    blocks: Vec<(u64, u64)>, // (mono ns at end, ms) of sends that blocked >= 50 ms
+    sent_at_longest_block_start: u64,
+    outcome: String,
+    end_ns: u64,
+}
+/// `rst_after`: after that many bytes abort the connection with a RST (connect(AF_UNSPEC) = tcp_disconnect, tcp_need_reset(ESTABLISHED)).
+/// `tls_alert`: before the FIN send a TLS close_notify alert record (the socket must carry the kTLS ULP).
+fn write_pattern(fd: RawFd, total: u64, gap_ms: u64, burst_kb: u64, fast_gen: bool, salt: u64, eof: bool, rst_after: u64, tls_alert: bool) -> WStats {
+    let mut buf = vec![0u8; 65536];
+    let (mut sent, mut max_ms, mut blocks) = (0u64, 0u128, Vec::new());
+    let mut longest_start_sent = 0u64;
+    let t0 = Instant::now();
+    let mut outcome = "done".to_string();
+    let mut since_gap = 0u64;
+    'w: while sent < total {
+        let n = std::cmp::min(buf.len() as u64, total - sent) as usize;
+        if !fast_gen || sent == 0 {
+            gen_fill(&mut buf[..n], sent / 8, salt);
+        }
+        let mut off = 0usize;
+        while off < n {
+            let ts = Instant::now();
+            let r = unsafe { libc::send(fd, buf[off..n].as_ptr() as *const _, n - off, libc::MSG_NOSIGNAL) };
+            let el = ts.elapsed().as_millis();
+            if r < 0 {
+                outcome = format!("err_{}", std::io::Error::last_os_error().raw_os_error().unwrap_or(0));
+                break 'w;
+            }
+            if el > max_ms {
+                max_ms = el;
+                longest_start_sent = sent;
+            }
+            if el >= 50 && blocks.len() < 64 {
+                blocks.push((mono_ns(), el as u64));
+            }
+            off += r as usize;
+            sent += r as u64;
+        }
+        since_gap += n as u64;
+        if rst_after > 0 && sent >= rst_after {
+            let sa = libc::sockaddr { sa_family: libc::AF_UNSPEC as u16, sa_data: [0; 14] };
+            let rc = unsafe { libc::connect(fd, &sa, 16) };
+            outcome = format!("rst_rc{}", rc);
+            break 'w;
+        }
+        if gap_ms > 0 && burst_kb > 0 && since_gap >= burst_kb * 1024 {
+            since_gap = 0;
+            std::thread::sleep(Duration::from_millis(gap_ms));
+        }
+    }
+    if eof && outcome == "done" {
+        if tls_alert {
+            ktls_send_record(fd, 21, &[1, 0]); // alert: level warning, description close_notify
+        }
+        unsafe { libc::shutdown(fd, libc::SHUT_WR) };
+    }
+    WStats { sent, secs: t0.elapsed().as_secs_f64(), max_send_ms: max_ms, blocks, sent_at_longest_block_start: longest_start_sent, outcome, end_ns: mono_ns() }
+}
+fn wjson(w: &WStats) -> String {
+    let blocks: Vec<String> = w.blocks.iter().map(|(e, ms)| format!("[{},{}]", e, ms)).collect();
+    format!(
+        "{{\"sent\":{},\"secs\":{:.3},\"max_send_ms\":{},\"sent_at_longest_block_start\":{},\"outcome\":\"{}\",\"end_ns\":{},\"blocks\":[{}]}}",
+        w.sent, w.secs, w.max_send_ms, w.sent_at_longest_block_start, w.outcome, w.end_ns, blocks.join(",")
+    )
+}
+
+// ---------------------------------------------------------------- clock sync between the two ends of a vsock flow
+/// sink_clock = sender_clock + off
+fn sync_client(raw: RawFd) -> (i64, u64) {
+    let (mut best_rtt, mut off_ns) = (u64::MAX, 0i64);
+    set_tmo(raw, libc::SO_RCVTIMEO, 5000);
+    for _ in 0..24 {
+        let t0 = mono_ns();
+        if write_fd(raw, b"P") != 1 {
+            break;
+        }
+        let mut b = [0u8; 8];
+        let mut got = 0;
+        while got < 8 {
+            let n = read_fd(raw, &mut b[got..]);
+            if n <= 0 {
+                break;
+            }
+            got += n as usize;
+        }
+        let t1 = mono_ns();
+        if got < 8 {
+            break;
+        }
+        let ts = u64::from_le_bytes(b);
+        let rtt = t1 - t0;
+        if rtt < best_rtt {
+            best_rtt = rtt;
+            off_ns = ts as i64 - ((t0 + t1) / 2) as i64;
+        }
+    }
+    write_fd(raw, b"D");
+    (off_ns, if best_rtt == u64::MAX { 0 } else { best_rtt })
+}
+fn sync_server(raw: RawFd) {
+    set_tmo(raw, libc::SO_RCVTIMEO, 20000);
+    loop {
+        let mut b = [0u8; 1];
+        if read_fd(raw, &mut b) != 1 {
+            break;
+        }
+        if b[0] == b'P' {
+            write_fd(raw, &mono_ns().to_le_bytes());
+        } else {
+            break;
+        }
+    }
+    set_tmo(raw, libc::SO_RCVTIMEO, 0);
+}
+
+// ---------------------------------------------------------------- sink (the owner)
+struct Pair {
+    c: TcpStream, // target leg owned by the forwarder
+    s: TcpStream, // its peer: the target app
+    _l: TcpListener,
+}
+fn tcp_pair() -> std::io::Result<Pair> {
+    let l = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))?;
+    let c = TcpStream::connect(l.local_addr()?)?;
+    let (s, _) = l.accept()?;
+    Ok(Pair { c, s, _l: l })
+}
+
+fn sink(a: &[String]) {
+    let kind = arg(a, "--kind").unwrap_or("vsock".into());
+    let label = arg(a, "--label").unwrap_or("ev".into());
+    let port = argn(a, "--port", 7000) as u32;
+    let trials = argn(a, "--trials", 1);
+    let bytes = argn(a, "--bytes", 64 << 20) & !7;
+    let phases = parse_phases(&arg(a, "--app").unwrap_or("f".into()));
+    let src_rcvbuf = argn(a, "--src-rcvbuf", 0) as i32;
+    let tgt_sndbuf = argn(a, "--tgt-sndbuf", 0) as i32;
+    let app_rcvbuf = argn(a, "--app-rcvbuf", 0) as i32;
+    let vsock_buf = argn(a, "--vsock-buf", 0);
+    let abort_mb = argn(a, "--abort-queued-mb", 0);
+    let max_s = argn(a, "--max-s", 90);
+    let sample_ms = argn(a, "--sample-ms", 50);
+    let verbose_trials = argn(a, "--verbose-trials", 1);
+    let gap_ms = argn(a, "--gap-ms", 0);
+    let burst_kb = argn(a, "--burst-kb", 0);
+    let hold_ms = argn(a, "--hold-ms", 200);
+    let verify = argn(a, "--verify", 1) == 1;
+    let fast_gen = argn(a, "--fast-gen", 0) == 1;
+    let back = argn(a, "--back", 0) & !7;
+    let eof = argn(a, "--eof", 0) == 1;
+    let hostport = argn(a, "--host-port", port as u64) as u32;
+    let close_wait = argn(a, "--close-wait-ms", 1500);
+    let cut_after_kb = argn(a, "--cut-after-kb", 0);
+    let leave_attached = argn(a, "--leave-attached", 0) == 1;
+    let await_gone = argn(a, "--await-gone", 0) == 1;
+    // inc2 options
+    let ktls_mask = argn(a, "--ktls", 0); // bit0: target pair (module-owned TCP leg <-> target app), bit1: source pair
+    let ktls_after = arg(a, "--ktls-order").as_deref() == Some("after"); // default: kTLS installed BEFORE the module attaches (production order)
+    let tls_alert = argn(a, "--ktls-close-notify", 0) == 1;
+    let rst_after_kb = argn(a, "--src-rst-after-kb", 0);
+    let cut_rst = argn(a, "--cut-rst", 0) == 1;
+    let unload_base_ms = argn(a, "--unload-after-ms", 0);
+    let unload_spread_ms = argn(a, "--unload-spread-ms", 0);
+    let unload_after_ms_for = |trial: u64| unload_base_ms + if unload_spread_ms > 0 { (trial * 37) % (unload_spread_ms + 1) } else { 0 };
+    let unload_after_ms = unload_base_ms; // > 0 selects unload mode; the per-trial delay is unload_after_ms_for(trial)
+    let modparams = arg(a, "--modparams").unwrap_or_default().replace('+', " ");
+    let slab_start = slab_snapshot();
+    let leak_mem0 = meminfo_kb(&["MemAvailable", "SUnreclaim", "Slab"]);
+
+    let mut ev_opt = Some(Evmod::open().unwrap_or_else(|e| {
+        out(format!("{{\"ev\":\"fatal\",\"err\":{:?}}}", e));
+        std::process::exit(2)
+    }));
+    let lst = if kind == "vsock" { Some(vsock_listen(port, vsock_buf).expect("vsock listen")) } else { None };
+    out(format!(
+        "{{\"ev\":\"sink_ready\",\"label\":\"{}\",\"kind\":\"{}\",\"uname\":\"{}\",\"port\":{},\"bytes\":{},\"app\":{:?},\"back\":{},\"eof\":{},\"ntasks\":{}}}",
+        label, kind, uname(), port, bytes, arg(a, "--app").unwrap_or("f".into()), back, eof, ntasks()
+    ));
+    let epoch = Instant::now();
+    for trial in 0..trials {
+        let verbose = trial < verbose_trials;
+        if unload_after_ms > 0 {
+            // every trial starts from a freshly loaded module (the previous trial unloaded it while its pair was live)
+            if let Err(e) = ensure_module(&modparams) {
+                out(format!("{{\"ev\":\"fatal\",\"err\":{:?}}}", e));
+                std::process::exit(2);
+            }
+            ev_opt = Some(Evmod::open().unwrap_or_else(|e| {
+                out(format!("{{\"ev\":\"fatal\",\"err\":{:?}}}", e));
+                std::process::exit(2)
+            }));
+        }
+        let ev0 = ev_stats();
+        let tls0 = tls_stat();
+        let rst = Arc::new(RStats::default());
+        let back_abort = Arc::new(AtomicBool::new(false));
+        let mut pair: Option<Pair> = None;
+        let mut v: Option<OwnedFd> = None; // vsock leg (source in A, target in G)
+        let mut src_pair: Option<(TcpStream, TcpStream, TcpListener)> = None; // (module-owned source, source app end, listener)
+        let mut off_info = 0i64;
+        // ---- the legs
+        if kind != "tcp2vsock" {
+            let pr = tcp_pair().expect("tcp pair");
+            if tgt_sndbuf > 0 {
+                setsockopt_i32(pr.c.as_raw_fd(), libc::SOL_SOCKET, libc::SO_SNDBUF, tgt_sndbuf);
+            }
+            if app_rcvbuf > 0 {
+                setsockopt_i32(pr.s.as_raw_fd(), libc::SOL_SOCKET, libc::SO_RCVBUF, app_rcvbuf);
+            }
+            pair = Some(pr);
+        }
+        if kind == "vsock" {
+            let f = accept(lst.as_ref().unwrap().as_raw_fd()).expect("accept");
+            if vsock_buf > 0 {
+                set_vsock_buf(f.as_raw_fd(), vsock_buf);
+            }
+            sync_server(f.as_raw_fd());
+            v = Some(f);
+        } else {
+            let l2 = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let ap = TcpStream::connect(l2.local_addr().unwrap()).unwrap();
+            let (src, _) = l2.accept().unwrap();
+            if src_rcvbuf > 0 {
+                setsockopt_i32(src.as_raw_fd(), libc::SOL_SOCKET, libc::SO_RCVBUF, src_rcvbuf);
+            }
+            src_pair = Some((src, ap, l2));
+            if kind == "tcp2vsock" {
+                let mut f = None;
+                for _ in 0..400 {
+                    match vsock_connect(2, hostport) {
+                        Ok(x) => {
+                            f = Some(x);
+                            break;
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(50)),
+                    }
+                }
+                let f = f.expect("connect host vread");
+                if vsock_buf > 0 {
+                    set_vsock_buf(f.as_raw_fd(), vsock_buf);
+                }
+                let (off, _rtt) = sync_client(f.as_raw_fd());
+                off_info = off;
+                v = Some(f);
+            }
+        }
+        let src_fd: RawFd = if kind == "vsock" { v.as_ref().unwrap().as_raw_fd() } else { src_pair.as_ref().unwrap().0.as_raw_fd() };
+        let tgt_fd: RawFd = if kind == "tcp2vsock" { v.as_ref().unwrap().as_raw_fd() } else { pair.as_ref().unwrap().c.as_raw_fd() };
+        let app_fd: Option<RawFd> = pair.as_ref().map(|p| p.s.as_raw_fd());
+        let ap_fd: Option<RawFd> = src_pair.as_ref().map(|s| s.1.as_raw_fd());
+        // ---- kTLS on the TCP legs (production order: installed before the module attaches), then the target app (reader + optional back writer)
+        let mut ktls_err = String::new();
+        let enable_ktls = |ktls_err: &mut String| {
+            let seed = (trial as u8).wrapping_mul(4).wrapping_add(10);
+            if ktls_mask & 1 != 0 {
+                if let Some(p) = pair.as_ref() {
+                    if let Err(e) = ktls_pair(p.c.as_raw_fd(), p.s.as_raw_fd(), seed) {
+                        ktls_err.push_str(&format!("target:{e};"));
+                    }
+                }
+            }
+            if ktls_mask & 2 != 0 {
+                if let Some((sr, ap, _)) = src_pair.as_ref() {
+                    if let Err(e) = ktls_pair(sr.as_raw_fd(), ap.as_raw_fd(), seed.wrapping_add(40)) {
+                        ktls_err.push_str(&format!("source:{e};"));
+                    }
+                }
+            }
+        };
+        let spawn_apps = || -> (Option<std::thread::JoinHandle<()>>, Option<std::thread::JoinHandle<WStats>>) {
+            let (mut rd, mut bw) = (None, None);
+            if let Some(fd) = app_fd {
+                let (rs2, ph) = (rst.clone(), phases.clone());
+                rd = Some(std::thread::spawn(move || reader(fd, bytes, ph, rs2, verify, eof, cut_after_kb * 1024, cut_rst)));
+                if back > 0 {
+                    let alert = tls_alert && ktls_mask & 1 != 0;
+                    bw = Some(std::thread::spawn(move || write_pattern(fd, back, 0, 0, false, BACK_SALT, eof, 0, alert)));
+                }
+            }
+            (rd, bw)
+        };
+        if ktls_mask != 0 && !ktls_after {
+            enable_ktls(&mut ktls_err);
+        }
+        let defer_apps = ktls_mask != 0 && ktls_after;
+        let (mut rd, mut bw) = if defer_apps { (None, None) } else { spawn_apps() };
+        let (m0, sk0) = (meminfo_kb(&["MemAvailable", "SUnreclaim", "Slab"]), skb_active());
+        let (avail0, sun0) = (m0[0], m0[1]);
+        let (mut min_avail, mut max_sun, mut max_skb) = (avail0, sun0, sk0);
+        let (mut peak_pipe, mut peak_src, mut peak_tgt, mut peak_peer, mut peak_ap) = (0i64, 0i64, 0i64, 0i64, 0i64);
+        let tasks0 = ntasks();
+        let mut max_tasks = tasks0;
+        let t0 = Instant::now();
+        let t0_ns = mono_ns();
+        let busy0 = cpu_busy_jiffies();
+        // sink-to-sender handshake for A: 'G' BEFORE the attach, so the owner never writes on a flow the forwarder owns
+        if kind == "vsock" && !defer_apps {
+            if write_fd(src_fd, b"G") != 1 {
+                out("{\"ev\":\"warn\",\"msg\":\"G write failed\"}".to_string());
+            }
+        }
+        let id = ev_opt.as_ref().unwrap().attach(src_fd, tgt_fd).unwrap_or_else(|e| {
+            out(format!("{{\"ev\":\"fatal\",\"err\":{:?}}}", e));
+            std::process::exit(3)
+        });
+        if defer_apps {
+            // "after" order: the module is already hooked; kTLS arrives on top of its callbacks, then traffic starts
+            enable_ktls(&mut ktls_err);
+            let (r2, b2) = spawn_apps();
+            rd = r2;
+            bw = b2;
+            if kind == "vsock" && write_fd(src_fd, b"G") != 1 {
+                out("{\"ev\":\"warn\",\"msg\":\"G write failed\"}".to_string());
+            }
+        }
+        let ss_ulp = if trial == 0 && ktls_mask != 0 { ss_ulp_lines() } else { "\"\"".to_string() };
+        if leave_attached || unload_after_ms > 0 {
+            // close the control device: the pair stays attached (pairs are module-global), and rmmod is no longer blocked by the open device
+            ev_opt = None;
+        }
+        // ---- unload while the pair is live, then a plain userspace pump continues the stream on the same sockets
+        let delay_ms = unload_after_ms_for(trial);
+        let ud: Option<std::thread::JoinHandle<(String, i32, u128)>> = if unload_after_ms > 0 {
+            Some(std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(delay_ms));
+                let live = fs::read_to_string("/proc/evmod").unwrap_or_default();
+                let t = Instant::now();
+                let o = std::process::Command::new("/bin/rmmod").arg("evmod").output();
+                let (rc, msg) = match o {
+                    Ok(o) => (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stderr).trim().to_string()),
+                    Err(e) => (-2, format!("spawn: {e}")),
+                };
+                (format!("{}|{}", live.trim(), msg), rc, t.elapsed().as_millis())
+            }))
+        } else {
+            None
+        };
+        let mut ud = ud;
+        let mut ud_res: Option<(String, i32, u128)> = None;
+        let pst = Arc::new(PumpStats::default());
+        let mut pump_h: Option<std::thread::JoinHandle<()>> = None;
+        // ---- source app (T, G): writer + back reader
+        let mut writer = None;
+        let mut back_thr = None;
+        if let Some(apfd) = ap_fd {
+            let alert = tls_alert && ktls_mask & 2 != 0;
+            writer = Some(std::thread::spawn(move || write_pattern(apfd, bytes, gap_ms, burst_kb, fast_gen, 0, eof, rst_after_kb * 1024, alert)));
+            let dupfd = unsafe { OwnedFd::from_raw_fd(libc::dup(apfd)) };
+            let ab = back_abort.clone();
+            let stop_at_total = kind != "tcp2vsock" && !eof;
+            back_thr = Some(std::thread::spawn(move || back_reader(dupfd, back, ab, max_s + 30, stop_at_total)));
+        }
+        let mut outcome = String::new();
+        let mut done_at: Option<Instant> = None;
+        let mut last_sample = Instant::now() - Duration::from_secs(1);
+        let deadline = t0 + Duration::from_secs(max_s);
+        let mut final_pipe = 0i64;
+        let mut shut_done = false;
+        let need_eof: i64 = if eof { 1 + (back > 0) as i64 } else { 0 };
+        loop {
+            std::thread::sleep(Duration::from_millis(2));
+            if last_sample.elapsed() >= Duration::from_millis(sample_ms.max(10)) {
+                last_sample = Instant::now();
+                let m = meminfo_kb(&["MemAvailable", "SUnreclaim"]);
+                let sk = if verbose { skb_active() } else { 0 };
+                min_avail = min_avail.min(m[0]);
+                max_sun = max_sun.max(m[1]);
+                max_skb = max_skb.max(sk);
+                let src_inq = ioctl_i32(src_fd, SIOCINQ).max(0);
+                let tgt_outq = ioctl_i32(tgt_fd, SIOCOUTQ).max(0);
+                let peer_inq = app_fd.map(|f| ioctl_i32(f, SIOCINQ).max(0)).unwrap_or(0);
+                let ap_outq = ap_fd.map(|f| ioctl_i32(f, SIOCOUTQ).max(0)).unwrap_or(0);
+                let pipe = src_inq + tgt_outq + peer_inq; // bytes held in kernel buffers between the two apps, excluding the writer's own socket
+                final_pipe = pipe;
+                peak_pipe = peak_pipe.max(pipe);
+                peak_src = peak_src.max(src_inq);
+                peak_tgt = peak_tgt.max(tgt_outq);
+                peak_peer = peak_peer.max(peer_inq);
+                peak_ap = peak_ap.max(ap_outq);
+                if verbose {
+                    let e = ev_stats();
+                    out(format!(
+                        "{{\"ev\":\"sample\",\"label\":\"{}\",\"trial\":{},\"t_ms\":{},\"src_inq\":{},\"tgt_outq\":{},\"peer_inq\":{},\"ap_outq\":{},\"pipe\":{},\"app_read\":{},\"moved\":{},\"stall_dst\":{},\"stall_src\":{},\"mem_avail_kb\":{},\"sunreclaim_kb\":{},\"skb_head\":{}}}",
+                        label, trial, t0.elapsed().as_millis(), src_inq, tgt_outq, peer_inq, ap_outq, pipe, rst.read.load(Ordering::Relaxed), ev_moved(&e) - ev_moved(&ev0),
+                        evs(&e, "stall_dst") - evs(&ev0, "stall_dst"), evs(&e, "stall_src") - evs(&ev0, "stall_src"), m[0], m[1], sk
+                    ));
+                }
+                if ntasks() > max_tasks {
+                    max_tasks = ntasks();
+                }
+            }
+            if let Some(dn) = done_at {
+                if dn.elapsed() >= Duration::from_millis(hold_ms) {
+                    break;
+                }
+                continue;
+            }
+            // finished = the app that verifies the main stream is done AND the forwarder moved every byte of both streams AND (FIN mode)
+            // propagated every FIN. The G sink has no local reader: its writer finishing + the module's own counters stand in for it.
+            let side_done = if kind == "tcp2vsock" { writer.as_ref().map(|w| w.is_finished()).unwrap_or(false) } else { rst.done.load(Ordering::Relaxed) };
+            if await_gone && side_done && !shut_done {
+                // the target app is done: end its write side too, so both directions can reach EOF and the pair can complete by itself
+                if let Some(fd) = app_fd {
+                    unsafe { libc::shutdown(fd, libc::SHUT_WR) };
+                }
+                shut_done = true;
+            }
+            if unload_after_ms > 0 {
+                if ud_res.is_none() && ud.as_ref().map(|h| h.is_finished()).unwrap_or(false) {
+                    ud_res = ud.take().and_then(|h| h.join().ok());
+                    let ps = pst.clone();
+                    pump_h = Some(std::thread::spawn(move || pump(src_fd, tgt_fd, ps)));
+                }
+            }
+            let finished = if unload_after_ms > 0 {
+                side_done && ud_res.is_some() && pst.done.load(Ordering::Relaxed)
+            } else {
+              side_done && if cut_after_kb > 0 || await_gone || rst_after_kb > 0 { evs(&ev_stats(), "live") == 0 } else {
+                let e = ev_stats();
+                ev_moved(&e) - ev_moved(&ev0) >= (bytes + back) as i64 && evs(&e, "eof_fwd") - evs(&ev0, "eof_fwd") >= need_eof
+              }
+            };
+            if finished {
+                outcome = "complete".into();
+                done_at = Some(Instant::now());
+                continue;
+            }
+            if abort_mb > 0 && (final_pipe as u64) >= abort_mb * 1048576 {
+                outcome = "abort_cap".into();
+                break;
+            }
+            if Instant::now() > deadline {
+                outcome = "timeout".into();
+                break;
+            }
+        }
+        let secs = t0.elapsed().as_secs_f64();
+        let busy_ms = (cpu_busy_jiffies() - busy0) * 10; // USER_HZ = 100
+        let ev1 = ev_stats();
+        let app_read = rst.read.load(Ordering::Relaxed);
+        rst.abort.store(true, Ordering::Relaxed);
+        let src_inq_end = ioctl_i32(src_fd, SIOCINQ);
+        let tgt_outq_end = ioctl_i32(tgt_fd, SIOCOUTQ);
+        if let Some(t) = rd.take() {
+            let _ = t.join();
+        }
+        let rr = rst.res.lock().unwrap().take();
+        let stall_ends = rst.stall_ends.lock().unwrap().clone();
+        let first_byte = rst.first_byte_ns.load(Ordering::Relaxed);
+        let done_ns = rst.done_ns.load(Ordering::Relaxed);
+        // let the backward stream and the FIN finish before aborting the back reader
+        if kind != "tcp2vsock" && back > 0 {
+            let end = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < end && !back_thr.as_ref().map(|t| t.is_finished()).unwrap_or(true) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        back_abort.store(true, Ordering::Relaxed);
+        let wj = match writer.take() {
+            Some(h) => {
+                if let Some((_, ap, _)) = &src_pair {
+                    // a writer blocked on a full socket never returns on its own: wake it if it has not finished
+                    if !h.is_finished() {
+                        unsafe { libc::shutdown(ap.as_raw_fd(), libc::SHUT_RDWR) };
+                    }
+                }
+                h.join().map(|w| wjson(&w)).unwrap_or("null".into())
+            }
+            None => "null".into(),
+        };
+        let backres = back_thr.take().and_then(|t| t.join().ok());
+        let bwj = bw.take().and_then(|t| t.join().ok()).map(|w| wjson(&w)).unwrap_or("null".into());
+        // tear down
+        let detached = match ev_opt.as_ref() {
+            Some(ev) => ev.detach(id).unwrap_or_else(|e| {
+                out(format!("{{\"ev\":\"warn\",\"msg\":{:?}}}", e));
+                false
+            }),
+            None => false,
+        };
+        if let Some(h) = pump_h.take() {
+            let _ = h.join();
+        }
+        if ud_res.is_none() {
+            ud_res = ud.take().and_then(|h| h.join().ok());
+        }
+        let tls1 = tls_stat();
+        let mem1 = meminfo_kb(&["MemAvailable", "SUnreclaim"]);
+        drop(v);
+        drop(src_pair);
+        drop(pair);
+        std::thread::sleep(Duration::from_millis(close_wait));
+        let mem2 = meminfo_kb(&["MemAvailable", "SUnreclaim"]);
+        let rend = rr.as_ref().map(|r| r.end.clone()).unwrap_or("none".into());
+        let xjson = format!(
+            "{{\"ktls_mask\":{},\"ktls_order\":\"{}\",\"ktls_err\":{:?},\"tls_alert\":{},\"ss_ulp\":{},\"tls_stat_before\":{},\"tls_stat_after\":{},\"unload\":{},\"pump\":{}}}",
+            ktls_mask, if ktls_after { "after" } else { "before" }, ktls_err, tls_alert, ss_ulp, tls0, tls1,
+            match &ud_res {
+                Some((live, rc, ms)) => format!("{{\"after_ms\":{},\"rc\":{},\"ms\":{},\"info\":{:?}}}", delay_ms, rc, ms, live),
+                None => "null".to_string(),
+            },
+            if unload_after_ms > 0 {
+                format!("{{\"moved\":{},\"lost_wakeups\":{},\"eof\":{},\"err\":{:?}}}", pst.moved.load(Ordering::Relaxed), pst.lost_wakeups.load(Ordering::Relaxed), pst.eof.load(Ordering::Relaxed), pst.err.lock().unwrap().clone())
+            } else {
+                "null".to_string()
+            }
+        );
+        let (rok, rbad, rhash, rehash, rbytes, reof, rextra) = match &rr {
+            Some(r) => (r.ok, r.first_bad.map(|x| x as i64).unwrap_or(-1), r.hash, r.ehash, r.bytes, r.eof_seen, r.extra),
+            None => (false, -2, 0, 0, app_read, false, 0),
+        };
+        let stalls: Vec<String> = stall_ends.iter().map(|(t, b)| format!("[{},{}]", t, b)).collect();
+        out(format!(
+            "{{\"ev\":\"trial_end\",\"label\":\"{}\",\"kind\":\"{}\",\"trial\":{},\"outcome\":\"{}\",\"secs\":{:.3},\"bytes\":{},\"app_read\":{},\"app_ok\":{},\"first_bad\":{},\"hash\":{},\"ehash\":{},\"eof_seen\":{},\"extra\":{},\
+\"reader_first_byte_ns\":{},\"reader_done_ns\":{},\"reader_mibps\":{:.1},\"stall_ends\":[{}],\"t0_ns\":{},\"off_ns\":{},\
+\"peak_pipe\":{},\"peak_src_inq\":{},\"peak_tgt_outq\":{},\"peak_peer_inq\":{},\"peak_ap_outq\":{},\"src_inq_end\":{},\"tgt_outq_end\":{},\
+\"moved\":{},\"stall_dst\":{},\"stall_src\":{},\"runs\":{},\"requeue\":{},\"err\":{},\"aborted\":{},\"completed\":{},\"live_end\":{},\"held_max\":{},\"short_consume\":{},\"fault_hits\":{},\"eof_fwd\":{},\"detached\":{},\"writer\":{},\"back_writer\":{},\"back\":{},\
+\"avail_start_kb\":{},\"min_avail_kb\":{},\"avail_end_kb\":{},\"avail_after_close_kb\":{},\"sunreclaim_start_kb\":{},\"max_sunreclaim_kb\":{},\"sunreclaim_end_kb\":{},\"sunreclaim_after_close_kb\":{},\"max_skb_head\":{},\
+\"tasks_start\":{},\"tasks_max\":{},\"sys_busy_ms\":{},\"reader_end\":\"{}\",\"x\":{}}}",
+            label, kind, trial, outcome, secs, bytes, rbytes, rok, rbad, rhash, rehash, reof, rextra,
+            first_byte, done_ns,
+            if done_ns > first_byte && first_byte > 0 { rbytes as f64 / 1048576.0 / ((done_ns - first_byte) as f64 / 1e9) } else { 0.0 },
+            stalls.join(","), t0_ns, off_info,
+            peak_pipe, peak_src, peak_tgt, peak_peer, peak_ap, src_inq_end, tgt_outq_end,
+            ev_moved(&ev1) - ev_moved(&ev0), evs(&ev1, "stall_dst") - evs(&ev0, "stall_dst"), evs(&ev1, "stall_src") - evs(&ev0, "stall_src"),
+            evs(&ev1, "runs") - evs(&ev0, "runs"), evs(&ev1, "requeue") - evs(&ev0, "requeue"), evs(&ev1, "err") - evs(&ev0, "err"), evs(&ev1, "aborted") - evs(&ev0, "aborted"), evs(&ev1, "completed") - evs(&ev0, "completed"), evs(&ev1, "live"), evs(&ev1, "held_max"),
+            evs(&ev1, "short_consume") - evs(&ev0, "short_consume"), evs(&ev1, "fault_hits") - evs(&ev0, "fault_hits"), evs(&ev1, "eof_fwd") - evs(&ev0, "eof_fwd"), detached, wj, bwj, back_json(&backres),
+            avail0, min_avail, mem1[0], mem2[0], sun0, max_sun, mem1[1], mem2[1], max_skb,
+            tasks0, max_tasks, busy_ms, rend, xjson
+        ));
+    }
+    {
+        // leak audit across all trials (the module may have been loaded and unloaded many times): slab and memory against the start.
+        // --leak-wait-ms lets vsock close timeouts (8 s) expire first.
+        std::thread::sleep(Duration::from_millis(argn(a, "--leak-wait-ms", 1500)));
+        let m1 = meminfo_kb(&["MemAvailable", "SUnreclaim", "Slab"]);
+        let slab_end = slab_snapshot();
+        let named: Vec<String> = ["AF_VSOCK", "TCP", "sock_inode_cache", "skbuff_head_cache", "skbuff_fclone_cache", "skbuff_small_head"]
+            .iter()
+            .map(|k| format!("\"{}\":[{},{}]", k, slab_start.get(*k).copied().unwrap_or(0), slab_end.get(*k).copied().unwrap_or(0)))
+            .collect();
+        out(format!(
+            "{{\"ev\":\"leak_check\",\"label\":\"{}\",\"module_loaded\":{},\"avail_delta_kb\":{},\"sunreclaim_delta_kb\":{},\"slab_delta_kb\":{},\"named_start_end\":{{{}}},\"slab_objs_delta_top\":{}}}",
+            label, module_loaded(), m1[0] as i64 - leak_mem0[0] as i64, m1[1] as i64 - leak_mem0[1] as i64, m1[2] as i64 - leak_mem0[2] as i64,
+            named.join(","), slab_diff_json(&slab_start, &slab_end)
+        ));
+    }
+    out(format!("{{\"ev\":\"sink_done\",\"label\":\"{}\",\"t_ms\":{}}}", label, epoch.elapsed().as_millis()));
+}
+
+// ---------------------------------------------------------------- leak audit: many insmod / attach / rmmod-while-live cycles, with a no-module control
+fn leak(a: &[String]) {
+    let n = argn(a, "--cycles", 200);
+    let control = argn(a, "--control", 0) == 1;
+    let label = arg(a, "--label").unwrap_or("leak".into());
+    let params = arg(a, "--modparams").unwrap_or_default().replace('+', " ");
+    let kib = argn(a, "--kib", 256) as usize;
+    let mut snaps: Vec<String> = vec![];
+    let mut base: Option<std::collections::BTreeMap<String, i64>> = None;
+    let mut fails = 0u64;
+    let buf = vec![0xA5u8; kib * 1024];
+    let warm = 10;
+    for i in 0..(n + warm) {
+        if i == warm {
+            std::thread::sleep(Duration::from_millis(500));
+            base = Some(slab_snapshot());
+            let m = meminfo_kb(&["MemAvailable", "SUnreclaim", "Slab"]);
+            snaps.push(format!("[0,{},{},{}]", m[0], m[1], m[2]));
+        }
+        if !control {
+            if let Err(e) = ensure_module(&params) {
+                out(format!("{{\"ev\":\"fatal\",\"err\":{:?}}}", e));
+                std::process::exit(2);
+            }
+        }
+        let ev = if control { None } else { Evmod::open().ok() };
+        let p1 = tcp_pair().expect("pair1");
+        let p2 = tcp_pair().expect("pair2");
+        let id = ev.as_ref().map(|e| e.attach(p1.c.as_raw_fd(), p2.c.as_raw_fd()));
+        if let Some(Err(e)) = &id {
+            out(format!("{{\"ev\":\"warn\",\"msg\":{:?}}}", e));
+            fails += 1;
+        }
+        drop(ev); // close the control device so rmmod is allowed while the pair stays attached
+        // push traffic through the pair (or, in the control, straight into the socket buffers)
+        let _ = write_fd(p1.s.as_raw_fd(), &buf);
+        std::thread::sleep(Duration::from_millis(3));
+        let mut rb = vec![0u8; 65536];
+        set_tmo(p2.s.as_raw_fd(), libc::SO_RCVTIMEO, 5);
+        let _ = read_fd(p2.s.as_raw_fd(), &mut rb);
+        let o = if control { std::process::Command::new("/bin/true").output() } else { std::process::Command::new("/bin/rmmod").arg("evmod").output() };
+        if !o.map(|o| o.status.success()).unwrap_or(false) {
+            fails += 1;
+        }
+        drop(p1);
+        drop(p2);
+        if i >= warm && (i - warm + 1) % (n / 10).max(1) == 0 {
+            std::thread::sleep(Duration::from_millis(300));
+            let m = meminfo_kb(&["MemAvailable", "SUnreclaim", "Slab"]);
+            snaps.push(format!("[{},{},{},{}]", i - warm + 1, m[0], m[1], m[2]));
+        }
+    }
+    std::thread::sleep(Duration::from_millis(argn(a, "--leak-wait-ms", 10000)));
+    let end = slab_snapshot();
+    let m = meminfo_kb(&["MemAvailable", "SUnreclaim", "Slab"]);
+    let named: Vec<String> = ["AF_VSOCK", "TCP", "sock_inode_cache", "skbuff_head_cache", "skbuff_fclone_cache", "skbuff_small_head"]
+        .iter()
+        .map(|k| format!("\"{}\":[{},{}]", k, base.as_ref().and_then(|b| b.get(*k)).copied().unwrap_or(0), end.get(*k).copied().unwrap_or(0)))
+        .collect();
+    out(format!(
+        "{{\"ev\":\"leak_cycles\",\"label\":\"{}\",\"control\":{},\"cycles\":{},\"failures\":{},\"module_loaded\":{},\"snaps_cycle_avail_sunreclaim_slab_kb\":[{}],\"named_start_end\":{{{}}},\"slab_objs_delta_top\":{}}}",
+        label, control, n, fails, module_loaded(), snaps.join(","), named.join(","), slab_diff_json(base.as_ref().unwrap(), &end)
+    ));
+    let _ = m;
+}
+
+// ---------------------------------------------------------------- host-side vsock reader for G
+fn vread(a: &[String]) {
+    let label = arg(a, "--label").unwrap_or("ev".into());
+    let port = argn(a, "--port", 7000) as u32;
+    let trials = argn(a, "--trials", 1);
+    let bytes = argn(a, "--bytes", 64 << 20) & !7;
+    let phases = parse_phases(&arg(a, "--app").unwrap_or("f".into()));
+    let vsock_buf = argn(a, "--vsock-buf", 0);
+    let max_s = argn(a, "--max-s", 90);
+    let sample_ms = argn(a, "--sample-ms", 50);
+    let verbose_trials = argn(a, "--verbose-trials", 1);
+    let hold_ms = argn(a, "--hold-ms", 200);
+    let verify = argn(a, "--verify", 1) == 1;
+    let back = argn(a, "--back", 0) & !7;
+    let eof = argn(a, "--eof", 0) == 1;
+    let cut_after_kb = argn(a, "--cut-after-kb", 0);
+    let lst = vsock_listen(port, vsock_buf).expect("vsock listen");
+    out(format!("{{\"ev\":\"vread_ready\",\"label\":\"{}\",\"uname\":\"{}\",\"port\":{},\"bytes\":{},\"app\":{:?}}}", label, uname(), port, bytes, arg(a, "--app").unwrap_or("f".into())));
+    for trial in 0..trials {
+        let verbose = trial < verbose_trials;
+        let f = accept(lst.as_raw_fd()).expect("accept");
+        let fd = f.as_raw_fd();
+        if vsock_buf > 0 {
+            set_vsock_buf(fd, vsock_buf);
+        }
+        sync_server(fd);
+        let rst = Arc::new(RStats::default());
+        let (rs2, ph) = (rst.clone(), phases.clone());
+        let rd = std::thread::spawn(move || reader(fd, bytes, ph, rs2, verify, eof, cut_after_kb * 1024, false));
+        let bw = if back > 0 { Some(std::thread::spawn(move || write_pattern(fd, back, 0, 0, false, BACK_SALT, eof, 0, false))) } else { None };
+        let m0 = meminfo_kb(&["MemAvailable", "SUnreclaim"]);
+        let (avail0, sun0) = (m0[0], m0[1]);
+        let (mut min_avail, mut max_sun, mut peak_src) = (avail0, sun0, 0i64);
+        let t0 = Instant::now();
+        let t0_ns = mono_ns();
+        let deadline = t0 + Duration::from_secs(max_s);
+        let mut done_at: Option<Instant> = None;
+        let mut outcome = String::new();
+        let mut last = Instant::now() - Duration::from_secs(1);
+        loop {
+            std::thread::sleep(Duration::from_millis(2));
+            if last.elapsed() >= Duration::from_millis(sample_ms.max(10)) {
+                last = Instant::now();
+                let m = meminfo_kb(&["MemAvailable", "SUnreclaim"]);
+                min_avail = min_avail.min(m[0]);
+                max_sun = max_sun.max(m[1]);
+                let inq = ioctl_i32(fd, SIOCINQ).max(0);
+                peak_src = peak_src.max(inq);
+                if verbose {
+                    out(format!(
+                        "{{\"ev\":\"sample\",\"label\":\"{}\",\"side\":\"host\",\"trial\":{},\"t_ms\":{},\"src_inq\":{},\"app_read\":{},\"mem_avail_kb\":{},\"sunreclaim_kb\":{}}}",
+                        label, trial, t0.elapsed().as_millis(), inq, rst.read.load(Ordering::Relaxed), m[0], m[1]
+                    ));
+                }
+            }
+            if let Some(dn) = done_at {
+                if dn.elapsed() >= Duration::from_millis(hold_ms) {
+                    break;
+                }
+                continue;
+            }
+            if rst.done.load(Ordering::Relaxed) {
+                outcome = "complete".into();
+                done_at = Some(Instant::now());
+                continue;
+            }
+            if Instant::now() > deadline {
+                outcome = "timeout".into();
+                break;
+            }
+        }
+        let secs = t0.elapsed().as_secs_f64();
+        let app_read = rst.read.load(Ordering::Relaxed);
+        rst.abort.store(true, Ordering::Relaxed);
+        let _ = rd.join();
+        let bwj = bw.and_then(|t| t.join().ok()).map(|w| wjson(&w)).unwrap_or("null".into());
+        let rr = rst.res.lock().unwrap().take();
+        let stall_ends = rst.stall_ends.lock().unwrap().clone();
+        let first_byte = rst.first_byte_ns.load(Ordering::Relaxed);
+        let done_ns = rst.done_ns.load(Ordering::Relaxed);
+        let mem1 = meminfo_kb(&["MemAvailable", "SUnreclaim"]);
+        drop(f);
+        std::thread::sleep(Duration::from_millis(1500));
+        let mem2 = meminfo_kb(&["MemAvailable", "SUnreclaim"]);
+        let (rok, rbad, rhash, rehash, rbytes, reof, rextra) = match &rr {
+            Some(r) => (r.ok, r.first_bad.map(|x| x as i64).unwrap_or(-1), r.hash, r.ehash, r.bytes, r.eof_seen, r.extra),
+            None => (false, -2, 0, 0, app_read, false, 0),
+        };
+        let stalls: Vec<String> = stall_ends.iter().map(|(t, b)| format!("[{},{}]", t, b)).collect();
+        out(format!(
+            "{{\"ev\":\"trial_end\",\"label\":\"{}\",\"kind\":\"vread\",\"trial\":{},\"outcome\":\"{}\",\"secs\":{:.3},\"bytes\":{},\"app_read\":{},\"app_ok\":{},\"first_bad\":{},\"hash\":{},\"ehash\":{},\"eof_seen\":{},\"extra\":{},\
+\"reader_first_byte_ns\":{},\"reader_done_ns\":{},\"reader_mibps\":{:.1},\"stall_ends\":[{}],\"t0_ns\":{},\"peak_src_inq\":{},\"back_writer\":{},\"reader_end\":\"{}\",\
+\"avail_start_kb\":{},\"min_avail_kb\":{},\"avail_end_kb\":{},\"avail_after_close_kb\":{},\"sunreclaim_start_kb\":{},\"max_sunreclaim_kb\":{},\"sunreclaim_end_kb\":{},\"sunreclaim_after_close_kb\":{}}}",
+            label, trial, outcome, secs, bytes, rbytes, rok, rbad, rhash, rehash, reof, rextra, first_byte, done_ns,
+            if done_ns > first_byte && first_byte > 0 { rbytes as f64 / 1048576.0 / ((done_ns - first_byte) as f64 / 1e9) } else { 0.0 },
+            stalls.join(","), t0_ns, peak_src, bwj, rr.as_ref().map(|r| r.end.clone()).unwrap_or("none".into()), avail0, min_avail, mem1[0], mem2[0], sun0, max_sun, mem1[1], mem2[1]
+        ));
+    }
+    out(format!("{{\"ev\":\"vread_done\",\"label\":\"{}\"}}", label));
+}
+
+// ---------------------------------------------------------------- sender (A)
+fn send(a: &[String]) {
+    let cid = argn(a, "--cid", 2) as u32;
+    let port = argn(a, "--port", 7000) as u32;
+    let bytes = argn(a, "--bytes", 64 << 20) & !7;
+    let trials = argn(a, "--trials", 1);
+    let label = arg(a, "--label").unwrap_or("ev".into());
+    let gap_ms = argn(a, "--gap-ms", 0);
+    let burst_kb = argn(a, "--burst-kb", 0);
+    let vsock_buf = argn(a, "--vsock-buf", 0);
+    let fast_gen = argn(a, "--fast-gen", 0) == 1;
+    let back = argn(a, "--back", 0) & !7;
+    let eof = argn(a, "--eof", 0) == 1;
+    let close_after_mb = argn(a, "--close-after-mb", 0);
+    out(format!("{{\"ev\":\"send_ready\",\"label\":\"{}\",\"uname\":\"{}\",\"cid\":{},\"port\":{},\"bytes\":{},\"trials\":{}}}", label, uname(), cid, port, bytes, trials));
+    for trial in 0..trials {
+        let mut fd = None;
+        for _ in 0..400 {
+            match vsock_connect(cid, port) {
+                Ok(f) => {
+                    fd = Some(f);
+                    break;
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
+        let Some(fd) = fd else {
+            out(format!("{{\"ev\":\"send_end\",\"label\":\"{}\",\"trial\":{},\"outcome\":\"connect_fail\"}}", label, trial));
+            continue;
+        };
+        let raw = fd.as_raw_fd();
+        if vsock_buf > 0 {
+            set_vsock_buf(raw, vsock_buf);
+        }
+        let (off_ns, best_rtt) = sync_client(raw);
+        set_tmo(raw, libc::SO_RCVTIMEO, 30000);
+        let mut g = [0u8; 1];
+        if read_fd(raw, &mut g) != 1 {
+            out(format!("{{\"ev\":\"send_end\",\"label\":\"{}\",\"trial\":{},\"outcome\":\"no_go\"}}", label, trial));
+            continue;
+        }
+        let abort = Arc::new(AtomicBool::new(false));
+        let dupfd = unsafe { OwnedFd::from_raw_fd(libc::dup(raw)) };
+        let ab = abort.clone();
+        let bt = std::thread::spawn(move || back_reader(dupfd, back, ab, 150, false));
+        let t_start_ns = mono_ns();
+        let w = if close_after_mb > 0 { write_pattern(raw, close_after_mb << 20, gap_ms, burst_kb, fast_gen, 0, false, 0, false) } else { write_pattern(raw, bytes, gap_ms, burst_kb, fast_gen, 0, eof, 0, false) };
+        if close_after_mb > 0 {
+            abort.store(true, Ordering::Relaxed);
+        }
+        let br = bt.join().ok();
+        out(format!(
+            "{{\"ev\":\"send_end\",\"label\":\"{}\",\"trial\":{},\"outcome\":\"{}\",\"sent\":{},\"secs\":{:.3},\"mibps\":{:.1},\"max_send_ms\":{},\"sent_at_longest_block_start\":{},\"blocks\":[{}],\"off_ns\":{},\"best_rtt_ns\":{},\"t_start_ns\":{},\"end_ns\":{},\"back\":{}}}",
+            label, trial, w.outcome, w.sent, w.secs, w.sent as f64 / w.secs.max(1e-6) / 1048576.0, w.max_send_ms, w.sent_at_longest_block_start,
+            w.blocks.iter().map(|(e, ms)| format!("[{},{}]", e, ms)).collect::<Vec<_>>().join(","), off_ns, best_rtt, t_start_ns, w.end_ns, back_json(&br)
+        ));
+        drop(fd);
+    }
+}
+
+// ---------------------------------------------------------------- agent (guest command channel)
+fn agent() {
+    let l = vsock_listen(4000, 0).expect("agent listen");
+    out(format!("{{\"ev\":\"agent_ready\",\"uname\":\"{}\"}}", uname()));
+    loop {
+        let Ok(c) = accept(l.as_raw_fd()) else { continue };
+        std::thread::spawn(move || {
+            let mut f = std::fs::File::from(c);
+            let mut len = [0u8; 4];
+            if f.read_exact(&mut len).is_err() {
+                return;
+            }
+            let mut cmd = vec![0u8; u32::from_be_bytes(len) as usize];
+            if f.read_exact(&mut cmd).is_err() {
+                return;
+            }
+            let o = std::process::Command::new("/bin/sh").arg("-c").arg(String::from_utf8_lossy(&cmd).into_owned()).stdin(std::process::Stdio::null()).output();
+            match o {
+                Ok(o) => {
+                    let _ = f.write_all(&o.stdout);
+                    let _ = f.write_all(&o.stderr);
+                    let _ = f.write_all(format!("\nAGENT_RC={}\n", o.status.code().unwrap_or(-1)).as_bytes());
+                }
+                Err(e) => {
+                    let _ = f.write_all(format!("\nspawn failed {e}\nAGENT_RC=-1\n").as_bytes());
+                }
+            }
+        });
+    }
+}
+
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    match a.get(1).map(|s| s.as_str()) {
+        Some("agent") => agent(),
+        Some("sink") => sink(&a[2..]),
+        Some("send") => send(&a[2..]),
+        Some("vread") => vread(&a[2..]),
+        Some("leak") => leak(&a[2..]),
+        _ => {
+            eprintln!("usage: evprobe agent|sink|send|vread");
+            std::process::exit(1)
+        }
+    }
+}

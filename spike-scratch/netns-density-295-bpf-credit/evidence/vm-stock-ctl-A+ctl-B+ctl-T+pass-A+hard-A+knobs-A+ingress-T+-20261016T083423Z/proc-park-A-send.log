@@ -1,0 +1,4 @@
+{"ev":"send_ready","label":"park-A","uname":"7.0.0-29-generic","cid":3370,"port":7142,"bytes":268435456,"trials":3}
+{"ev":"send_end","label":"park-A","trial":0,"outcome":"err_32","sent":176553984,"secs":0.405,"mibps":416.0,"max_send_ms":3,"sent_at_longest_block_start":67305472,"blocks":[],"off_ns":-5425470915186599,"best_rtt_ns":56906,"t_start_ns":5425769171514105,"peer_closed_read":0}
+{"ev":"send_end","label":"park-A","trial":1,"outcome":"err_32","sent":175670068,"secs":0.474,"mibps":353.6,"max_send_ms":4,"sent_at_longest_block_start":1507328,"blocks":[],"off_ns":-5425470915191368,"best_rtt_ns":83336,"t_start_ns":5425771096052021,"peer_closed_read":0}
+{"ev":"send_end","label":"park-A","trial":2,"outcome":"err_32","sent":175308800,"secs":0.452,"mibps":370.0,"max_send_ms":0,"sent_at_longest_block_start":0,"blocks":[],"off_ns":-5425470915185975,"best_rtt_ns":58879,"t_start_ns":5425773110922595,"peer_closed_read":0}

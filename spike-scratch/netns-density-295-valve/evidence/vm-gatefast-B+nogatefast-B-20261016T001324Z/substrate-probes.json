@@ -1,0 +1,13 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "machine": "x86_64",
+ "systemd_detect_virt": "none",
+ "cpu": "AMD EPYC 8024P 8-Core Processor",
+ "nproc": 16,
+ "meminfo_head": [
+  "MemTotal:       65401772 kB",
+  "MemFree:        21402488 kB",
+  "MemAvailable:   60931804 kB"
+ ],
+ "failures": []
+}

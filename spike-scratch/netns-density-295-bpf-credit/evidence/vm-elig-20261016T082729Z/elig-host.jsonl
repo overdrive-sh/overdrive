@@ -1,0 +1,155 @@
+{"row":"env","uname_r":"7.0.0-29-generic"}
+{"row":"btf","vmlinux_types":168880,"vmlinux_funcs":69482}
+{"row":"btf_module","module":"vsock","types":225,"funcs":77,"loaded_btf_obj":true}
+{"row":"btf_module","module":"vmw_vsock_virtio_transport_common","types":226,"funcs":64,"loaded_btf_obj":true}
+{"row":"btf_module","module":"vmw_vsock_virtio_transport","present":false}
+{"row":"btf_module","module":"vhost_vsock","types":169,"funcs":22,"loaded_btf_obj":true}
+{"row":"btf_module","module":"vsock_loopback","types":87,"funcs":9,"loaded_btf_obj":true}
+{"row":"btf_module","module":"vhost","types":293,"funcs":85,"loaded_btf_obj":true}
+{"row":"struct_ops_btf_types","types":["bpf_struct_ops_Qdisc_ops", "bpf_struct_ops_arg_info", "bpf_struct_ops_bpf_dummy_ops", "bpf_struct_ops_common_value", "bpf_struct_ops_desc", "bpf_struct_ops_hid_bpf_ops", "bpf_struct_ops_link", "bpf_struct_ops_map", "bpf_struct_ops_sched_ext_ops", "bpf_struct_ops_tcp_congestion_ops", "bpf_struct_ops_value"]}
+{"row":"symbol","func":"virtio_transport_send_credit_update","where":"vmw_vsock_virtio_transport_common","btf_id":-1,"linkage":"-","kallsyms":"absent"}
+{"row":"kprobe_override","func":"virtio_transport_send_credit_update","load":"skipped","why":"symbol not in kallsyms"}
+{"row":"symbol","func":"virtio_transport_dec_rx_pkt","where":"vmw_vsock_virtio_transport_common","btf_id":-1,"linkage":"-","kallsyms":"absent"}
+{"row":"kprobe_override","func":"virtio_transport_dec_rx_pkt","load":"skipped","why":"symbol not in kallsyms"}
+{"row":"symbol","func":"virtio_transport_read_skb","where":"vmw_vsock_virtio_transport_common","btf_id":169073,"linkage":"static","kallsyms":"ffffffffc1301d50 [vmw_vsock_virtio_transport_common]"}
+{"row":"tracing","func":"virtio_transport_read_skb","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_read_skb","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_read_skb","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"virtio_transport_read_skb() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_read_skb","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"virtio_transport_read_skb","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"virtio_transport_read_skb","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"virtio_transport_inc_tx_pkt","where":"vmw_vsock_virtio_transport_common","btf_id":169058,"linkage":"static","kallsyms":"ffffffffc12ff1d0 [vmw_vsock_virtio_transport_common]"}
+{"row":"tracing","func":"virtio_transport_inc_tx_pkt","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_inc_tx_pkt","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_inc_tx_pkt","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"virtio_transport_inc_tx_pkt() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_inc_tx_pkt","mode":"fentry-btf-read","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (61) r3 = *(u32 *)(r2 +0) | cannot access ptr member vsk with moff 0 in struct virtio_vsock_sock with off 0 size 4 | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_inc_tx_pkt","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"virtio_transport_inc_tx_pkt","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"virtio_transport_recv_pkt","where":"vmw_vsock_virtio_transport_common","btf_id":169077,"linkage":"static","kallsyms":"ffffffffc13028a0 [vmw_vsock_virtio_transport_common]"}
+{"row":"tracing","func":"virtio_transport_recv_pkt","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_recv_pkt","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_recv_pkt","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"virtio_transport_recv_pkt() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_recv_pkt","mode":"fentry-btf-read","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (61) r3 = *(u32 *)(r2 +0) | cannot access ptr member module with moff 0 in struct vsock_transport with off 0 size 4 | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_recv_pkt","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"virtio_transport_recv_pkt","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"virtio_transport_notify_set_rcvlowat","where":"vmw_vsock_virtio_transport_common","btf_id":169070,"linkage":"static","kallsyms":"ffffffffc1301e80 [vmw_vsock_virtio_transport_common]"}
+{"row":"tracing","func":"virtio_transport_notify_set_rcvlowat","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_notify_set_rcvlowat","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_notify_set_rcvlowat","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"virtio_transport_notify_set_rcvlowat() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_notify_set_rcvlowat","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"virtio_transport_notify_set_rcvlowat","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"virtio_transport_notify_set_rcvlowat","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"virtio_transport_get_credit","where":"vmw_vsock_virtio_transport_common","btf_id":169057,"linkage":"static","kallsyms":"ffffffffc1300740 [vmw_vsock_virtio_transport_common]"}
+{"row":"tracing","func":"virtio_transport_get_credit","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_get_credit","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_get_credit","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"virtio_transport_get_credit() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_get_credit","mode":"fentry-btf-read","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (61) r3 = *(u32 *)(r2 +0) | cannot access ptr member vsk with moff 0 in struct virtio_vsock_sock with off 0 size 4 | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_get_credit","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"virtio_transport_get_credit","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"virtio_transport_recv_enqueue","where":"vmw_vsock_virtio_transport_common","btf_id":169075,"linkage":"static","kallsyms":"ffffffffc12ffcb0 [vmw_vsock_virtio_transport_common]"}
+{"row":"tracing","func":"virtio_transport_recv_enqueue","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_recv_enqueue","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"virtio_transport_recv_enqueue","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"virtio_transport_recv_enqueue() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"virtio_transport_recv_enqueue","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"virtio_transport_recv_enqueue","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"virtio_transport_recv_enqueue","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"vsock_data_ready","where":"vsock","btf_id":169060,"linkage":"static","kallsyms":"ffffffffc12e2da0 [vsock]"}
+{"row":"tracing","func":"vsock_data_ready","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"vsock_data_ready","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"vsock_data_ready","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"vsock_data_ready() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"vsock_data_ready","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"vsock_data_ready","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"vsock_data_ready","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"vsock_set_rcvlowat","where":"vsock","btf_id":169093,"linkage":"static","kallsyms":"ffffffffc12e1250 [vsock]"}
+{"row":"tracing","func":"vsock_set_rcvlowat","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"vsock_set_rcvlowat","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"vsock_set_rcvlowat","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"vsock_set_rcvlowat() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"vsock_set_rcvlowat","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"vsock_set_rcvlowat","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"vsock_set_rcvlowat","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"sk_psock_verdict_recv","where":"vmlinux","btf_id":152501,"linkage":"static","kallsyms":"ffffffff9768d090 [vmlinux]"}
+{"row":"tracing","func":"sk_psock_verdict_recv","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_verdict_recv","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_verdict_recv","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"sk_psock_verdict_recv() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"sk_psock_verdict_recv","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"sk_psock_verdict_recv","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"sk_psock_verdict_recv","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"sk_psock_verdict_data_ready","where":"vmlinux","btf_id":152500,"linkage":"static","kallsyms":"ffffffff9768a660 [vmlinux]"}
+{"row":"tracing","func":"sk_psock_verdict_data_ready","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_verdict_data_ready","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_verdict_data_ready","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"sk_psock_verdict_data_ready() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"sk_psock_verdict_data_ready","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"sk_psock_verdict_data_ready","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"sk_psock_verdict_data_ready","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"sk_psock_skb_redirect","where":"vmlinux","btf_id":152487,"linkage":"static","kallsyms":"ffffffff9768caf0 [vmlinux]"}
+{"row":"tracing","func":"sk_psock_skb_redirect","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_skb_redirect","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_skb_redirect","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"sk_psock_skb_redirect() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"sk_psock_skb_redirect","mode":"fentry-btf-read","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (61) r3 = *(u32 *)(r2 +0) | cannot access ptr member sk with moff 0 in struct sk_psock with off 0 size 4 | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"sk_psock_skb_redirect","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"sk_psock_skb_redirect","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"sk_psock_verdict_apply","where":"vmlinux","btf_id":152499,"linkage":"static","kallsyms":"ffffffff9768cd60 [vmlinux]"}
+{"row":"tracing","func":"sk_psock_verdict_apply","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_verdict_apply","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_verdict_apply","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"sk_psock_verdict_apply() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"sk_psock_verdict_apply","mode":"fentry-btf-read","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (61) r3 = *(u32 *)(r2 +0) | cannot access ptr member sk with moff 0 in struct sk_psock with off 0 size 4 | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"sk_psock_verdict_apply","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"sk_psock_verdict_apply","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"sk_psock_backlog","where":"vmlinux","btf_id":152476,"linkage":"static","kallsyms":"ffffffff9768d1f0 [vmlinux]"}
+{"row":"tracing","func":"sk_psock_backlog","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_backlog","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"sk_psock_backlog","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"sk_psock_backlog() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"sk_psock_backlog","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"sk_psock_backlog","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"sk_psock_backlog","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"sk_psock_handle_skb","where":"vmlinux","btf_id":-1,"linkage":"-","kallsyms":"absent"}
+{"row":"kprobe_override","func":"sk_psock_handle_skb","load":"skipped","why":"symbol not in kallsyms"}
+{"row":"symbol","func":"skb_send_sock","where":"vmlinux","btf_id":152668,"linkage":"static","kallsyms":"ffffffff975ee970 [vmlinux]"}
+{"row":"tracing","func":"skb_send_sock","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"skb_send_sock","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"skb_send_sock","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"skb_send_sock() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"skb_send_sock","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"skb_send_sock","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"skb_send_sock","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"tcp_read_skb","where":"vmlinux","btf_id":156155,"linkage":"static","kallsyms":"ffffffff9770d500 [vmlinux]"}
+{"row":"tracing","func":"tcp_read_skb","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"tcp_read_skb","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"tcp_read_skb","mode":"fmod_ret","load":"rejected","errno":"22 (Invalid argument (os error 22))","verifier":"tcp_read_skb() is not modifiable | processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"tracing","func":"tcp_read_skb","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"tcp_read_skb","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"tcp_read_skb","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"security_socket_recvmsg","where":"vmlinux","btf_id":149866,"linkage":"static","kallsyms":"ffffffff96d2db50 [vmlinux]"}
+{"row":"tracing","func":"security_socket_recvmsg","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"security_socket_recvmsg","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"security_socket_recvmsg","mode":"fmod_ret","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"security_socket_recvmsg","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"security_socket_recvmsg","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"security_socket_recvmsg","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"security_socket_sendmsg","where":"vmlinux","btf_id":149867,"linkage":"static","kallsyms":"ffffffff96d2d990 [vmlinux]"}
+{"row":"tracing","func":"security_socket_sendmsg","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"security_socket_sendmsg","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"security_socket_sendmsg","mode":"fmod_ret","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"security_socket_sendmsg","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"security_socket_sendmsg","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"security_socket_sendmsg","load":"ok","attach":"rejected","errno":"22 (Invalid argument (os error 22))"}
+{"row":"symbol","func":"page_pool_alloc_netmems","where":"vmlinux","btf_id":137452,"linkage":"static","kallsyms":"ffffffff97667d90 [vmlinux]"}
+{"row":"tracing","func":"page_pool_alloc_netmems","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"page_pool_alloc_netmems","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"page_pool_alloc_netmems","mode":"fmod_ret","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"page_pool_alloc_netmems","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"page_pool_alloc_netmems","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"page_pool_alloc_netmems","load":"ok","attach":"ok"}
+{"row":"symbol","func":"__x64_sys_iopl","where":"vmlinux","btf_id":89877,"linkage":"static","kallsyms":"ffffffff965a4550 [vmlinux]"}
+{"row":"tracing","func":"__x64_sys_iopl","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"__x64_sys_iopl","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"__x64_sys_iopl","mode":"fmod_ret","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"__x64_sys_iopl","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"__x64_sys_iopl","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"__x64_sys_iopl","load":"ok","attach":"ok"}
+{"row":"symbol","func":"__x64_sys_sendto","where":"vmlinux","btf_id":90062,"linkage":"static","kallsyms":"ffffffff975d1a20 [vmlinux]"}
+{"row":"tracing","func":"__x64_sys_sendto","mode":"fentry","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"__x64_sys_sendto","mode":"fexit","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"__x64_sys_sendto","mode":"fmod_ret","load":"ok","attach":"attached","attach_err":""}
+{"row":"tracing","func":"__x64_sys_sendto","mode":"fentry-btf-read","load":"ok"}
+{"row":"tracing","func":"__x64_sys_sendto","mode":"fentry-btf-write","load":"rejected","errno":"13 (Permission denied (os error 13))","verifier":"1: (62) *(u32 *)(r2 +0) = 0 | only read is supported | processed 2 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0"}
+{"row":"kprobe_override","func":"__x64_sys_sendto","load":"ok","attach":"ok"}

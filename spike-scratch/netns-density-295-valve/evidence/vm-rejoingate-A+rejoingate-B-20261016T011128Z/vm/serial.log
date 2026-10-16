@@ -1,0 +1,587 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}
+HB up=0.35 0.74 MemAvailable:832704 SUnreclaim:18592 
+{"ev":"sink_ready","label":"rejoingate-A","kind":"vsock","uname":"7.0.0-29-generic","port":7165,"bytes":67108864,"high_kb":4096,"low_kb":0,"resume":"pump","rejoin":true,"app":"s2000,f","mode":0,"redir_flags":0,"owner_delay_ms":0}
+HB up=1.36 4.64 MemAvailable:829192 SUnreclaim:19476 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3,"state":"open","fwd":1048576,"sent":1048576,"queued":0,"peak":262144,"src_inq":0,"tgt_outq":1014988,"peer_inq":87432,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":828224,"sunreclaim_kb":20068,"skb_head":479}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":54,"state":"open","fwd":1048576,"sent":1048576,"queued":0,"peak":262144,"src_inq":0,"tgt_outq":961144,"peer_inq":87432,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":828224,"sunreclaim_kb":20068,"skb_head":479}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":104,"state":"open","fwd":2097152,"sent":2097152,"queued":123608,"peak":262144,"src_inq":0,"tgt_outq":2009720,"peer_inq":87432,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":827088,"sunreclaim_kb":20084,"skb_head":479}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":155,"state":"open","fwd":2097152,"sent":2097152,"queued":0,"peak":262144,"src_inq":0,"tgt_outq":2009720,"peer_inq":87432,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":826960,"sunreclaim_kb":20148,"skb_head":479}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":206,"state":"open","fwd":3083924,"sent":2693256,"queued":183320,"peak":466216,"src_inq":0,"tgt_outq":2605824,"peer_inq":87432,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":826960,"sunreclaim_kb":19796,"skb_head":479}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":256,"state":"open","fwd":3145728,"sent":2693256,"queued":452472,"peak":466216,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":826112,"sunreclaim_kb":20388,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":306,"state":"open","fwd":3419068,"sent":2693256,"queued":452472,"peak":725812,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":826112,"sunreclaim_kb":20388,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":357,"state":"open","fwd":4194304,"sent":2693256,"queued":1501048,"peak":1501048,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":824884,"sunreclaim_kb":21524,"skb_head":983}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":408,"state":"open","fwd":4194304,"sent":2693256,"queued":1501048,"peak":1501048,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":824884,"sunreclaim_kb":21524,"skb_head":983}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":458,"state":"open","fwd":5242880,"sent":2693256,"queued":2549624,"peak":2549624,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":823988,"sunreclaim_kb":22604,"skb_head":1235}
+HB up=2.36 8.49 MemAvailable:823888 SUnreclaim:22604 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":511,"state":"open","fwd":5519952,"sent":2693256,"queued":2549624,"peak":2826696,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":823688,"sunreclaim_kb":22604,"skb_head":1235}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":562,"state":"open","fwd":6291456,"sent":2693256,"queued":3598200,"peak":3598200,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":822140,"sunreclaim_kb":24188,"skb_head":1431}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":614,"state":"open","fwd":6710796,"sent":2693256,"queued":3598200,"peak":4021272,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":822140,"sunreclaim_kb":24188,"skb_head":1431}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":666,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":0,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":821252,"sunreclaim_kb":25020,"skb_head":1627}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":717,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820612,"sunreclaim_kb":25712,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":769,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820612,"sunreclaim_kb":25712,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":821,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820612,"sunreclaim_kb":25712,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":873,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820612,"sunreclaim_kb":25712,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":925,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":976,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1028,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1080,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1132,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1184,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1235,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1287,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1339,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1391,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1443,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1495,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820580,"sunreclaim_kb":25780,"skb_head":1711}
+HB up=3.37 12.26 MemAvailable:820680 SUnreclaim:25780 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1547,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820944,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1598,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820944,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1650,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820944,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1702,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820944,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1754,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820944,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1806,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820944,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1858,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":820944,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1910,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":822804,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":1961,"state":"closed","fwd":7340032,"sent":2693256,"queued":4646776,"peak":4646776,"src_inq":262144,"tgt_outq":2583040,"peer_inq":110216,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":822804,"sunreclaim_kb":25780,"skb_head":1711}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2012,"state":"open","fwd":7340032,"sent":7340032,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":8388608,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":832060,"sunreclaim_kb":20240,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2064,"state":"open","fwd":7340032,"sent":7340032,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":8388608,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20204,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2116,"state":"open","fwd":8388608,"sent":8388608,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":9437184,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20264,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2167,"state":"open","fwd":8388608,"sent":8388608,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":9437184,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20264,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2219,"state":"open","fwd":9437184,"sent":9437184,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":10485760,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20552,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2270,"state":"open","fwd":9437184,"sent":9437184,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":10485760,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20552,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2322,"state":"open","fwd":10485760,"sent":10485760,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":11534336,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20264,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2374,"state":"open","fwd":10485760,"sent":10485760,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":11534336,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20264,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2425,"state":"open","fwd":11534336,"sent":11534336,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":12582912,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20488,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2477,"state":"open","fwd":11534336,"sent":11534336,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":12582912,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831996,"sunreclaim_kb":20488,"skb_head":563}
+HB up=4.38 16.03 MemAvailable:831684 SUnreclaim:20488 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2527,"state":"open","fwd":12582912,"sent":12582912,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":13631488,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831684,"sunreclaim_kb":20488,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2579,"state":"open","fwd":12582912,"sent":12582912,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":13631488,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":831636,"sunreclaim_kb":20488,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2631,"state":"open","fwd":13631488,"sent":13631488,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":14680064,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":832916,"sunreclaim_kb":20360,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2682,"state":"open","fwd":13631488,"sent":13631488,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":14680064,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":832916,"sunreclaim_kb":20360,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2734,"state":"open","fwd":14680064,"sent":14680064,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":15728640,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":832916,"sunreclaim_kb":20136,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2786,"state":"open","fwd":14680064,"sent":14680064,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":15728640,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":832916,"sunreclaim_kb":20136,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2838,"state":"open","fwd":15728640,"sent":15728640,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":16777216,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":832916,"sunreclaim_kb":20264,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2889,"state":"open","fwd":15728640,"sent":15728640,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":16777216,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":833924,"sunreclaim_kb":20264,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2941,"state":"open","fwd":16777216,"sent":16777216,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":17825792,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20520,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":2993,"state":"open","fwd":16777216,"sent":16777216,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":17825792,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20520,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3044,"state":"open","fwd":17825792,"sent":17825792,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":18874368,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20296,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3096,"state":"open","fwd":17825792,"sent":17825792,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":18874368,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20296,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3148,"state":"open","fwd":18874368,"sent":18874368,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":19922944,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20520,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3199,"state":"open","fwd":18874368,"sent":18874368,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":19922944,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20520,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3251,"state":"open","fwd":19922944,"sent":19922944,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":20971520,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20488,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3303,"state":"open","fwd":19922944,"sent":19922944,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":20971520,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20488,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3354,"state":"open","fwd":20971520,"sent":20971520,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":22020096,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20456,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3406,"state":"open","fwd":20971520,"sent":20971520,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":22020096,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20456,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3458,"state":"open","fwd":22020096,"sent":22020096,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":23068672,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20360,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3509,"state":"open","fwd":22020096,"sent":22020096,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":23068672,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834812,"sunreclaim_kb":20360,"skb_head":535}
+HB up=5.38 19.79 MemAvailable:834408 SUnreclaim:20360 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3561,"state":"open","fwd":23068672,"sent":23068672,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":35680,"peer_inq":0,"app_read":24107692,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834580,"sunreclaim_kb":20360,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3613,"state":"open","fwd":23068672,"sent":23068672,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":24117248,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834580,"sunreclaim_kb":20360,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3664,"state":"open","fwd":24117248,"sent":24117248,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":25165824,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834580,"sunreclaim_kb":20520,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3716,"state":"open","fwd":24117248,"sent":24117248,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":25165824,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834580,"sunreclaim_kb":20520,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3768,"state":"open","fwd":25165824,"sent":25165824,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":26214400,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834580,"sunreclaim_kb":20520,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3819,"state":"open","fwd":25165824,"sent":25165824,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":26214400,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834580,"sunreclaim_kb":20520,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3871,"state":"open","fwd":26214400,"sent":26214400,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":27262976,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":834580,"sunreclaim_kb":20456,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3923,"state":"open","fwd":26214400,"sent":26214400,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":27262976,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836056,"sunreclaim_kb":20456,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":3974,"state":"open","fwd":27262976,"sent":27262976,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":28311552,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20524,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4026,"state":"open","fwd":27262976,"sent":27262976,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":28311552,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20524,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4078,"state":"open","fwd":28311552,"sent":28311552,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":29360128,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20524,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4130,"state":"open","fwd":28311552,"sent":28311552,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":29360128,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20524,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4182,"state":"open","fwd":29360128,"sent":29360128,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":30408704,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20364,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4234,"state":"open","fwd":29360128,"sent":29360128,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":30408704,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20364,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4285,"state":"open","fwd":30408704,"sent":30408704,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":31457280,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20524,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4337,"state":"open","fwd":30408704,"sent":30408704,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":31457280,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20524,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4389,"state":"open","fwd":31457280,"sent":31457280,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":32505856,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20396,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4440,"state":"open","fwd":31457280,"sent":31457280,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":32505856,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20396,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4492,"state":"open","fwd":32505856,"sent":32505856,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":33554432,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836384,"sunreclaim_kb":20524,"skb_head":535}
+HB up=6.39 23.57 MemAvailable:836184 SUnreclaim:20524 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4544,"state":"open","fwd":32505856,"sent":32505856,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":33554432,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836036,"sunreclaim_kb":20532,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4596,"state":"open","fwd":33554432,"sent":33554432,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":34603008,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836012,"sunreclaim_kb":20500,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4647,"state":"open","fwd":33554432,"sent":33554432,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":34603008,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836012,"sunreclaim_kb":20500,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4699,"state":"open","fwd":34603008,"sent":34603008,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":35651584,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836012,"sunreclaim_kb":20468,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4751,"state":"open","fwd":34603008,"sent":34603008,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":35651584,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836012,"sunreclaim_kb":20468,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4801,"state":"open","fwd":35651584,"sent":35651584,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":54340,"peer_inq":0,"app_read":36653284,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836012,"sunreclaim_kb":20404,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4853,"state":"open","fwd":35651584,"sent":35651584,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":36700160,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836012,"sunreclaim_kb":20404,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4905,"state":"open","fwd":36700160,"sent":36700160,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":37748736,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":836012,"sunreclaim_kb":20404,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":4956,"state":"open","fwd":36700160,"sent":36700160,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":37748736,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":837348,"sunreclaim_kb":20404,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5008,"state":"open","fwd":37748736,"sent":37748736,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":38797312,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838220,"sunreclaim_kb":20596,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5060,"state":"open","fwd":37748736,"sent":37748736,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":38797312,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838220,"sunreclaim_kb":20596,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5111,"state":"open","fwd":38797312,"sent":38797312,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":39845888,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838604,"sunreclaim_kb":20628,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5163,"state":"open","fwd":38797312,"sent":38797312,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":39845888,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838604,"sunreclaim_kb":20628,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5215,"state":"open","fwd":39845888,"sent":39845888,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":40894464,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838604,"sunreclaim_kb":20500,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5266,"state":"open","fwd":39845888,"sent":39845888,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":40894464,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838604,"sunreclaim_kb":20500,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5318,"state":"open","fwd":40894464,"sent":40894464,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":41943040,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838956,"sunreclaim_kb":20532,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5370,"state":"open","fwd":40894464,"sent":40894464,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":41943040,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838956,"sunreclaim_kb":20532,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5421,"state":"open","fwd":41943040,"sent":41943040,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":42991616,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838956,"sunreclaim_kb":20500,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5473,"state":"open","fwd":41943040,"sent":41943040,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":42991616,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838956,"sunreclaim_kb":20500,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5525,"state":"open","fwd":42991616,"sent":42991616,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":44040192,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838956,"sunreclaim_kb":20372,"skb_head":563}
+HB up=7.39 27.33 MemAvailable:838656 SUnreclaim:20372 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5577,"state":"open","fwd":42991616,"sent":42991616,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":44040192,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838584,"sunreclaim_kb":20376,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5627,"state":"open","fwd":44040192,"sent":44040192,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":45088768,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838584,"sunreclaim_kb":20536,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5679,"state":"open","fwd":44040192,"sent":44040192,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":45088768,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838584,"sunreclaim_kb":20536,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5731,"state":"open","fwd":45088768,"sent":45088768,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":46137344,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838584,"sunreclaim_kb":20440,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5782,"state":"open","fwd":45088768,"sent":45088768,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":46137344,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838584,"sunreclaim_kb":20440,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5834,"state":"open","fwd":46137344,"sent":46137344,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":47185920,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838584,"sunreclaim_kb":20408,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5886,"state":"open","fwd":46137344,"sent":46137344,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":47185920,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":838584,"sunreclaim_kb":20408,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5938,"state":"open","fwd":47185920,"sent":47185920,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":48234496,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840048,"sunreclaim_kb":20528,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":5989,"state":"open","fwd":47185920,"sent":47185920,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":48234496,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840048,"sunreclaim_kb":20528,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6041,"state":"open","fwd":48234496,"sent":48234496,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":49283072,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840048,"sunreclaim_kb":20528,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6093,"state":"open","fwd":48234496,"sent":48234496,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":49283072,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840048,"sunreclaim_kb":20528,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6145,"state":"open","fwd":49283072,"sent":49283072,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":50331648,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840048,"sunreclaim_kb":20464,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6196,"state":"open","fwd":49283072,"sent":49283072,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":50331648,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840048,"sunreclaim_kb":20464,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6248,"state":"open","fwd":50331648,"sent":50331648,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":51380224,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840048,"sunreclaim_kb":20432,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6300,"state":"open","fwd":50331648,"sent":50331648,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":51380224,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840048,"sunreclaim_kb":20432,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6351,"state":"open","fwd":51380224,"sent":51380224,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":52428800,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840464,"sunreclaim_kb":20432,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6403,"state":"open","fwd":51380224,"sent":51380224,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":52428800,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840464,"sunreclaim_kb":20432,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6455,"state":"open","fwd":52428800,"sent":52428800,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":53477376,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840464,"sunreclaim_kb":20496,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6506,"state":"open","fwd":52428800,"sent":52428800,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":53477376,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840464,"sunreclaim_kb":20496,"skb_head":563}
+HB up=8.41 31.12 MemAvailable:840064 SUnreclaim:20496 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6557,"state":"open","fwd":53477376,"sent":53477376,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":54525952,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840016,"sunreclaim_kb":20532,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6608,"state":"open","fwd":53477376,"sent":53477376,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":54525952,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840108,"sunreclaim_kb":20532,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6659,"state":"open","fwd":54525952,"sent":54525952,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":55574528,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840108,"sunreclaim_kb":20436,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6709,"state":"open","fwd":54525952,"sent":54525952,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":55574528,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840108,"sunreclaim_kb":20436,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6760,"state":"open","fwd":55574528,"sent":55574528,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":56623104,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840108,"sunreclaim_kb":20400,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6811,"state":"open","fwd":55574528,"sent":55574528,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":56623104,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840108,"sunreclaim_kb":20400,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6861,"state":"open","fwd":56623104,"sent":56623104,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":57671680,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840108,"sunreclaim_kb":20432,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6912,"state":"open","fwd":56623104,"sent":56623104,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":57671680,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840108,"sunreclaim_kb":20432,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":6962,"state":"open","fwd":57671680,"sent":57671680,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":58720256,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840456,"sunreclaim_kb":20496,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7013,"state":"open","fwd":57671680,"sent":57671680,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":58720256,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840456,"sunreclaim_kb":20496,"skb_head":591}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7063,"state":"open","fwd":58720256,"sent":58720256,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":59768832,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840456,"sunreclaim_kb":20336,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7114,"state":"open","fwd":58720256,"sent":58720256,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":59768832,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840456,"sunreclaim_kb":20336,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7165,"state":"open","fwd":59768832,"sent":59768832,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":60817408,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840456,"sunreclaim_kb":20496,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7216,"state":"open","fwd":59768832,"sent":59768832,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":60817408,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840456,"sunreclaim_kb":20496,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7267,"state":"open","fwd":60817408,"sent":60817408,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":61865984,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840776,"sunreclaim_kb":20560,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7317,"state":"open","fwd":60817408,"sent":60817408,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":61865984,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840776,"sunreclaim_kb":20560,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7368,"state":"open","fwd":61865984,"sent":61865984,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":62914560,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840776,"sunreclaim_kb":20496,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7419,"state":"open","fwd":61865984,"sent":61865984,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":62914560,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840776,"sunreclaim_kb":20496,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7470,"state":"open","fwd":62914560,"sent":62914560,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":63963136,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840776,"sunreclaim_kb":20400,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7521,"state":"open","fwd":62914560,"sent":62914560,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":63963136,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840776,"sunreclaim_kb":20400,"skb_head":535}
+HB up=9.41 34.78 MemAvailable:840564 SUnreclaim:20304 
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7572,"state":"open","fwd":63963136,"sent":63963136,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":65011712,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840668,"sunreclaim_kb":20308,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7624,"state":"open","fwd":63963136,"sent":63963136,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":65011712,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840644,"sunreclaim_kb":20308,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7675,"state":"open","fwd":65011712,"sent":65011712,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":66060288,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840644,"sunreclaim_kb":20660,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7727,"state":"open","fwd":65011712,"sent":65011712,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":66060288,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840644,"sunreclaim_kb":20660,"skb_head":563}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7778,"state":"open","fwd":66060288,"sent":66060288,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":67108864,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840644,"sunreclaim_kb":20404,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7830,"state":"open","fwd":66060288,"sent":66060288,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":67108864,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840644,"sunreclaim_kb":20404,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7882,"state":"open","fwd":66060288,"sent":66060288,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":67108864,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840644,"sunreclaim_kb":20404,"skb_head":535}
+{"ev":"sample","label":"rejoingate-A","trial":0,"t_ms":7934,"state":"open","fwd":66060288,"sent":66060288,"queued":0,"peak":4646776,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":67108864,"pumped":1048576,"parked":0,"rs_zero":0,"mem_avail_kb":840644,"sunreclaim_kb":20404,"skb_head":535}
+HB up=10.42 38.70 MemAvailable:840432 SUnreclaim:20412 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":0,"outcome":"complete","secs":7.947,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":3872270983,"reader_done_ns":9617610745,"reader_mibps":11.1,"stall_ends":[[3872247768,0]],"t0_ns":1872868910,"fwd":66060288,"sent":66060288,"queued_end":0,"peak_queued":4646776,"verdicts":18144,"refused":0,"send_ok":18146,"send_fail":899,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4646776],"pump_recv":1048576,"pump_sent":1048576,"pump_ms":2,"rejoins":1,"rejoin_fail":1,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":623,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4646776,"src_inq":0,"ktime":2487565558}],"writer":null,"avail_start_kb":829716,"min_avail_kb":820580,"avail_end_kb":840644,"avail_after_close_kb":840368,"sunreclaim_start_kb":19724,"max_sunreclaim_kb":25780,"sunreclaim_end_kb":20404,"sunreclaim_after_close_kb":20412,"max_skb_head":1711,"parked":0,"forwarded":0,"rs_ok":18144,"rs_zero":0,"rs_err":0,"rs_bytes":66060288,"vr_ok":18144,"vr_zero":0,"vr_err":0,"owner_cpu_ms":1491,"sys_busy_ms":980}
+HB up=11.43 42.67 MemAvailable:840368 SUnreclaim:20444 
+HB up=12.43 46.63 MemAvailable:834628 SUnreclaim:25100 
+HB up=13.44 50.59 MemAvailable:834056 SUnreclaim:20376 
+HB up=14.45 54.52 MemAvailable:834156 SUnreclaim:20640 
+HB up=15.45 58.47 MemAvailable:833940 SUnreclaim:20768 
+HB up=16.46 62.41 MemAvailable:835172 SUnreclaim:20800 
+HB up=17.46 66.34 MemAvailable:836436 SUnreclaim:20768 
+HB up=18.47 70.28 MemAvailable:836860 SUnreclaim:20404 
+HB up=19.48 74.24 MemAvailable:836720 SUnreclaim:20532 
+HB up=20.48 78.25 MemAvailable:836868 SUnreclaim:20532 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":1,"outcome":"complete","secs":8.111,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":13360564915,"reader_done_ns":19269899504,"reader_mibps":10.8,"stall_ends":[[13360539287,0]],"t0_ns":11360731133,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4217880,"verdicts":18360,"refused":0,"send_ok":18362,"send_fail":896,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4217880],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":619,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4217880,"src_inq":0,"ktime":11979783706}],"writer":null,"avail_start_kb":840368,"min_avail_kb":833940,"avail_end_kb":836844,"avail_after_close_kb":837068,"sunreclaim_start_kb":20412,"max_sunreclaim_kb":25132,"sunreclaim_end_kb":20500,"sunreclaim_after_close_kb":20532,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":109,"sys_busy_ms":590}
+HB up=21.49 82.20 MemAvailable:833164 SUnreclaim:22948 
+HB up=22.49 86.16 MemAvailable:830524 SUnreclaim:25352 
+HB up=23.50 90.13 MemAvailable:832312 SUnreclaim:20724 
+HB up=24.51 94.08 MemAvailable:832100 SUnreclaim:20852 
+HB up=25.51 98.03 MemAvailable:832992 SUnreclaim:20592 
+HB up=26.52 101.96 MemAvailable:834060 SUnreclaim:20996 
+HB up=27.52 105.89 MemAvailable:834492 SUnreclaim:21080 
+HB up=28.53 109.83 MemAvailable:835232 SUnreclaim:20824 
+HB up=29.54 113.80 MemAvailable:835140 SUnreclaim:20884 
+HB up=30.55 117.82 MemAvailable:835140 SUnreclaim:20884 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":2,"outcome":"complete","secs":8.087,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":23012469415,"reader_done_ns":28897078163,"reader_mibps":10.9,"stall_ends":[[23012452290,0]],"t0_ns":21012379428,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4290880,"verdicts":18360,"refused":0,"send_ok":18362,"send_fail":899,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4290880],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":613,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4290880,"src_inq":0,"ktime":21626016611}],"writer":null,"avail_start_kb":837068,"min_avail_kb":830524,"avail_end_kb":835140,"avail_after_close_kb":835140,"sunreclaim_start_kb":20404,"max_sunreclaim_kb":25384,"sunreclaim_end_kb":20876,"sunreclaim_after_close_kb":20884,"max_skb_head":507,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":108,"sys_busy_ms":560}
+HB up=31.55 121.74 MemAvailable:830816 SUnreclaim:25160 
+HB up=32.56 125.71 MemAvailable:830692 SUnreclaim:25224 
+HB up=33.56 129.65 MemAvailable:833984 SUnreclaim:20928 
+HB up=34.57 133.60 MemAvailable:833936 SUnreclaim:20944 
+HB up=35.57 137.54 MemAvailable:835164 SUnreclaim:20884 
+HB up=36.58 141.48 MemAvailable:835056 SUnreclaim:21104 
+HB up=37.59 145.43 MemAvailable:835040 SUnreclaim:20964 
+HB up=38.59 149.37 MemAvailable:835040 SUnreclaim:20644 
+HB up=39.60 153.38 MemAvailable:834816 SUnreclaim:20684 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":3,"outcome":"complete","secs":8.131,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":32636681930,"reader_done_ns":38536546547,"reader_mibps":10.8,"stall_ends":[[32636662060,0]],"t0_ns":30606694318,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4253560,"verdicts":18360,"refused":0,"send_ok":18362,"send_fail":913,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4253560],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":617,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4253560,"src_inq":26124,"ktime":31223827953}],"writer":null,"avail_start_kb":835140,"min_avail_kb":830592,"avail_end_kb":835040,"avail_after_close_kb":834816,"sunreclaim_start_kb":20884,"max_sunreclaim_kb":25224,"sunreclaim_end_kb":20644,"sunreclaim_after_close_kb":20684,"max_skb_head":507,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":101,"sys_busy_ms":540}
+HB up=40.61 157.33 MemAvailable:834304 SUnreclaim:21908 
+HB up=41.61 161.29 MemAvailable:830752 SUnreclaim:25592 
+HB up=42.62 165.25 MemAvailable:833620 SUnreclaim:20924 
+HB up=43.62 169.19 MemAvailable:834148 SUnreclaim:21084 
+HB up=44.63 173.13 MemAvailable:835224 SUnreclaim:21232 
+HB up=45.63 177.07 MemAvailable:835116 SUnreclaim:20960 
+HB up=46.64 181.01 MemAvailable:835148 SUnreclaim:20956 
+HB up=47.65 184.95 MemAvailable:835148 SUnreclaim:20660 
+HB up=48.66 188.93 MemAvailable:835148 SUnreclaim:20884 
+HB up=49.66 192.94 MemAvailable:835036 SUnreclaim:20840 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":4,"outcome":"complete","secs":8.096,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":42247783394,"reader_done_ns":48141755212,"reader_mibps":10.9,"stall_ends":[[42247759327,0]],"t0_ns":40247158871,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4206684,"verdicts":18360,"refused":0,"send_ok":18363,"send_fail":898,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4206684],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":618,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4206684,"src_inq":0,"ktime":40865929680}],"writer":null,"avail_start_kb":834816,"min_avail_kb":830688,"avail_end_kb":835148,"avail_after_close_kb":835044,"sunreclaim_start_kb":20660,"max_sunreclaim_kb":25632,"sunreclaim_end_kb":20884,"sunreclaim_after_close_kb":20840,"max_skb_head":507,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":108,"sys_busy_ms":530}
+HB up=50.67 196.87 MemAvailable:831204 SUnreclaim:25292 
+HB up=51.68 200.85 MemAvailable:830896 SUnreclaim:25292 
+HB up=52.68 204.79 MemAvailable:837336 SUnreclaim:20792 
+HB up=53.69 208.72 MemAvailable:837212 SUnreclaim:20780 
+HB up=54.70 212.65 MemAvailable:837100 SUnreclaim:20844 
+HB up=55.70 216.59 MemAvailable:837100 SUnreclaim:20940 
+HB up=56.71 220.52 MemAvailable:836988 SUnreclaim:20812 
+HB up=57.72 224.45 MemAvailable:836864 SUnreclaim:20676 
+HB up=58.72 228.46 MemAvailable:836764 SUnreclaim:20776 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":5,"outcome":"complete","secs":8.144,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":51881386010,"reader_done_ns":57794412656,"reader_mibps":10.8,"stall_ends":[[51881361764,0]],"t0_ns":49851886442,"fwd":66723112,"sent":66723112,"queued_end":0,"peak_queued":4261024,"verdicts":18326,"refused":0,"send_ok":18327,"send_fail":910,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4261024],"pump_recv":385752,"pump_sent":385752,"pump_ms":1,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":617,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4261024,"src_inq":123608,"ktime":50468909010}],"writer":null,"avail_start_kb":835044,"min_avail_kb":830872,"avail_end_kb":836864,"avail_after_close_kb":836740,"sunreclaim_start_kb":20840,"max_sunreclaim_kb":25292,"sunreclaim_end_kb":20772,"sunreclaim_after_close_kb":20776,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18326,"rs_zero":0,"rs_err":0,"rs_bytes":66723112,"vr_ok":18326,"vr_zero":0,"vr_err":0,"owner_cpu_ms":104,"sys_busy_ms":590}
+HB up=59.73 232.41 MemAvailable:836260 SUnreclaim:20936 
+HB up=60.74 236.37 MemAvailable:831652 SUnreclaim:25604 
+HB up=61.75 240.33 MemAvailable:831268 SUnreclaim:20988 
+HB up=62.75 244.24 MemAvailable:832500 SUnreclaim:20772 
+HB up=63.76 248.16 MemAvailable:833316 SUnreclaim:20684 
+HB up=64.77 252.09 MemAvailable:833588 SUnreclaim:20828 
+HB up=65.77 256.03 MemAvailable:833476 SUnreclaim:20828 
+HB up=66.78 259.97 MemAvailable:833668 SUnreclaim:20764 
+HB up=67.79 263.92 MemAvailable:833668 SUnreclaim:20828 
+HB up=68.80 267.94 MemAvailable:833456 SUnreclaim:20828 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":6,"outcome":"complete","secs":8.108,"bytes":67108864,"app_read":67108864,"app_ok":false,"first_bad":7354960,"hash":1437426261001524170,"ehash":16227903447944583845,"reader_first_byte_ns":61536529095,"reader_done_ns":67415784796,"reader_mibps":10.9,"stall_ends":[[61536505309,0]],"t0_ns":59508720321,"fwd":66228680,"sent":66228680,"queued_end":0,"peak_queued":4384632,"verdicts":18190,"refused":0,"send_ok":18193,"send_fail":909,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4384632],"pump_recv":880184,"pump_sent":880184,"pump_ms":1,"rejoins":1,"rejoin_fail":3,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":621,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4384632,"src_inq":0,"ktime":60129900436}],"writer":null,"avail_start_kb":836740,"min_avail_kb":831156,"avail_end_kb":833668,"avail_after_close_kb":833432,"sunreclaim_start_kb":20712,"max_sunreclaim_kb":25608,"sunreclaim_end_kb":20892,"sunreclaim_after_close_kb":20828,"max_skb_head":507,"parked":0,"forwarded":0,"rs_ok":18190,"rs_zero":0,"rs_err":0,"rs_bytes":66228680,"vr_ok":18190,"vr_zero":0,"vr_err":0,"owner_cpu_ms":112,"sys_busy_ms":650}
+HB up=69.80 271.87 MemAvailable:829300 SUnreclaim:25408 
+HB up=70.81 275.84 MemAvailable:829152 SUnreclaim:25424 
+HB up=71.82 279.78 MemAvailable:832648 SUnreclaim:20956 
+HB up=72.82 283.72 MemAvailable:833284 SUnreclaim:21008 
+HB up=73.83 287.66 MemAvailable:833452 SUnreclaim:21068 
+HB up=74.84 291.60 MemAvailable:833784 SUnreclaim:20908 
+HB up=75.84 295.52 MemAvailable:833660 SUnreclaim:20740 
+HB up=76.85 299.44 MemAvailable:833524 SUnreclaim:20740 
+HB up=77.86 303.42 MemAvailable:833412 SUnreclaim:20644 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":7,"outcome":"complete","secs":8.200,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":71151985402,"reader_done_ns":77122189337,"reader_mibps":10.7,"stall_ends":[[71151907314,0]],"t0_ns":69124808889,"fwd":66676236,"sent":66676236,"queued_end":0,"peak_queued":4214148,"verdicts":18313,"refused":0,"send_ok":18314,"send_fail":910,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4214148],"pump_recv":432628,"pump_sent":432628,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":616,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4214148,"src_inq":0,"ktime":69741074438}],"writer":null,"avail_start_kb":833432,"min_avail_kb":829152,"avail_end_kb":833524,"avail_after_close_kb":833412,"sunreclaim_start_kb":20828,"max_sunreclaim_kb":25424,"sunreclaim_end_kb":20644,"sunreclaim_after_close_kb":20644,"max_skb_head":563,"parked":0,"forwarded":0,"rs_ok":18313,"rs_zero":0,"rs_err":0,"rs_bytes":66676236,"vr_ok":18313,"vr_zero":0,"vr_err":0,"owner_cpu_ms":109,"sys_busy_ms":580}
+HB up=78.86 307.39 MemAvailable:833300 SUnreclaim:20996 
+HB up=79.87 311.35 MemAvailable:828788 SUnreclaim:25324 
+HB up=80.88 315.31 MemAvailable:831144 SUnreclaim:20876 
+HB up=81.88 319.24 MemAvailable:831704 SUnreclaim:20872 
+HB up=82.89 323.18 MemAvailable:832468 SUnreclaim:20864 
+HB up=83.90 327.12 MemAvailable:832548 SUnreclaim:20908 
+HB up=84.90 331.03 MemAvailable:832892 SUnreclaim:21076 
+HB up=85.91 334.95 MemAvailable:833168 SUnreclaim:21064 
+HB up=86.92 338.89 MemAvailable:832964 SUnreclaim:20744 
+HB up=87.92 342.90 MemAvailable:832808 SUnreclaim:20744 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":8,"outcome":"complete","secs":8.176,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":80834918840,"reader_done_ns":86808818407,"reader_mibps":10.7,"stall_ends":[[80834893451,0]],"t0_ns":78834207116,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4264756,"verdicts":18360,"refused":0,"send_ok":18361,"send_fail":897,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4264756],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":617,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4264756,"src_inq":0,"ktime":79451824019}],"writer":null,"avail_start_kb":833412,"min_avail_kb":828788,"avail_end_kb":832808,"avail_after_close_kb":832808,"sunreclaim_start_kb":20676,"max_sunreclaim_kb":25324,"sunreclaim_end_kb":20744,"sunreclaim_after_close_kb":20744,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":111,"sys_busy_ms":600}
+HB up=88.93 346.84 MemAvailable:831656 SUnreclaim:23076 
+HB up=89.94 350.81 MemAvailable:828776 SUnreclaim:25944 
+HB up=90.95 354.75 MemAvailable:835144 SUnreclaim:21044 
+HB up=91.95 358.69 MemAvailable:835144 SUnreclaim:20972 
+HB up=92.96 362.62 MemAvailable:835144 SUnreclaim:21004 
+HB up=93.97 366.56 MemAvailable:835032 SUnreclaim:21008 
+HB up=94.97 370.50 MemAvailable:835032 SUnreclaim:20940 
+HB up=95.98 374.44 MemAvailable:834908 SUnreclaim:20936 
+HB up=96.99 378.42 MemAvailable:834908 SUnreclaim:20896 
+HB up=97.99 382.43 MemAvailable:834908 SUnreclaim:20896 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":9,"outcome":"complete","secs":8.031,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":90517586668,"reader_done_ns":96347352208,"reader_mibps":11.0,"stall_ends":[[90517561550,0]],"t0_ns":88517459975,"fwd":66309144,"sent":66309144,"queued_end":0,"peak_queued":4436880,"verdicts":18212,"refused":0,"send_ok":18214,"send_fail":895,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4436880],"pump_recv":799720,"pump_sent":799720,"pump_ms":1,"rejoins":1,"rejoin_fail":1,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":622,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4436880,"src_inq":0,"ktime":89139753425}],"writer":null,"avail_start_kb":832808,"min_avail_kb":828776,"avail_end_kb":834908,"avail_after_close_kb":834908,"sunreclaim_start_kb":20744,"max_sunreclaim_kb":25944,"sunreclaim_end_kb":20960,"sunreclaim_after_close_kb":20896,"max_skb_head":507,"parked":0,"forwarded":0,"rs_ok":18212,"rs_zero":0,"rs_err":0,"rs_bytes":66309144,"vr_ok":18212,"vr_zero":0,"vr_err":0,"owner_cpu_ms":109,"sys_busy_ms":550}
+HB up=99.00 386.34 MemAvailable:829420 SUnreclaim:25992 
+HB up=100.01 390.32 MemAvailable:829308 SUnreclaim:26000 
+HB up=101.01 394.25 MemAvailable:829308 SUnreclaim:20772 
+HB up=102.02 398.19 MemAvailable:829308 SUnreclaim:20968 
+HB up=103.03 402.12 MemAvailable:830396 SUnreclaim:21220 
+HB up=104.04 406.05 MemAvailable:830784 SUnreclaim:20892 
+HB up=105.04 409.99 MemAvailable:831256 SUnreclaim:21044 
+HB up=106.05 413.93 MemAvailable:831144 SUnreclaim:20844 
+HB up=107.06 417.94 MemAvailable:831144 SUnreclaim:20844 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":10,"outcome":"complete","secs":8.063,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":100087157308,"reader_done_ns":105916247542,"reader_mibps":11.0,"stall_ends":[[100087139251,0]],"t0_ns":98056351534,"fwd":66356020,"sent":66356020,"queued_end":0,"peak_queued":4418220,"verdicts":18225,"refused":0,"send_ok":18226,"send_fail":911,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4418220],"pump_recv":752844,"pump_sent":752844,"pump_ms":1,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":620,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4418220,"src_inq":0,"ktime":98676083260}],"writer":null,"avail_start_kb":834908,"min_avail_kb":829308,"avail_end_kb":831144,"avail_after_close_kb":831288,"sunreclaim_start_kb":20864,"max_sunreclaim_kb":26000,"sunreclaim_end_kb":20844,"sunreclaim_after_close_kb":20844,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18225,"rs_zero":0,"rs_err":0,"rs_bytes":66356020,"vr_ok":18225,"vr_zero":0,"vr_err":0,"owner_cpu_ms":110,"sys_busy_ms":570}
+HB up=108.06 421.88 MemAvailable:829652 SUnreclaim:23524 
+HB up=109.07 425.85 MemAvailable:827420 SUnreclaim:25728 
+HB up=110.08 429.79 MemAvailable:830412 SUnreclaim:21088 
+HB up=111.09 433.73 MemAvailable:830412 SUnreclaim:20920 
+HB up=112.09 437.66 MemAvailable:830860 SUnreclaim:20904 
+HB up=113.10 441.60 MemAvailable:831020 SUnreclaim:21028 
+HB up=114.11 445.55 MemAvailable:831020 SUnreclaim:21016 
+HB up=115.11 449.48 MemAvailable:831020 SUnreclaim:21172 
+HB up=116.12 453.46 MemAvailable:831020 SUnreclaim:21264 
+HB up=117.13 457.48 MemAvailable:830908 SUnreclaim:21264 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":11,"outcome":"complete","secs":8.085,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":109659918200,"reader_done_ns":115513126611,"reader_mibps":10.9,"stall_ends":[[109659895005,0]],"t0_ns":107630189677,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4392096,"verdicts":18360,"refused":0,"send_ok":18361,"send_fail":910,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4392096],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":622,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4392096,"src_inq":0,"ktime":108252425331}],"writer":null,"avail_start_kb":831288,"min_avail_kb":827420,"avail_end_kb":831020,"avail_after_close_kb":830908,"sunreclaim_start_kb":20844,"max_sunreclaim_kb":25728,"sunreclaim_end_kb":21300,"sunreclaim_after_close_kb":21264,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":109,"sys_busy_ms":600}
+HB up=118.13 461.39 MemAvailable:827068 SUnreclaim:25388 
+HB up=119.14 465.38 MemAvailable:826972 SUnreclaim:25420 
+HB up=120.15 469.31 MemAvailable:827756 SUnreclaim:21296 
+HB up=121.15 473.24 MemAvailable:829368 SUnreclaim:21076 
+HB up=122.16 477.17 MemAvailable:829760 SUnreclaim:21108 
+HB up=123.17 481.10 MemAvailable:829860 SUnreclaim:20956 
+HB up=124.17 485.00 MemAvailable:830020 SUnreclaim:21084 
+HB up=125.18 488.93 MemAvailable:829908 SUnreclaim:20952 
+HB up=126.19 492.94 MemAvailable:829908 SUnreclaim:20920 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":12,"outcome":"complete","secs":8.158,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":119224874997,"reader_done_ns":125180911241,"reader_mibps":10.7,"stall_ends":[[119224861838,0]],"t0_ns":117225699015,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4294612,"verdicts":18360,"refused":0,"send_ok":18362,"send_fail":896,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4294612],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":620,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4294612,"src_inq":0,"ktime":117846337515}],"writer":null,"avail_start_kb":830908,"min_avail_kb":826972,"avail_end_kb":829908,"avail_after_close_kb":829916,"sunreclaim_start_kb":21264,"max_sunreclaim_kb":25420,"sunreclaim_end_kb":20952,"sunreclaim_after_close_kb":20920,"max_skb_head":591,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":111,"sys_busy_ms":640}
+HB up=127.19 496.88 MemAvailable:829916 SUnreclaim:21208 
+HB up=128.20 500.85 MemAvailable:827432 SUnreclaim:26136 
+HB up=129.21 504.79 MemAvailable:827072 SUnreclaim:21152 
+HB up=130.21 508.72 MemAvailable:827464 SUnreclaim:21300 
+HB up=131.22 512.66 MemAvailable:827784 SUnreclaim:21068 
+HB up=132.23 516.59 MemAvailable:828052 SUnreclaim:20892 
+HB up=133.24 520.52 MemAvailable:828184 SUnreclaim:20888 
+HB up=134.24 524.46 MemAvailable:828428 SUnreclaim:20980 
+HB up=135.25 528.43 MemAvailable:828316 SUnreclaim:20724 
+HB up=136.26 532.45 MemAvailable:828316 SUnreclaim:20724 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":13,"outcome":"complete","secs":8.052,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":128922660908,"reader_done_ns":134740463384,"reader_mibps":11.0,"stall_ends":[[128922636661,0]],"t0_ns":126891669975,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4498684,"verdicts":18360,"refused":0,"send_ok":18361,"send_fail":912,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4498684],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":619,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4498684,"src_inq":0,"ktime":127510307253}],"writer":null,"avail_start_kb":829916,"min_avail_kb":827172,"avail_end_kb":828428,"avail_after_close_kb":828316,"sunreclaim_start_kb":20920,"max_sunreclaim_kb":26136,"sunreclaim_end_kb":20724,"sunreclaim_after_close_kb":20724,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":111,"sys_busy_ms":620}
+HB up=137.26 536.37 MemAvailable:825544 SUnreclaim:25824 
+HB up=138.27 540.35 MemAvailable:825276 SUnreclaim:25892 
+HB up=139.28 544.28 MemAvailable:826484 SUnreclaim:21208 
+HB up=140.28 548.23 MemAvailable:826696 SUnreclaim:21388 
+HB up=141.29 552.17 MemAvailable:826996 SUnreclaim:21212 
+HB up=142.30 556.12 MemAvailable:827368 SUnreclaim:20848 
+HB up=143.30 560.06 MemAvailable:827688 SUnreclaim:21200 
+HB up=144.31 564.00 MemAvailable:827792 SUnreclaim:21328 
+HB up=145.32 568.01 MemAvailable:827556 SUnreclaim:21008 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":14,"outcome":"complete","secs":8.142,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":138483091173,"reader_done_ns":144390811242,"reader_mibps":10.8,"stall_ends":[[138483070181,0]],"t0_ns":136451358263,"fwd":66715648,"sent":66715648,"queued_end":0,"peak_queued":4253560,"verdicts":18324,"refused":0,"send_ok":18326,"send_fail":913,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4253560],"pump_recv":393216,"pump_sent":393216,"pump_ms":0,"rejoins":1,"rejoin_fail":1,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":619,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4253560,"src_inq":0,"ktime":137070614683}],"writer":null,"avail_start_kb":828316,"min_avail_kb":825176,"avail_end_kb":827692,"avail_after_close_kb":827432,"sunreclaim_start_kb":20724,"max_sunreclaim_kb":25892,"sunreclaim_end_kb":21040,"sunreclaim_after_close_kb":21008,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18324,"rs_zero":0,"rs_err":0,"rs_bytes":66715648,"vr_ok":18324,"vr_zero":0,"vr_err":0,"owner_cpu_ms":105,"sys_busy_ms":550}
+HB up=146.33 571.96 MemAvailable:827320 SUnreclaim:21328 
+HB up=147.33 575.92 MemAvailable:824828 SUnreclaim:25892 
+HB up=148.34 579.88 MemAvailable:826100 SUnreclaim:21212 
+HB up=149.35 583.83 MemAvailable:827008 SUnreclaim:21144 
+HB up=150.35 587.76 MemAvailable:826908 SUnreclaim:20976 
+HB up=151.36 591.69 MemAvailable:826784 SUnreclaim:21264 
+HB up=152.37 595.63 MemAvailable:826884 SUnreclaim:20900 
+HB up=153.38 599.57 MemAvailable:826880 SUnreclaim:20868 
+HB up=154.38 603.52 MemAvailable:826612 SUnreclaim:21124 
+HB up=155.39 607.54 MemAvailable:826632 SUnreclaim:21124 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":15,"outcome":"complete","secs":8.188,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":148133700364,"reader_done_ns":154089215983,"reader_mibps":10.7,"stall_ends":[[148133674695,0]],"t0_ns":146101827804,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4229076,"verdicts":18360,"refused":0,"send_ok":18362,"send_fail":913,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4229076],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":617,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4229076,"src_inq":0,"ktime":146719286468}],"writer":null,"avail_start_kb":827432,"min_avail_kb":824828,"avail_end_kb":826936,"avail_after_close_kb":826484,"sunreclaim_start_kb":21008,"max_sunreclaim_kb":25892,"sunreclaim_end_kb":21156,"sunreclaim_after_close_kb":21124,"max_skb_head":507,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":109,"sys_busy_ms":560}
+HB up=156.40 611.47 MemAvailable:824948 SUnreclaim:24388 
+HB up=157.40 615.44 MemAvailable:823408 SUnreclaim:25928 
+HB up=158.41 619.39 MemAvailable:827228 SUnreclaim:21268 
+HB up=159.42 623.32 MemAvailable:828364 SUnreclaim:21156 
+HB up=160.42 627.26 MemAvailable:828368 SUnreclaim:21040 
+HB up=161.43 631.20 MemAvailable:828096 SUnreclaim:21068 
+HB up=162.44 635.14 MemAvailable:828252 SUnreclaim:21220 
+HB up=163.44 639.08 MemAvailable:828240 SUnreclaim:21028 
+HB up=164.45 643.07 MemAvailable:828412 SUnreclaim:21124 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":16,"outcome":"complete","secs":8.149,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":157828392067,"reader_done_ns":163744926191,"reader_mibps":10.8,"stall_ends":[[157828369423,0]],"t0_ns":155798270533,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4257292,"verdicts":18360,"refused":0,"send_ok":18361,"send_fail":911,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4257292],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":619,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4257292,"src_inq":0,"ktime":156417394473}],"writer":null,"avail_start_kb":826484,"min_avail_kb":823296,"avail_end_kb":828412,"avail_after_close_kb":828412,"sunreclaim_start_kb":21092,"max_sunreclaim_kb":25932,"sunreclaim_end_kb":21124,"sunreclaim_after_close_kb":21124,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":106,"sys_busy_ms":550}
+HB up=165.46 647.05 MemAvailable:828300 SUnreclaim:21124 
+HB up=166.46 650.99 MemAvailable:825484 SUnreclaim:25444 
+HB up=167.47 654.95 MemAvailable:828268 SUnreclaim:21112 
+HB up=168.48 658.90 MemAvailable:828364 SUnreclaim:20916 
+HB up=169.48 662.84 MemAvailable:828252 SUnreclaim:21076 
+HB up=170.49 666.78 MemAvailable:828252 SUnreclaim:21252 
+HB up=171.50 670.72 MemAvailable:828252 SUnreclaim:20932 
+HB up=172.51 674.67 MemAvailable:828040 SUnreclaim:21240 
+HB up=173.51 678.61 MemAvailable:828024 SUnreclaim:21232 
+HB up=174.52 682.63 MemAvailable:828100 SUnreclaim:21244 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":17,"outcome":"complete","secs":8.109,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":167456178340,"reader_done_ns":173361803587,"reader_mibps":10.8,"stall_ends":[[167456153273,0]],"t0_ns":165455689362,"fwd":66833432,"sent":66833432,"queued_end":0,"peak_queued":4251468,"verdicts":18356,"refused":0,"send_ok":18358,"send_fail":897,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4251468],"pump_recv":275432,"pump_sent":275432,"pump_ms":0,"rejoins":1,"rejoin_fail":1,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":618,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4251468,"src_inq":0,"ktime":166074062292}],"writer":null,"avail_start_kb":828412,"min_avail_kb":825420,"avail_end_kb":827924,"avail_after_close_kb":828184,"sunreclaim_start_kb":21124,"max_sunreclaim_kb":25444,"sunreclaim_end_kb":21232,"sunreclaim_after_close_kb":21244,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18356,"rs_zero":0,"rs_err":0,"rs_bytes":66833432,"vr_ok":18356,"vr_zero":0,"vr_err":0,"owner_cpu_ms":108,"sys_busy_ms":500}
+HB up=175.53 686.57 MemAvailable:827332 SUnreclaim:23688 
+HB up=176.53 690.54 MemAvailable:825140 SUnreclaim:25920 
+HB up=177.54 694.48 MemAvailable:828592 SUnreclaim:21284 
+HB up=178.55 698.42 MemAvailable:828368 SUnreclaim:21224 
+HB up=179.55 702.36 MemAvailable:828880 SUnreclaim:21132 
+HB up=180.56 706.30 MemAvailable:828944 SUnreclaim:21180 
+HB up=181.57 710.24 MemAvailable:828944 SUnreclaim:21080 
+HB up=182.57 714.19 MemAvailable:828832 SUnreclaim:21304 
+HB up=183.58 718.16 MemAvailable:828832 SUnreclaim:20920 
+HB up=184.59 722.18 MemAvailable:828832 SUnreclaim:20920 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":18,"outcome":"complete","secs":8.139,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":177102573640,"reader_done_ns":183012838489,"reader_mibps":10.8,"stall_ends":[[177102549503,0]],"t0_ns":175074533317,"fwd":66846720,"sent":66846720,"queued_end":0,"peak_queued":4229076,"verdicts":18360,"refused":0,"send_ok":18361,"send_fail":910,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4229076],"pump_recv":262144,"pump_sent":262144,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":618,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4229076,"src_inq":24484,"ktime":175693093540}],"writer":null,"avail_start_kb":828184,"min_avail_kb":825040,"avail_end_kb":828832,"avail_after_close_kb":828832,"sunreclaim_start_kb":21148,"max_sunreclaim_kb":25924,"sunreclaim_end_kb":21016,"sunreclaim_after_close_kb":20920,"max_skb_head":563,"parked":0,"forwarded":0,"rs_ok":18360,"rs_zero":0,"rs_err":0,"rs_bytes":66846720,"vr_ok":18360,"vr_zero":0,"vr_err":0,"owner_cpu_ms":109,"sys_busy_ms":570}
+HB up=185.60 726.10 MemAvailable:825760 SUnreclaim:26116 
+HB up=186.60 730.08 MemAvailable:825524 SUnreclaim:26124 
+HB up=187.61 734.00 MemAvailable:826752 SUnreclaim:21092 
+HB up=188.62 737.94 MemAvailable:826616 SUnreclaim:21176 
+HB up=189.62 741.88 MemAvailable:826840 SUnreclaim:21080 
+HB up=190.63 745.81 MemAvailable:827100 SUnreclaim:21188 
+HB up=191.64 749.75 MemAvailable:827408 SUnreclaim:21064 
+HB up=192.64 753.69 MemAvailable:827408 SUnreclaim:21052 
+HB up=193.65 757.71 MemAvailable:827296 SUnreclaim:21148 
+{"ev":"trial_end","label":"rejoingate-A","kind":"vsock","trial":19,"outcome":"complete","secs":8.021,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"reader_first_byte_ns":186754727505,"reader_done_ns":192571579101,"reader_mibps":11.0,"stall_ends":[[186754702187,0]],"t0_ns":184754637337,"fwd":66844628,"sent":66844628,"queued_end":0,"peak_queued":4448076,"verdicts":18359,"refused":0,"send_ok":18361,"send_fail":897,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4448076],"pump_recv":264236,"pump_sent":264236,"pump_ms":0,"rejoins":1,"rejoin_fail":0,"final_state":"open","src_inq_end":0,"closes":[{"t_ms":619,"ev_fwd":6885012,"ev_sent":2693256,"queued_at_remove":4448076,"src_inq":0,"ktime":185373960738}],"writer":null,"avail_start_kb":828832,"min_avail_kb":825268,"avail_end_kb":827408,"avail_after_close_kb":827296,"sunreclaim_start_kb":20920,"max_sunreclaim_kb":26124,"sunreclaim_end_kb":21052,"sunreclaim_after_close_kb":21148,"max_skb_head":535,"parked":0,"forwarded":0,"rs_ok":18359,"rs_zero":0,"rs_err":0,"rs_bytes":66844628,"vr_ok":18359,"vr_zero":0,"vr_err":0,"owner_cpu_ms":104,"sys_busy_ms":540}
+{"ev":"sink_done","label":"rejoingate-A","t_ms":193808}
+HB up=194.66 761.64 MemAvailable:831496 SUnreclaim:21168 
+HB up=195.66 765.65 MemAvailable:831384 SUnreclaim:21168 
+{"ev":"send_ready","label":"rejoingate-B","uname":"7.0.0-29-generic","cid":2,"port":7166,"bytes":67108864,"trials":20}
+HB up=196.67 769.65 MemAvailable:836120 SUnreclaim:20992 
+HB up=197.68 773.66 MemAvailable:835532 SUnreclaim:20960 
+HB up=198.68 777.67 MemAvailable:833836 SUnreclaim:20972 
+HB up=199.69 781.66 MemAvailable:834016 SUnreclaim:20848 
+HB up=200.70 785.66 MemAvailable:834240 SUnreclaim:20944 
+HB up=201.71 789.66 MemAvailable:836672 SUnreclaim:20944 
+HB up=202.71 793.66 MemAvailable:834256 SUnreclaim:20944 
+HB up=203.72 797.66 MemAvailable:833744 SUnreclaim:20948 
+{"ev":"send_end","label":"rejoingate-B","trial":0,"outcome":"done","sent":67108864,"secs":7.780,"mibps":8.2,"max_send_ms":1285,"sent_at_longest_block_start":7602176,"blocks":[[198353349640,1285]],"off_ns":5398896216104399,"best_rtt_ns":43085,"t_start_ns":196357467024,"peer_closed_read":0}
+HB up=204.73 801.66 MemAvailable:836176 SUnreclaim:20948 
+HB up=205.74 805.68 MemAvailable:836176 SUnreclaim:20916 
+HB up=206.75 809.70 MemAvailable:840816 SUnreclaim:20948 
+HB up=207.76 813.71 MemAvailable:840528 SUnreclaim:20948 
+HB up=208.76 817.71 MemAvailable:845460 SUnreclaim:20948 
+HB up=209.77 821.71 MemAvailable:845196 SUnreclaim:20916 
+HB up=210.78 825.71 MemAvailable:848256 SUnreclaim:20948 
+HB up=211.78 829.71 MemAvailable:845536 SUnreclaim:20948 
+HB up=212.79 833.71 MemAvailable:848280 SUnreclaim:20948 
+{"ev":"send_end","label":"rejoingate-B","trial":1,"outcome":"done","sent":67108864,"secs":7.871,"mibps":8.1,"max_send_ms":1384,"sent_at_longest_block_start":7208960,"blocks":[[207748810151,1384]],"off_ns":5398896216100070,"best_rtt_ns":61292,"t_start_ns":205755457903,"peer_closed_read":0}
+HB up=213.80 837.70 MemAvailable:847672 SUnreclaim:20948 
+HB up=214.81 841.72 MemAvailable:847560 SUnreclaim:20948 
+HB up=215.81 845.73 MemAvailable:848424 SUnreclaim:20948 
+HB up=216.82 849.74 MemAvailable:847448 SUnreclaim:20948 
+HB up=217.83 853.74 MemAvailable:845000 SUnreclaim:20948 
+HB up=218.83 857.73 MemAvailable:847752 SUnreclaim:20948 
+HB up=219.84 861.71 MemAvailable:845112 SUnreclaim:20948 
+HB up=220.85 865.70 MemAvailable:846392 SUnreclaim:20948 
+HB up=221.86 869.70 MemAvailable:846648 SUnreclaim:20948 
+HB up=222.86 873.70 MemAvailable:847096 SUnreclaim:20948 
+{"ev":"send_end","label":"rejoingate-B","trial":2,"outcome":"done","sent":67108864,"secs":7.915,"mibps":8.1,"max_send_ms":1388,"sent_at_longest_block_start":7208960,"blocks":[[217236402056,1388]],"off_ns":5398896216103762,"best_rtt_ns":57526,"t_start_ns":215240506841,"peer_closed_read":0}
+HB up=223.87 877.70 MemAvailable:844872 SUnreclaim:20948 
+HB up=224.88 881.72 MemAvailable:844584 SUnreclaim:20948 
+HB up=225.88 885.73 MemAvailable:847816 SUnreclaim:20948 
+HB up=226.89 889.74 MemAvailable:846552 SUnreclaim:20948 
+HB up=227.90 893.73 MemAvailable:846976 SUnreclaim:20948 
+HB up=228.90 897.72 MemAvailable:847628 SUnreclaim:20948 
+HB up=229.91 901.72 MemAvailable:845900 SUnreclaim:20948 
+HB up=230.92 905.72 MemAvailable:848156 SUnreclaim:20948 
+HB up=231.92 909.72 MemAvailable:845960 SUnreclaim:20952 
+{"ev":"send_end","label":"rejoingate-B","trial":3,"outcome":"done","sent":67108864,"secs":7.885,"mibps":8.1,"max_send_ms":1386,"sent_at_longest_block_start":7208960,"blocks":[[226765949083,1386]],"off_ns":5398896216109530,"best_rtt_ns":59059,"t_start_ns":224770101650,"peer_closed_read":0}
+HB up=232.93 913.71 MemAvailable:848304 SUnreclaim:20956 
+HB up=233.94 917.73 MemAvailable:848304 SUnreclaim:20956 
+HB up=234.95 921.73 MemAvailable:845312 SUnreclaim:20956 
+HB up=235.95 925.74 MemAvailable:845312 SUnreclaim:20956 
+HB up=236.96 929.74 MemAvailable:847520 SUnreclaim:20956 
+HB up=237.96 933.73 MemAvailable:845408 SUnreclaim:20956 
+HB up=238.97 937.73 MemAvailable:844368 SUnreclaim:20956 
+HB up=239.98 941.73 MemAvailable:844656 SUnreclaim:20960 
+HB up=240.98 945.72 MemAvailable:846448 SUnreclaim:20960 
+HB up=241.99 949.72 MemAvailable:847344 SUnreclaim:20960 
+{"ev":"send_end","label":"rejoingate-B","trial":4,"outcome":"done","sent":67108864,"secs":7.886,"mibps":8.1,"max_send_ms":1385,"sent_at_longest_block_start":7208960,"blocks":[[236264736868,1385]],"off_ns":5398896216103828,"best_rtt_ns":83807,"t_start_ns":234270433138,"peer_closed_read":0}
+HB up=243.00 953.73 MemAvailable:846208 SUnreclaim:20960 
+HB up=244.00 957.74 MemAvailable:845856 SUnreclaim:20960 
+HB up=245.01 961.75 MemAvailable:844288 SUnreclaim:20960 
+HB up=246.02 965.76 MemAvailable:844512 SUnreclaim:20960 
+HB up=247.02 969.75 MemAvailable:845840 SUnreclaim:20960 
+HB up=248.03 973.75 MemAvailable:846544 SUnreclaim:20960 
+HB up=249.04 977.75 MemAvailable:843872 SUnreclaim:20960 
+HB up=250.04 981.74 MemAvailable:845152 SUnreclaim:20964 
+HB up=251.05 985.74 MemAvailable:845328 SUnreclaim:20964 
+{"ev":"send_end","label":"rejoingate-B","trial":5,"outcome":"done","sent":67108864,"secs":7.876,"mibps":8.1,"max_send_ms":1388,"sent_at_longest_block_start":7208960,"blocks":[[245769416970,1388]],"off_ns":5398896216114410,"best_rtt_ns":61753,"t_start_ns":243772969314,"peer_closed_read":0}
+HB up=252.06 989.74 MemAvailable:843024 SUnreclaim:20964 
+HB up=253.07 993.75 MemAvailable:842912 SUnreclaim:20964 
+HB up=254.07 997.76 MemAvailable:843784 SUnreclaim:20964 
+HB up=255.08 1001.77 MemAvailable:843784 SUnreclaim:20964 
+HB up=256.09 1005.77 MemAvailable:845864 SUnreclaim:20964 
+HB up=257.09 1009.77 MemAvailable:842776 SUnreclaim:20964 
+HB up=258.10 1013.76 MemAvailable:843512 SUnreclaim:20964 
+HB up=259.11 1017.76 MemAvailable:845992 SUnreclaim:20964 
+HB up=260.11 1021.75 MemAvailable:843880 SUnreclaim:20964 
+HB up=261.12 1025.75 MemAvailable:845688 SUnreclaim:20964 
+{"ev":"send_end","label":"rejoingate-B","trial":6,"outcome":"done","sent":67108864,"secs":7.887,"mibps":8.1,"max_send_ms":1387,"sent_at_longest_block_start":7208960,"blocks":[[255259488618,1387]],"off_ns":5398896216122102,"best_rtt_ns":58438,"t_start_ns":253263537379,"peer_closed_read":0}
+HB up=262.12 1029.75 MemAvailable:845720 SUnreclaim:20964 
+HB up=263.13 1033.75 MemAvailable:844424 SUnreclaim:20964 
+HB up=264.14 1037.76 MemAvailable:843368 SUnreclaim:20964 
+HB up=265.14 1041.77 MemAvailable:844472 SUnreclaim:20968 
+HB up=266.15 1045.76 MemAvailable:847048 SUnreclaim:20968 
+HB up=267.16 1049.76 MemAvailable:844900 SUnreclaim:20968 
+HB up=268.16 1053.75 MemAvailable:845244 SUnreclaim:20972 
+HB up=269.17 1057.75 MemAvailable:846144 SUnreclaim:20972 
+HB up=270.18 1061.75 MemAvailable:844160 SUnreclaim:20972 
+{"ev":"send_end","label":"rejoingate-B","trial":7,"outcome":"done","sent":67108864,"secs":7.878,"mibps":8.1,"max_send_ms":1386,"sent_at_longest_block_start":7208960,"blocks":[[264762403594,1386]],"off_ns":5398896216125282,"best_rtt_ns":66040,"t_start_ns":262766541098,"peer_closed_read":0}
+HB up=271.18 1065.74 MemAvailable:842272 SUnreclaim:20972 
+HB up=272.19 1069.76 MemAvailable:842272 SUnreclaim:20972 
+HB up=273.20 1073.76 MemAvailable:845168 SUnreclaim:20972 
+HB up=274.21 1077.78 MemAvailable:845088 SUnreclaim:20972 
+HB up=275.21 1081.78 MemAvailable:843584 SUnreclaim:20972 
+HB up=276.22 1085.78 MemAvailable:843808 SUnreclaim:20972 
+HB up=277.23 1089.77 MemAvailable:844208 SUnreclaim:20972 
+HB up=278.23 1093.75 MemAvailable:845072 SUnreclaim:20972 
+HB up=279.24 1097.74 MemAvailable:843008 SUnreclaim:20972 
+HB up=280.25 1101.74 MemAvailable:842896 SUnreclaim:20972 
+{"ev":"send_end","label":"rejoingate-B","trial":8,"outcome":"done","sent":67108864,"secs":7.906,"mibps":8.1,"max_send_ms":1385,"sent_at_longest_block_start":7208960,"blocks":[[274255609889,1385]],"off_ns":5398896216127260,"best_rtt_ns":65228,"t_start_ns":272260095517,"peer_closed_read":0}
+HB up=281.25 1105.74 MemAvailable:842896 SUnreclaim:20972 
+HB up=282.26 1109.75 MemAvailable:842896 SUnreclaim:20972 
+HB up=283.27 1113.76 MemAvailable:842784 SUnreclaim:20972 
+HB up=284.27 1117.76 MemAvailable:842784 SUnreclaim:20972 
+HB up=285.28 1121.75 MemAvailable:842784 SUnreclaim:20980 
+HB up=286.29 1125.75 MemAvailable:842672 SUnreclaim:20980 
+HB up=287.29 1129.74 MemAvailable:842560 SUnreclaim:20980 
+HB up=288.30 1133.74 MemAvailable:842560 SUnreclaim:20980 
+HB up=289.31 1137.74 MemAvailable:842448 SUnreclaim:20980 
+{"ev":"send_end","label":"rejoingate-B","trial":9,"outcome":"done","sent":67108864,"secs":7.890,"mibps":8.1,"max_send_ms":1385,"sent_at_longest_block_start":7208960,"blocks":[[283776302099,1385]],"off_ns":5398896216133023,"best_rtt_ns":57096,"t_start_ns":281781884718,"peer_closed_read":0}
+HB up=290.31 1141.74 MemAvailable:842448 SUnreclaim:20980 
+HB up=291.32 1145.75 MemAvailable:842336 SUnreclaim:20984 
+HB up=292.33 1149.76 MemAvailable:842336 SUnreclaim:20984 
+HB up=293.33 1153.77 MemAvailable:842224 SUnreclaim:20984 
+HB up=294.34 1157.76 MemAvailable:842224 SUnreclaim:20984 
+HB up=295.34 1161.76 MemAvailable:842224 SUnreclaim:20984 
+HB up=296.35 1165.76 MemAvailable:842112 SUnreclaim:20984 
+HB up=297.36 1169.76 MemAvailable:842112 SUnreclaim:20984 
+HB up=298.36 1173.75 MemAvailable:843052 SUnreclaim:20984 
+{"ev":"send_end","label":"rejoingate-B","trial":10,"outcome":"done","sent":67108864,"secs":7.880,"mibps":8.1,"max_send_ms":1385,"sent_at_longest_block_start":7208960,"blocks":[[293282316160,1385]],"off_ns":5398896216133968,"best_rtt_ns":64888,"t_start_ns":291286697741,"peer_closed_read":0}
+HB up=299.37 1177.74 MemAvailable:844428 SUnreclaim:20984 
+HB up=300.37 1181.75 MemAvailable:844360 SUnreclaim:20984 
+HB up=301.38 1185.75 MemAvailable:844728 SUnreclaim:20988 
+HB up=302.39 1189.77 MemAvailable:843744 SUnreclaim:20988 
+HB up=303.40 1193.77 MemAvailable:844048 SUnreclaim:20988 
+HB up=304.40 1197.76 MemAvailable:842028 SUnreclaim:20988 
+HB up=305.41 1201.75 MemAvailable:843148 SUnreclaim:20988 
+HB up=306.42 1205.74 MemAvailable:843732 SUnreclaim:20988 
+HB up=307.42 1209.73 MemAvailable:841044 SUnreclaim:20988 
+HB up=308.43 1213.72 MemAvailable:843620 SUnreclaim:20988 
+{"ev":"send_end","label":"rejoingate-B","trial":11,"outcome":"done","sent":67108864,"secs":7.914,"mibps":8.1,"max_send_ms":1384,"sent_at_longest_block_start":7208960,"blocks":[[302779345438,1384]],"off_ns":5398896216141733,"best_rtt_ns":55083,"t_start_ns":300782857150,"peer_closed_read":0}
+HB up=309.44 1217.72 MemAvailable:841556 SUnreclaim:20988 
+HB up=310.45 1221.73 MemAvailable:840692 SUnreclaim:20988 
+HB up=311.45 1225.74 MemAvailable:842244 SUnreclaim:20988 
+HB up=312.46 1229.75 MemAvailable:841092 SUnreclaim:20988 
+HB up=313.47 1233.74 MemAvailable:841392 SUnreclaim:20988 
+HB up=314.47 1237.74 MemAvailable:843516 SUnreclaim:20992 
+HB up=315.48 1241.74 MemAvailable:841276 SUnreclaim:20996 
+HB up=316.49 1245.74 MemAvailable:843532 SUnreclaim:20996 
+HB up=317.49 1249.73 MemAvailable:841404 SUnreclaim:20996 
+{"ev":"send_end","label":"rejoingate-B","trial":12,"outcome":"done","sent":67108864,"secs":7.878,"mibps":8.1,"max_send_ms":1384,"sent_at_longest_block_start":7208960,"blocks":[[312306405021,1384]],"off_ns":5398896216142819,"best_rtt_ns":61763,"t_start_ns":310312572841,"peer_closed_read":0}
+HB up=318.50 1253.72 MemAvailable:841500 SUnreclaim:20996 
+HB up=319.51 1257.74 MemAvailable:841532 SUnreclaim:20996 
+HB up=320.51 1261.74 MemAvailable:841164 SUnreclaim:20996 
+HB up=321.52 1265.76 MemAvailable:841164 SUnreclaim:20996 
+HB up=322.52 1269.76 MemAvailable:840492 SUnreclaim:20996 
+HB up=323.53 1273.76 MemAvailable:840492 SUnreclaim:21000 
+HB up=324.54 1277.75 MemAvailable:840780 SUnreclaim:21000 
+HB up=325.54 1281.75 MemAvailable:838348 SUnreclaim:21000 
+HB up=326.55 1285.75 MemAvailable:841372 SUnreclaim:21000 
+HB up=327.56 1289.75 MemAvailable:839064 SUnreclaim:21000 
+{"ev":"send_end","label":"rejoingate-B","trial":13,"outcome":"done","sent":67108864,"secs":7.867,"mibps":8.1,"max_send_ms":1386,"sent_at_longest_block_start":7208960,"blocks":[[321801953421,1386]],"off_ns":5398896216149205,"best_rtt_ns":64257,"t_start_ns":319806800253,"peer_closed_read":0}
+HB up=328.56 1293.75 MemAvailable:838112 SUnreclaim:21000 
+HB up=329.57 1297.76 MemAvailable:837616 SUnreclaim:21000 
+HB up=330.58 1301.76 MemAvailable:837808 SUnreclaim:21000 
+HB up=331.58 1305.78 MemAvailable:838208 SUnreclaim:21000 
+HB up=332.59 1309.78 MemAvailable:838108 SUnreclaim:21000 
+HB up=333.60 1313.77 MemAvailable:838084 SUnreclaim:21000 
+HB up=334.60 1317.77 MemAvailable:837972 SUnreclaim:21004 
+HB up=335.61 1321.76 MemAvailable:837972 SUnreclaim:21004 
+HB up=336.62 1325.75 MemAvailable:837972 SUnreclaim:21004 
+{"ev":"send_end","label":"rejoingate-B","trial":14,"outcome":"done","sent":67108864,"secs":7.900,"mibps":8.1,"max_send_ms":1387,"sent_at_longest_block_start":7208960,"blocks":[[331285978027,1387]],"off_ns":5398896216152310,"best_rtt_ns":66169,"t_start_ns":329290400831,"peer_closed_read":0}
+HB up=337.62 1329.74 MemAvailable:837860 SUnreclaim:21008 
+HB up=338.63 1333.76 MemAvailable:837748 SUnreclaim:21008 
+HB up=339.64 1337.77 MemAvailable:837748 SUnreclaim:21008 
+HB up=340.64 1341.78 MemAvailable:837636 SUnreclaim:21008 
+HB up=341.65 1345.77 MemAvailable:837636 SUnreclaim:21008 
+HB up=342.66 1349.76 MemAvailable:836900 SUnreclaim:21008 
+HB up=343.66 1353.75 MemAvailable:838724 SUnreclaim:21008 
+HB up=344.67 1357.75 MemAvailable:839316 SUnreclaim:21008 
+HB up=345.68 1361.75 MemAvailable:837412 SUnreclaim:21008 
+HB up=346.68 1365.75 MemAvailable:840260 SUnreclaim:21008 
+{"ev":"send_end","label":"rejoingate-B","trial":15,"outcome":"done","sent":67108864,"secs":7.897,"mibps":8.1,"max_send_ms":1387,"sent_at_longest_block_start":7208960,"blocks":[[340801639377,1387]],"off_ns":5398896216156118,"best_rtt_ns":58879,"t_start_ns":338805122586,"peer_closed_read":0}
+HB up=347.69 1369.75 MemAvailable:840148 SUnreclaim:21008 
+HB up=348.70 1373.76 MemAvailable:840244 SUnreclaim:21008 
+HB up=349.71 1377.77 MemAvailable:837172 SUnreclaim:21040 
+HB up=350.71 1381.78 MemAvailable:838356 SUnreclaim:21040 
+HB up=351.72 1385.77 MemAvailable:838452 SUnreclaim:21040 
+HB up=352.73 1389.76 MemAvailable:839108 SUnreclaim:21040 
+HB up=353.73 1393.76 MemAvailable:836904 SUnreclaim:21040 
+HB up=354.74 1397.75 MemAvailable:836360 SUnreclaim:21044 
+HB up=355.75 1401.74 MemAvailable:838152 SUnreclaim:21044 
+{"ev":"send_end","label":"rejoingate-B","trial":16,"outcome":"done","sent":67108864,"secs":7.908,"mibps":8.1,"max_send_ms":1389,"sent_at_longest_block_start":7208960,"blocks":[[350315262959,1389]],"off_ns":5398896216160035,"best_rtt_ns":59660,"t_start_ns":348317384659,"peer_closed_read":0}
+HB up=356.76 1405.75 MemAvailable:839608 SUnreclaim:21044 
+HB up=357.76 1409.76 MemAvailable:839788 SUnreclaim:21044 
+HB up=358.77 1413.77 MemAvailable:840080 SUnreclaim:21044 
+HB up=359.78 1417.79 MemAvailable:840184 SUnreclaim:21048 
+HB up=360.79 1421.78 MemAvailable:837864 SUnreclaim:21048 
+HB up=361.79 1425.78 MemAvailable:839204 SUnreclaim:21048 
+HB up=362.80 1429.77 MemAvailable:839100 SUnreclaim:21048 
+HB up=363.81 1433.77 MemAvailable:838796 SUnreclaim:21048 
+HB up=364.81 1437.76 MemAvailable:837588 SUnreclaim:21048 
+HB up=365.82 1441.76 MemAvailable:837280 SUnreclaim:21048 
+{"ev":"send_end","label":"rejoingate-B","trial":17,"outcome":"done","sent":67108864,"secs":7.892,"mibps":8.1,"max_send_ms":1387,"sent_at_longest_block_start":7208960,"blocks":[[359837116126,1387]],"off_ns":5398896216161423,"best_rtt_ns":67121,"t_start_ns":357841174652,"peer_closed_read":0}
+HB up=366.83 1445.76 MemAvailable:837144 SUnreclaim:21048 
+HB up=367.84 1449.77 MemAvailable:839264 SUnreclaim:21048 
+HB up=368.84 1453.78 MemAvailable:839248 SUnreclaim:21052 
+HB up=369.85 1457.78 MemAvailable:839884 SUnreclaim:21052 
+HB up=370.86 1461.78 MemAvailable:837412 SUnreclaim:21052 
+HB up=371.86 1465.77 MemAvailable:839300 SUnreclaim:21068 
+HB up=372.87 1469.77 MemAvailable:839796 SUnreclaim:21068 
+HB up=373.88 1473.76 MemAvailable:840916 SUnreclaim:21068 
+HB up=374.88 1477.75 MemAvailable:838900 SUnreclaim:21068 
+{"ev":"send_end","label":"rejoingate-B","trial":18,"outcome":"done","sent":67108864,"secs":7.910,"mibps":8.1,"max_send_ms":1386,"sent_at_longest_block_start":7208960,"blocks":[[369343903400,1386]],"off_ns":5398896216164112,"best_rtt_ns":82485,"t_start_ns":367349155973,"peer_closed_read":0}
+HB up=375.89 1481.74 MemAvailable:838244 SUnreclaim:21036 
+HB up=376.90 1485.75 MemAvailable:837284 SUnreclaim:21040 
+HB up=377.90 1489.75 MemAvailable:837188 SUnreclaim:21040 
+HB up=378.91 1493.76 MemAvailable:837092 SUnreclaim:21040 
+HB up=379.92 1497.75 MemAvailable:839572 SUnreclaim:21040 
+HB up=380.93 1501.75 MemAvailable:836944 SUnreclaim:21040 
+HB up=381.93 1505.75 MemAvailable:838180 SUnreclaim:21040 
+HB up=382.94 1509.75 MemAvailable:838032 SUnreclaim:21040 
+HB up=383.95 1513.74 MemAvailable:838200 SUnreclaim:21040 
+{"ev":"send_end","label":"rejoingate-B","trial":19,"outcome":"done","sent":67108864,"secs":7.879,"mibps":8.1,"max_send_ms":1382,"sent_at_longest_block_start":7208960,"blocks":[[378873296295,1382]],"off_ns":5398896216169890,"best_rtt_ns":76435,"t_start_ns":376875977648,"peer_closed_read":0}
+HB up=384.95 1517.74 MemAvailable:837464 SUnreclaim:21040 
+HB up=385.96 1521.76 MemAvailable:837464 SUnreclaim:21040 
+HB up=386.97 1525.77 MemAvailable:837352 SUnreclaim:21040 
+HB up=387.98 1529.79 MemAvailable:837240 SUnreclaim:21040 

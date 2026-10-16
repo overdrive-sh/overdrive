@@ -1,0 +1,1123 @@
+qemu-system-x86_64: -accel kvm: warning: Number of hotpluggable cpus requested (64) exceeds the recommended cpus supported by KVM (16)
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2J[    0.000000] Linux version 7.0.0-29-generic (buildd@lcy02-amd64-113) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 (Ubuntu 7.0.0-29.29-generic 7.0.12)
+[    0.000000] Command line: console=ttyS0 rdinit=/init panic=-1
+[    0.000000] KERNEL supported cpus:
+[    0.000000]   Intel GenuineIntel
+[    0.000000]   AMD AuthenticAMD
+[    0.000000]   Hygon HygonGenuine
+[    0.000000]   Centaur CentaurHauls
+[    0.000000]   zhaoxin   Shanghai  
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000effff]
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000007ffdffff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000007ffe0000-0x000000007fffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000080000000-0x00000000afffffff]
+[    0.000000] BIOS-e820: [mem 0x00000000b0000000-0x00000000bfffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000c0000000-0x00000000fed1bfff]
+[    0.000000] BIOS-e820: [mem 0x00000000fed1c000-0x00000000fed1ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000fed20000-0x00000000feffbfff]
+[    0.000000] BIOS-e820: [mem 0x00000000feffc000-0x00000000feffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000ff000000-0x00000000fffbffff]
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000100000000-0x000000047fffffff]  System RAM
+[    0.000000] BIOS-e820: [gap 0x0000000480000000-0x000000fcffffffff]
+[    0.000000] BIOS-e820: [mem 0x000000fd00000000-0x000000ffffffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] SMBIOS 2.8 present.
+[    0.000000] DMI: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.17.0-debian-1.17.0-1ubuntu1 04/01/2014
+[    0.000000] DMI: Memory slots populated: 1/1
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x7ffe0 max_arch_pfn = 0x10000000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000001] kvm-clock: using sched offset of 200196774 cycles
+[    0.000003] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000007] tsc: Detected 2396.400 MHz processor
+[    0.000394] last_pfn = 0x480000 max_arch_pfn = 0x10000000000
+[    0.000441] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
+[    0.000445] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.000510] last_pfn = 0x7ffe0 max_arch_pfn = 0x10000000000
+[    0.003300] found SMP MP-table at [mem 0x000f5460-0x000f546f]
+[    0.003320] Using GB pages for direct mapping
+[    0.003435] RAMDISK: [mem 0x7bce3000-0x7ffdffff]
+[    0.003506] ACPI: Early table checksum verification disabled
+[    0.003510] ACPI: RSDP 0x00000000000F5270 000014 (v00 BOCHS )
+[    0.003514] ACPI: RSDT 0x000000007FFE3A02 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003519] ACPI: FACP 0x000000007FFE3602 0000F4 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003524] ACPI: DSDT 0x000000007FFE0040 0035C2 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003527] ACPI: FACS 0x000000007FFE0000 000040
+[    0.003529] ACPI: APIC 0x000000007FFE36F6 000270 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003532] ACPI: HPET 0x000000007FFE3966 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003534] ACPI: MCFG 0x000000007FFE399E 00003C (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003536] ACPI: WAET 0x000000007FFE39DA 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003538] ACPI: Reserving FACP table memory at [mem 0x7ffe3602-0x7ffe36f5]
+[    0.003539] ACPI: Reserving DSDT table memory at [mem 0x7ffe0040-0x7ffe3601]
+[    0.003540] ACPI: Reserving FACS table memory at [mem 0x7ffe0000-0x7ffe003f]
+[    0.003541] ACPI: Reserving APIC table memory at [mem 0x7ffe36f6-0x7ffe3965]
+[    0.003542] ACPI: Reserving HPET table memory at [mem 0x7ffe3966-0x7ffe399d]
+[    0.003542] ACPI: Reserving MCFG table memory at [mem 0x7ffe399e-0x7ffe39d9]
+[    0.003543] ACPI: Reserving WAET table memory at [mem 0x7ffe39da-0x7ffe3a01]
+[    0.004132] No NUMA configuration found
+[    0.004134] Faking a node at [mem 0x0000000000000000-0x000000047fffffff]
+[    0.004147] NODE_DATA(0) allocated [mem 0x47ffd5280-0x47fffffff]
+[    0.005014] ACPI: PM-Timer IO Port: 0x608
+[    0.005035] ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+[    0.005068] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.005071] ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+[    0.005072] ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+[    0.005074] ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+[    0.005075] ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+[    0.005076] ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+[    0.005079] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.005080] ACPI: HPET id: 0x8086a201 base: 0xfed00000
+[    0.005083] TSC deadline timer available
+[    0.005086] CPU topo: Max. logical packages:   1
+[    0.005087] CPU topo: Max. logical nodes:      1
+[    0.005088] CPU topo: Num. nodes per package:  1
+[    0.005090] CPU topo: Max. logical dies:       1
+[    0.005090] CPU topo: Max. dies per package:   1
+[    0.005094] CPU topo: Max. threads per core:   1
+[    0.005095] CPU topo: Num. cores per package:    64
+[    0.005096] CPU topo: Num. threads per package:  64
+[    0.005097] CPU topo: Allowing 4 present CPUs plus 60 hotplug CPUs
+[    0.005115] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.005128] kvm-guest: KVM setup pv remote TLB flush
+[    0.005132] kvm-guest: setup PV sched yield
+[    0.005139] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.005141] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.005143] PM: hibernation: Registered nosave memory: [mem 0x7ffe0000-0xffffffff]
+[    0.005144] [gap 0xc0000000-0xfed1bfff] available for PCI devices
+[    0.005145] Booting paravirtualized kernel on KVM
+[    0.005147] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.005206] Zone ranges:
+[    0.005207]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.005208]   DMA32    [mem 0x0000000001000000-0x00000000ffffffff]
+[    0.005210]   Normal   [mem 0x0000000100000000-0x000000047fffffff]
+[    0.005211]   Device   empty
+[    0.005212] Movable zone start for each node
+[    0.005214] Early memory node ranges
+[    0.005215]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.005216]   node   0: [mem 0x0000000000100000-0x000000007ffdffff]
+[    0.005217]   node   0: [mem 0x0000000100000000-0x000000047fffffff]
+[    0.005220] Initmem setup node 0 [mem 0x0000000000001000-0x000000047fffffff]
+[    0.005309] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.005325] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.029278] On node 0, zone Normal: 32 pages in unavailable ranges
+[    0.029297] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:64 nr_cpu_ids:64 nr_node_ids:1
+[    0.032111] percpu: Embedded 85 pages/cpu s225280 r8192 d114688 u524288
+[    0.032205] kvm-guest: PV spinlocks enabled
+[    0.032207] PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.032211] Kernel command line: console=ttyS0 rdinit=/init panic=-1
+[    0.032252] random: crng init done
+[    0.032253] printk: log_buf_len individual max cpu contribution: 4096 bytes
+[    0.032254] printk: log_buf_len total cpu_extra contributions: 258048 bytes
+[    0.032255] printk: log_buf_len min size: 262144 bytes
+[    0.032586] printk: log buffer data + meta data: 524288 + 2228224 = 2752512 bytes
+[    0.032588] printk: early log buf free: 253976(96%)
+[    0.033621] Dentry cache hash table entries: 2097152 (order: 12, 16777216 bytes, linear)
+[    0.034178] Inode-cache hash table entries: 1048576 (order: 11, 8388608 bytes, linear)
+[    0.034691] software IO TLB: area num 64.
+[    0.041037] Fallback order for Node 0: 0 
+[    0.041049] Built 1 zonelists, mobility grouping on.  Total pages: 4194174
+[    0.041051] Policy zone: Normal
+[    0.041062] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.068382] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=64, Nodes=1
+[    0.082439] ftrace: allocating 63941 entries in 252 pages
+[    0.082442] ftrace: allocated 252 pages with 6 groups
+[    0.083309] Dynamic Preempt: lazy
+[    0.083731] rcu: Preemptible hierarchical RCU implementation.
+[    0.083732] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=64.
+[    0.083735] 	Trampoline variant of Tasks RCU enabled.
+[    0.083735] 	Rude variant of Tasks RCU enabled.
+[    0.083736] 	Tracing variant of Tasks RCU enabled.
+[    0.083737] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.083738] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=64
+[    0.083771] RCU Tasks: Setting shift to 6 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=64.
+[    0.083775] RCU Tasks Rude: Setting shift to 6 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=64.
+[    0.088906] NR_IRQS: 524544, nr_irqs: 936, preallocated irqs: 16
+[    0.089186] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.089473] Console: colour *CGA 80x25
+[    0.089548] printk: legacy console [ttyS0] enabled
+[    0.316586] ACPI: Core revision 20251212
+[    0.317895] clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604467 ns
+[    0.320453] APIC: Switch to symmetric I/O mode setup
+[    0.322037] x2apic enabled
+[    0.323116] APIC: Switched APIC routing to: physical x2apic
+[    0.324625] kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+[    0.326539] kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+[    0.328937] kvm-guest: setup PV IPIs
+[    0.331250] ..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+[    0.332863] clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x228aeee0e7a, max_idle_ns: 440795314296 ns
+[    0.335633] Calibrating delay loop (skipped) preset value.. 4792.80 BogoMIPS (lpj=2396400)
+[    0.336780] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.337743] Last level iTLB entries: 4KB 512, 2MB 255, 4MB 127
+[    0.338632] Last level dTLB entries: 4KB 512, 2MB 255, 4MB 127, 1GB 0
+[    0.339641] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.340632] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.341632] Transient Scheduler Attacks: Vulnerable: No microcode
+[    0.342632] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.343632] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.344632] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.345638] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.346632] active return thunk: srso_alias_return_thunk
+[    0.347662] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.348632] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.349632] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.350632] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.351633] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.352632] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.353632] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.354632] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.355632] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.356632] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.357633] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.358632] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.359632] x86/fpu: Enabled xstate features 0x2e7, context size is 2440 bytes, using 'compacted' format.
+[    0.401132] Freeing SMP alternatives memory: 56K
+[    0.401634] pid_max: default: 65536 minimum: 512
+[    0.404012] landlock: Up and running.
+[    0.404632] Yama: becoming mindful.
+[    0.405811] AppArmor: AppArmor initialized
+[    0.406632] AppArmor: AppArmor secmark mediation reserved: ready to be enabled
+[    0.407824] Mount-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.408637] Mountpoint-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.409794] VFS: Finished mounting rootfs on nullfs
+[    0.411369] smpboot: CPU0: AMD EPYC 8024P 8-Core Processor (family: 0x19, model: 0xa0, stepping: 0x2)
+[    0.411976] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.412645] ... version:                   2
+[    0.413634] ... bit width:                 48
+[    0.414634] ... generic counters:          6
+[    0.415634] ... generic bitmap:            000000000000003f
+[    0.416634] ... fixed-purpose counters:    0
+[    0.417634] ... fixed-purpose bitmap:      0000000000000000
+[    0.418634] ... value mask:                0000ffffffffffff
+[    0.419636] ... max period:                00007fffffffffff
+[    0.420634] ... global_ctrl mask:          000000000000003f
+[    0.421898] signal: max sigframe size: 3376
+[    0.422697] rcu: Hierarchical SRCU implementation.
+[    0.423640] rcu: 	Max phase no-delay instances is 400.
+[    0.424715] Timer migration: 2 hierarchy levels; 8 children per group; 2 crossnode level
+[    0.434094] smp: Bringing up secondary CPUs ...
+[    0.434926] smpboot: x86: Booting SMP configuration:
+[    0.435647] .... node  #0, CPUs:        #1  #2  #3
+[    0.438749] smp: Brought up 1 node, 4 CPUs
+[    0.440635] smpboot: Total of 4 processors activated (19171.20 BogoMIPS)
+[    0.442257] Memory: 14409628K/16776696K available (23799K kernel code, 4952K rwdata, 16764K rodata, 5292K init, 5856K bss, 2349000K reserved, 0K cma-reserved)
+[    0.443125] devtmpfs: initialized
+[    0.443740] x86/mm: Memory block size: 128MB
+[    0.447756] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.448652] posixtimers hash table entries: 32768 (order: 7, 524288 bytes, linear)
+[    0.449685] futex hash table entries: 16384 (1048576 bytes on 1 NUMA nodes, total 1024 KiB, linear).
+[    0.451137] PM: RTC time: 16:05:29, date: 2026-10-16
+[    0.452367] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.452946] DMA: preallocated 2048 KiB GFP_KERNEL pool for atomic allocations
+[    0.453704] DMA: preallocated 2048 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.454709] DMA: preallocated 2048 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.455648] audit: initializing netlink subsys (disabled)
+[    0.456658] audit: type=2000 audit(1792166729.468:1): state=initialized audit_enabled=0 res=1
+[    0.456860] thermal_sys: Registered thermal governor 'fair_share'
+[    0.457639] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.458636] thermal_sys: Registered thermal governor 'step_wise'
+[    0.459634] thermal_sys: Registered thermal governor 'user_space'
+[    0.460634] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.461651] cpuidle: using governor ladder
+[    0.463643] cpuidle: using governor menu
+[    0.465810] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.466926] PCI: ECAM [mem 0xb0000000-0xbfffffff] (base 0xb0000000) for domain 0000 [bus 00-ff]
+[    0.467637] PCI: ECAM [mem 0xb0000000-0xbfffffff] reserved as E820 entry
+[    0.468648] PCI: Using configuration type 1 for base access
+[    0.469733] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.471753] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.475667] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.478656] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.482649] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.489431] ACPI: Added _OSI(Module Device)
+[    0.490636] ACPI: Added _OSI(Processor Device)
+[    0.492636] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.498344] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.503658] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.508079] ACPI: Interpreter enabled
+[    0.509699] ACPI: PM: (supports S0 S3 S4 S5)
+[    0.512643] ACPI: Using IOAPIC for interrupt routing
+[    0.515604] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.520643] PCI: Using E820 reservations for host bridge windows
+[    0.524342] ACPI: Enabled 2 GPEs in block 00 to 3F
+[    0.550066] ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+[    0.552667] acpi PNP0A08:00: _OSC: OS supports [ExtendedConfig ASPM ClockPM Segments MSI EDR HPX-Type3]
+[    0.556845] acpi PNP0A08:00: _OSC: platform does not support [PCIeHotplug LTR DPC]
+[    0.559927] acpi PNP0A08:00: _OSC: OS now controls [SHPCHotplug PME AER PCIeCapability]
+[    0.564245] PCI host bridge to bus 0000:00
+[    0.565650] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    0.568640] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    0.571639] pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+[    0.574640] pci_bus 0000:00: root bus resource [mem 0x80000000-0xafffffff window]
+[    0.576635] pci_bus 0000:00: root bus resource [mem 0xc0000000-0xfebfffff window]
+[    0.578635] pci_bus 0000:00: root bus resource [mem 0x480000000-0xc7fffffff window]
+[    0.580636] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    0.582727] pci 0000:00:00.0: [8086:29c0] type 00 class 0x060000 conventional PCI endpoint
+[    0.595404] pci 0000:00:1f.0: [8086:2918] type 00 class 0x060100 conventional PCI endpoint
+[    0.598393] pci 0000:00:1f.0: quirk: [io  0x0600-0x067f] claimed by ICH6 ACPI/GPIO/TCO
+[    0.601149] pci 0000:00:1f.2: [8086:2922] type 00 class 0x010601 conventional PCI endpoint
+[    0.604713] pci 0000:00:1f.2: BAR 4 [io  0xc040-0xc05f]
+[    0.605651] pci 0000:00:1f.2: BAR 5 [mem 0xfebff000-0xfebfffff]
+[    0.608370] pci 0000:00:1f.3: [8086:2930] type 00 class 0x0c0500 conventional PCI endpoint
+[    0.610615] pci 0000:00:1f.3: BAR 4 [io  0x0700-0x073f]
+[    0.614519] ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+[    0.615836] ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+[    0.617823] ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+[    0.619823] ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+[    0.620823] ACPI: PCI: Interrupt link LNKE configured for IRQ 10
+[    0.622830] ACPI: PCI: Interrupt link LNKF configured for IRQ 10
+[    0.624840] ACPI: PCI: Interrupt link LNKG configured for IRQ 11
+[    0.626823] ACPI: PCI: Interrupt link LNKH configured for IRQ 11
+[    0.628706] ACPI: PCI: Interrupt link GSIA configured for IRQ 16
+[    0.629656] ACPI: PCI: Interrupt link GSIB configured for IRQ 17
+[    0.631656] ACPI: PCI: Interrupt link GSIC configured for IRQ 18
+[    0.632655] ACPI: PCI: Interrupt link GSID configured for IRQ 19
+[    0.634655] ACPI: PCI: Interrupt link GSIE configured for IRQ 20
+[    0.636655] ACPI: PCI: Interrupt link GSIF configured for IRQ 21
+[    0.637657] ACPI: PCI: Interrupt link GSIG configured for IRQ 22
+[    0.639658] ACPI: PCI: Interrupt link GSIH configured for IRQ 23
+[    0.646687] iommu: Default domain type: Translated
+[    0.647636] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.649959] SCSI subsystem initialized
+[    0.650684] ACPI: bus type USB registered
+[    0.651669] usbcore: registered new interface driver usbfs
+[    0.653664] usbcore: registered new interface driver hub
+[    0.654657] usbcore: registered new device driver usb
+[    0.656677] pps_core: LinuxPPS API ver. 1 registered
+[    0.657634] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.659641] PTP clock support registered
+[    0.661671] EDAC MC: Ver: 3.0.0
+[    0.663676] NetLabel: Initializing
+[    0.664586] NetLabel:  domain hash size = 128
+[    0.665634] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.666662] NetLabel:  unlabeled traffic allowed by default
+[    0.668676] mctp: management component transport protocol core
+[    0.669643] NET: Registered PF_MCTP protocol family
+[    0.671654] PCI: Using ACPI for IRQ routing
+[    0.873479] e820: register RAM buffer resource [mem 0x0009fc00-0x0009ffff]
+[    0.874635] e820: register RAM buffer resource [mem 0x7ffe0000-0x7fffffff]
+[    0.876694] vgaarb: loaded
+[    0.877681] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+[    0.878637] hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+[    0.885883] clocksource: Switched to clocksource kvm-clock
+[    0.887506] VFS: Disk quotas dquot_6.6.0
+[    0.888593] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.890854] AppArmor: AppArmor Filesystem Enabled
+[    0.892146] acpi PNP0C01:00: Reserved [mem 0xb0000000-0xbfffffff]
+[    0.893773] pnp: PnP ACPI init
+[    0.895382] pnp: PnP ACPI: found 4 devices
+[    0.904753] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    0.907236] NET: Registered PF_INET protocol family
+[    0.908692] IP idents hash table entries: 262144 (order: 9, 2097152 bytes, linear)
+[    0.930972] tcp_listen_portaddr_hash hash table entries: 8192 (order: 5, 131072 bytes, linear)
+[    0.933259] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.935330] TCP established hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.937626] TCP bind hash table entries: 65536 (order: 9, 2097152 bytes, linear)
+[    0.939651] TCP: Hash tables configured (established 131072 bind 65536)
+[    0.941697] MPTCP token hash table entries: 16384 (order: 7, 393216 bytes, linear)
+[    0.943742] UDP hash table entries: 8192 (order: 7, 524288 bytes, linear)
+[    0.945570] UDP-Lite hash table entries: 8192 (order: 7, 524288 bytes, linear)
+[    0.947652] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.949180] NET: Registered PF_XDP protocol family
+[    0.950466] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    0.952106] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    0.953710] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    0.955517] pci_bus 0000:00: resource 7 [mem 0x80000000-0xafffffff window]
+[    0.957327] pci_bus 0000:00: resource 8 [mem 0xc0000000-0xfebfffff window]
+[    0.959141] pci_bus 0000:00: resource 9 [mem 0x480000000-0xc7fffffff window]
+[    0.961097] PCI: CLS 0 bytes, default 64
+[    0.962230] PCI-DMA: Using software bounce buffering for IO (SWIOTLB)
+[    0.962414] Trying to unpack rootfs image as initramfs...
+[    0.963913] software IO TLB: mapped [mem 0x0000000077ce3000-0x000000007bce3000] (64MB)
+[    0.963966] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x228aeee0e7a, max_idle_ns: 440795314296 ns
+[    0.973204] Initialise system trusted keyrings
+[    0.974411] Key type blacklist registered
+[    0.975622] workingset: timestamp_bits=36 max_order=22 bucket_order=0
+[    0.977957] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.979855] fuse: init (API version 7.45)
+[    0.981311] integrity: Platform Keyring initialized
+[    0.982612] integrity: Machine keyring initialized
+[    0.996665] Key type asymmetric registered
+[    0.997770] Asymmetric key parser 'x509' registered
+[    0.999124] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 242)
+[    1.001193] io scheduler mq-deadline registered
+[    1.007522] ledtrig-cpu: registered to indicate activity on CPUs
+[    1.009389] input: Power Button as /devices/platform/LNXPWRBN:00/input/input0
+[    1.011350] ACPI: button: Power Button [PWRF]
+[    1.014147] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    1.027529] Freeing initrd memory: 68596K
+[    1.043025] 00:02: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    1.048814] Linux agpgart interface v0.103
+[    1.055769] loop: module loaded
+[    1.056974] ACPI: bus type drm_connector registered
+[    1.058602] tun: Universal TUN/TAP device driver, 1.6
+[    1.060031] PPP generic driver version 2.4.2
+[    1.061390] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    1.064608] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    1.065930] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    1.067466] mousedev: PS/2 mouse device common for all mice
+[    1.069129] rtc_cmos 00:03: RTC can wake from S4
+[    1.071335] rtc_cmos 00:03: registered as rtc0
+[    1.072714] rtc_cmos 00:03: setting system clock to 2026-10-16T16:05:30 UTC (1792166730)
+[    1.075073] rtc_cmos 00:03: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    1.075269] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+[    1.077120] i2c_dev: i2c /dev entries driver
+[    1.080690] device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+[    1.083910] device-mapper: uevent: version 1.0.3
+[    1.085322] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[    1.087700] amd_pstate: The CPPC feature is supported but currently disabled by the BIOS.
+[    1.087700] Please enable it if your BIOS has the CPPC option.
+[    1.091360] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    1.093564] drop_monitor: Initializing network drop monitor service
+[    1.095448] NET: Registered PF_INET6 protocol family
+[    1.097614] Segment Routing with IPv6
+[    1.098630] In-situ OAM (IOAM) with IPv6
+[    1.099715] NET: Registered PF_PACKET protocol family
+[    1.101211] Key type dns_resolver registered
+[    1.103151] IPI shorthand broadcast: enabled
+[    1.107708] sched_clock: Marking stable (869002754, 238433440)->(1174937797, -67501603)
+[    1.110643] registered taskstats version 1
+[    1.112697] Loading compiled-in X.509 certificates
+[    1.114642] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    1.117695] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    1.120908] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    1.123950] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    1.127380] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    1.130009] blacklist: Loading compiled-in revocation X.509 certificates
+[    1.131796] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    1.134393] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    1.137166] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    1.140002] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    1.142741] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    1.145540] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    1.148361] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    1.151179] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    1.162844] Demotion targets for Node 0: null
+[    1.164252] Key type .fscrypt registered
+[    1.165312] Key type fscrypt-provisioning registered
+[    1.166759] Key type big_key registered
+[    1.169153] Key type encrypted registered
+[    1.170240] AppArmor: AppArmor sha256 policy hashing enabled
+[    1.171732] ima: No TPM chip found, activating TPM-bypass!
+[    1.173198] Loading compiled-in module X.509 certificates
+[    1.175100] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    1.177677] ima: Allocated hash algorithm: sha256
+[    1.178939] ima: No architecture policies found
+[    1.180189] evm: Initialising EVM extended attributes:
+[    1.181542] evm: security.selinux
+[    1.182453] evm: security.SMACK64
+[    1.183335] evm: security.SMACK64EXEC
+[    1.184326] evm: security.SMACK64TRANSMUTE
+[    1.185423] evm: security.SMACK64MMAP
+[    1.186415] evm: security.apparmor
+[    1.187342] evm: security.ima
+[    1.188156] evm: security.capability
+[    1.189124] evm: HMAC attrs: 0x1
+[    1.190361] PM:   Magic number: 14:437:85
+[    1.191828] RAS: Correctable Errors collector initialized.
+[    1.193677] clk: Disabling unused clocks
+[    1.194729] PM: genpd: Disabling unused power domains
+[    1.198002] Freeing unused decrypted memory: 2028K
+[    1.199626] Freeing unused kernel image (initmem) memory: 5292K
+[    1.200737] Write protecting the kernel read-only data: 43008k
+[    1.202485] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    1.204081] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    1.271473] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    1.272686] Run /init as init process
+Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+65536
+112720
+0-3
+0-63
+[    1.288839] NET: Registered PF_VSOCK protocol family
+BENCH_PRE_VARIANT_MEMINFO
+MemTotal:       16347208 kB
+MemFree:        16175884 kB
+MemAvailable:   16005484 kB
+Buffers:               0 kB
+Cached:            68600 kB
+SwapCached:            0 kB
+Active:            68796 kB
+Inactive:              0 kB
+Active(anon):      68796 kB
+Inactive(anon):        0 kB
+Active(file):          0 kB
+Inactive(file):        0 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:           196 kB
+Mapped:             1764 kB
+Shmem:             68600 kB
+KReclaimable:       4272 kB
+Slab:              37052 kB
+SReclaimable:       4272 kB
+SUnreclaim:        32780 kB
+KernelStack:        2336 kB
+PageTables:          640 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8173604 kB
+Committed_AS:      69372 kB
+VmallocTotal:   13743895347199 kB
+VmallocUsed:        6756 kB
+VmallocChunk:          0 kB
+Percpu:            21760 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+CmaTotal:              0 kB
+CmaFree:         1837056 kB
+Unaccepted:            0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       38784 kB
+DirectMap2M:     4155392 kB
+DirectMap1G:    14680064 kB
+BENCH_PRE_VARIANT_SLABINFO
+slabinfo - version: 2.1
+# name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab> : tunables <limit> <batchcount> <sharedfactor> : slabdata <active_slabs> <num_slabs> <sharedavail>
+AF_VSOCK               0      0   1280   25    8 : tunables    0    0    0 : slabdata      0      0      0
+fsverity_info          0      0    272   30    2 : tunables    0    0    0 : slabdata      0      0      0
+fscrypt_inode_info      0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+MPTCPv6                0      0   2176   15    8 : tunables    0    0    0 : slabdata      0      0      0
+request_sock_subflow_v6      0      0    400   20    2 : tunables    0    0    0 : slabdata      0      0      0
+ip6-frags              0      0    184   22    1 : tunables    0    0    0 : slabdata      0      0      0
+ip6_dst_cache          0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+PINGv6                 0      0   1408   23    8 : tunables    0    0    0 : slabdata      0      0      0
+RAWv6                132    138   1408   23    8 : tunables    0    0    0 : slabdata      6      6      0
+UDPv6                  0      0   1472   22    8 : tunables    0    0    0 : slabdata      0      0      0
+tw_sock_TCPv6          0      0    280   29    2 : tunables    0    0    0 : slabdata      0      0      0
+request_sock_TCPv6      0      0    328   24    2 : tunables    0    0    0 : slabdata      0      0      0
+TCPv6                  0      0   2560   12    8 : tunables    0    0    0 : slabdata      0      0      0
+kcopyd_job             0      0   3240   10    8 : tunables    0    0    0 : slabdata      0      0      0
+dm_uevent              0      0   2888   11    8 : tunables    0    0    0 : slabdata      0      0      0
+bio-136               60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0
+io_kiocb               0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+bio-264               28     50    320   25    2 : tunables    0    0    0 : slabdata      2      2      0
+mqueue_inode_cache     28     34    960   17    4 : tunables    0    0    0 : slabdata      2      2      0
+fuse_request           0      0    176   23    1 : tunables    0    0    0 : slabdata      0      0      0
+fuse_inode             0      0    896   18    4 : tunables    0    0    0 : slabdata      0      0      0
+ecryptfs_inode_cache      0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+ecryptfs_file_cache      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+fat_inode_cache        0      0    768   21    4 : tunables    0    0    0 : slabdata      0      0      0
+fat_cache              0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0
+squashfs_inode_cache      0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0
+jbd2_transaction_s      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+jbd2_journal_head      0      0    120   34    1 : tunables    0    0    0 : slabdata      0      0      0
+jbd2_revoke_table_s      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+ext4_inode_cache       0      0   1128   29    8 : tunables    0    0    0 : slabdata      0      0      0
+ext4_allocation_context      0      0    168   24    1 : tunables    0    0    0 : slabdata      0      0      0
+ext4_prealloc_space      0      0    112   36    1 : tunables    0    0    0 : slabdata      0      0      0
+ext4_io_end_vec        0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+ext4_io_end            0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+pending_reservation      0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+extent_status          0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0
+mb_cache_entry       180    219     56   73    1 : tunables    0    0    0 : slabdata      3      3      0
+kioctx                 0      0    576   28    4 : tunables    0    0    0 : slabdata      0      0      0
+userfaultfd_ctx_cache      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+fanotify_perm_event      0      0    112   36    1 : tunables    0    0    0 : slabdata      0      0      0
+dnotify_struct         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+dio                    0      0    640   25    4 : tunables    0    0    0 : slabdata      0      0      0
+zs_handle              0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0
+pid_namespace          0      0    576   28    4 : tunables    0    0    0 : slabdata      0      0      0
+ip4-frags              0      0    200   20    1 : tunables    0    0    0 : slabdata      0      0      0
+MPTCP                  0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+request_sock_subflow_v4      0      0    400   20    2 : tunables    0    0    0 : slabdata      0      0      0
+xfrm_dst               0      0    320   25    2 : tunables    0    0    0 : slabdata      0      0      0
+xfrm_state             0      0    832   19    4 : tunables    0    0    0 : slabdata      0      0      0
+ip_fib_trie           60     85     48   85    1 : tunables    0    0    0 : slabdata      1      1      0
+ip_fib_alias          60     73     56   73    1 : tunables    0    0    0 : slabdata      1      1      0
+PING                   0      0   1088   30    8 : tunables    0    0    0 : slabdata      0      0      0
+RAW                  192    208   1216   26    8 : tunables    0    0    0 : slabdata      8      8      0
+UDP                   12     24   1344   24    8 : tunables    0    0    0 : slabdata      1      1      0
+tw_sock_TCP            0      0    280   29    2 : tunables    0    0    0 : slabdata      0      0      0
+request_sock_TCP       0      0    328   24    2 : tunables    0    0    0 : slabdata      0      0      0
+TCP                    0      0   2432   13    8 : tunables    0    0    0 : slabdata      0      0      0
+hugetlbfs_inode_cache     28     52    624   26    4 : tunables    0    0    0 : slabdata      2      2      0
+dquot                  0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+bio-280               56     75    320   25    2 : tunables    0    0    0 : slabdata      3      3      0
+ep_head                0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+eventpoll_epi         60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+dax_cache             28     42    768   21    4 : tunables    0    0    0 : slabdata      2      2      0
+bio_integrity_data     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+request_queue         28     32    992   16    4 : tunables    0    0    0 : slabdata      2      2      0
+bio-200               28     32    256   16    1 : tunables    0    0    0 : slabdata      2      2      0
+biovec-max            44     48   4096    8    8 : tunables    0    0    0 : slabdata      6      6      0
+biovec-128            12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0
+msg_msg-8k             0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-4k             0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-2k             0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-1k             0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-512            0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-256            0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-128            0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-64             0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-32             0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-16             0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-8              0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-192            0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-96             0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-16        60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+memdup_user-8        180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+memdup_user-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0
+user_namespace         0      0    896   18    4 : tunables    0    0    0 : slabdata      0      0      0
+iommu_iova_magazine     12     16   1024   16    4 : tunables    0    0    0 : slabdata      1      1      0
+dmaengine-unmap-256     12     15   2112   15    8 : tunables    0    0    0 : slabdata      1      1      0
+dmaengine-unmap-128     12     30   1088   30    8 : tunables    0    0    0 : slabdata      1      1      0
+dmaengine-unmap-2     60     64     64   64    1 : tunables    0    0    0 : slabdata      1      1      0
+sock_inode_cache     392    399    832   19    4 : tunables    0    0    0 : slabdata     21     21      0
+skbuff_small_head     84     92    704   23    4 : tunables    0    0    0 : slabdata      4      4      0
+skbuff_head_cache     88     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0
+tracefs_inode_cache    924    925    648   25    4 : tunables    0    0    0 : slabdata     37     37      0
+debugfs_inode_cache   2912   2925    632   25    4 : tunables    0    0    0 : slabdata    117    117      0
+configfs_dir_cache     60     92     88   46    1 : tunables    0    0    0 : slabdata      2      2      0
+file_lease_cache       0      0    160   25    1 : tunables    0    0    0 : slabdata      0      0      0
+file_lock_cache      180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0
+fsnotify_mark_connector      0      0     24  170    1 : tunables    0    0    0 : slabdata      0      0      0
+buffer_head            0      0    104   39    1 : tunables    0    0    0 : slabdata      0      0      0
+task_delay_info        0      0    368   22    2 : tunables    0    0    0 : slabdata      0      0      0
+taskstats              0      0    688   23    4 : tunables    0    0    0 : slabdata      0      0      0
+mem_cgroup_per_node     12     17   1920   17    8 : tunables    0    0    0 : slabdata      1      1      0
+mem_cgroup            12     18   1728   18    8 : tunables    0    0    0 : slabdata      1      1      0
+pidfs_xattr_cache      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+pidfs_attr_cache       0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+proc_dir_entry       360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+pde_opener             0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0
+proc_inode_cache      84     92    688   23    4 : tunables    0    0    0 : slabdata      4      4      0
+seq_file             120    136    120   34    1 : tunables    0    0    0 : slabdata      4      4      0
+sigqueue             180    204     80   51    1 : tunables    0    0    0 : slabdata      4      4      0
+bdev_cache            24     38   1664   19    8 : tunables    0    0    0 : slabdata      2      2      0
+shmem_inode_cache    280    294    768   21    4 : tunables    0    0    0 : slabdata     14     14      0
+kernfs_node_cache  29040  29040    136   30    1 : tunables    0    0    0 : slabdata    968    968      0
+mnt_cache            112    126    384   21    2 : tunables    0    0    0 : slabdata      6      6      0
+bfilp                  0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+filp                 240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0
+inode_cache          196    208    616   26    4 : tunables    0    0    0 : slabdata      8      8      0
+dentry              4320   4326    192   21    1 : tunables    0    0    0 : slabdata    206    206      0
+names_cache          240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0
+net_namespace          0      0   6336    5    8 : tunables    0    0    0 : slabdata      0      0      0
+ima_iint_cache         0      0    104   39    1 : tunables    0    0    0 : slabdata      0      0      0
+apparmor_auditcache      0      0    344   23    2 : tunables    0    0    0 : slabdata      0      0      0
+lsm_file_cache       360    408     40  102    1 : tunables    0    0    0 : slabdata      4      4      0
+key_jar               56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0
+uts_namespace          0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0
+nsproxy               60    112     72   56    1 : tunables    0    0    0 : slabdata      2      2      0
+vm_area_struct       360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+files_cache          112    115    704   23    4 : tunables    0    0    0 : slabdata      5      5      0
+signal_cache         180    196   1152   28    8 : tunables    0    0    0 : slabdata      7      7      0
+sighand_cache        156    165   2112   15    8 : tunables    0    0    0 : slabdata     11     11      0
+task_struct          160    160  12544    2    8 : tunables    0    0    0 : slabdata     80     80      0
+anon_vma_chain       300    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0
+anon_vma             300    312    104   39    1 : tunables    0    0    0 : slabdata      8      8      0
+pid                  360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+Acpi-ParseExt         60     78    104   39    1 : tunables    0    0    0 : slabdata      2      2      0
+Acpi-State            60    102     80   51    1 : tunables    0    0    0 : slabdata      2      2      0
+shared_policy_node    720    765     48   85    1 : tunables    0    0    0 : slabdata      9      9      0
+numa_policy           84     84    288   28    2 : tunables    0    0    0 : slabdata      3      3      0
+perf_event            12     24   1352   24    8 : tunables    0    0    0 : slabdata      1      1      0
+trace_event_file    6420   6426     96   42    1 : tunables    0    0    0 : slabdata    153    153      0
+ftrace_event_field   5100   5110     56   73    1 : tunables    0    0    0 : slabdata     70     70      0
+pool_workqueue      3920   3920    512   16    2 : tunables    0    0    0 : slabdata    245    245      0
+radix_tree_node      980    980    584   28    4 : tunables    0    0    0 : slabdata     35     35      0
+task_group             0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0
+maple_node           220    224    256   16    1 : tunables    0    0    0 : slabdata     14     14      0
+mm_struct             60     72   1792   18    8 : tunables    0    0    0 : slabdata      4      4      0
+vmap_area           2516   2520     72   56    1 : tunables    0    0    0 : slabdata     45     45      0
+kmalloc_buckets      120    144    112   36    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-cg-8k          4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-cg-4k         84     88   4096    8    8 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-cg-2k        168    176   2048   16    8 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-cg-1k        108    112   1024   16    4 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-cg-512       140    144    512   16    2 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-cg-256       336    336    256   16    1 : tunables    0    0    0 : slabdata     21     21      0
+kmalloc-cg-128       420    448    128   32    1 : tunables    0    0    0 : slabdata     14     14      0
+kmalloc-cg-64        360    384     64   64    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-cg-32        540    640     32  128    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-cg-16        420    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-cg-8         240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-cg-192       480    483    192   21    1 : tunables    0    0    0 : slabdata     23     23      0
+kmalloc-cg-96        420    420     96   42    1 : tunables    0    0    0 : slabdata     10     10      0
+dma-kmalloc-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-16         0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-8          0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-16         0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-8          0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-15-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-15-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-15-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-15-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-15-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-15-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-15-128    240    256    128   32    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-15-64    420    448     64   64    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-15-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-15-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-15-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-15-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-15-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-14-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-14-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-14-2k     12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-14-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-14-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-14-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-14-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-14-64    549    576     64   64    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-14-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-14-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-14-8    2460   2560      8  512    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-14-192    360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+kmalloc-rnd-14-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-13-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-13-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-13-2k     48     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-13-1k     24     32   1024   16    4 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-13-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-13-256    112    112    256   16    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-13-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-13-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-13-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-13-16    120    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-13-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-13-192    180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-13-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-12-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-12-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-12-2k    108    112   2048   16    8 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-12-1k    120    128   1024   16    4 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-12-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-12-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-12-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-12-64    480    512     64   64    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-12-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-12-16    660    768     16  256    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-12-8     780   1024      8  512    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-12-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-12-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-11-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-11-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-11-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-11-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-11-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-11-256    112    112    256   16    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-11-128    240    256    128   32    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-11-64    300    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-11-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-11-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-11-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-11-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-11-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-10-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-10-4k     16     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-10-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-10-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-10-512     56     64    512   16    2 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-10-256     56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-10-128    240    256    128   32    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-10-64    480    512     64   64    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-10-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-10-16    300    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-10-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-10-192      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-10-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-09-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-09-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-09-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-09-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-09-512    168    176    512   16    2 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-rnd-09-256    252    256    256   16    1 : tunables    0    0    0 : slabdata     16     16      0
+kmalloc-rnd-09-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-09-64    279    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-09-32    840    896     32  128    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-09-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-09-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-09-192    300    315    192   21    1 : tunables    0    0    0 : slabdata     15     15      0
+kmalloc-rnd-09-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-08-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-08-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-08-2k     12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-08-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-08-512  12315  12320    512   16    2 : tunables    0    0    0 : slabdata    770    770      0
+kmalloc-rnd-08-256   5450   5456    256   16    1 : tunables    0    0    0 : slabdata    341    341      0
+kmalloc-rnd-08-128   4270   4288    128   32    1 : tunables    0    0    0 : slabdata    134    134      0
+kmalloc-rnd-08-64   2769   2816     64   64    1 : tunables    0    0    0 : slabdata     44     44      0
+kmalloc-rnd-08-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-08-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-08-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-08-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-08-96    300    336     96   42    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-07-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-07-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-07-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-07-1k    144    144   1024   16    4 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-07-512     56     64    512   16    2 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-07-256    476    480    256   16    1 : tunables    0    0    0 : slabdata     30     30      0
+kmalloc-rnd-07-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-07-64    300    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-07-32    780    896     32  128    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-07-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-07-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-07-192    300    315    192   21    1 : tunables    0    0    0 : slabdata     15     15      0
+kmalloc-rnd-07-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-06-8k      8      8   8192    4    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-06-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-06-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-06-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-06-512   1428   1440    512   16    2 : tunables    0    0    0 : slabdata     90     90      0
+kmalloc-rnd-06-256    496    496    256   16    1 : tunables    0    0    0 : slabdata     31     31      0
+kmalloc-rnd-06-128    564    576    128   32    1 : tunables    0    0    0 : slabdata     18     18      0
+kmalloc-rnd-06-64    624    640     64   64    1 : tunables    0    0    0 : slabdata     10     10      0
+kmalloc-rnd-06-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-06-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-06-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-06-192    180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-06-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-05-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-05-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-05-2k    108    112   2048   16    8 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-05-1k    108    112   1024   16    4 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-05-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-05-256    196    208    256   16    1 : tunables    0    0    0 : slabdata     13     13      0
+kmalloc-rnd-05-128    240    256    128   32    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-05-64    540    576     64   64    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-05-32   1020   1408     32  128    1 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-rnd-05-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-05-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-05-192    361    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+kmalloc-rnd-05-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-04-8k     16     16   8192    4    8 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-04-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-04-2k     48     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-04-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-04-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-04-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-04-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-04-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-04-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-04-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-04-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-04-192    180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-04-96    360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-03-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-03-4k     16     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-03-2k    132    144   2048   16    8 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-03-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-03-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-03-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-03-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-03-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-03-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-03-16    120    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-03-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-03-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-03-96    300    336     96   42    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-02-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-02-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-02-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-02-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-02-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-02-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-02-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-02-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-02-32    300    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-02-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-02-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-02-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-02-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-01-8k     12     12   8192    4    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-01-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-01-2k     48     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-01-1k    108    112   1024   16    4 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-01-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-01-256    112    112    256   16    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-01-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-01-64   1260   1280     64   64    1 : tunables    0    0    0 : slabdata     20     20      0
+kmalloc-rnd-01-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-01-16   1440   1536     16  256    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-01-8    1740   2048      8  512    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-01-192    180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-01-96   1980   2016     96   42    1 : tunables    0    0    0 : slabdata     48     48      0
+kmalloc-8k             0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-4k             4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-2k            48     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-1k            24     32   1024   16    4 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-512           84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-256          196    208    256   16    1 : tunables    0    0    0 : slabdata     13     13      0
+kmalloc-128          120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-64           540    576     64   64    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-32           240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-16           180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-8            180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-192           60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-96           180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmem_cache_node      407    416    128   32    1 : tunables    0    0    0 : slabdata     13     13      0
+kmem_cache           407    416    256   16    1 : tunables    0    0    0 : slabdata     26     26      0
+BENCH_PRE_VARIANT_END
+[    2.149989] evmod: loading out-of-tree module taints kernel.
+[    2.152178] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    2.157427] evmod: loaded (per-cpu workqueue)
+BENCH_POST_LOAD_MEMINFO
+MemTotal:       16347208 kB
+MemFree:        16174388 kB
+MemAvailable:   16004096 kB
+Buffers:               0 kB
+Cached:            68692 kB
+SwapCached:            0 kB
+Active:            68736 kB
+Inactive:              0 kB
+Active(anon):      68736 kB
+Inactive(anon):        0 kB
+Active(file):          0 kB
+Inactive(file):        0 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:            60 kB
+Mapped:             1800 kB
+Shmem:             68692 kB
+KReclaimable:       4484 kB
+Slab:              38084 kB
+SReclaimable:       4484 kB
+SUnreclaim:        33600 kB
+KernelStack:        2256 kB
+PageTables:          316 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8173604 kB
+Committed_AS:      69372 kB
+VmallocTotal:   13743895347199 kB
+VmallocUsed:        6664 kB
+VmallocChunk:          0 kB
+Percpu:            21760 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+CmaTotal:              0 kB
+CmaFree:         1837056 kB
+Unaccepted:            0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       38784 kB
+DirectMap2M:     4155392 kB
+DirectMap1G:    14680064 kB
+BENCH_POST_LOAD_END
+BENCH_PERF_PMU_PROBE
+
+ Performance counter stats for 'system wide':
+
+           4084337      cycles                                                                
+           2666634      instructions                                                          
+
+       0.102177436 seconds time elapsed
+
+BENCH_PERF_SOFTWARE_PROBE
+
+ Performance counter stats for 'system wide':
+
+            407.56 msec cpu-clock                                                             
+            407.56 msec task-clock                                                            
+                26      context-switches                                                      
+                 5      cpu-migrations                                                        
+
+       0.101934241 seconds time elapsed
+
+{"dir":"v2t","event":"v3_begin","evmod":"live=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=248 buf_bytes=65536\n","label":"v2t-stall","schedule":"s3000,f","total":268435456,"trials":10,"uname":"7.0.0-29-generic\n"}
+{"avail_min_kb":15954908,"avail_start_kb":16000324,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.691686419,"sender_blocks_ms":[[47,2956]],"sent":268435456,"sent_at_first_block":4915200,"series":[[0,32768,32768,32741,32768,0,34504,15999920],[50,233033,4190912,491255,4682167,16,34640,15994844],[100,233033,4190912,491255,4682167,16,34640,15994844],[151,233033,4190912,491255,4682167,16,34640,15994844],[201,233033,4190912,491255,4682167,16,34640,15994844],[251,233033,4165312,516855,4682167,16,34640,15994844],[301,233033,4165312,516855,4682167,16,34640,15994844],[352,233033,4165312,516855,4682167,16,34640,15994844],[402,233033,4165312,516855,4682167,16,34640,15994844],[452,233033,4165312,516855,4682167,16,34640,15994844],[502,233033,4165312,516855,4682167,16,34640,15994844],[553,233033,4165312,516855,4682167,16,34640,15994844],[603,233033,4165312,516855,4682167,16,34640,15995752],[653,233033,4165312,516855,4682167,16,34640,15995752],[703,233033,4165312,516855,4682167,16,34640,15995752],[754,233033,4165312,516855,4682167,16,34640,15995752],[804,233033,4165312,516855,4682167,16,34640,15995752],[854,233033,4165312,516855,4682167,16,34640,15995752],[904,233033,4165312,516855,4682167,16,34640,15995752],[955,233033,4165312,516855,4682167,16,34640,15995752],[1005,233033,4165312,516855,4682167,16,34640,15995752],[1055,233033,4165312,516855,4682167,16,34640,15995752],[1105,233033,4165312,516855,4682167,16,34640,15995752],[1156,233033,4165312,516855,4682167,16,34640,15995752],[1206,233033,4165312,516855,4682167,16,34640,15995752],[1256,233033,4165312,516855,4682167,16,34640,15995752],[1306,233033,4165312,516855,4682167,16,34640,15995752],[1357,233033,4165312,516855,4682167,16,34640,15995752],[1407,233033,4165312,516855,4682167,16,34640,15995752],[1457,233033,4165312,516855,4682167,16,34640,15995752],[1507,233033,4165312,516855,4682167,16,34640,15995752],[1558,233033,4165312,516855,4682167,16,34640,15995752],[1608,233033,4165312,516855,4682167,16,34640,15996548],[1658,233033,4165312,516855,4682167,16,34640,15996548],[1708,233033,4165312,516855,4682167,16,34640,15996548],[1759,233033,4165312,516855,4682167,16,34640,15996548],[1809,233033,4165312,516855,4682167,16,34640,15996548],[1859,233033,4165312,516855,4682167,16,34640,15996548],[1909,233033,4165312,516855,4682167,16,34640,15996548],[1960,233033,4165312,516855,4682167,16,34640,15996548],[2010,233033,4165312,516855,4682167,16,34640,15996548],[2060,233033,4165312,516855,4682167,16,34640,15996548],[2110,233033,4165312,516855,4682167,16,34640,15996548],[2161,233033,4165312,516855,4682167,16,34640,15996548],[2211,233033,4165312,516855,4682167,16,34640,15996548],[2261,233033,4165312,516855,4682167,16,34640,15996548],[2311,233033,4165312,516855,4682167,16,34640,15996548],[2362,233033,4165312,516855,4682167,16,34640,15996548],[2412,233033,4165312,516855,4682167,16,34640,15996548],[2462,233033,4165312,516855,4682167,16,34640,15996548],[2513,233033,4165312,516855,4682167,16,34640,15996548],[2563,233033,4165312,516855,4682167,16,34640,15996548],[2613,233033,4165312,516855,4682167,16,34664,15997244],[2663,233033,4165312,516855,4682167,16,34664,15997244],[2714,233033,4165312,516855,4682167,16,34664,15997244],[2764,233033,4165312,516855,4682167,16,34664,15997244],[2814,233033,4165312,516855,4682167,16,34664,15997244],[2864,233033,4165312,516855,4682167,16,34664,15997244],[2915,233033,4165312,516855,4682167,16,34664,15997244],[2965,233033,4165312,516855,4682167,16,34664,15997244],[3015,0,0,0,7929856,16,34680,15996348],[3065,0,65536,0,24248320,16,34680,15993212],[3116,32768,32768,32768,43483136,16,34680,15989628],[3166,0,0,0,65830912,16,34680,15985372],[3216,0,65536,0,88211456,16,34680,15979996],[3266,0,0,0,110559232,16,34680,15974396],[3316,0,53,53,132939776,16,34680,15969084],[3367,32768,32768,0,153944064,16,34680,15963868],[3417,0,0,0,174391296,16,34680,15958940],[3467,32768,32768,0,197099520,16,34680,15958268],[3517,32768,65536,0,219152384,16,34680,15954908],[3567,0,65536,0,241827840,16,34680,15955516],[3618,0,65536,0,260440064,16,34680,15955516],[3668,0,65536,0,268435456,16,34680,15955516]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39232,"slab_start_kb":39044,"stall_ends":[[5262898446,0]],"sunrec_after_close_kb":34604,"sunrec_end_kb":34712,"sunrec_max_kb":34680,"sunrec_start_kb":34504,"timed_out":false,"total":268435456,"trial":0}
+{"avail_min_kb":15958592,"avail_start_kb":15960208,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.684643435,"sender_blocks_ms":[[47,2956]],"sent":268435456,"sent_at_first_block":4915200,"series":[[11,231496,2619373,491255,2783160,8,34604,15960208],[61,233033,4190912,491255,4682167,16,34792,15958592],[111,233033,4190912,491255,4682167,16,34792,15958592],[162,233033,4190912,491255,4682167,16,34792,15958592],[212,233033,4190912,491255,4682167,16,34792,15959056],[262,233033,4165312,516855,4682167,16,34792,15959056],[313,233033,4165312,516855,4682167,16,34792,15959056],[363,233033,4165312,516855,4682167,16,34792,15959056],[413,233033,4165312,516855,4682167,16,34792,15959056],[464,233033,4165312,516855,4682167,16,34792,15959056],[514,233033,4165312,516855,4682167,16,34792,15959056],[564,233033,4165312,516855,4682167,16,34792,15959056],[614,233033,4165312,516855,4682167,16,34792,15959056],[665,233033,4165312,516855,4682167,16,34792,15959056],[715,233033,4165312,516855,4682167,16,34792,15959056],[765,233033,4165312,516855,4682167,16,34792,15959056],[816,233033,4165312,516855,4682167,16,34792,15959056],[866,233033,4165312,516855,4682167,16,34792,15959056],[916,233033,4165312,516855,4682167,16,34792,15959056],[967,233033,4165312,516855,4682167,16,34792,15959056],[1017,233033,4165312,516855,4682167,16,34792,15959056],[1067,233033,4165312,516855,4682167,16,34792,15959056],[1118,233033,4165312,516855,4682167,16,34792,15959056],[1168,233033,4165312,516855,4682167,16,34792,15959056],[1218,233033,4165312,516855,4682167,16,34792,15959056],[1269,233033,4165312,516855,4682167,16,34792,15959464],[1319,233033,4165312,516855,4682167,16,34792,15962808],[1369,233033,4165312,516855,4682167,16,34792,15962808],[1420,233033,4165312,516855,4682167,16,34792,15962808],[1470,233033,4165312,516855,4682167,16,34792,15962808],[1520,233033,4165312,516855,4682167,16,34792,15962808],[1571,233033,4165312,516855,4682167,16,34792,15962808],[1621,233033,4165312,516855,4682167,16,34792,15962808],[1671,233033,4165312,516855,4682167,16,34792,15962808],[1722,233033,4165312,516855,4682167,16,34792,15962808],[1772,233033,4165312,516855,4682167,16,34792,15962808],[1822,233033,4165312,516855,4682167,16,34792,15962808],[1872,233033,4165312,516855,4682167,16,34792,15962808],[1923,233033,4165312,516855,4682167,16,34792,15962808],[1973,233033,4165312,516855,4682167,16,34792,15962808],[2023,233033,4165312,516855,4682167,16,34792,15962808],[2074,233033,4165312,516855,4682167,16,34792,15962808],[2124,233033,4165312,516855,4682167,16,34792,15962808],[2174,233033,4165312,516855,4682167,16,34792,15962808],[2225,233033,4165312,516855,4682167,16,34792,15962808],[2275,233033,4165312,516855,4682167,16,34792,15963164],[2325,233033,4165312,516855,4682167,16,34792,15966576],[2376,233033,4165312,516855,4682167,16,34792,15966576],[2426,233033,4165312,516855,4682167,16,34792,15966576],[2476,233033,4165312,516855,4682167,16,34792,15966576],[2527,233033,4165312,516855,4682167,16,34792,15966576],[2577,233033,4165312,516855,4682167,16,34792,15966576],[2627,233033,4165312,516855,4682167,16,34792,15966576],[2678,233033,4165312,516855,4682167,16,34792,15966576],[2728,233033,4165312,516855,4682167,16,34792,15966576],[2778,233033,4165312,516855,4682167,16,34792,15966576],[2828,233033,4165312,516855,4682167,16,34792,15966576],[2879,233033,4165312,516855,4682167,16,34792,15966576],[2929,233033,4165312,516855,4682167,16,34792,15966576],[2979,233033,4165312,516855,4682167,16,34792,15966576],[3030,0,0,0,11698176,16,34792,15967792],[3080,0,53,53,25690112,16,34792,15967792],[3130,32768,0,0,45613056,16,34792,15967792],[3180,0,0,0,65175552,16,34792,15976016],[3231,32768,0,0,86310912,16,34792,15975404],[3281,0,0,0,109117440,16,34792,15976372],[3331,0,32768,32768,130514944,16,34792,15984436],[3381,0,0,0,152764416,16,34792,15984436],[3431,0,32768,0,175210496,16,34792,15984212],[3482,0,32768,0,197885952,16,34792,15987060],[3532,32768,32768,0,220463104,16,34792,15989684],[3582,0,98304,53,242778112,16,34792,15984308],[3632,0,0,0,263094272,16,34792,15987604],[3683,0,65536,0,268435456,16,34792,15986260]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39376,"slab_start_kb":39156,"stall_ends":[[10598400148,0]],"sunrec_after_close_kb":34672,"sunrec_end_kb":34792,"sunrec_max_kb":34792,"sunrec_start_kb":34604,"timed_out":false,"total":268435456,"trial":1}
+{"avail_min_kb":15987524,"avail_start_kb":15988448,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.670194281,"sender_blocks_ms":[[46,2957]],"sent":268435456,"sent_at_first_block":4915200,"series":[[0,0,27,32768,32768,0,34672,15988448],[50,233033,4190912,491255,4682167,16,34860,15988420],[100,233033,4190912,491255,4682167,16,34860,15988420],[150,233033,4190912,491255,4682167,16,34860,15988420],[201,233033,4190912,491255,4682167,16,34860,15988420],[251,233033,4190912,491255,4682167,16,34860,15988420],[301,233033,4165312,516855,4682167,16,34860,15988420],[351,233033,4165312,516855,4682167,16,34860,15988420],[402,233033,4165312,516855,4682167,16,34860,15988420],[452,233033,4165312,516855,4682167,16,34860,15988420],[502,233033,4165312,516855,4682167,16,34860,15988420],[552,233033,4165312,516855,4682167,16,34860,15988420],[603,233033,4165312,516855,4682167,16,34860,15988420],[653,233033,4165312,516855,4682167,16,34860,15988420],[703,233033,4165312,516855,4682167,16,34860,15988420],[753,233033,4165312,516855,4682167,16,34860,15988420],[804,233033,4165312,516855,4682167,16,34860,15988420],[854,233033,4165312,516855,4682167,16,34860,15988420],[904,233033,4165312,516855,4682167,16,34860,15988420],[954,233033,4165312,516855,4682167,16,34860,15988420],[1005,233033,4165312,516855,4682167,16,34860,15988420],[1055,233033,4165312,516855,4682167,16,34860,15988420],[1105,233033,4165312,516855,4682167,16,34860,15988420],[1155,233033,4165312,516855,4682167,16,34860,15988420],[1206,233033,4165312,516855,4682167,16,34860,15988420],[1256,233033,4165312,516855,4682167,16,34860,15988420],[1306,233033,4165312,516855,4682167,16,34860,15988420],[1356,233033,4165312,516855,4682167,16,34860,15988420],[1407,233033,4165312,516855,4682167,16,34860,15988420],[1457,233033,4165312,516855,4682167,16,34860,15988420],[1507,233033,4165312,516855,4682167,16,34860,15988420],[1557,233033,4165312,516855,4682167,16,34860,15988420],[1608,233033,4165312,516855,4682167,16,34860,15988420],[1658,233033,4165312,516855,4682167,16,34860,15988420],[1708,233033,4165312,516855,4682167,16,34860,15988420],[1758,233033,4165312,516855,4682167,16,34860,15988420],[1809,233033,4165312,516855,4682167,16,34860,15988420],[1859,233033,4165312,516855,4682167,16,34860,15988420],[1909,233033,4165312,516855,4682167,16,34860,15988420],[1959,233033,4165312,516855,4682167,16,34860,15988420],[2010,233033,4165312,516855,4682167,16,34860,15988420],[2060,233033,4165312,516855,4682167,16,34860,15988420],[2110,233033,4165312,516855,4682167,16,34860,15988420],[2160,233033,4165312,516855,4682167,16,34860,15988420],[2211,233033,4165312,516855,4682167,16,34860,15988420],[2261,233033,4165312,516855,4682167,16,34860,15988420],[2311,233033,4165312,516855,4682167,16,34860,15988420],[2361,233033,4165312,516855,4682167,16,34860,15988420],[2412,233033,4165312,516855,4682167,16,34860,15988420],[2462,233033,4165312,516855,4682167,16,34860,15988420],[2512,233033,4165312,516855,4682167,16,34860,15988420],[2562,233033,4165312,516855,4682167,16,34860,15988420],[2613,233033,4165312,516855,4682167,16,34860,15988420],[2663,233033,4165312,516855,4682167,16,34860,15988420],[2713,233033,4165312,516855,4682167,16,34860,15988420],[2763,233033,4165312,516855,4682167,16,34860,15988420],[2814,233033,4165312,516855,4682167,16,34860,15988420],[2864,233033,4165312,516855,4682167,16,34860,15988420],[2914,233033,4165312,516855,4682167,16,34860,15988420],[2964,233033,4165312,516855,4682167,16,34860,15988420],[3015,0,0,0,7536640,16,34860,15987524],[3065,0,65536,0,19660800,16,34860,15987524],[3115,0,0,0,35028992,16,34860,15987748],[3165,0,32768,32768,55410688,16,34860,15995812],[3215,0,32768,0,78512128,16,34860,15991108],[3266,32768,98304,53,100990976,16,34860,15989988],[3316,0,65536,0,122716160,16,34860,15994468],[3366,0,32768,0,141688832,16,34860,16001188],[3416,32768,0,0,162594816,16,34860,15998276],[3467,0,65536,0,183533568,16,34860,16001860],[3517,0,0,0,204963840,16,34860,15998500],[3567,0,0,0,222134272,16,34860,15998276],[3617,0,53,53,244776960,16,34860,15997604],[3668,32768,32768,32768,267485184,16,34860,15992004]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39444,"slab_start_kb":39256,"stall_ends":[[15966593217,0]],"sunrec_after_close_kb":34748,"sunrec_end_kb":34860,"sunrec_max_kb":34860,"sunrec_start_kb":34672,"timed_out":false,"total":268435456,"trial":2}
+{"avail_min_kb":15982532,"avail_start_kb":15991748,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.6566303749999998,"sender_blocks_ms":[[47,2956]],"sent":268435456,"sent_at_first_block":4915200,"series":[[0,0,27,32768,32768,0,34752,15991552],[50,233033,4190912,491255,4682167,16,34752,15988864],[100,233033,4190912,491255,4682167,16,34752,15988864],[151,233033,4190912,491255,4682167,16,34752,15988864],[201,233033,4190912,491255,4682167,16,34752,15988864],[251,233033,4165312,516855,4682167,16,34752,15988864],[302,233033,4165312,516855,4682167,16,34752,15988864],[352,233033,4165312,516855,4682167,16,34752,15988864],[402,233033,4165312,516855,4682167,16,34752,15988864],[453,233033,4165312,516855,4682167,16,34752,15988864],[503,233033,4165312,516855,4682167,16,34924,15988744],[553,233033,4165312,516855,4682167,16,34924,15988744],[603,233033,4165312,516855,4682167,16,34924,15988744],[654,233033,4165312,516855,4682167,16,34924,15988744],[704,233033,4165312,516855,4682167,16,34924,15988744],[754,233033,4165312,516855,4682167,16,34924,15988744],[805,233033,4165312,516855,4682167,16,34924,15988744],[855,233033,4165312,516855,4682167,16,34924,15988744],[905,233033,4165312,516855,4682167,16,34924,15988744],[956,233033,4165312,516855,4682167,16,34924,15988744],[1006,233033,4165312,516855,4682167,16,34924,15988744],[1056,233033,4165312,516855,4682167,16,34924,15988744],[1107,233033,4165312,516855,4682167,16,34924,15988744],[1157,233033,4165312,516855,4682167,16,34924,15988744],[1207,233033,4165312,516855,4682167,16,34924,15988744],[1258,233033,4165312,516855,4682167,16,34924,15988744],[1308,233033,4165312,516855,4682167,16,34924,15988744],[1358,233033,4165312,516855,4682167,16,34924,15988744],[1409,233033,4165312,516855,4682167,16,34924,15988744],[1459,233033,4165312,516855,4682167,16,34924,15988744],[1509,233033,4165312,516855,4682167,16,34924,15988744],[1559,233033,4165312,516855,4682167,16,34924,15988744],[1610,233033,4165312,516855,4682167,16,34924,15989476],[1660,233033,4165312,516855,4682167,16,34924,15989476],[1710,233033,4165312,516855,4682167,16,34924,15989476],[1761,233033,4165312,516855,4682167,16,34924,15989476],[1811,233033,4165312,516855,4682167,16,34924,15989476],[1861,233033,4165312,516855,4682167,16,34924,15989476],[1912,233033,4165312,516855,4682167,16,34924,15989476],[1962,233033,4165312,516855,4682167,16,34924,15989476],[2012,233033,4165312,516855,4682167,16,34924,15989476],[2063,233033,4165312,516855,4682167,16,34924,15989476],[2113,233033,4165312,516855,4682167,16,34924,15989476],[2163,233033,4165312,516855,4682167,16,34924,15989476],[2214,233033,4165312,516855,4682167,16,34924,15989476],[2264,233033,4165312,516855,4682167,16,34924,15989476],[2315,233033,4165312,516855,4682167,16,34924,15989476],[2365,233033,4165312,516855,4682167,16,34924,15989476],[2415,233033,4165312,516855,4682167,16,34924,15989476],[2466,233033,4165312,516855,4682167,16,34924,15989476],[2516,233033,4165312,516855,4682167,16,34924,15989476],[2566,233033,4165312,516855,4682167,16,34924,15989476],[2617,233033,4165312,516855,4682167,16,34924,15989476],[2667,233033,4165312,516855,4682167,16,34924,15989476],[2717,233033,4165312,516855,4682167,16,34924,15989476],[2768,233033,4165312,516855,4682167,16,34924,15989476],[2818,233033,4165312,516855,4682167,16,34924,15989476],[2868,233033,4165312,516855,4682167,16,34924,15989476],[2919,233033,4165312,516855,4682167,16,34924,15989476],[2969,233033,4165312,516855,4682167,16,34924,15989476],[3019,0,98304,65483,8978432,16,34924,15990596],[3069,0,53,53,24608768,16,34924,15990596],[3120,32768,32768,32768,44597248,16,34924,15987236],[3170,32768,32768,0,64487424,16,34924,15982532],[3220,32768,0,0,83460096,16,34924,15986340],[3270,0,32768,0,106201088,16,34924,15996196],[3321,32768,98251,65483,128516096,16,34924,15994628],[3371,0,0,0,150437888,16,34924,15997764],[3421,32768,32768,32768,169574400,16,34924,15994628],[3471,0,0,0,189890560,16,34924,16001572],[3522,32768,98251,65483,210960384,16,34924,16000292],[3572,0,32768,32768,232259584,16,34924,16004708],[3622,0,53,0,254640128,16,34924,16000228]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39508,"slab_start_kb":39336,"stall_ends":[[21313546576,0]],"sunrec_after_close_kb":34796,"sunrec_end_kb":34924,"sunrec_max_kb":34924,"sunrec_start_kb":34752,"timed_out":false,"total":268435456,"trial":3}
+{"avail_min_kb":15995972,"avail_start_kb":16000292,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.684478066,"sender_blocks_ms":[[44,2959]],"sent":268435456,"sent_at_first_block":4915200,"series":[[0,32768,32741,0,0,0,34796,16000292],[50,233033,4190912,491255,4682167,16,34956,15999556],[100,233033,4190912,491255,4682167,16,34956,15999556],[151,233033,4190912,491255,4682167,16,34956,15999556],[201,233033,4190912,491255,4682167,16,34956,15999556],[251,233033,4190912,491255,4682167,16,34956,15999556],[302,233033,4165312,516855,4682167,16,34956,15999556],[352,233033,4165312,516855,4682167,16,34956,15999556],[402,233033,4165312,516855,4682167,16,34956,15999556],[452,233033,4165312,516855,4682167,16,34956,15999556],[503,233033,4165312,516855,4682167,16,34956,15999556],[553,233033,4165312,516855,4682167,16,34956,15999556],[603,233033,4165312,516855,4682167,16,34956,15999556],[654,233033,4165312,516855,4682167,16,34956,15999556],[704,233033,4165312,516855,4682167,16,34956,15999556],[754,233033,4165312,516855,4682167,16,34956,15999556],[805,233033,4165312,516855,4682167,16,34956,15999556],[855,233033,4165312,516855,4682167,16,34956,15999556],[905,233033,4165312,516855,4682167,16,34956,15999556],[956,233033,4165312,516855,4682167,16,34956,15999556],[1006,233033,4165312,516855,4682167,16,34956,15999556],[1056,233033,4165312,516855,4682167,16,34956,15999556],[1107,233033,4165312,516855,4682167,16,34956,15999556],[1157,233033,4165312,516855,4682167,16,34956,15999556],[1207,233033,4165312,516855,4682167,16,34956,15999556],[1258,233033,4165312,516855,4682167,16,34972,15999556],[1308,233033,4165312,516855,4682167,16,34972,15999556],[1358,233033,4165312,516855,4682167,16,34972,15999556],[1409,233033,4165312,516855,4682167,16,34972,15999556],[1459,233033,4165312,516855,4682167,16,34972,15999556],[1509,233033,4165312,516855,4682167,16,34972,15999556],[1560,233033,4165312,516855,4682167,16,34972,15999556],[1610,233033,4165312,516855,4682167,16,34972,15999556],[1660,233033,4165312,516855,4682167,16,34972,15999556],[1710,233033,4165312,516855,4682167,16,34972,15999556],[1761,233033,4165312,516855,4682167,16,34972,15999556],[1811,233033,4165312,516855,4682167,16,34972,15999556],[1861,233033,4165312,516855,4682167,16,34972,15999556],[1912,233033,4165312,516855,4682167,16,34972,15999556],[1962,233033,4165312,516855,4682167,16,34972,15999556],[2012,233033,4165312,516855,4682167,16,34972,15999556],[2063,233033,4165312,516855,4682167,16,34972,15999556],[2113,233033,4165312,516855,4682167,16,34972,15999556],[2163,233033,4165312,516855,4682167,16,34972,15999556],[2214,233033,4165312,516855,4682167,16,34972,15999556],[2264,233033,4165312,516855,4682167,16,34972,15999556],[2314,233033,4165312,516855,4682167,16,34972,15999556],[2365,233033,4165312,516855,4682167,16,34972,15999556],[2415,233033,4165312,516855,4682167,16,34972,15999556],[2465,233033,4165312,516855,4682167,16,34972,15999556],[2516,233033,4165312,516855,4682167,16,34972,15999556],[2566,233033,4165312,516855,4682167,16,34972,15999556],[2616,233033,4165312,516855,4682167,16,34972,15999556],[2666,233033,4165312,516855,4682167,16,34972,15999556],[2717,233033,4165312,516855,4682167,16,34972,15999556],[2767,233033,4165312,516855,4682167,16,34972,15999556],[2817,233033,4165312,516855,4682167,16,34972,15999556],[2868,233033,4165312,516855,4682167,16,34972,15999556],[2918,233033,4165312,516855,4682167,16,34972,15999556],[2968,233033,4165312,516855,4682167,16,34972,15999556],[3019,0,53,53,10190848,16,34972,16001572],[3069,0,0,0,28409856,16,34972,16003588],[3119,0,0,0,49283072,16,34972,16007172],[3169,32768,0,0,64192512,16,34972,16005380],[3219,0,0,0,82149376,16,34972,16009412],[3270,32768,32715,0,103579648,16,34972,16004100],[3320,0,32768,0,120782848,16,34972,16008964],[3370,0,53,53,139853824,16,34972,16004484],[3420,0,65536,0,157646848,16,34972,16000004],[3471,32768,98251,65483,177143808,16,34972,15995972],[3521,0,53,53,199327744,16,34972,15996228],[3571,0,53,53,221347840,16,34972,15998116],[3621,0,65536,0,240713728,16,34972,16002308],[3671,0,0,0,262930432,16,34972,15996932]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39556,"slab_start_kb":39380,"stall_ends":[[26622532213,0]],"sunrec_after_close_kb":34852,"sunrec_end_kb":34972,"sunrec_max_kb":34972,"sunrec_start_kb":34796,"timed_out":false,"total":268435456,"trial":4}
+{"avail_min_kb":15995588,"avail_start_kb":15995652,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.73144687,"sender_blocks_ms":[[44,2958]],"sent":268435456,"sent_at_first_block":4915200,"series":[[0,32768,53,163787,163840,0,34852,15995652],[50,233033,4190912,491255,4682167,16,34980,15995588],[100,233033,4190912,491255,4682167,16,34980,15995588],[151,233033,4190912,491255,4682167,16,34980,15995588],[201,233033,4190912,491255,4682167,16,34980,15995588],[251,233033,4190912,491255,4682167,16,34980,15995588],[302,233033,4165312,516855,4682167,16,34980,15995588],[352,233033,4165312,516855,4682167,16,34980,15995588],[402,233033,4165312,516855,4682167,16,34980,15995588],[453,233033,4165312,516855,4682167,16,34980,15995588],[503,233033,4165312,516855,4682167,16,34980,15995588],[553,233033,4165312,516855,4682167,16,34980,15995588],[604,233033,4165312,516855,4682167,16,34980,15995588],[654,233033,4165312,516855,4682167,16,34980,15995588],[704,233033,4165312,516855,4682167,16,34980,15995588],[755,233033,4165312,516855,4682167,16,34980,15995588],[805,233033,4165312,516855,4682167,16,34980,15995588],[855,233033,4165312,516855,4682167,16,34980,15995588],[905,233033,4165312,516855,4682167,16,34980,15995588],[956,233033,4165312,516855,4682167,16,34980,15995588],[1006,233033,4165312,516855,4682167,16,34980,15995588],[1056,233033,4165312,516855,4682167,16,34980,15995588],[1106,233033,4165312,516855,4682167,16,34980,15995588],[1156,233033,4165312,516855,4682167,16,34980,15995588],[1207,233033,4165312,516855,4682167,16,34980,15995588],[1257,233033,4165312,516855,4682167,16,34980,15995588],[1307,233033,4165312,516855,4682167,16,34980,15995588],[1357,233033,4165312,516855,4682167,16,34980,15995588],[1408,233033,4165312,516855,4682167,16,34980,15995588],[1458,233033,4165312,516855,4682167,16,34980,15995588],[1508,233033,4165312,516855,4682167,16,34980,15995588],[1559,233033,4165312,516855,4682167,16,34980,15995588],[1609,233033,4165312,516855,4682167,16,34980,15995588],[1659,233033,4165312,516855,4682167,16,34980,15995588],[1710,233033,4165312,516855,4682167,16,34980,15995588],[1760,233033,4165312,516855,4682167,16,34980,15995588],[1810,233033,4165312,516855,4682167,16,34980,15995588],[1861,233033,4165312,516855,4682167,16,34980,15995588],[1911,233033,4165312,516855,4682167,16,34980,15995588],[1961,233033,4165312,516855,4682167,16,34980,15995588],[2011,233033,4165312,516855,4682167,16,34980,15995588],[2062,233033,4165312,516855,4682167,16,34980,15995588],[2112,233033,4165312,516855,4682167,16,34980,15995588],[2162,233033,4165312,516855,4682167,16,34980,15995588],[2213,233033,4165312,516855,4682167,16,34980,15995588],[2263,233033,4165312,516855,4682167,16,34980,15995588],[2313,233033,4165312,516855,4682167,16,34980,15995588],[2363,233033,4165312,516855,4682167,16,34980,15995588],[2414,233033,4165312,516855,4682167,16,34980,15995588],[2464,233033,4165312,516855,4682167,16,34980,15995588],[2514,233033,4165312,516855,4682167,16,34980,15995588],[2564,233033,4165312,516855,4682167,16,34980,15995588],[2615,233033,4165312,516855,4682167,16,34980,15995588],[2665,233033,4165312,516855,4682167,16,34980,15995588],[2715,233033,4165312,516855,4682167,16,34980,15995588],[2766,233033,4165312,516855,4682167,16,34980,15995588],[2816,233033,4165312,516855,4682167,16,34980,15995588],[2866,233033,4165312,516855,4682167,16,34980,15995588],[2917,233033,4165312,516855,4682167,16,34980,15995588],[2967,233033,4165312,516855,4682167,16,34980,15995588],[3017,32768,5724,0,9207808,16,34980,15996932],[3068,0,0,0,22380544,16,34980,15996932],[3118,0,0,0,41844736,16,34980,15996932],[3168,0,0,0,63340544,16,34980,15996932],[3218,32768,0,0,84475904,16,34980,15996932],[3268,32768,32768,32768,104267776,16,34980,15996932],[3319,0,0,0,120324096,16,34980,15996932],[3369,0,0,0,138936320,16,34980,15996932],[3419,0,0,0,157614080,16,34980,15996932],[3469,0,0,0,176259072,16,34980,15996932],[3520,0,0,0,194740224,16,34980,15996932],[3570,0,0,0,210141184,16,34980,15996932],[3620,0,0,0,228032512,16,34980,15996932],[3670,32768,5724,0,246218752,16,34980,15996932],[3721,0,0,0,263979008,16,34980,15996932]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39564,"slab_start_kb":39436,"stall_ends":[[31980661196,0]],"sunrec_after_close_kb":34852,"sunrec_end_kb":34980,"sunrec_max_kb":34980,"sunrec_start_kb":34852,"timed_out":false,"total":268435456,"trial":5}
+{"avail_min_kb":15994180,"avail_start_kb":15997156,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.62872694,"sender_blocks_ms":[[46,2955]],"sent":268435456,"sent_at_first_block":4915200,"series":[[0,32768,27,32768,32768,0,34852,15997156],[50,233033,4190912,491255,4682167,16,34980,15994404],[100,233033,4190912,491255,4682167,16,34980,15994404],[151,233033,4190912,491255,4682167,16,34980,15994404],[201,233033,4190912,491255,4682167,16,34980,15994404],[251,233033,4190912,491255,4682167,16,34980,15994404],[302,233033,4165312,516855,4682167,16,34980,15994404],[352,233033,4165312,516855,4682167,16,34980,15994404],[402,233033,4165312,516855,4682167,16,34980,15994404],[453,233033,4165312,516855,4682167,16,34980,15994404],[503,233033,4165312,516855,4682167,16,34980,15994404],[553,233033,4165312,516855,4682167,16,34980,15994404],[604,233033,4165312,516855,4682167,16,34980,15994404],[654,233033,4165312,516855,4682167,16,34980,15994404],[704,233033,4165312,516855,4682167,16,34980,15994404],[755,233033,4165312,516855,4682167,16,34980,15994404],[805,233033,4165312,516855,4682167,16,34980,15994404],[855,233033,4165312,516855,4682167,16,34980,15994404],[905,233033,4165312,516855,4682167,16,34980,15994404],[956,233033,4165312,516855,4682167,16,34980,15994404],[1006,233033,4165312,516855,4682167,16,34980,15994404],[1056,233033,4165312,516855,4682167,16,34980,15994404],[1107,233033,4165312,516855,4682167,16,34980,15994404],[1157,233033,4165312,516855,4682167,16,34980,15994404],[1207,233033,4165312,516855,4682167,16,34980,15994404],[1258,233033,4165312,516855,4682167,16,34980,15994404],[1308,233033,4165312,516855,4682167,16,34980,15994404],[1358,233033,4165312,516855,4682167,16,34980,15994404],[1409,233033,4165312,516855,4682167,16,34980,15994404],[1459,233033,4165312,516855,4682167,16,34980,15994404],[1509,233033,4165312,516855,4682167,16,34980,15994404],[1560,233033,4165312,516855,4682167,16,34980,15994404],[1610,233033,4165312,516855,4682167,16,34980,15994404],[1660,233033,4165312,516855,4682167,16,34980,15994404],[1711,233033,4165312,516855,4682167,16,34980,15994404],[1761,233033,4165312,516855,4682167,16,34980,15994404],[1811,233033,4165312,516855,4682167,16,34980,15994404],[1861,233033,4165312,516855,4682167,16,34980,15994404],[1912,233033,4165312,516855,4682167,16,34980,15994404],[1962,233033,4165312,516855,4682167,16,34980,15994404],[2012,233033,4165312,516855,4682167,16,34980,15994404],[2063,233033,4165312,516855,4682167,16,34980,15994404],[2113,233033,4165312,516855,4682167,16,34980,15994404],[2163,233033,4165312,516855,4682167,16,34980,15994404],[2214,233033,4165312,516855,4682167,16,34980,15994404],[2264,233033,4165312,516855,4682167,16,34980,15994404],[2314,233033,4165312,516855,4682167,16,34980,15994404],[2365,233033,4165312,516855,4682167,16,34980,15994404],[2415,233033,4165312,516855,4682167,16,34980,15994404],[2465,233033,4165312,516855,4682167,16,34980,15994404],[2515,233033,4165312,516855,4682167,16,34980,15994404],[2566,233033,4165312,516855,4682167,16,34980,15994404],[2616,233033,4165312,516855,4682167,16,34980,15994404],[2666,233033,4165312,516855,4682167,16,34980,15994404],[2717,233033,4165312,516855,4682167,16,34980,15994404],[2767,233033,4165312,516855,4682167,16,34980,15994404],[2817,233033,4165312,516855,4682167,16,34980,15994404],[2868,233033,4165312,516855,4682167,16,34980,15994404],[2918,233033,4165312,516855,4682167,16,34980,15994404],[2968,233033,4165312,516855,4682167,16,34980,15994404],[3019,0,0,0,11304960,16,34980,15994180],[3069,0,0,0,28475392,16,34980,15994180],[3119,0,0,0,50102272,16,34980,15994180],[3170,0,32768,0,72056832,16,34980,15994180],[3220,0,0,0,93683712,16,34980,15994180],[3270,0,0,0,112590848,16,34980,15994180],[3320,0,0,0,134348800,16,34980,15994180],[3371,0,0,0,156336128,16,34980,15994180],[3421,32768,32768,32768,178290688,16,34980,15994180],[3471,0,0,0,200212480,16,34980,15994180],[3522,0,0,0,221970432,16,34980,15994180],[3572,0,32768,0,243859456,16,34980,15994180],[3622,0,0,0,265781248,16,34980,15994180]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39564,"slab_start_kb":39436,"stall_ends":[[37387742036,0]],"sunrec_after_close_kb":34980,"sunrec_end_kb":34980,"sunrec_max_kb":34980,"sunrec_start_kb":34852,"timed_out":false,"total":268435456,"trial":6}
+{"avail_min_kb":15992388,"avail_start_kb":15994180,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.648703074,"sender_blocks_ms":[[46,2955]],"sent":268435456,"sent_at_first_block":4915200,"series":[[0,32768,0,0,0,0,34980,15994180],[50,233033,4190912,491255,4682167,16,34980,15992612],[100,233033,4190912,491255,4682167,16,34980,15992612],[151,233033,4190912,491255,4682167,16,34980,15992612],[201,233033,4190912,491255,4682167,16,34980,15992612],[251,233033,4190912,491255,4682167,16,34980,15992612],[301,233033,4165312,516855,4682167,16,34980,15992612],[352,233033,4165312,516855,4682167,16,34980,15992612],[402,233033,4165312,516855,4682167,16,34980,15992612],[452,233033,4165312,516855,4682167,16,34980,15992612],[503,233033,4165312,516855,4682167,16,34980,15992612],[553,233033,4165312,516855,4682167,16,34980,15992612],[603,233033,4165312,516855,4682167,16,34980,15992612],[653,233033,4165312,516855,4682167,16,34980,15992612],[704,233033,4165312,516855,4682167,16,34980,15992612],[754,233033,4165312,516855,4682167,16,34980,15992612],[804,233033,4165312,516855,4682167,16,34980,15992612],[855,233033,4165312,516855,4682167,16,34980,15992612],[905,233033,4165312,516855,4682167,16,34980,15992612],[955,233033,4165312,516855,4682167,16,34980,15992612],[1006,233033,4165312,516855,4682167,16,34980,15992612],[1056,233033,4165312,516855,4682167,16,34980,15992612],[1106,233033,4165312,516855,4682167,16,34980,15992612],[1157,233033,4165312,516855,4682167,16,34980,15992612],[1207,233033,4165312,516855,4682167,16,34980,15992612],[1257,233033,4165312,516855,4682167,16,34980,15992612],[1308,233033,4165312,516855,4682167,16,34980,15992612],[1358,233033,4165312,516855,4682167,16,34980,15992612],[1408,233033,4165312,516855,4682167,16,34980,15992612],[1458,233033,4165312,516855,4682167,16,34980,15992612],[1509,233033,4165312,516855,4682167,16,34980,15992612],[1559,233033,4165312,516855,4682167,16,34980,15992612],[1609,233033,4165312,516855,4682167,16,34980,15992612],[1660,233033,4165312,516855,4682167,16,34980,15992612],[1710,233033,4165312,516855,4682167,16,34980,15992612],[1760,233033,4165312,516855,4682167,16,34980,15992612],[1811,233033,4165312,516855,4682167,16,34980,15992612],[1861,233033,4165312,516855,4682167,16,34980,15992612],[1911,233033,4165312,516855,4682167,16,34980,15992612],[1961,233033,4165312,516855,4682167,16,34980,15992612],[2012,233033,4165312,516855,4682167,16,34980,15992612],[2062,233033,4165312,516855,4682167,16,34980,15992612],[2113,233033,4165312,516855,4682167,16,34980,15992612],[2163,233033,4165312,516855,4682167,16,34980,15992612],[2213,233033,4165312,516855,4682167,16,34980,15992612],[2264,233033,4165312,516855,4682167,16,34980,15992612],[2314,233033,4165312,516855,4682167,16,34980,15992612],[2364,233033,4165312,516855,4682167,16,34980,15992612],[2414,233033,4165312,516855,4682167,16,34980,15992612],[2465,233033,4165312,516855,4682167,16,34980,15992612],[2515,233033,4165312,516855,4682167,16,34980,15992612],[2565,233033,4165312,516855,4682167,16,34980,15992612],[2616,233033,4165312,516855,4682167,16,34980,15992612],[2666,233033,4165312,516855,4682167,16,34980,15992612],[2716,233033,4165312,516855,4682167,16,34980,15992612],[2767,233033,4165312,516855,4682167,16,34980,15992612],[2817,233033,4165312,516855,4682167,16,34980,15992612],[2867,233033,4165312,516855,4682167,16,34980,15992612],[2917,233033,4165312,516855,4682167,16,34980,15992612],[2968,233033,4165312,516855,4682167,16,34980,15992612],[3018,32768,32768,0,9338880,16,34980,15992388],[3068,0,53,53,22511616,16,34980,15992388],[3118,32768,0,0,38010880,16,34980,15992388],[3169,0,0,0,58949632,16,34980,15997988],[3219,0,0,0,76546048,16,34980,15993732],[3269,0,53,53,93159424,16,34980,15997988],[3319,0,65536,0,114884608,16,34980,15992836],[3369,0,65536,0,138739712,16,34980,15998884],[3420,0,0,0,161185792,16,34980,16004484],[3470,0,0,0,183468032,16,34980,15999108],[3520,32768,32768,0,204734464,16,34980,16002020],[3570,32768,65536,0,228655104,16,34980,16006052],[3620,32768,65536,0,251101184,16,34980,16002916]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39564,"slab_start_kb":39564,"stall_ends":[[42677782506,0]],"sunrec_after_close_kb":34860,"sunrec_end_kb":34980,"sunrec_max_kb":34980,"sunrec_start_kb":34980,"timed_out":false,"total":268435456,"trial":7}
+{"avail_min_kb":15996612,"avail_start_kb":15998916,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.703486238,"sender_blocks_ms":[[46,2956]],"sent":268435456,"sent_at_first_block":4915200,"series":[[0,0,32795,32768,65536,0,34860,15998916],[50,233033,4190912,491255,4682167,16,35000,15996836],[100,233033,4190912,491255,4682167,16,35000,15996836],[151,233033,4190912,491255,4682167,16,35000,15996836],[201,233033,4190912,491255,4682167,16,35000,15996836],[251,233033,4165312,516855,4682167,16,35000,15996836],[301,233033,4165312,516855,4682167,16,35000,15996836],[351,233033,4165312,516855,4682167,16,35000,15996836],[402,233033,4165312,516855,4682167,16,35000,15996836],[452,233033,4165312,516855,4682167,16,35000,15996836],[502,233033,4165312,516855,4682167,16,35000,15996836],[552,233033,4165312,516855,4682167,16,35000,15996836],[603,233033,4165312,516855,4682167,16,35000,15996836],[653,233033,4165312,516855,4682167,16,35000,15996836],[703,233033,4165312,516855,4682167,16,35000,15996836],[753,233033,4165312,516855,4682167,16,35000,15996836],[804,233033,4165312,516855,4682167,16,35000,15996836],[854,233033,4165312,516855,4682167,16,35000,15996836],[904,233033,4165312,516855,4682167,16,35000,15996836],[955,233033,4165312,516855,4682167,16,35000,15996836],[1005,233033,4165312,516855,4682167,16,35000,15996836],[1055,233033,4165312,516855,4682167,16,35000,15996836],[1106,233033,4165312,516855,4682167,16,35000,15996836],[1156,233033,4165312,516855,4682167,16,35000,15996836],[1206,233033,4165312,516855,4682167,16,35000,15996836],[1256,233033,4165312,516855,4682167,16,35000,15996836],[1307,233033,4165312,516855,4682167,16,35000,15996836],[1357,233033,4165312,516855,4682167,16,35000,15996836],[1407,233033,4165312,516855,4682167,16,35000,15996836],[1458,233033,4165312,516855,4682167,16,35000,15996836],[1508,233033,4165312,516855,4682167,16,35000,15996836],[1558,233033,4165312,516855,4682167,16,35000,15996836],[1608,233033,4165312,516855,4682167,16,35000,15996836],[1659,233033,4165312,516855,4682167,16,35000,15996836],[1709,233033,4165312,516855,4682167,16,35000,15996836],[1759,233033,4165312,516855,4682167,16,35000,15996836],[1810,233033,4165312,516855,4682167,16,35000,15996836],[1860,233033,4165312,516855,4682167,16,35000,15996836],[1910,233033,4165312,516855,4682167,16,35000,15996836],[1961,233033,4165312,516855,4682167,16,35000,15996836],[2011,233033,4165312,516855,4682167,16,35000,15996836],[2061,233033,4165312,516855,4682167,16,35000,15996836],[2112,233033,4165312,516855,4682167,16,35000,15996836],[2162,233033,4165312,516855,4682167,16,35000,15996836],[2212,233033,4165312,516855,4682167,16,35000,15996836],[2262,233033,4165312,516855,4682167,16,35000,15996836],[2313,233033,4165312,516855,4682167,16,35000,15996836],[2363,233033,4165312,516855,4682167,16,35000,15996836],[2413,233033,4165312,516855,4682167,16,35000,15996836],[2463,233033,4165312,516855,4682167,16,35000,15996836],[2513,233033,4165312,516855,4682167,16,35000,15996836],[2564,233033,4165312,516855,4682167,16,35000,15996836],[2614,233033,4165312,516855,4682167,16,35000,15996836],[2664,233033,4165312,516855,4682167,16,35000,15996836],[2714,233033,4165312,516855,4682167,16,35000,15996836],[2764,233033,4165312,516855,4682167,16,35000,15996836],[2815,233033,4165312,516855,4682167,16,35000,15996836],[2865,233033,4165312,516855,4682167,16,35000,15996836],[2915,233033,4165312,516855,4682167,16,35000,15996836],[2966,233033,4165312,516855,4682167,16,35000,15996836],[3016,0,0,0,8617984,16,35000,15996612],[3066,32768,0,0,22609920,16,35000,15996612],[3116,32768,0,0,40828928,16,35000,15996612],[3167,32768,0,0,63242240,16,35000,15996612],[3217,0,0,0,83460096,16,35000,15996612],[3267,0,0,0,102924288,16,35000,15996612],[3317,0,0,0,119898112,16,35000,15996612],[3367,0,0,0,138412032,16,35000,15996612],[3418,32768,0,0,158302208,16,35000,15996612],[3468,0,0,0,178454528,16,35000,15996612],[3518,0,0,0,196116480,16,35000,15996612],[3568,32768,0,0,211779584,16,35000,15996612],[3618,0,0,0,230391808,16,35000,15996612],[3669,0,0,0,255426560,16,35000,15996612]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39584,"slab_start_kb":39444,"stall_ends":[[47977612180,0]],"sunrec_after_close_kb":34872,"sunrec_end_kb":35000,"sunrec_max_kb":35000,"sunrec_start_kb":34860,"timed_out":false,"total":268435456,"trial":8}
+{"avail_min_kb":15992132,"avail_start_kb":15996676,"consumed":268435456,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-stall","module_moved":268435456,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s3000,f","secs":3.6453473709999997,"sender_blocks_ms":[[47,2954]],"sent":268435456,"sent_at_first_block":4915200,"series":[[11,231496,2619373,491255,2783160,8,34872,15993988],[61,233033,4190912,491255,4682167,16,34872,15992644],[111,233033,4190912,491255,4682167,16,34872,15992644],[161,233033,4190912,491255,4682167,16,34872,15992644],[212,233033,4190912,491255,4682167,16,34872,15992644],[262,233033,4165312,516855,4682167,16,34872,15992644],[312,233033,4165312,516855,4682167,16,34872,15992644],[362,233033,4165312,516855,4682167,16,34872,15992644],[413,233033,4165312,516855,4682167,16,34872,15992644],[463,233033,4165312,516855,4682167,16,34872,15992644],[513,233033,4165312,516855,4682167,16,35000,15992580],[564,233033,4165312,516855,4682167,16,35000,15992580],[614,233033,4165312,516855,4682167,16,35000,15992580],[664,233033,4165312,516855,4682167,16,35000,15992580],[715,233033,4165312,516855,4682167,16,35000,15992580],[765,233033,4165312,516855,4682167,16,35000,15992580],[815,233033,4165312,516855,4682167,16,35000,15992580],[866,233033,4165312,516855,4682167,16,35000,15992580],[916,233033,4165312,516855,4682167,16,35000,15992580],[966,233033,4165312,516855,4682167,16,35000,15992580],[1017,233033,4165312,516855,4682167,16,35000,15992580],[1067,233033,4165312,516855,4682167,16,35000,15992580],[1117,233033,4165312,516855,4682167,16,35000,15992580],[1168,233033,4165312,516855,4682167,16,35000,15992580],[1218,233033,4165312,516855,4682167,16,35000,15992580],[1268,233033,4165312,516855,4682167,16,35000,15992580],[1318,233033,4165312,516855,4682167,16,35000,15992580],[1369,233033,4165312,516855,4682167,16,35000,15992580],[1419,233033,4165312,516855,4682167,16,35000,15992580],[1469,233033,4165312,516855,4682167,16,35000,15992580],[1520,233033,4165312,516855,4682167,16,35000,15992580],[1570,233033,4165312,516855,4682167,16,35000,15992580],[1620,233033,4165312,516855,4682167,16,35000,15992580],[1670,233033,4165312,516855,4682167,16,35000,15992580],[1721,233033,4165312,516855,4682167,16,35000,15992580],[1771,233033,4165312,516855,4682167,16,35000,15992580],[1821,233033,4165312,516855,4682167,16,35000,15992580],[1872,233033,4165312,516855,4682167,16,35000,15992580],[1922,233033,4165312,516855,4682167,16,35000,15992580],[1972,233033,4165312,516855,4682167,16,35000,15992580],[2023,233033,4165312,516855,4682167,16,35000,15992580],[2073,233033,4165312,516855,4682167,16,35000,15992580],[2123,233033,4165312,516855,4682167,16,35000,15992580],[2174,233033,4165312,516855,4682167,16,35000,15992580],[2224,233033,4165312,516855,4682167,16,35000,15992580],[2274,233033,4165312,516855,4682167,16,35000,15992580],[2325,233033,4165312,516855,4682167,16,35000,15992580],[2375,233033,4165312,516855,4682167,16,35000,15992580],[2425,233033,4165312,516855,4682167,16,35000,15992580],[2476,233033,4165312,516855,4682167,16,35000,15992580],[2526,233033,4165312,516855,4682167,16,35000,15992580],[2576,233033,4165312,516855,4682167,16,35000,15992580],[2626,233033,4165312,516855,4682167,16,35000,15992580],[2677,233033,4165312,516855,4682167,16,35000,15992580],[2727,233033,4165312,516855,4682167,16,35000,15992580],[2777,233033,4165312,516855,4682167,16,35000,15992580],[2828,233033,4165312,516855,4682167,16,35000,15992580],[2878,233033,4165312,516855,4682167,16,35000,15992580],[2928,233033,4165312,516855,4682167,16,35000,15992580],[2979,233033,4165312,516855,4682167,16,35000,15992580],[3029,0,0,0,13336576,16,35000,15992132],[3079,0,0,0,32440320,16,35000,15992132],[3130,0,0,0,51150848,16,35000,15992132],[3180,0,0,0,68059136,16,35000,15992132],[3230,32768,32768,32768,97976320,16,35000,15992132],[3280,0,0,0,127959040,16,35000,15992132],[3330,0,0,0,154238976,16,35000,15992132],[3381,0,0,0,170328064,16,35000,15992132],[3431,0,0,0,188973056,16,35000,15992132],[3481,32768,0,0,207585280,16,35000,15992132],[3531,0,0,0,226295808,16,35000,15992132],[3582,0,0,0,244973568,16,35000,15992132],[3632,0,0,0,263618560,16,35000,15992132]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39584,"slab_start_kb":39456,"stall_ends":[[53317227812,0]],"sunrec_after_close_kb":34876,"sunrec_end_kb":35000,"sunrec_max_kb":35000,"sunrec_start_kb":34872,"timed_out":false,"total":268435456,"trial":9}
+{"event":"v3_done","evmod":"live=0 attached=10 detached=10 completed=10 aborted=0 err=0 runs=164152 kicks=246567 queued=164152 requeue=0 bytes_v2t=2684354560 bytes_t2v=0 bytes_t2t=0 stall_dst=160 stall_src=245907 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"v2t-stall"}
+{"dir":"v2t","event":"v3_begin","evmod":"live=0 attached=10 detached=10 completed=10 aborted=0 err=0 runs=164152 kicks=246567 queued=164152 requeue=0 bytes_v2t=2684354560 bytes_t2v=0 bytes_t2t=0 stall_dst=160 stall_src=245907 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"v2t-long","schedule":"s10000,f","total":536870912,"trials":2,"uname":"7.0.0-29-generic\n"}
+{"avail_min_kb":15968608,"avail_start_kb":15992196,"consumed":536870912,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-long","module_moved":536870912,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s10000,f","secs":11.22758762,"sender_blocks_ms":[[48,9962]],"sent":536870912,"sent_at_first_block":4915200,"series":[[0,32768,32768,32768,65536,0,35072,15992196],[252,233033,4190912,491255,4682167,16,35112,15989888],[503,233033,4165312,516855,4682167,16,35112,15989888],[755,233033,4165312,516855,4682167,16,35112,15989888],[1006,233033,4165312,516855,4682167,16,35112,15989888],[1258,233033,4165312,516855,4682167,16,35112,15989888],[1510,233033,4165312,516855,4682167,16,35112,15989888],[1761,233033,4165312,516855,4682167,16,35112,15989888],[2013,233033,4165312,516855,4682167,16,35112,15989888],[2264,233033,4165312,516855,4682167,16,35112,15989888],[2516,233033,4165312,516855,4682167,16,35112,15989888],[2768,233033,4165312,516855,4682167,16,35112,15989888],[3019,233033,4165312,516855,4682167,16,35112,15989888],[3271,233033,4165312,516855,4682167,16,35112,15989888],[3522,233033,4165312,516855,4682167,16,35112,15989888],[3774,233033,4165312,516855,4682167,16,35112,15989888],[4025,233033,4165312,516855,4682167,16,35112,15989888],[4277,233033,4165312,516855,4682167,16,35112,15989888],[4529,233033,4165312,516855,4682167,16,35112,15989888],[4780,233033,4165312,516855,4682167,16,35112,15989888],[5032,233033,4165312,516855,4682167,16,35112,15989888],[5283,233033,4165312,516855,4682167,16,35112,15989888],[5535,233033,4165312,516855,4682167,16,35112,15989888],[5787,233033,4165312,516855,4682167,16,35112,15989888],[6038,233033,4165312,516855,4682167,16,35112,15989888],[6290,233033,4165312,516855,4682167,16,35112,15989888],[6541,233033,4165312,516855,4682167,16,35112,15989888],[6793,233033,4165312,516855,4682167,16,35112,15989888],[7044,233033,4165312,516855,4682167,16,35112,15989888],[7296,233033,4165312,516855,4682167,16,35112,15989888],[7548,233033,4165312,516855,4682167,16,35112,15989888],[7799,233033,4165312,516855,4682167,16,35112,15989888],[8051,233033,4165312,516855,4682167,16,35112,15989888],[8302,233033,4165312,516855,4682167,16,35112,15989888],[8554,233033,4165312,516855,4682167,16,35112,15989888],[8805,233033,4165312,516855,4682167,16,35112,15989888],[9057,233033,4165312,516855,4682167,16,35112,15989888],[9309,233033,4165312,516855,4682167,16,35112,15989888],[9560,233033,4165312,516855,4682167,16,35112,15989888],[9812,233033,4165312,516855,4682167,16,35112,15989888],[10063,32768,32768,32768,21659648,16,35112,15993248],[10314,0,0,0,120094720,16,35112,16009536],[10566,0,32768,0,236912640,16,35112,16002016],[10817,0,0,0,345767936,16,35112,15984544],[11068,0,65536,0,461111296,16,35128,15975808]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39712,"slab_start_kb":39656,"stall_ends":[[65644277004,0]],"sunrec_after_close_kb":35000,"sunrec_end_kb":35128,"sunrec_max_kb":35128,"sunrec_start_kb":35072,"timed_out":false,"total":536870912,"trial":0}
+{"avail_min_kb":15967712,"avail_start_kb":15968000,"consumed":536870912,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-long","module_moved":536870912,"ok":true,"peak_a":233033,"peak_b":4190912,"peak_c":516855,"peak_pipe":4915200,"schedule":"s10000,f","secs":11.261944855,"sender_blocks_ms":[[46,9957]],"sent":536870912,"sent_at_first_block":4915200,"series":[[0,32768,32741,0,0,0,35000,15968000],[251,233033,4190912,491255,4682167,16,35124,15967712],[503,233033,4165312,516855,4682167,16,35124,15970740],[754,233033,4165312,516855,4682167,16,35124,15970740],[1006,233033,4165312,516855,4682167,16,35124,15970740],[1258,233033,4165312,516855,4682167,16,35124,15970740],[1509,233033,4165312,516855,4682167,16,35124,15974292],[1761,233033,4165312,516855,4682167,16,35124,15974292],[2012,233033,4165312,516855,4682167,16,35124,15974292],[2264,233033,4165312,516855,4682167,16,35124,15974292],[2516,233033,4165312,516855,4682167,16,35124,15977364],[2767,233033,4165312,516855,4682167,16,35124,15977364],[3019,233033,4165312,516855,4682167,16,35124,15977364],[3271,233033,4165312,516855,4682167,16,35124,15977364],[3522,233033,4165312,516855,4682167,16,35124,15980052],[3774,233033,4165312,516855,4682167,16,35124,15980052],[4025,233033,4165312,516855,4682167,16,35124,15980052],[4277,233033,4165312,516855,4682167,16,35124,15980052],[4528,233033,4165312,516855,4682167,16,35124,15980848],[4780,233033,4165312,516855,4682167,16,35124,15980848],[5032,233033,4165312,516855,4682167,16,35124,15980848],[5283,233033,4165312,516855,4682167,16,35124,15980848],[5535,233033,4165312,516855,4682167,16,35124,15983900],[5786,233033,4165312,516855,4682167,16,35124,15983900],[6038,233033,4165312,516855,4682167,16,35124,15983900],[6290,233033,4165312,516855,4682167,16,35124,15983900],[6541,233033,4165312,516855,4682167,16,35124,15986428],[6793,233033,4165312,516855,4682167,16,35124,15986428],[7044,233033,4165312,516855,4682167,16,35124,15986428],[7296,233033,4165312,516855,4682167,16,35124,15986428],[7548,233033,4165312,516855,4682167,16,35124,15986428],[7799,233033,4165312,516855,4682167,16,35124,15986428],[8051,233033,4165312,516855,4682167,16,35124,15986428],[8302,233033,4165312,516855,4682167,16,35124,15986428],[8554,233033,4165312,516855,4682167,16,35124,15986428],[8806,233033,4165312,516855,4682167,16,35124,15986428],[9057,233033,4165312,516855,4682167,16,35124,15986428],[9309,233033,4165312,516855,4682167,16,35124,15986428],[9560,233033,4165312,516855,4682167,16,35124,15986428],[9812,233033,4165312,516855,4682167,16,35124,15986428],[10063,0,65536,0,18874368,16,35124,15990908],[10314,32768,32768,0,114524160,16,35124,16005916],[10565,32768,32768,32768,229212160,16,35124,16015484],[10816,0,53,53,343867392,16,35124,16006300],[11067,32768,32768,32768,446169088,16,35124,15994876]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39708,"slab_start_kb":39584,"stall_ends":[[78511073777,0]],"sunrec_after_close_kb":34996,"sunrec_end_kb":35124,"sunrec_max_kb":35124,"sunrec_start_kb":35000,"timed_out":false,"total":536870912,"trial":1}
+{"event":"v3_done","evmod":"live=0 attached=12 detached=12 completed=12 aborted=0 err=0 runs=229974 kicks=345488 queued=229974 requeue=0 bytes_v2t=3758096384 bytes_t2v=0 bytes_t2t=0 stall_dst=192 stall_src=344464 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"v2t-long"}
+{"dir":"v2t","event":"v3_begin","evmod":"live=0 attached=12 detached=12 completed=12 aborted=0 err=0 runs=229974 kicks=345488 queued=229974 requeue=0 bytes_v2t=3758096384 bytes_t2v=0 bytes_t2t=0 stall_dst=192 stall_src=344464 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"v2t-slow","schedule":"r20","total":67108864,"trials":3,"uname":"7.0.0-29-generic\n"}
+{"avail_min_kb":15956316,"avail_start_kb":15995440,"consumed":67108864,"detach_ms":0,"dir":"v2t","event":"v3_trial","first_bad":-1,"label":"v2t-slow","module_moved":67108864,"ok":true,"peak_a":261494,"peak_b":4190912,"peak_c":509006,"peak_pipe":4882220,"schedule":"r20","secs":3.200978277,"sender_blocks_ms":[[26,72],[104,63],[173,63],[241,63],[310,63],[379,63],[448,63],[516,63],[585,63],[654,63],[723,63],[791,63],[860,63],[928,63],[997,63],[1066,63],[1135,63],[1203,63],[1272,63],[1341,63],[1410,63],[1478,63],[1547,63],[1616,63],[1685,63],[1753,63],[1821,64],[1890,61],[1955,65],[2024,65],[2093,65],[2162,65],[2230,64],[2299,64],[2368,64],[2437,65],[2506,64],[2574,64],[2643,64],[2712,64],[2780,65],[2849,65],[2918,65]],"sent":67108864,"sent_at_first_block":5341184,"series":[[7,0,2261310,360130,2785280,0,34996,15992304],[57,233404,3545086,350278,5107780,16,35124,15989692],[107,234676,4190912,227468,6679372,24,35140,15988348],[157,234676,2951643,418161,6679372,24,35140,15988348],[208,235842,3470599,225719,8119998,32,35140,15987004],[258,237008,3671956,416412,9560624,40,35140,15986780],[308,0,4003102,289506,10813440,40,35140,15985884],[359,238174,3208667,480199,11001250,48,35140,15985436],[409,239340,3470599,353293,12441876,56,35140,15985436],[459,240506,3928980,286962,13882502,64,35140,15985212],[510,240506,2951643,417080,13882502,64,35140,15985212],[560,241672,3208667,350749,15323128,72,35140,15984092],[610,242838,3671956,279510,16763754,80,35140,15984092],[661,244004,4190912,414536,18204380,88,35140,15982748],[711,244004,2951643,277761,18204380,88,35140,15982748],[761,245170,3470599,412787,19645006,96,35140,15981404],[812,246336,3671956,341548,21085632,104,35140,15980060],[862,247502,4190912,214642,22526258,112,35140,15979836],[912,247502,2951643,405335,22526258,112,35140,15979836],[962,248668,3470599,278429,23966884,120,35140,15979836],[1013,249834,3928980,469122,25407510,128,35140,15979612],[1063,0,3589944,342216,26247168,128,35140,15979164],[1113,251000,3208667,275885,26848136,136,35156,15978492],[1164,252166,3671956,406003,28288762,144,35156,15977148],[1214,253332,3928980,339672,29729388,152,35156,15976924],[1264,253332,2951643,404254,29729388,152,35156,15976924],[1314,254498,3208667,337923,31170014,160,35156,15975580],[1365,255664,3671956,266684,32610640,168,35156,15975580],[1415,256830,4190912,401710,34051266,176,35188,15974236],[1465,256830,2951643,330471,34051266,176,35188,15974236],[1516,257996,3470599,203565,35491892,184,35188,15972892],[1566,259162,3671956,394258,36932518,192,35188,15972892],[1616,260328,4190912,267352,38373144,200,35188,15971548],[1667,260328,3208667,458045,38373144,200,35188,15971548],[1717,261494,3470599,331139,39813770,208,35188,15971324],[1767,229892,3928980,456296,41254396,216,35188,15969980],[1818,0,3012946,329390,41517056,216,35188,15969980],[1868,231058,3208667,263059,42695022,224,35188,15969980],[1918,232224,3671956,393177,44135648,232,35188,15969980],[1968,233390,3928980,326846,45576274,240,35188,15969980],[2019,233390,2951643,456964,45576274,240,35188,15969980],[2069,234556,3208667,390633,47016900,248,35188,15968860],[2119,235722,3671956,319394,48457526,256,35188,15967516],[2170,236888,4190912,454420,49898152,264,35188,15966172],[2220,236888,2951643,383181,49898152,264,35188,15966172],[2270,238054,3470599,452671,51338778,272,35188,15964604],[2321,239220,3671956,381432,52779404,280,35196,15963260],[2371,240386,4190912,254526,54220030,288,35196,15961692],[2421,240386,2951643,445219,54220030,288,35196,15961692],[2472,241552,3470599,318313,55660656,296,35196,15960348],[2522,242718,3928980,509006,57101282,304,35196,15959004],[2572,32768,3713900,382100,58064896,304,35196,15958332],[2623,243884,3208667,315769,58541908,312,35196,15957660],[2673,245050,3671956,445887,59982534,320,35212,15956316],[2723,246216,3928980,314020,61423160,328,35212,15956316],[2774,246216,2951643,444138,61423160,328,35212,15956316],[2824,247382,3208667,377807,62863786,336,35212,15956316],[2874,248548,3671956,306568,64304412,344,35212,15956316],[2925,249714,4190912,441594,65745038,352,35212,15956316],[2975,249714,2951643,370355,65745038,352,35212,15956316],[3025,0,3393799,243449,67108864,352,35212,15956316],[3076,0,2154530,434142,67108864,352,35212,15956316],[3126,0,1232860,307236,67108864,352,35212,15956316],[3176,0,250615,491520,67108864,352,35212,15956316]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":39796,"slab_start_kb":39580,"stall_ends":[],"sunrec_after_close_kb":35084,"sunrec_end_kb":35212,"sunrec_max_kb":35212,"sunrec_start_kb":34996,"timed_out":false,"total":67108864,"trial":0}
+
+thread 'main' (150) panicked at src/peer.rs:276:13:
+assertion `left != right` failed: connect rejected
+  left: 3
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+{"dir":"v2t","event":"v3_begin","evmod":"live=0 attached=13 detached=13 completed=13 aborted=0 err=0 runs=233855 kicks=351456 queued=233855 requeue=0 bytes_v2t=3825205248 bytes_t2v=0 bytes_t2t=0 stall_dst=544 stall_src=350035 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"v2t-cyc","schedule":"s1000,f:300,s1000,f:300,s1000,f","total":134217728,"trials":5,"uname":"7.0.0-29-generic\n"}
+
+thread 'main' (155) panicked at src/peer.rs:266:45:
+RX timed out
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+{"dir":"t2v","event":"v3_begin","evmod":"live=0 attached=13 detached=13 completed=13 aborted=0 err=0 runs=233855 kicks=351456 queued=233855 requeue=0 bytes_v2t=3825205248 bytes_t2v=0 bytes_t2t=0 stall_dst=544 stall_src=350035 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"t2v-stall","schedule":"s3000,f","total":67108864,"trials":10,"uname":"7.0.0-29-generic\n"}
+
+thread 'main' (157) panicked at src/peer.rs:276:13:
+assertion `left != right` failed: connect rejected
+  left: 3
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+{"dir":"t2v","event":"v3_begin","evmod":"live=0 attached=13 detached=13 completed=13 aborted=0 err=0 runs=233855 kicks=351456 queued=233855 requeue=0 bytes_v2t=3825205248 bytes_t2v=0 bytes_t2t=0 stall_dst=544 stall_src=350035 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"t2v-long","schedule":"s10000,f","total":67108864,"trials":2,"uname":"7.0.0-29-generic\n"}
+{"blocks":[[10002,10001]],"event":"v3_writer","label":"t2v-long","max_send_ms":10001,"sent_at_longest_block_start":524288,"stall_ends":[[102759543017,0]],"trial":0,"writer_sent":67108864}
+{"avail_min_kb":15963752,"avail_start_kb":15963752,"consumed":67108864,"detach_ms":0,"dir":"t2v","event":"v3_trial","first_bad":-1,"label":"t2v-long","module_moved":67108864,"ok":true,"peak_a":128512,"peak_b":526336,"peak_c":65536,"peak_pipe":686080,"schedule":"s10000,f","secs":12.792730794,"sender_blocks_ms":[[10002,10001]],"sent":67108864,"sent_at_first_block":524288,"series":[[0,0,0,0,0,0,35212,15963752],[302,128512,383488,65536,65536,2,35084,15963812],[603,128512,383488,65536,65536,2,35084,15965820],[905,128512,383488,65536,65536,2,35084,15965820],[1207,128512,383488,65536,65536,2,35264,15965768],[1508,128512,383488,65536,65536,2,35264,15965768],[1810,128512,383488,65536,65536,2,35264,15965768],[2112,128512,383488,65536,65536,2,35264,15965768],[2414,128512,383488,65536,65536,2,35264,15966112],[2715,128512,383488,65536,65536,2,35264,15966112],[3017,128512,383488,65536,65536,2,35264,15966112],[3319,128512,383488,65536,65536,2,35264,15966112],[3620,128512,383488,65536,65536,2,35264,15966112],[3922,128512,383488,65536,65536,2,35264,15966112],[4224,128512,383488,65536,65536,2,35264,15966112],[4526,128512,383488,65536,65536,2,35264,15966112],[4827,128512,383488,65536,65536,2,35264,15966112],[5129,128512,383488,65536,65536,2,35264,15966112],[5431,128512,383488,65536,65536,2,35264,15966112],[5733,128512,383488,65536,65536,2,35264,15966112],[6035,128512,383488,65536,65536,2,35264,15966112],[6337,128512,383488,65536,65536,2,35264,15966112],[6638,128512,383488,65536,65536,2,35264,15966112],[6940,128512,383488,65536,65536,2,35264,15966112],[7242,128512,383488,65536,65536,2,35264,15966112],[7544,128512,383488,65536,65536,2,35264,15966112],[7846,128512,383488,65536,65536,2,35264,15966112],[8148,128512,383488,65536,65536,2,35264,15966112],[8450,128512,383488,65536,65536,2,35264,15966112],[8752,128512,383488,65536,65536,2,35264,15966112],[9054,128512,383488,65536,65536,2,35264,15966112],[9356,128512,383488,65536,65536,2,35264,15966112],[9657,128512,383488,65536,65536,2,35264,15966112],[9959,128512,383488,65536,65536,2,35264,15966112],[10261,11264,526336,64512,8849920,11190,35552,15975808],[10562,83968,526336,64512,15632896,24710,35584,15975808],[10863,3072,526336,64512,22382080,38047,35584,15975808],[11165,55296,526336,65536,29376000,51835,35584,15975808],[11466,90112,526336,64512,36197888,65353,35584,15975808],[11768,22528,526336,64512,43122176,78994,35584,15975808],[12069,26112,431104,65024,50070016,92775,35656,15975808],[12371,34816,431104,64512,57108992,106639,35656,15975808],[12672,17408,431104,64512,64364032,120931,35656,15975808]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":40260,"slab_start_kb":39796,"stall_ends":[],"sunrec_after_close_kb":35556,"sunrec_end_kb":35664,"sunrec_max_kb":35664,"sunrec_start_kb":35212,"timed_out":false,"total":67108864,"trial":0}
+{"blocks":[[10000,10000]],"event":"v3_writer","label":"t2v-long","max_send_ms":10000,"sent_at_longest_block_start":524288,"stall_ends":[[117179847080,0]],"trial":1,"writer_sent":67108864}
+{"avail_min_kb":15975808,"avail_start_kb":15975808,"consumed":67108864,"detach_ms":0,"dir":"t2v","event":"v3_trial","first_bad":-1,"label":"t2v-long","module_moved":67108864,"ok":true,"peak_a":128512,"peak_b":526336,"peak_c":65536,"peak_pipe":679936,"schedule":"s10000,f","secs":12.532092677,"sender_blocks_ms":[[10000,10000]],"sent":67108864,"sent_at_first_block":524288,"series":[[0,0,0,0,0,0,35684,15975808],[301,128512,383488,65536,65536,2,35684,15975808],[604,128512,383488,65536,65536,2,35684,15975808],[906,128512,383488,65536,65536,2,35684,15975808],[1207,128512,383488,65536,65536,2,35684,15975808],[1509,128512,383488,65536,65536,2,35684,15975808],[1811,128512,383488,65536,65536,2,35684,15975808],[2113,128512,383488,65536,65536,2,35684,15975808],[2415,128512,383488,65536,65536,2,35684,15975808],[2717,128512,383488,65536,65536,2,35684,15975808],[3018,128512,383488,65536,65536,2,35684,15975808],[3320,128512,383488,65536,65536,2,35684,15975808],[3622,128512,383488,65536,65536,2,35684,15975808],[3924,128512,383488,65536,65536,2,35684,15975808],[4226,128512,383488,65536,65536,2,35684,15975808],[4528,128512,383488,65536,65536,2,35684,15975808],[4830,128512,383488,65536,65536,2,35684,15975808],[5131,128512,383488,65536,65536,2,35684,15975808],[5433,128512,383488,65536,65536,2,35684,15975808],[5735,128512,383488,65536,65536,2,35684,15975808],[6037,128512,383488,65536,65536,2,35684,15975808],[6339,128512,383488,65536,65536,2,35684,15975808],[6641,128512,383488,65536,65536,2,35684,15975808],[6943,128512,383488,65536,65536,2,35684,15975808],[7244,128512,383488,65536,65536,2,35684,15975808],[7546,128512,383488,65536,65536,2,35684,15975808],[7848,128512,383488,65536,65536,2,35684,15975808],[8150,128512,383488,65536,65536,2,35684,15975808],[8452,128512,383488,65536,65536,2,35684,15975808],[8754,128512,383488,65536,65536,2,35684,15975808],[9056,128512,383488,65536,65536,2,35684,15975808],[9357,128512,383488,65536,65536,2,35684,15975808],[9659,128512,383488,65536,65536,2,35684,15975808],[9961,128512,383488,65536,65536,2,35684,15975808],[10263,78848,526336,64512,8971776,11279,35764,15975808],[10564,83456,431104,65024,15729152,24661,35764,15975808],[10865,14336,431104,64512,22656512,38297,35764,15975808],[11166,66560,526336,64512,29744640,52101,35764,15975808],[11468,83968,431104,64512,36870656,66099,35764,15975808],[11769,29696,431104,64512,43971072,79924,35780,15975808],[12070,55296,526336,64512,51849728,94976,35780,15975808],[12371,16384,431104,65536,62268928,115435,35780,15975808]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":40376,"slab_start_kb":40280,"stall_ends":[],"sunrec_after_close_kb":35652,"sunrec_end_kb":35780,"sunrec_max_kb":35780,"sunrec_start_kb":35684,"timed_out":false,"total":67108864,"trial":1}
+{"event":"v3_done","evmod":"live=0 attached=15 detached=15 completed=15 aborted=0 err=0 runs=485346 kicks=732275 queued=485346 requeue=0 bytes_v2t=3825205248 bytes_t2v=134217728 bytes_t2t=0 stall_dst=251782 stall_src=350299 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"t2v-long"}
+{"dir":"t2v","event":"v3_begin","evmod":"live=0 attached=15 detached=15 completed=15 aborted=0 err=0 runs=485346 kicks=732275 queued=485346 requeue=0 bytes_v2t=3825205248 bytes_t2v=134217728 bytes_t2t=0 stall_dst=251782 stall_src=350299 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"t2v-cyc","schedule":"s1000,f:300,s1000,f:300,s1000,f","total":67108864,"trials":5,"uname":"7.0.0-29-generic\n"}
+{"blocks":[[1001,1001],[2311,1010],[3610,1009]],"event":"v3_writer","label":"t2v-cyc","max_send_ms":1010,"sent_at_longest_block_start":10682368,"stall_ends":[[122322835492,0],[123624926038,10049024],[124925146748,16936448]],"trial":0,"writer_sent":67108864}
+{"avail_min_kb":15975328,"avail_start_kb":15975664,"consumed":67108864,"detach_ms":0,"dir":"t2v","event":"v3_trial","first_bad":-1,"label":"t2v-cyc","module_moved":67108864,"ok":true,"peak_a":128512,"peak_b":526336,"peak_c":65536,"peak_pipe":679936,"schedule":"s1000,f:300,s1000,f:300,s1000,f","secs":5.713728973,"sender_blocks_ms":[[1001,1001],[2311,1010],[3610,1009]],"sent":67108864,"sent_at_first_block":10682368,"series":[[7,128512,383488,65536,65536,2,35652,15975412],[108,128512,383488,65536,65536,2,35652,15975660],[208,128512,383488,65536,65536,2,35652,15975660],[309,128512,383488,65536,65536,2,35652,15975660],[410,128512,383488,65536,65536,2,35652,15975660],[510,128512,383488,65536,65536,2,35652,15975660],[611,128512,383488,65536,65536,2,35780,15975564],[712,128512,383488,65536,65536,2,35780,15975564],[812,128512,383488,65536,65536,2,35780,15975564],[913,128512,383488,65536,65536,2,35780,15975564],[1013,5120,431104,59392,1717760,445,35748,15975568],[1114,5120,526336,64512,5618176,4927,35732,15975568],[1214,81920,431104,64512,8112640,9724,35732,15975568],[1314,78848,526336,65536,10114560,13716,35732,15975568],[1415,78848,526336,65536,10114560,13716,35732,15975568],[1515,78848,526336,65536,10114560,13716,35732,15975568],[1615,78848,526336,65536,10114560,13716,35732,15975568],[1716,78848,526336,65536,10114560,13716,35732,15975568],[1816,78848,526336,65536,10114560,13716,35732,15975568],[1917,78848,526336,65536,10114560,13716,35732,15975568],[2017,78848,526336,65536,10114560,13716,35732,15975568],[2118,78848,526336,65536,10114560,13716,35732,15975568],[2219,78848,526336,65536,10114560,13716,35732,15975568],[2319,91136,501248,64512,10484224,14437,35780,15975568],[2420,32768,526336,65536,12828160,19032,35780,15975568],[2520,64512,431104,64512,15177216,23646,35780,15975568],[2621,48128,526336,65536,17001984,27277,35780,15975568],[2721,48128,526336,65536,17001984,27277,35780,15975568],[2822,48128,526336,65536,17001984,27277,35780,15975568],[2923,48128,526336,65536,17001984,27277,35780,15975568],[3023,48128,526336,65536,17001984,27277,35780,15975568],[3124,48128,526336,65536,17001984,27277,35780,15975568],[3225,48128,526336,65536,17001984,27277,35780,15975568],[3325,48128,526336,65536,17001984,27277,35780,15975568],[3426,48128,526336,65536,17001984,27277,35780,15975568],[3526,48128,526336,65536,17001984,27277,35780,15975568],[3627,24576,431104,64512,17502720,28278,35780,15975568],[3728,20480,526336,64512,19887616,32916,35780,15975568],[3828,52224,431104,64512,22236672,37518,35780,15975568],[3928,70656,431104,65536,24502784,42036,35780,15975568],[4029,76800,526336,64512,26878464,46663,35780,15975568],[4129,13312,526336,64512,29227520,51330,35780,15975568],[4230,39936,526336,64512,31676928,56138,35780,15975568],[4330,56320,526336,64512,34136576,60935,35780,15975568],[4431,31744,526336,64512,36637184,65834,35780,15975568],[4531,70656,431104,64512,39170560,70883,35780,15975568],[4632,5120,431104,65536,41521664,75506,35780,15975568],[4732,61440,431104,64512,43940352,80324,35780,15975360],[4833,78848,431104,64512,46398976,85228,35780,15975360],[4933,11264,526336,64512,48656896,89728,35780,15975360],[5034,46080,526336,64512,50907648,94213,35780,15975360],[5134,87040,431104,64512,53247488,98797,35780,15975360],[5235,89088,526336,64512,55626240,103535,35780,15975360],[5335,66560,431104,64512,58029568,108267,35780,15975360],[5435,92160,431104,65536,60289536,112769,35780,15975360],[5536,77824,431104,64512,62589440,117306,35796,15975328],[5636,20480,526336,64512,65408512,122926,35796,15975328]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":40392,"slab_start_kb":40248,"stall_ends":[],"sunrec_after_close_kb":35668,"sunrec_end_kb":35796,"sunrec_max_kb":35796,"sunrec_start_kb":35652,"timed_out":false,"total":67108864,"trial":0}
+{"blocks":[[1000,1000],[2306,1009],[3608,1015]],"event":"v3_writer","label":"t2v-cyc","max_send_ms":1015,"sent_at_longest_block_start":17170432,"stall_ends":[[129635911415,0],[130936528390,9902592],[132238043382,16685568]],"trial":1,"writer_sent":67108864}
+{"avail_min_kb":15975088,"avail_start_kb":15975392,"consumed":67108864,"detach_ms":0,"dir":"t2v","event":"v3_trial","first_bad":-1,"label":"t2v-cyc","module_moved":67108864,"ok":true,"peak_a":499550,"peak_b":540672,"peak_c":65536,"peak_pipe":1087979,"schedule":"s1000,f:300,s1000,f:300,s1000,f","secs":5.555369313,"sender_blocks_ms":[[1000,1000],[2306,1009],[3608,1015]],"sent":67108864,"sent_at_first_block":17170432,"series":[[0,0,0,0,0,0,35668,15975184],[100,128512,383488,65536,65536,2,35796,15975088],[201,128512,383488,65536,65536,2,35796,15975088],[302,128512,383488,65536,65536,2,35796,15975088],[402,128512,383488,65536,65536,2,35796,15975088],[503,128512,383488,65536,65536,2,35796,15975088],[604,128512,383488,65536,65536,2,35796,15975088],[704,128512,383488,65536,65536,2,35796,15975088],[805,128512,383488,65536,65536,2,35796,15975088],[905,128512,383488,65536,65536,2,35796,15975088],[1006,34816,526336,60416,1211904,221,35836,15975088],[1107,51200,526336,65536,5381632,4546,35836,15975088],[1207,74752,526336,64512,7833088,9268,35836,15975088],[1307,34816,526336,65536,9968128,13507,35836,15975088],[1408,34816,526336,65536,9968128,13507,35836,15975088],[1508,34816,526336,65536,9968128,13507,35836,15975088],[1609,34816,526336,65536,9968128,13507,35836,15975088],[1709,34816,526336,65536,9968128,13507,35836,15975088],[1809,34816,526336,65536,9968128,13507,35836,15975088],[1910,34816,526336,65536,9968128,13507,35836,15975088],[2010,34816,526336,65536,9968128,13507,35836,15975088],[2111,34816,526336,65536,9968128,13507,35836,15975088],[2211,34816,526336,65536,9968128,13507,35836,15975088],[2311,86016,431104,64512,10203648,13971,35804,15975088],[2412,48128,431104,64512,12527104,18522,35804,15975088],[2512,84992,431104,64512,14775808,23001,35804,15975088],[2613,13312,431104,65536,16751104,26932,35804,15975088],[2713,13312,431104,65536,16751104,26932,35804,15975088],[2813,13312,431104,65536,16751104,26932,35804,15975088],[2914,13312,431104,65536,16751104,26932,35804,15975088],[3014,13312,431104,65536,16751104,26932,35804,15975088],[3115,13312,431104,65536,16751104,26932,35804,15975088],[3215,13312,431104,65536,16751104,26932,35804,15975088],[3315,13312,431104,65536,16751104,26932,35804,15975088],[3416,13312,431104,65536,16751104,26932,35804,15975088],[3517,13312,431104,65536,16751104,26932,35804,15975088],[3617,30720,540672,64512,17005056,27439,35804,15975088],[3718,359176,523864,64512,18979328,31402,35804,15977776],[3818,349288,523864,64512,21085696,35656,35804,15977776],[3918,334280,523864,64512,23195136,39920,35804,15977776],[4018,325416,523864,64512,25299456,44180,35804,15977104],[4119,453190,523917,64512,27398656,48464,35804,15977104],[4219,478118,523917,65536,29469184,52669,35804,15977104],[4319,499550,523917,64512,32067072,57342,35804,15977104],[4420,450750,523917,64512,34211328,61669,35804,15977104],[4520,458270,523917,64512,36299264,65893,35804,15977104],[4620,476030,523917,65536,38376960,70093,35804,15977104],[4721,271582,523917,65536,40676864,74411,35804,15977104],[4821,389870,523917,64512,43702784,79621,35804,15977104],[4921,362538,523917,64512,47135232,86369,35804,15977104],[5022,477754,523917,64512,50163200,92487,35804,15977104],[5122,470090,523917,64512,53314048,98856,35804,15977104],[5222,262746,523917,65536,56664576,105629,35804,15976976],[5323,492650,523917,64512,59576832,111513,35804,15976976],[5423,337530,523917,64512,62876160,118182,35804,15976976],[5523,265354,523917,64512,66090496,124676,35804,15976976]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":40432,"slab_start_kb":40264,"stall_ends":[],"sunrec_after_close_kb":35676,"sunrec_end_kb":35804,"sunrec_max_kb":35836,"sunrec_start_kb":35668,"timed_out":false,"total":67108864,"trial":1}
+{"blocks":[[1002,1001],[2305,1008],[3602,1008]],"event":"v3_writer","label":"t2v-cyc","max_send_ms":1008,"sent_at_longest_block_start":10813440,"stall_ends":[[136786151483,0],[138086495369,10248704],[139386913186,17167872]],"trial":2,"writer_sent":67108864}
+{"avail_min_kb":15976976,"avail_start_kb":15977040,"consumed":67108864,"detach_ms":0,"dir":"t2v","event":"v3_trial","first_bad":-1,"label":"t2v-cyc","module_moved":67108864,"ok":true,"peak_a":190464,"peak_b":526336,"peak_c":65536,"peak_pipe":778240,"schedule":"s1000,f:300,s1000,f:300,s1000,f","secs":5.699391206,"sender_blocks_ms":[[1002,1001],[2305,1008],[3602,1008]],"sent":67108864,"sent_at_first_block":10813440,"series":[[0,0,0,0,0,0,35676,15977040],[100,128512,383488,65536,65536,2,35868,15976976],[201,128512,383488,65536,65536,2,35868,15976976],[302,128512,383488,65536,65536,2,35868,15976976],[402,128512,383488,65536,65536,2,35868,15976976],[503,128512,383488,65536,65536,2,35868,15976976],[604,128512,383488,65536,65536,2,35868,15976976],[704,128512,383488,65536,65536,2,35868,15976976],[805,128512,383488,65536,65536,2,35868,15976976],[906,128512,383488,65536,65536,2,35868,15976976],[1006,89088,335872,59392,1063424,170,35868,15976976],[1107,69632,526336,64512,5457408,4637,35868,15976976],[1207,15360,431104,64512,7893504,9265,35868,15976976],[1307,69632,431104,65536,10314240,14064,35868,15976976],[1408,69632,431104,65536,10314240,14064,35868,15976976],[1509,69632,431104,65536,10314240,14064,35868,15976976],[1609,69632,431104,65536,10314240,14064,35868,15976976],[1710,69632,431104,65536,10314240,14064,35868,15976976],[1811,69632,431104,65536,10314240,14064,35868,15976976],[1911,69632,431104,65536,10314240,14064,35868,15976976],[2012,69632,431104,65536,10314240,14064,35868,15976976],[2113,69632,431104,65536,10314240,14064,35868,15976976],[2213,69632,431104,65536,10314240,14064,35868,15976976],[2314,95232,335872,64512,10575360,14587,35868,15976976],[2414,41984,431104,64512,12818944,19047,35868,15976976],[2515,88064,526336,64512,15152640,23597,35868,15976976],[2615,7168,431104,65536,17233408,27619,35868,15976976],[2716,7168,431104,65536,17233408,27619,35868,15976976],[2816,7168,431104,65536,17233408,27619,35868,15976976],[2917,7168,431104,65536,17233408,27619,35868,15976976],[3018,7168,431104,65536,17233408,27619,35868,15976976],[3118,7168,431104,65536,17233408,27619,35868,15976976],[3219,7168,431104,65536,17233408,27619,35868,15976976],[3320,7168,431104,65536,17233408,27619,35868,15976976],[3420,7168,431104,65536,17233408,27619,35868,15976976],[3521,7168,431104,65536,17233408,27619,35868,15976976],[3622,74752,526336,64512,17643008,28434,35868,15976976],[3722,35840,526336,64512,19966464,32918,35868,15976976],[3822,110592,526336,64512,22368768,37475,35868,15976976],[3923,19456,526336,64512,24744448,42191,35868,15976976],[4023,66560,526336,64512,26983936,46640,35868,15976976],[4124,126976,526336,64512,29399552,51154,35868,15976976],[4224,174080,526336,64512,32020992,55933,35868,15976976],[4325,187392,526336,64512,34480640,60600,35868,15976976],[4425,23552,526336,65536,36931072,65238,35868,15976976],[4525,166912,526336,64512,39263744,69877,35868,15976976],[4626,126976,526336,64512,41779712,74601,35868,15976976],[4726,151552,526336,65536,44232192,79232,35868,15976976],[4827,171008,526336,65536,46687744,83930,35868,15976976],[4927,56320,526336,64512,49088000,88573,35868,15976976],[5028,72704,526336,64512,51356160,93078,35868,15976976],[5128,91136,526336,65536,53813760,97968,35868,15976976],[5228,95232,526336,65536,56287744,102675,35868,15976976],[5329,179200,526336,64512,58677760,107232,35868,15976976],[5429,43008,526336,64512,60910080,111655,35868,15976976],[5529,63488,526336,65536,63175168,116151,35868,15976976],[5630,106496,526336,65536,65608192,120909,35868,15976976]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":40464,"slab_start_kb":40272,"stall_ends":[],"sunrec_after_close_kb":35740,"sunrec_end_kb":35868,"sunrec_max_kb":35868,"sunrec_start_kb":35676,"timed_out":false,"total":67108864,"trial":2}
+{"blocks":[[1002,1002],[2303,1007],[3613,1012]],"event":"v3_writer","label":"t2v-cyc","max_send_ms":1012,"sent_at_longest_block_start":17956864,"stall_ends":[[144023701417,0],[145324106975,10379776],[146625273475,17292800]],"trial":3,"writer_sent":67108864}
+{"avail_min_kb":15976976,"avail_start_kb":15977040,"consumed":67108864,"detach_ms":0,"dir":"t2v","event":"v3_trial","first_bad":-1,"label":"t2v-cyc","module_moved":67108864,"ok":true,"peak_a":128512,"peak_b":526336,"peak_c":65536,"peak_pipe":679936,"schedule":"s1000,f:300,s1000,f:300,s1000,f","secs":5.304717235,"sender_blocks_ms":[[1002,1002],[2303,1007],[3613,1012]],"sent":67108864,"sent_at_first_block":17956864,"series":[[0,0,0,0,0,0,35740,15977040],[100,128512,383488,65536,65536,2,35772,15977040],[201,128512,383488,65536,65536,2,35900,15976976],[301,128512,383488,65536,65536,2,35900,15976976],[402,128512,383488,65536,65536,2,35900,15976976],[503,128512,383488,65536,65536,2,35900,15976976],[603,128512,383488,65536,65536,2,35900,15976976],[704,128512,383488,65536,65536,2,35900,15976976],[805,128512,383488,65536,65536,2,35900,15976976],[905,128512,383488,65536,65536,2,35900,15976976],[1006,76800,456192,65536,980480,142,35932,15976976],[1106,75776,431104,65536,5452288,4631,35932,15976976],[1207,88064,431104,64512,8106496,9787,35932,15976976],[1307,33792,431104,65536,10445312,14372,35932,15976976],[1408,33792,431104,65536,10445312,14372,35932,15976976],[1508,33792,431104,65536,10445312,14372,35932,15976976],[1609,33792,431104,65536,10445312,14372,35932,15976976],[1710,33792,431104,65536,10445312,14372,35932,15976976],[1810,33792,431104,65536,10445312,14372,35932,15976976],[1911,33792,431104,65536,10445312,14372,35932,15976976],[2011,33792,431104,65536,10445312,14372,35932,15976976],[2112,33792,431104,65536,10445312,14372,35932,15976976],[2213,33792,431104,65536,10445312,14372,35932,15976976],[2313,61440,526336,64512,10704384,14862,35932,15976976],[2414,41984,526336,64512,13009408,19420,35932,15976976],[2514,79872,431104,65536,15352320,24029,35932,15976976],[2615,72704,526336,65536,17358336,28021,35932,15976976],[2715,72704,526336,65536,17358336,28021,35932,15976976],[2816,72704,526336,65536,17358336,28021,35932,15976976],[2917,72704,526336,65536,17358336,28021,35932,15976976],[3017,72704,526336,65536,17358336,28021,35932,15976976],[3118,72704,526336,65536,17358336,28021,35932,15976976],[3219,72704,526336,65536,17358336,28021,35932,15976976],[3319,72704,526336,65536,17358336,28021,35932,15976976],[3420,72704,526336,65536,17358336,28021,35932,15976976],[3521,72704,526336,65536,17358336,28021,35932,15976976],[3621,56320,431104,65536,17661440,28628,35932,15976976],[3722,26624,526336,64512,19691008,32643,35932,15976976],[3822,55296,526336,64512,22138368,37426,35932,15976976],[3923,78848,526336,64512,24399360,41934,35932,15976976],[4023,31744,431104,64512,26828288,46641,35932,15976976],[4124,88064,431104,64512,29057536,51085,35932,15976976],[4224,86016,431104,64512,31535616,56026,35932,15976976],[4325,8192,431104,64512,34280960,61440,35932,15976976],[4425,63488,431104,64512,37843456,68547,35932,15976976],[4526,26624,526336,65536,41403904,75647,35932,15976976],[4626,89088,526336,64512,44960256,82741,35932,15976976],[4726,60416,431104,65536,48512512,89827,35932,15976976],[4827,25600,526336,64512,51879424,96537,35940,15976976],[4927,22528,526336,64512,54930944,102609,35940,15976976],[5027,17408,526336,65536,57983488,108642,35940,15976976],[5128,74752,431104,64512,61068800,114770,35940,15976976],[5228,95232,431104,64512,64476672,121565,35940,15976976]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":40536,"slab_start_kb":40336,"stall_ends":[],"sunrec_after_close_kb":35812,"sunrec_end_kb":35940,"sunrec_max_kb":35940,"sunrec_start_kb":35740,"timed_out":false,"total":67108864,"trial":3}
+{"blocks":[[1002,1002],[2312,1011],[3609,1008]],"event":"v3_writer","label":"t2v-cyc","max_send_ms":1011,"sent_at_longest_block_start":10289152,"stall_ends":[[150859429849,0],[152160097750,9676288],[153461563479,18665984]],"trial":4,"writer_sent":67108864}
+{"avail_min_kb":15976976,"avail_start_kb":15977040,"consumed":67108864,"detach_ms":0,"dir":"t2v","event":"v3_trial","first_bad":-1,"label":"t2v-cyc","module_moved":67108864,"ok":true,"peak_a":128512,"peak_b":526336,"peak_c":65536,"peak_pipe":685056,"schedule":"s1000,f:300,s1000,f:300,s1000,f","secs":5.217978878,"sender_blocks_ms":[[1002,1002],[2312,1011],[3609,1008]],"sent":67108864,"sent_at_first_block":10289152,"series":[[0,0,32768,0,0,0,35812,15977040],[100,128512,383488,65536,65536,2,35812,15977040],[201,128512,383488,65536,65536,2,35940,15976976],[302,128512,383488,65536,65536,2,35940,15976976],[402,128512,383488,65536,65536,2,35940,15976976],[503,128512,383488,65536,65536,2,35940,15976976],[604,128512,383488,65536,65536,2,35940,15976976],[704,128512,383488,65536,65536,2,35940,15976976],[805,128512,383488,65536,65536,2,35940,15976976],[906,128512,383488,65536,65536,2,35940,15976976],[1006,89088,431104,59392,872960,112,36036,15976976],[1107,63488,431104,65536,5084672,4041,35988,15976976],[1207,39936,431104,64512,7582208,8675,35988,15976976],[1308,70656,526336,65536,9741824,12981,35988,15976976],[1408,70656,526336,65536,9741824,12981,35988,15976976],[1509,70656,526336,65536,9741824,12981,35988,15976976],[1609,70656,526336,65536,9741824,12981,35988,15976976],[1710,70656,526336,65536,9741824,12981,35988,15976976],[1811,70656,526336,65536,9741824,12981,35988,15976976],[1911,70656,526336,65536,9741824,12981,35988,15976976],[2012,70656,526336,65536,9741824,12981,35940,15976976],[2113,70656,526336,65536,9741824,12981,35940,15976976],[2213,70656,526336,65536,9741824,12981,35940,15976976],[2314,69632,526336,64512,9934336,13366,35940,15976976],[2414,8192,526336,64512,12282368,18050,35940,15976976],[2515,61440,526336,64512,15656448,24781,35940,15976976],[2615,32768,526336,65536,18731520,30910,35940,15976976],[2716,32768,526336,65536,18731520,30910,35940,15976976],[2816,32768,526336,65536,18731520,30910,35940,15976976],[2917,32768,526336,65536,18731520,30910,35940,15976976],[3018,32768,526336,65536,18731520,30910,35940,15976976],[3118,32768,526336,65536,18731520,30910,35940,15976976],[3219,32768,526336,65536,18731520,30910,35940,15976976],[3319,32768,526336,65536,18731520,30910,35940,15976976],[3420,32768,526336,65536,18731520,30910,35940,15976976],[3521,32768,526336,65536,18731520,30910,35940,15976976],[3621,23552,526336,65536,19122688,31675,35940,15976976],[3722,30720,526336,64512,21973504,37191,35940,15976976],[3822,15360,431104,64512,25511424,44246,35940,15976976],[3923,3072,526336,65536,29048320,51296,35940,15976976],[4023,80896,526336,64512,32588288,58358,35940,15976976],[4124,95232,335872,65536,36001280,65164,35940,15976976],[4224,93184,526336,65536,39431680,72005,35940,15976976],[4324,69632,431104,65024,42598400,78322,35940,15976976],[4425,56320,431104,64512,46040576,85183,35940,15976976],[4525,80384,526336,65024,49349120,91786,35940,15976976],[4626,82944,526336,64512,52583936,98234,35940,15976976],[4726,24576,526336,64512,55881216,104803,35940,15976976],[4827,13312,431104,65536,58274304,109576,35940,15976976],[4927,62464,431104,64512,60509696,114034,35940,15976976],[5027,22528,526336,64512,62739968,118472,35940,15976976],[5128,95232,431104,64512,65048064,123005,35940,15976976]],"series_cols":"t_ms,a,b,c,moved,stall_dst,sunrec_kb,avail_kb","slab_max_kb":40632,"slab_start_kb":40408,"stall_ends":[],"sunrec_after_close_kb":35812,"sunrec_end_kb":35940,"sunrec_max_kb":36036,"sunrec_start_kb":35812,"timed_out":false,"total":67108864,"trial":4}
+{"event":"v3_done","evmod":"live=0 attached=20 detached=20 completed=20 aborted=0 err=0 runs=1116576 kicks=1690120 queued=1116576 requeue=0 bytes_v2t=3825205248 bytes_t2v=469762048 bytes_t2t=0 stall_dst=882541 stall_src=350968 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536\n","label":"t2v-cyc"}
+BENCH_HARNESS_EXIT=0
+evmod 28672 0 - Live 0xffffffffc0617000 (OE)
+vhost_vsock 28672 2 - Live 0xffffffffc0615000
+vmw_vsock_virtio_transport_common 57344 1 vhost_vsock, Live 0xffffffffc0611000
+vhost 69632 1 vhost_vsock, Live 0xffffffffc0609000
+vhost_iotlb 16384 1 vhost, Live 0xffffffffc0608000
+vsock 73728 4 vhost_vsock,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+[  156.927501] evmod: unloaded attached=20 completed=20 detached=20 aborted=0
+BENCH_MODULE_UNLOAD_EXIT=0
+BENCH_LIVE_MODULES_AFTER_UNLOAD
+vhost_vsock 28672 2 - Live 0xffffffffc0615000
+vmw_vsock_virtio_transport_common 57344 1 vhost_vsock, Live 0xffffffffc0611000
+vhost 69632 1 vhost_vsock, Live 0xffffffffc0609000
+vhost_iotlb 16384 1 vhost, Live 0xffffffffc0608000
+vsock 73728 4 vhost_vsock,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+[    1.103151] IPI shorthand broadcast: enabled
+[    1.107708] sched_clock: Marking stable (869002754, 238433440)->(1174937797, -67501603)
+[    1.110643] registered taskstats version 1
+[    1.112697] Loading compiled-in X.509 certificates
+[    1.114642] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    1.117695] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    1.120908] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    1.123950] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    1.127380] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    1.130009] blacklist: Loading compiled-in revocation X.509 certificates
+[    1.131796] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    1.134393] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    1.137166] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    1.140002] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    1.142741] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    1.145540] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    1.148361] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    1.151179] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    1.162844] Demotion targets for Node 0: null
+[    1.164252] Key type .fscrypt registered
+[    1.165312] Key type fscrypt-provisioning registered
+[    1.166759] Key type big_key registered
+[    1.169153] Key type encrypted registered
+[    1.170240] AppArmor: AppArmor sha256 policy hashing enabled
+[    1.171732] ima: No TPM chip found, activating TPM-bypass!
+[    1.173198] Loading compiled-in module X.509 certificates
+[    1.175100] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    1.177677] ima: Allocated hash algorithm: sha256
+[    1.178939] ima: No architecture policies found
+[    1.180189] evm: Initialising EVM extended attributes:
+[    1.181542] evm: security.selinux
+[    1.182453] evm: security.SMACK64
+[    1.183335] evm: security.SMACK64EXEC
+[    1.184326] evm: security.SMACK64TRANSMUTE
+[    1.185423] evm: security.SMACK64MMAP
+[    1.186415] evm: security.apparmor
+[    1.187342] evm: security.ima
+[    1.188156] evm: security.capability
+[    1.189124] evm: HMAC attrs: 0x1
+[    1.190361] PM:   Magic number: 14:437:85
+[    1.191828] RAS: Correctable Errors collector initialized.
+[    1.193677] clk: Disabling unused clocks
+[    1.194729] PM: genpd: Disabling unused power domains
+[    1.198002] Freeing unused decrypted memory: 2028K
+[    1.199626] Freeing unused kernel image (initmem) memory: 5292K
+[    1.200737] Write protecting the kernel read-only data: 43008k
+[    1.202485] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    1.204081] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    1.271473] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    1.272686] Run /init as init process
+[    1.273378]   with arguments:
+[    1.273381]     /init
+[    1.273383]   with environment:
+[    1.273385]     HOME=/
+[    1.273387]     TERM=linux
+[    1.288839] NET: Registered PF_VSOCK protocol family
+[    2.149989] evmod: loading out-of-tree module taints kernel.
+[    2.152178] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    2.157427] evmod: loaded (per-cpu workqueue)
+[  156.927501] evmod: unloaded attached=20 completed=20 detached=20 aborted=0
+BENCH_COMPLETE_EXIT=0
+[  157.044096] ACPI: PM: Preparing to enter system sleep state S5
+[  157.046571] reboot: Power down

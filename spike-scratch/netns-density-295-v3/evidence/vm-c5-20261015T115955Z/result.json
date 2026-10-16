@@ -1,0 +1,86 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "events": [
+   {
+    "ev": "valve_closed",
+    "label": "c5",
+    "t_ms": 24,
+    "fwd": 11665408,
+    "sent": 2643144,
+    "queued": 9022264,
+    "src_inq": 0
+   },
+   {
+    "ev": "valve_kick",
+    "label": "c5",
+    "discarded": 262144
+   },
+   {
+    "ev": "valve_reopened",
+    "label": "c5",
+    "t_ms": 3026,
+    "fwd": 11691532,
+    "sent": 2693256,
+    "queued": 8998276,
+    "src_inq": 262144,
+    "insert_ok": true
+   },
+   {
+    "ev": "trial_end",
+    "label": "c5",
+    "kind": "vsock",
+    "src": "vsock",
+    "trial": 0,
+    "outcome": "abort_cap",
+    "secs": 4.65,
+    "samples": 2381,
+    "fwd": 76871636,
+    "sent": 2693256,
+    "queued_end": 74178380,
+    "peak_queued": 74024916,
+    "peak_queued_at_ms": 3148,
+    "verdicts": 21113,
+    "drops": 0,
+    "send_calls": 741,
+    "send_fail": 1571,
+    "app_sent": 0,
+    "app_state": 0,
+    "avail_start_kb": 820064,
+    "avail_end_kb": 732956,
+    "avail_after_close_kb": 818888,
+    "sunreclaim_start_kb": 20196,
+    "sunreclaim_end_kb": 106528,
+    "sunreclaim_after_close_kb": 20860
+   }
+  ],
+  "send": [
+   {
+    "ev": "send_prog",
+    "label": "c5",
+    "trial": 0,
+    "t_ms": 3024,
+    "sent": 11993088,
+    "max_send_ms": 3000,
+    "slow_sends": 1
+   },
+   {
+    "ev": "send_end",
+    "label": "c5",
+    "trial": 0,
+    "outcome": "err_32",
+    "sent": 77485944,
+    "secs": 3.149,
+    "mbps": 23.5,
+    "max_send_ms": 3000,
+    "slow_sends": 1,
+    "sends": 1184,
+    "peer_closed_read": 0
+   }
+  ],
+  "bad_json_lines": 0
+ }
+}

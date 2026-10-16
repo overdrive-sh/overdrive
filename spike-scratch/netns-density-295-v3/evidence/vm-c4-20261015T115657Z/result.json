@@ -1,0 +1,98 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "host_trial_end": [
+   {
+    "ev": "trial_end",
+    "label": "c4host",
+    "kind": "vsock",
+    "src": "vsock",
+    "trial": 0,
+    "outcome": "abort_cap",
+    "secs": 1.76,
+    "samples": 1,
+    "fwd": 402653184,
+    "sent": 2749952,
+    "queued_end": 399903232,
+    "peak_queued": 399903232,
+    "peak_queued_at_ms": 250,
+    "verdicts": 6144,
+    "drops": 0,
+    "send_calls": 44,
+    "send_fail": 118,
+    "app_sent": 0,
+    "app_state": 0,
+    "avail_start_kb": 61104412,
+    "avail_end_kb": 60704676,
+    "avail_after_close_kb": 61107504,
+    "sunreclaim_start_kb": 730544,
+    "sunreclaim_end_kb": 733264,
+    "sunreclaim_after_close_kb": 730768
+   }
+  ],
+  "guest_send_end": [
+   {
+    "ev": "send_end",
+    "label": "c4guest",
+    "trial": 0,
+    "outcome": "done",
+    "sent": 402653184,
+    "secs": 0.18,
+    "mbps": 2136.1,
+    "max_send_ms": 0,
+    "slow_sends": 0,
+    "sends": 6144,
+    "peer_closed_read": 0
+   }
+  ],
+  "n_samples": 1,
+  "peak_queued_MiB": 381.4,
+  "bad_json_lines": 0,
+  "host_mem_total_MiB": 63868.9,
+  "host_min_avail_MiB": 59281.9,
+  "last_sample": {
+   "ev": "sample",
+   "label": "c4host",
+   "trial": 0,
+   "t_ms": 250,
+   "fwd": 402653184,
+   "sent": 2749952,
+   "queued": 399903232,
+   "verdicts": 6144,
+   "drops": 0,
+   "send_calls": 44,
+   "send_fail": 115,
+   "last_errno": 11,
+   "src_inq": 0,
+   "tgt_outq": 2621440,
+   "peer_inq": 128512,
+   "app_sent": 0,
+   "app_state": 0,
+   "mem_total_kb": 65401772,
+   "mem_free_kb": 21871940,
+   "mem_avail_kb": 60704676,
+   "slab_kb": 3467812,
+   "sunreclaim_kb": 733264,
+   "sreclaim_kb": 2734548,
+   "tcp_mem_pages": 720,
+   "skbuff_head_active": 6731,
+   "slab_top_mib": [
+    [
+     "buffer_head",
+     956
+    ],
+    [
+     "ext4_inode_cache",
+     920
+    ],
+    [
+     "dentry",
+     403
+    ]
+   ]
+  }
+ }
+}

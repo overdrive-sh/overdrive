@@ -1,0 +1,180 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "scenarios": {
+  "rejoingate-A": {
+   "scenario": "rejoingate-A",
+   "dir": "A",
+   "wall_s": 1232.6,
+   "trials_planned": 20,
+   "trial_end": 20,
+   "send_end": 20,
+   "outcomes": {
+    "timeout": 20
+   },
+   "send_outcomes": {
+    "done": 20
+   },
+   "app_ok": "0/20",
+   "bytes_verified_total_MiB": 0.0,
+   "first_bad": [],
+   "hash_eq": "0/20",
+   "peak_queued_MiB": {
+    "min": 4.02,
+    "p50": 4.06,
+    "max": 4.43,
+    "n": 20
+   },
+   "queued_at_remove_MiB": {
+    "min": 4.02,
+    "p50": 4.06,
+    "max": 4.43,
+    "n": 20
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 4.1,
+    "p50": 4.6,
+    "max": 5.6,
+    "n": 20
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 1.9,
+    "p50": 3.2,
+    "max": 7.7,
+    "n": 20
+   },
+   "unreclaim_after_close_minus_start_MiB": {
+    "min": -0.1,
+    "p50": 0.1,
+    "max": 1.1,
+    "n": 20
+   },
+   "valve_closes": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 1,
+    "n": 20
+   },
+   "resumes": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 1,
+    "n": 20
+   },
+   "pump_MiB": {
+    "min": 0.25,
+    "p50": 0.28,
+    "max": 0.41,
+    "n": 20
+   },
+   "pump_ms": {
+    "min": 0,
+    "p50": 0.0,
+    "max": 0,
+    "n": 20
+   },
+   "rejoins": 20,
+   "rejoin_fail": 9,
+   "refused": 0,
+   "hard_drops": 0,
+   "passed": 0,
+   "rb_fail": 0,
+   "rs_zero_total(kretprobe read_skb==0)": 0,
+   "vr_zero_total(fexit sk_psock_verdict_recv==0)": 0,
+   "vr_ok_total": 365488,
+   "trials_with_vr_zero": 0,
+   "rs_ok_total": 365488,
+   "parked_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 20
+   },
+   "forwarded_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 20
+   },
+   "lost_bytes_per_trial": [
+    258412,
+    258412,
+    258412,
+    258412,
+    258412,
+    258412,
+    258412,
+    258412,
+    258412,
+    258412,
+    258412,
+    258412
+   ],
+   "queued_end_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 20
+   },
+   "src_inq_end": {
+    "min": 258412,
+    "p50": 258412.0,
+    "max": 258412,
+    "n": 20
+   },
+   "reader_MiBps": {
+    "min": 1.1,
+    "p50": 1.1,
+    "max": 1.1,
+    "n": 20
+   },
+   "owner_cpu_ms": {
+    "min": 696,
+    "p50": 788.5,
+    "max": 7500,
+    "n": 20
+   },
+   "sys_busy_ms": {
+    "min": 1700,
+    "p50": 2045.0,
+    "max": 5480,
+    "n": 20
+   },
+   "owner_trial_secs": {
+    "min": 60.0,
+    "p50": 60.0,
+    "max": 60.0,
+    "n": 20
+   },
+   "sender_MiBps": {
+    "min": 7.2,
+    "p50": 7.4,
+    "max": 7.6,
+    "n": 20
+   },
+   "sender_max_send_ms": {
+    "min": 1287,
+    "p50": 1389.5,
+    "max": 1420,
+    "n": 20
+   },
+   "sender_sent_at_longest_block_start_MiB": {
+    "min": 6.81,
+    "p50": 6.88,
+    "max": 7.25,
+    "n": 20
+   },
+   "resume_latency_ms(unblock-resume)": {
+    "min": 3.49,
+    "p50": 5.8,
+    "max": 7.32,
+    "n": 20
+   },
+   "final_state": {
+    "open": 20
+   },
+   "oom_lines": [],
+   "bad_json_lines": 0
+  }
+ },
+ "guest_boot": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\nMemTotal:         977368 kB\nMemAvailable:     830272 kB\n"
+}

@@ -1,0 +1,3 @@
+obj-m += vmw_vsock_virtio_transport_common.o
+vmw_vsock_virtio_transport_common-y := virtio_transport_common.o
+ccflags-$(P1) += -DP1_CREDIT_ON_FREE

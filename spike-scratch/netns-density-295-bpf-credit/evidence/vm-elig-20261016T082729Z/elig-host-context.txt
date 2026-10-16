@@ -1,0 +1,7 @@
+1020
+page_pool_alloc_netmems	NULL
+CONFIG_BPF_LSM=y
+CONFIG_HAVE_FUNCTION_ERROR_INJECTION=y
+CONFIG_BPF_KPROBE_OVERRIDE=y
+CONFIG_FUNCTION_ERROR_INJECTION=y
+lockdown,capability,landlock,yama,apparmor,ima,evm

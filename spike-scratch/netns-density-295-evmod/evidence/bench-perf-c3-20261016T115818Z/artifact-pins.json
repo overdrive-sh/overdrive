@@ -1,0 +1,12 @@
+{
+  "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst": "dcab15ab168919bfe43d49d3a9f5ba8d8b884acfe62e090d4684ea73eb43c680",
+  "/lib/modules/7.0.0-29-generic/kernel/drivers/vhost/vhost_iotlb.ko.zst": "eefbe86f4c53a97dd483b0fba6e6f7e5b5a4635b91836f76113e3e8dbc9babf0",
+  "/lib/modules/7.0.0-29-generic/kernel/drivers/vhost/vhost.ko.zst": "29c3feb0628be99e16eb7542e3021051e112707102cb0dd33cdaa4310bada070",
+  "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst": "478dc2790cab03b9c494133a8a20d96ca4c126b43ad226b69e2df57968e27306",
+  "/lib/modules/7.0.0-29-generic/kernel/drivers/vhost/vhost_vsock.ko.zst": "8b4cffb7c8d7e1d37e7ed38c33ed7949adcfeb143d8f4420c5b2a17be2884bcb",
+  "Image": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+  "aya-vsock-probe": "19b6b524cff8edee1640f39b31aa0c30361700dd6eda2d7cb6c3907fbb386609",
+  "shmproxy.ko": "9c044049ac5476e52759cf2a30471b9940c208a12e243cabe7bf462cf0626f27",
+  "evmod.ko": "f4228aa01c9d12cd2fe1a6b528f2703bc361150fba60e8bce2b24ca92dd993a1",
+  "tcp.o": "3936f2b67fa4108c21e42b78420f3648cb50d109795628bc02c56dc0189eda4b"
+}

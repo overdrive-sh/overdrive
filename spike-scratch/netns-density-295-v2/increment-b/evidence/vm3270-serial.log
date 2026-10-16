@@ -1,0 +1,10 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+enable
+filter
+virtio_transport_alloc_pkt
+virtio_transport_recv_pkt
+GUEST_LOCAL_CID 3270
+GUEST_TRACE_SETUP Ok(())
+GUEST_CMD_LOOP_END
+GUEST_AGENT_EXITED rc=0
+[  370.782698] reboot: Power down

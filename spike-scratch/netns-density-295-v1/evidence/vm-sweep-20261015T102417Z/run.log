@@ -1,0 +1,89 @@
+[10:24:17] === v27 vm stage sweep ['/tmp/v1-work/spec-pilot.json']
+[10:24:17] === preflight (fail closed)
+[10:24:17] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[10:24:17] $ modprobe vhost_vsock; modprobe vsock_loopback; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[10:24:17]     vsock_diag             12288  0
+[10:24:17]     vhost_vsock            28672  0
+[10:24:17]     vhost                  69632  1 vhost_vsock
+[10:24:17]     vhost_iotlb            16384  1 vhost
+[10:24:17]     vsock_loopback         12288  0
+[10:24:17]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[10:24:17]     vmw_vsock_vmci_transport    53248  0
+[10:24:17]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[10:24:17]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[10:24:17] === guest image
+[10:24:18] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "717f78dbac48", "drainprobe": "b53afa9d1947", "bpf_obj": "7dfb4344b9d6", "cloud_hypervisor": "eadddf1bbcdc"}
+[10:24:18] launch VM: /tmp/v1-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v1-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v1-work/out/vm-sweep-20261015T102417Z/serial.log --console off --vsock cid=3360,backend=vhost-kernel --log-file /tmp/v1-work/out/vm-sweep-20261015T102417Z/ch.log -v
+[10:24:19] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[10:24:19] $ for f in tcp_rmem tcp_wmem tcp_adv_win_scale tcp_moderate_rcvbuf; do echo host_$f=$(cat /proc/sys/net/ipv4/$f); done; for f in rmem_default wmem_default rmem_max wmem_max; do echo host_$f=$(cat /proc/sys/net/core/$f); done; echo host_lo_mtu=$(cat /sys/class/net/lo/mtu) (rc=0)
+[10:24:19]     host_tcp_rmem=4096 131072 33554432
+[10:24:19]     host_tcp_wmem=4096 16384 4194304
+[10:24:19]     host_tcp_adv_win_scale=1
+[10:24:19]     host_tcp_moderate_rcvbuf=1
+[10:24:19]     host_rmem_default=212992
+[10:24:19]     host_wmem_default=212992
+[10:24:19]     host_rmem_max=4194304
+[10:24:19]     host_wmem_max=4194304
+[10:24:19]     host_lo_mtu=65536
+[10:24:19] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+
+/sys/kernel/tracing/events/vsock/virtio_transport_recv_pkt:
+1024	65535
+tcp_rmem=4096 131072 15350272
+tcp_wmem=4096 16384 4194304
+tcp_adv_win_scale=1
+tcp_moderate_rcvbuf=1
+rmem_default=212992
+wmem_default=212992
+rmem_max=4194304
+wmem_max=4194304
+lo_mtu=65536
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[10:24:19] ##### cell G-4194304: --n 0 --m 4194304 --srv-pause 0 --cli-pause never --trials 3 --conc 3 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:24:27] guest rc=0 GUEST_DONE
+
+[10:24:28] ##### cell H-4194304: --n 4194304 --m 0 --srv-pause never --cli-pause 0 --trials 3 --conc 3 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix
+[10:24:36] guest rc=0 GUEST_DONE
+
+[10:24:36] ##### cell Gm1500-65536: --n 0 --m 65536 --srv-pause 0 --cli-pause never --trials 3 --conc 3 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:24:36] guest_pre rc=0: lo_mtu=1500
+[10:24:45] guest rc=0 GUEST_DONE
+
+[10:24:45] ##### cell Hm1500-65536: --n 65536 --m 0 --srv-pause never --cli-pause 0 --trials 3 --conc 3 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:24:45] guest_pre rc=0: lo_mtu=1500
+[10:24:54] guest rc=0 GUEST_DONE
+
+[10:24:54] ##### cell Gm1500-262144: --n 0 --m 262144 --srv-pause 0 --cli-pause never --trials 3 --conc 3 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:24:54] guest_pre rc=0: lo_mtu=1500
+[10:25:03] guest rc=0 GUEST_DONE
+
+[10:25:03] ##### cell Hm1500-262144: --n 262144 --m 0 --srv-pause never --cli-pause 0 --trials 3 --conc 3 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:25:03] guest_pre rc=0: lo_mtu=1500
+[10:25:11] guest rc=0 GUEST_DONE
+
+[10:25:12] ##### cell Gm1500-1048576: --n 0 --m 1048576 --srv-pause 0 --cli-pause never --trials 3 --conc 3 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:25:12] guest_pre rc=0: lo_mtu=1500
+[10:25:20] guest rc=0 GUEST_DONE
+
+[10:25:20] ##### cell Hm1500-1048576: --n 1048576 --m 0 --srv-pause never --cli-pause 0 --trials 3 --conc 3 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:25:20] guest_pre rc=0: lo_mtu=1500
+[10:25:29] guest rc=0 GUEST_DONE
+
+[10:25:29] $ pgrep -af cloud-hypervisor | grep -v pgrep; ls -d /sys/fs/cgroup/v1-* 2>&1; true (rc=0)
+[10:25:29]     ls: cannot access '/sys/fs/cgroup/v1-*': No such file or directory

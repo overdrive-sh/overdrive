@@ -1,0 +1,171 @@
+[10:41:29] === v27 vm stage sweep ['/tmp/v1-work/spec-B.json']
+[10:41:29] === preflight (fail closed)
+[10:41:29] substrate: {"uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "pkg": "linux-image-7.0.0-29-generic 7.0.0-29.29\nlinux-image-7.0.0-38-generic 7.0.0-38.38\nlinux-image-generic 7.0.0-38.38\nlinux-image-virtual 7.0.0-38.38\n", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[10:41:29] $ modprobe vhost_vsock; modprobe vsock_loopback; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[10:41:29]     vsock_diag             12288  0
+[10:41:29]     vhost_vsock            28672  0
+[10:41:29]     vhost                  69632  1 vhost_vsock
+[10:41:29]     vhost_iotlb            16384  1 vhost
+[10:41:29]     vsock_loopback         12288  0
+[10:41:29]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[10:41:29]     vmw_vsock_vmci_transport    53248  0
+[10:41:29]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[10:41:29]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[10:41:29] === guest image
+[10:41:30] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "e4fdc95b6127", "drainprobe": "b53afa9d1947", "bpf_obj": "7dfb4344b9d6", "cloud_hypervisor": "eadddf1bbcdc"}
+[10:41:30] launch VM: /tmp/v1-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/v1-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=2048M --serial file=/tmp/v1-work/out/vm-sweep-20261015T104129Z/serial.log --console off --vsock cid=3360,backend=vhost-kernel --log-file /tmp/v1-work/out/vm-sweep-20261015T104129Z/ch.log -v
+[10:41:30] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[10:41:30] $ for f in tcp_rmem tcp_wmem tcp_adv_win_scale tcp_moderate_rcvbuf; do echo host_$f=$(cat /proc/sys/net/ipv4/$f); done; for f in rmem_default wmem_default rmem_max wmem_max; do echo host_$f=$(cat /proc/sys/net/core/$f); done; echo host_lo_mtu=$(cat /sys/class/net/lo/mtu) (rc=0)
+[10:41:30]     host_tcp_rmem=4096 131072 33554432
+[10:41:30]     host_tcp_wmem=4096 16384 4194304
+[10:41:30]     host_tcp_adv_win_scale=1
+[10:41:30]     host_tcp_moderate_rcvbuf=1
+[10:41:30]     host_rmem_default=212992
+[10:41:30]     host_wmem_default=212992
+[10:41:30]     host_rmem_max=4194304
+[10:41:30]     host_wmem_max=4194304
+[10:41:30]     host_lo_mtu=65536
+[10:41:30] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+
+/sys/kernel/tracing/events/vsock/virtio_transport_recv_pkt:
+1024	65535
+tcp_rmem=4096 131072 15350272
+tcp_wmem=4096 16384 4194304
+tcp_adv_win_scale=1
+tcp_moderate_rcvbuf=1
+rmem_default=212992
+wmem_default=212992
+rmem_max=4194304
+wmem_max=4194304
+lo_mtu=65536
+BusyBox v1.37.0 (Ubuntu 1:1.37.0-7ubuntu1) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID] [type TYPE ARGS]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+
+[10:41:30] ##### cell Gm1500-4096: --n 0 --m 4096 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:41:30] guest_pre rc=0: lo_mtu=1500
+[10:41:46] guest rc=0 GUEST_DONE
+
+[10:41:46] ##### cell Hm1500-4096: --n 4096 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:41:46] guest_pre rc=0: lo_mtu=1500
+[10:42:02] guest rc=0 GUEST_DONE
+
+[10:42:02] ##### cell Gm1500-16384: --n 0 --m 16384 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:42:02] guest_pre rc=0: lo_mtu=1500
+[10:42:17] guest rc=0 GUEST_DONE
+
+[10:42:18] ##### cell Hm1500-16384: --n 16384 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:42:18] guest_pre rc=0: lo_mtu=1500
+[10:42:33] guest rc=0 GUEST_DONE
+
+[10:42:34] ##### cell Gm1500-65536: --n 0 --m 65536 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:42:34] guest_pre rc=0: lo_mtu=1500
+[10:42:49] guest rc=0 GUEST_DONE
+
+[10:42:50] ##### cell Hm1500-65536: --n 65536 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:42:50] guest_pre rc=0: lo_mtu=1500
+[10:43:05] guest rc=0 GUEST_DONE
+
+[10:43:06] ##### cell Gm1500-98304: --n 0 --m 98304 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:43:06] guest_pre rc=0: lo_mtu=1500
+[10:43:21] guest rc=0 GUEST_DONE
+
+[10:43:22] ##### cell Hm1500-98304: --n 98304 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:43:22] guest_pre rc=0: lo_mtu=1500
+[10:43:37] guest rc=0 GUEST_DONE
+
+[10:43:38] ##### cell Gm1500-131072: --n 0 --m 131072 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:43:38] guest_pre rc=0: lo_mtu=1500
+[10:43:53] guest rc=0 GUEST_DONE
+
+[10:43:54] ##### cell Hm1500-131072: --n 131072 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:43:54] guest_pre rc=0: lo_mtu=1500
+[10:44:09] guest rc=0 GUEST_DONE
+
+[10:44:09] ##### cell Gm1500-163840: --n 0 --m 163840 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:44:09] guest_pre rc=0: lo_mtu=1500
+[10:44:25] guest rc=0 GUEST_DONE
+
+[10:44:25] ##### cell Hm1500-163840: --n 163840 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:44:25] guest_pre rc=0: lo_mtu=1500
+[10:44:41] guest rc=0 GUEST_DONE
+
+[10:44:41] ##### cell Gm1500-196608: --n 0 --m 196608 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:44:41] guest_pre rc=0: lo_mtu=1500
+[10:44:57] guest rc=0 GUEST_DONE
+
+[10:44:57] ##### cell Hm1500-196608: --n 196608 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:44:57] guest_pre rc=0: lo_mtu=1500
+[10:45:13] guest rc=0 GUEST_DONE
+
+[10:45:13] ##### cell Gm1500-229376: --n 0 --m 229376 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:45:13] guest_pre rc=0: lo_mtu=1500
+[10:45:29] guest rc=0 GUEST_DONE
+
+[10:45:29] ##### cell Hm1500-229376: --n 229376 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:45:29] guest_pre rc=0: lo_mtu=1500
+[10:45:45] guest rc=0 GUEST_DONE
+
+[10:45:45] ##### cell Gm1500-262144: --n 0 --m 262144 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:45:45] guest_pre rc=0: lo_mtu=1500
+[10:46:00] guest rc=0 GUEST_DONE
+
+[10:46:01] ##### cell Hm1500-262144: --n 262144 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:46:01] guest_pre rc=0: lo_mtu=1500
+[10:46:16] guest rc=0 GUEST_DONE
+
+[10:46:17] ##### cell Gm1500-327680: --n 0 --m 327680 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:46:17] guest_pre rc=0: lo_mtu=1500
+[10:46:32] guest rc=0 GUEST_DONE
+
+[10:46:33] ##### cell Hm1500-327680: --n 327680 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:46:33] guest_pre rc=0: lo_mtu=1500
+[10:46:48] guest rc=0 GUEST_DONE
+
+[10:46:49] ##### cell Gm1500-393216: --n 0 --m 393216 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:46:49] guest_pre rc=0: lo_mtu=1500
+[10:47:04] guest rc=0 GUEST_DONE
+
+[10:47:05] ##### cell Hm1500-393216: --n 393216 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:47:05] guest_pre rc=0: lo_mtu=1500
+[10:47:20] guest rc=0 GUEST_DONE
+
+[10:47:20] ##### cell Gm1500-524288: --n 0 --m 524288 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:47:20] guest_pre rc=0: lo_mtu=1500
+[10:47:36] guest rc=0 GUEST_DONE
+
+[10:47:36] ##### cell Hm1500-524288: --n 524288 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:47:36] guest_pre rc=0: lo_mtu=1500
+[10:47:52] guest rc=0 GUEST_DONE
+
+[10:47:52] ##### cell Gm1500-1048576: --n 0 --m 1048576 --srv-pause 0 --cli-pause never --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:47:52] guest_pre rc=0: lo_mtu=1500
+[10:48:08] guest rc=0 GUEST_DONE
+
+[10:48:08] ##### cell Hm1500-1048576: --n 1048576 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 50 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:48:08] guest_pre rc=0: lo_mtu=1500
+[10:48:24] guest rc=0 GUEST_DONE
+
+[10:48:24] ##### cell Gm1500-4194304: --n 0 --m 4194304 --srv-pause 0 --cli-pause never --trials 100 --conc 25 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:48:24] guest_pre rc=0: lo_mtu=1500
+[10:48:53] guest rc=0 GUEST_DONE
+
+[10:48:54] ##### cell Hm1500-4194304: --n 4194304 --m 0 --srv-pause never --cli-pause 0 --trials 100 --conc 25 --arm owner --flows 256 --hold-ms 7000 --settle-ms 2500 --io-timeout 40 --events-sample 1 --diag-seq --fin mix --dest-mss 1448
+[10:48:54] guest_pre rc=0: lo_mtu=1500
+[10:49:23] guest rc=0 GUEST_DONE
+
+[10:49:24] $ pgrep -af cloud-hypervisor | grep -v pgrep; ls -d /sys/fs/cgroup/v1-* 2>&1; true (rc=0)
+[10:49:24]     ls: cannot access '/sys/fs/cgroup/v1-*': No such file or directory

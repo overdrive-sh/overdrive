@@ -1,0 +1,882 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}
+HB up=0.40 0.88 MemAvailable:828628 SUnreclaim:18720 
+{"ev":"sink_ready","label":"detect-T","kind":"tcpsrc","uname":"7.0.0-29-generic","port":7151,"bytes":268435456,"high_kb":4096,"low_kb":0,"resume":"pump","rejoin":false,"app":"s3000,f","mode":0,"redir_flags":0,"owner_delay_ms":0}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2,"state":"open","fwd":1769472,"sent":1769472,"queued":0,"peak":1048576,"src_inq":0,"tgt_outq":1736731,"peer_inq":112650,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":812628,"sunreclaim_kb":19364,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":54,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2598208,"peer_inq":112650,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":106,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2598208,"peer_inq":112650,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":158,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2598208,"peer_inq":112650,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":209,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2598208,"peer_inq":112650,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":261,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":313,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":364,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":416,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":468,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":519,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":571,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":622,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":674,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":726,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802764,"sunreclaim_kb":19676,"skb_head":368}
+HB up=1.40 4.60 MemAvailable:802664 SUnreclaim:19676 
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":777,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802664,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":829,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802664,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":881,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802664,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":932,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802664,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":984,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802664,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1036,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802664,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1087,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802664,"sunreclaim_kb":19676,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1139,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1191,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1242,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1294,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1346,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1397,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1449,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1501,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1553,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1604,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1656,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1708,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802796,"sunreclaim_kb":19716,"skb_head":368}
+HB up=2.42 8.40 MemAvailable:802460 SUnreclaim:19716 
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1758,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802628,"sunreclaim_kb":19716,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1809,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802532,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1859,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802532,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1909,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802532,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":1959,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802532,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2010,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802532,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2060,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":802532,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2110,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2160,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2211,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2261,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2311,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2361,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2411,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2462,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2512,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2564,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2614,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2664,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2714,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":803456,"sunreclaim_kb":19796,"skb_head":368}
+HB up=3.42 12.06 MemAvailable:805424 SUnreclaim:19796 
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2764,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":805424,"sunreclaim_kb":19820,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2815,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":805400,"sunreclaim_kb":19828,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2866,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":805400,"sunreclaim_kb":19828,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2916,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":805400,"sunreclaim_kb":19828,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":2967,"state":"closed","fwd":6815744,"sent":2710858,"queued":4104886,"peak":4199222,"src_inq":444332,"tgt_outq":2583744,"peer_inq":127114,"app_read":0,"pumped":0,"parked":0,"rs_zero":0,"mem_avail_kb":805400,"sunreclaim_kb":19828,"skb_head":368}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":3294,"state":"done","fwd":6815744,"sent":6815744,"queued":0,"peak":4199222,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":261619712,"parked":0,"rs_zero":0,"mem_avail_kb":815256,"sunreclaim_kb":19836,"skb_head":396}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":3345,"state":"done","fwd":6815744,"sent":6815744,"queued":0,"peak":4199222,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":261619712,"parked":0,"rs_zero":0,"mem_avail_kb":815256,"sunreclaim_kb":19836,"skb_head":396}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":3396,"state":"done","fwd":6815744,"sent":6815744,"queued":0,"peak":4199222,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":261619712,"parked":0,"rs_zero":0,"mem_avail_kb":815256,"sunreclaim_kb":19836,"skb_head":396}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":3447,"state":"done","fwd":6815744,"sent":6815744,"queued":0,"peak":4199222,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":261619712,"parked":0,"rs_zero":0,"mem_avail_kb":815256,"sunreclaim_kb":19836,"skb_head":396}
+{"ev":"sample","label":"detect-T","trial":0,"t_ms":3498,"state":"done","fwd":6815744,"sent":6815744,"queued":0,"peak":4199222,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":261619712,"parked":0,"rs_zero":0,"mem_avail_kb":815256,"sunreclaim_kb":19836,"skb_head":396}
+HB up=4.43 15.32 MemAvailable:815044 SUnreclaim:19844 
+HB up=5.44 19.33 MemAvailable:816340 SUnreclaim:19844 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":0,"outcome":"complete","secs":3.502,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":3684190576,"reader_done_ns":3957166266,"reader_mibps":937.8,"stall_ends":[[3684110396,0]],"t0_ns":683642813,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1449,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":286,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":8,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":691732859}],"writer":{"sent":268435456,"secs":3.273,"max_send_ms":2958,"sent_at_longest_block_start":11272192,"outcome":"done","blocks":[[3692030435,2958]]},"avail_start_kb":814148,"min_avail_kb":802532,"avail_end_kb":815256,"avail_after_close_kb":816340,"sunreclaim_start_kb":19364,"max_sunreclaim_kb":19836,"sunreclaim_end_kb":19836,"sunreclaim_after_close_kb":19844,"max_skb_head":396,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=6.45 23.26 MemAvailable:805200 SUnreclaim:19892 
+HB up=7.45 27.24 MemAvailable:805776 SUnreclaim:19900 
+HB up=8.46 31.22 MemAvailable:805736 SUnreclaim:19900 
+HB up=9.47 34.58 MemAvailable:815276 SUnreclaim:19908 
+HB up=10.47 38.59 MemAvailable:817480 SUnreclaim:19908 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":1,"outcome":"complete","secs":3.516,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":8692125259,"reader_done_ns":8986911753,"reader_mibps":868.4,"stall_ends":[[8692043376,0]],"t0_ns":5691850146,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1485,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":307,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":41,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":5733126386}],"writer":{"sent":268435456,"secs":3.262,"max_send_ms":2924,"sent_at_longest_block_start":11337728,"outcome":"done","blocks":[[8699939249,2924]]},"avail_start_kb":816340,"min_avail_kb":805176,"avail_end_kb":815988,"avail_after_close_kb":817704,"sunreclaim_start_kb":19844,"max_sunreclaim_kb":19908,"sunreclaim_end_kb":19908,"sunreclaim_after_close_kb":19908,"max_skb_head":396,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=11.48 42.52 MemAvailable:810076 SUnreclaim:19908 
+HB up=12.49 46.50 MemAvailable:811968 SUnreclaim:19952 
+HB up=13.49 50.48 MemAvailable:813092 SUnreclaim:19960 
+HB up=14.50 53.88 MemAvailable:820808 SUnreclaim:19960 
+HB up=15.50 57.89 MemAvailable:820400 SUnreclaim:19960 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":2,"outcome":"complete","secs":3.490,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":13713501601,"reader_done_ns":13983195110,"reader_mibps":949.2,"stall_ends":[[13713417735,0]],"t0_ns":10713651908,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":213,"send_fail":1484,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":284,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":40,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":10754368085}],"writer":{"sent":268435456,"secs":3.236,"max_send_ms":2924,"sent_at_longest_block_start":11272192,"outcome":"done","blocks":[[13721127988,2924]]},"avail_start_kb":817704,"min_avail_kb":810124,"avail_end_kb":821108,"avail_after_close_kb":820252,"sunreclaim_start_kb":19908,"max_sunreclaim_kb":19960,"sunreclaim_end_kb":19960,"sunreclaim_after_close_kb":19964,"max_skb_head":424,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=16.51 61.82 MemAvailable:810652 SUnreclaim:19964 
+HB up=17.52 65.79 MemAvailable:810556 SUnreclaim:19964 
+HB up=18.52 69.77 MemAvailable:811684 SUnreclaim:20028 
+HB up=19.53 73.18 MemAvailable:828588 SUnreclaim:20028 
+HB up=20.54 77.20 MemAvailable:828096 SUnreclaim:20028 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":3,"outcome":"complete","secs":3.485,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":18708646275,"reader_done_ns":18973883528,"reader_mibps":965.2,"stall_ends":[[18708564943,0]],"t0_ns":15709438889,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":213,"send_fail":1484,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":279,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":41,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":15750886456}],"writer":{"sent":268435456,"secs":3.231,"max_send_ms":2923,"sent_at_longest_block_start":11468800,"outcome":"done","blocks":[[18716309568,2923]]},"avail_start_kb":820252,"min_avail_kb":810556,"avail_end_kb":828892,"avail_after_close_kb":828048,"sunreclaim_start_kb":19964,"max_sunreclaim_kb":20028,"sunreclaim_end_kb":20028,"sunreclaim_after_close_kb":20028,"max_skb_head":424,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=21.54 81.12 MemAvailable:818748 SUnreclaim:20028 
+HB up=22.55 85.10 MemAvailable:818444 SUnreclaim:20028 
+HB up=23.55 89.07 MemAvailable:818444 SUnreclaim:20028 
+HB up=24.56 92.49 MemAvailable:824948 SUnreclaim:20036 
+HB up=25.57 96.51 MemAvailable:825728 SUnreclaim:20040 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":4,"outcome":"complete","secs":3.481,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":23701091767,"reader_done_ns":23960979629,"reader_mibps":985.0,"stall_ends":[[23700989323,0]],"t0_ns":20700409171,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":213,"send_fail":1485,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":273,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":40,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":20741330466}],"writer":{"sent":268435456,"secs":3.227,"max_send_ms":2925,"sent_at_longest_block_start":11468800,"outcome":"done","blocks":[[23709065697,2925]]},"avail_start_kb":828048,"min_avail_kb":818444,"avail_end_kb":825072,"avail_after_close_kb":825708,"sunreclaim_start_kb":20028,"max_sunreclaim_kb":20028,"sunreclaim_end_kb":20028,"sunreclaim_after_close_kb":20040,"max_skb_head":424,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=26.57 100.43 MemAvailable:816492 SUnreclaim:20088 
+HB up=27.58 104.41 MemAvailable:817432 SUnreclaim:20088 
+HB up=28.59 108.38 MemAvailable:817424 SUnreclaim:20088 
+HB up=29.59 111.64 MemAvailable:826720 SUnreclaim:20088 
+HB up=30.60 115.66 MemAvailable:826640 SUnreclaim:20088 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":5,"outcome":"complete","secs":3.514,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":28686963285,"reader_done_ns":28980516813,"reader_mibps":872.1,"stall_ends":[[28686878718,0]],"t0_ns":25687571141,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":213,"send_fail":1483,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":308,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":41,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":25728779148}],"writer":{"sent":268435456,"secs":3.259,"max_send_ms":2924,"sent_at_longest_block_start":11468800,"outcome":"done","blocks":[[28694581190,2924]]},"avail_start_kb":825708,"min_avail_kb":816396,"avail_end_kb":827244,"avail_after_close_kb":826520,"sunreclaim_start_kb":20040,"max_sunreclaim_kb":20088,"sunreclaim_end_kb":20088,"sunreclaim_after_close_kb":20088,"max_skb_head":424,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=31.61 119.58 MemAvailable:816836 SUnreclaim:20088 
+HB up=32.61 123.56 MemAvailable:816764 SUnreclaim:20104 
+HB up=33.62 127.54 MemAvailable:816672 SUnreclaim:20104 
+HB up=34.63 130.83 MemAvailable:826120 SUnreclaim:20104 
+HB up=35.64 134.85 MemAvailable:825900 SUnreclaim:20104 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":6,"outcome":"complete","secs":3.489,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":33706659859,"reader_done_ns":33975857873,"reader_mibps":951.0,"stall_ends":[[33706579688,0]],"t0_ns":30707223689,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1484,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":281,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":41,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":30748643194}],"writer":{"sent":268435456,"secs":3.235,"max_send_ms":2924,"sent_at_longest_block_start":11337728,"outcome":"done","blocks":[[33715223908,2924]]},"avail_start_kb":826520,"min_avail_kb":816624,"avail_end_kb":826536,"avail_after_close_kb":825704,"sunreclaim_start_kb":20088,"max_sunreclaim_kb":20104,"sunreclaim_end_kb":20104,"sunreclaim_after_close_kb":20104,"max_skb_head":424,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=36.64 138.77 MemAvailable:817156 SUnreclaim:20104 
+HB up=37.65 142.75 MemAvailable:817008 SUnreclaim:20104 
+HB up=38.66 146.72 MemAvailable:817864 SUnreclaim:20104 
+HB up=39.66 150.17 MemAvailable:820512 SUnreclaim:20132 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":7,"outcome":"complete","secs":3.475,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":38736029240,"reader_done_ns":38956446481,"reader_mibps":1161.4,"stall_ends":[[38735924803,0]],"t0_ns":35702354141,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1518,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":234,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":8,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":35710291878}],"writer":{"sent":268435456,"secs":3.251,"max_send_ms":2990,"sent_at_longest_block_start":11272192,"outcome":"done","blocks":[[38743311790,2990]]},"avail_start_kb":825704,"min_avail_kb":817008,"avail_end_kb":819424,"avail_after_close_kb":821380,"sunreclaim_start_kb":20104,"max_sunreclaim_kb":20132,"sunreclaim_end_kb":20132,"sunreclaim_after_close_kb":20132,"max_skb_head":424,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=40.67 154.18 MemAvailable:821380 SUnreclaim:20132 
+HB up=41.72 158.26 MemAvailable:817580 SUnreclaim:20168 
+HB up=42.72 162.23 MemAvailable:817508 SUnreclaim:20232 
+HB up=43.73 166.09 MemAvailable:831504 SUnreclaim:20232 
+HB up=44.74 169.52 MemAvailable:832564 SUnreclaim:20240 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":8,"outcome":"complete","secs":3.508,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":43682761505,"reader_done_ns":43969958196,"reader_mibps":891.4,"stall_ends":[[43682668725,0]],"t0_ns":40682918973,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":213,"send_fail":1499,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":301,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":40690615687}],"writer":{"sent":268435456,"secs":3.287,"max_send_ms":2997,"sent_at_longest_block_start":9371648,"outcome":"done","blocks":[[43690120741,2997]]},"avail_start_kb":821380,"min_avail_kb":816248,"avail_end_kb":832344,"avail_after_close_kb":832104,"sunreclaim_start_kb":20132,"max_sunreclaim_kb":20232,"sunreclaim_end_kb":20232,"sunreclaim_after_close_kb":20240,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=45.74 173.48 MemAvailable:825976 SUnreclaim:20240 
+HB up=46.75 177.45 MemAvailable:825832 SUnreclaim:20240 
+HB up=47.76 181.43 MemAvailable:825832 SUnreclaim:20240 
+HB up=48.77 185.32 MemAvailable:836832 SUnreclaim:20240 
+HB up=49.77 188.71 MemAvailable:834348 SUnreclaim:20240 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":9,"outcome":"complete","secs":3.510,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":48731326495,"reader_done_ns":49020673482,"reader_mibps":884.8,"stall_ends":[[48731245974,0]],"t0_ns":45731754210,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":213,"send_fail":1500,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":302,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":45739616382}],"writer":{"sent":268435456,"secs":3.289,"max_send_ms":2958,"sent_at_longest_block_start":11272192,"outcome":"done","blocks":[[48740478208,2958]]},"avail_start_kb":832104,"min_avail_kb":825832,"avail_end_kb":834720,"avail_after_close_kb":835344,"sunreclaim_start_kb":20240,"max_sunreclaim_kb":20240,"sunreclaim_end_kb":20240,"sunreclaim_after_close_kb":20240,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=50.78 192.67 MemAvailable:835232 SUnreclaim:20240 
+HB up=51.79 196.64 MemAvailable:830800 SUnreclaim:20240 
+HB up=52.79 200.61 MemAvailable:830800 SUnreclaim:20240 
+HB up=53.80 204.45 MemAvailable:829040 SUnreclaim:20240 
+HB up=54.81 208.04 MemAvailable:829840 SUnreclaim:20252 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":10,"outcome":"complete","secs":3.443,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":53749894601,"reader_done_ns":53971676104,"reader_mibps":1154.3,"stall_ends":[[53749808591,0]],"t0_ns":50749029390,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1484,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":236,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":41,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":50790542045}],"writer":{"sent":268435456,"secs":3.188,"max_send_ms":2924,"sent_at_longest_block_start":11272192,"outcome":"done","blocks":[[53757344733,2924]]},"avail_start_kb":835344,"min_avail_kb":829808,"avail_end_kb":829808,"avail_after_close_kb":829840,"sunreclaim_start_kb":20240,"max_sunreclaim_kb":20244,"sunreclaim_end_kb":20244,"sunreclaim_after_close_kb":20284,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=55.82 212.00 MemAvailable:827728 SUnreclaim:20296 
+HB up=56.82 215.97 MemAvailable:827728 SUnreclaim:20296 
+HB up=57.83 219.94 MemAvailable:827736 SUnreclaim:20296 
+HB up=58.84 223.69 MemAvailable:832680 SUnreclaim:20296 
+HB up=59.84 227.33 MemAvailable:826516 SUnreclaim:20296 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":11,"outcome":"complete","secs":3.536,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":58734163597,"reader_done_ns":59013703716,"reader_mibps":915.8,"stall_ends":[[58734102705,0]],"t0_ns":55698390291,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":212,"send_fail":1517,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":296,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":55706290891}],"writer":{"sent":268435456,"secs":3.315,"max_send_ms":3030,"sent_at_longest_block_start":9371648,"outcome":"done","blocks":[[58738255796,3030]]},"avail_start_kb":829840,"min_avail_kb":825516,"avail_end_kb":825516,"avail_after_close_kb":826480,"sunreclaim_start_kb":20284,"max_sunreclaim_kb":20296,"sunreclaim_end_kb":20296,"sunreclaim_after_close_kb":20296,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=60.85 231.29 MemAvailable:824804 SUnreclaim:20296 
+HB up=61.85 235.27 MemAvailable:827488 SUnreclaim:20296 
+HB up=62.86 239.24 MemAvailable:828568 SUnreclaim:20296 
+HB up=63.86 242.96 MemAvailable:838724 SUnreclaim:20296 
+HB up=64.87 246.68 MemAvailable:827884 SUnreclaim:20296 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":12,"outcome":"complete","secs":3.422,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":63772815979,"reader_done_ns":63974398353,"reader_mibps":1270.0,"stall_ends":[[63772738642,0]],"t0_ns":60772281175,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1502,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":214,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":60779879230}],"writer":{"sent":268435456,"secs":3.199,"max_send_ms":2997,"sent_at_longest_block_start":9371648,"outcome":"done","blocks":[[63779725818,2997]]},"avail_start_kb":828380,"min_avail_kb":824648,"avail_end_kb":827832,"avail_after_close_kb":830304,"sunreclaim_start_kb":20296,"max_sunreclaim_kb":20296,"sunreclaim_end_kb":20296,"sunreclaim_after_close_kb":20296,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=65.87 250.64 MemAvailable:826196 SUnreclaim:20332 
+HB up=66.88 254.61 MemAvailable:827252 SUnreclaim:20332 
+HB up=67.89 258.58 MemAvailable:828272 SUnreclaim:20332 
+HB up=68.89 262.16 MemAvailable:832356 SUnreclaim:20332 
+HB up=69.90 265.88 MemAvailable:836080 SUnreclaim:20332 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":13,"outcome":"complete","secs":3.505,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":68735928425,"reader_done_ns":69020501088,"reader_mibps":899.6,"stall_ends":[[68735848185,0]],"t0_ns":65735756518,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1501,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":298,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":65743623047}],"writer":{"sent":268435456,"secs":3.285,"max_send_ms":2997,"sent_at_longest_block_start":9371648,"outcome":"done","blocks":[[68742826417,2997]]},"avail_start_kb":830304,"min_avail_kb":826196,"avail_end_kb":835336,"avail_after_close_kb":835956,"sunreclaim_start_kb":20296,"max_sunreclaim_kb":20332,"sunreclaim_end_kb":20332,"sunreclaim_after_close_kb":20332,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=70.91 269.83 MemAvailable:825580 SUnreclaim:20332 
+HB up=71.91 273.80 MemAvailable:825516 SUnreclaim:20340 
+HB up=72.92 277.77 MemAvailable:825116 SUnreclaim:20372 
+HB up=73.93 281.38 MemAvailable:815884 SUnreclaim:20372 
+HB up=74.93 285.13 MemAvailable:823040 SUnreclaim:20372 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":14,"outcome":"complete","secs":3.508,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":73781743306,"reader_done_ns":74034527278,"reader_mibps":1012.7,"stall_ends":[[73781658679,0]],"t0_ns":70747049034,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1519,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":266,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":70754956074}],"writer":{"sent":268435456,"secs":3.287,"max_send_ms":2991,"sent_at_longest_block_start":11272192,"outcome":"done","blocks":[[73789058676,2991]]},"avail_start_kb":835956,"min_avail_kb":822092,"avail_end_kb":822092,"avail_after_close_kb":822932,"sunreclaim_start_kb":20332,"max_sunreclaim_kb":20372,"sunreclaim_end_kb":20372,"sunreclaim_after_close_kb":20372,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=75.94 289.08 MemAvailable:820704 SUnreclaim:20420 
+HB up=76.95 293.05 MemAvailable:821656 SUnreclaim:20420 
+HB up=77.95 297.03 MemAvailable:822580 SUnreclaim:20420 
+HB up=78.96 300.55 MemAvailable:827288 SUnreclaim:20420 
+HB up=79.97 304.41 MemAvailable:830076 SUnreclaim:20424 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":15,"outcome":"complete","secs":3.489,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":78764083681,"reader_done_ns":79031466412,"reader_mibps":957.4,"stall_ends":[[78763978032,0]],"t0_ns":75762946500,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1502,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":280,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":8,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":75770907702}],"writer":{"sent":268435456,"secs":3.266,"max_send_ms":2959,"sent_at_longest_block_start":11337728,"outcome":"done","blocks":[[78772110921,2959]]},"avail_start_kb":822932,"min_avail_kb":820704,"avail_end_kb":830304,"avail_after_close_kb":829660,"sunreclaim_start_kb":20372,"max_sunreclaim_kb":20420,"sunreclaim_end_kb":20420,"sunreclaim_after_close_kb":20424,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=80.97 308.35 MemAvailable:822236 SUnreclaim:20424 
+HB up=81.98 312.33 MemAvailable:822460 SUnreclaim:20424 
+HB up=82.99 316.30 MemAvailable:822668 SUnreclaim:20424 
+HB up=83.99 319.83 MemAvailable:830028 SUnreclaim:20424 
+HB up=85.00 323.66 MemAvailable:829560 SUnreclaim:20424 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":16,"outcome":"complete","secs":3.538,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":83793217677,"reader_done_ns":84077024207,"reader_mibps":902.0,"stall_ends":[[83793134773,0]],"t0_ns":80760147820,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1518,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":296,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":80767876842}],"writer":{"sent":268435456,"secs":3.315,"max_send_ms":3031,"sent_at_longest_block_start":9371648,"outcome":"done","blocks":[[83800744846,3031]]},"avail_start_kb":829660,"min_avail_kb":822236,"avail_end_kb":829996,"avail_after_close_kb":829480,"sunreclaim_start_kb":20424,"max_sunreclaim_kb":20424,"sunreclaim_end_kb":20424,"sunreclaim_after_close_kb":20424,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=86.00 327.60 MemAvailable:824176 SUnreclaim:20424 
+HB up=87.01 331.58 MemAvailable:823940 SUnreclaim:20432 
+HB up=88.02 335.55 MemAvailable:823840 SUnreclaim:20432 
+HB up=89.02 339.06 MemAvailable:836012 SUnreclaim:20432 
+HB up=90.03 342.85 MemAvailable:828264 SUnreclaim:20432 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":17,"outcome":"complete","secs":3.533,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":88838258013,"reader_done_ns":89119539241,"reader_mibps":910.1,"stall_ends":[[88838174367,0]],"t0_ns":85807403369,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":213,"send_fail":1517,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":294,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":85815179842}],"writer":{"sent":268435456,"secs":3.312,"max_send_ms":3028,"sent_at_longest_block_start":9371648,"outcome":"done","blocks":[[88845808967,3028]]},"avail_start_kb":829480,"min_avail_kb":823692,"avail_end_kb":827788,"avail_after_close_kb":828388,"sunreclaim_start_kb":20424,"max_sunreclaim_kb":20432,"sunreclaim_end_kb":20432,"sunreclaim_after_close_kb":20432,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=91.04 346.81 MemAvailable:820724 SUnreclaim:20432 
+HB up=92.04 350.78 MemAvailable:822772 SUnreclaim:20436 
+HB up=93.05 354.75 MemAvailable:822572 SUnreclaim:20436 
+HB up=94.06 358.27 MemAvailable:819964 SUnreclaim:20444 
+HB up=95.06 362.22 MemAvailable:830980 SUnreclaim:20444 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":18,"outcome":"complete","secs":3.425,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":93880686277,"reader_done_ns":94086771148,"reader_mibps":1242.2,"stall_ends":[[93880602070,0]],"t0_ns":90879914737,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":213,"send_fail":1500,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":217,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":90887777901}],"writer":{"sent":268435456,"secs":3.202,"max_send_ms":2998,"sent_at_longest_block_start":9371648,"outcome":"done","blocks":[[93887722797,2998]]},"avail_start_kb":828388,"min_avail_kb":820836,"avail_end_kb":830948,"avail_after_close_kb":830980,"sunreclaim_start_kb":20432,"max_sunreclaim_kb":20444,"sunreclaim_end_kb":20444,"sunreclaim_after_close_kb":20444,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+HB up=96.07 366.18 MemAvailable:825136 SUnreclaim:20444 
+HB up=97.07 370.16 MemAvailable:824944 SUnreclaim:20444 
+HB up=98.08 374.15 MemAvailable:825524 SUnreclaim:20444 
+HB up=99.09 377.59 MemAvailable:845280 SUnreclaim:20448 
+HB up=100.09 381.50 MemAvailable:843828 SUnreclaim:20448 
+{"ev":"trial_end","label":"detect-T","kind":"tcpsrc","trial":19,"outcome":"complete","secs":3.517,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":98846881794,"reader_done_ns":99144435121,"reader_mibps":860.3,"stall_ends":[[98846795774,0]],"t0_ns":95846540922,"fwd":6815744,"sent":6815744,"queued_end":0,"peak_queued":4199222,"verdicts":209,"refused":0,"send_ok":214,"send_fail":1501,"last_errno":11,"high_events":1,"drained_events":1,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":1,"resumes":1,"close_queued":[4199222],"pump_recv":261619712,"pump_sent":261619712,"pump_ms":308,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[{"t_ms":7,"ev_fwd":6750208,"ev_sent":2616522,"queued_at_remove":4199222,"src_inq":0,"ktime":95854385127}],"writer":{"sent":268435456,"secs":3.292,"max_send_ms":2998,"sent_at_longest_block_start":9371648,"outcome":"done","blocks":[[98854554401,2998]]},"avail_start_kb":830980,"min_avail_kb":824944,"avail_end_kb":843848,"avail_after_close_kb":843828,"sunreclaim_start_kb":20444,"max_sunreclaim_kb":20448,"sunreclaim_end_kb":20448,"sunreclaim_after_close_kb":20452,"max_skb_head":536,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":209,"vr_zero":0,"vr_err":0}
+{"ev":"sink_done","label":"detect-T","t_ms":100189}
+HB up=101.10 385.41 MemAvailable:843728 SUnreclaim:20452 
+HB up=102.11 389.43 MemAvailable:843704 SUnreclaim:20452 
+HB up=103.12 393.44 MemAvailable:843704 SUnreclaim:20452 
+{"ev":"send_ready","label":"detect-B","uname":"7.0.0-29-generic","cid":2,"port":7150,"bytes":268435456,"trials":20}
+HB up=104.12 397.44 MemAvailable:843592 SUnreclaim:20492 
+HB up=105.13 401.46 MemAvailable:843468 SUnreclaim:20492 
+HB up=106.14 405.47 MemAvailable:843468 SUnreclaim:20492 
+{"ev":"send_end","label":"detect-B","trial":0,"outcome":"done","sent":268435456,"secs":3.184,"mibps":80.4,"max_send_ms":2992,"sent_at_longest_block_start":7077888,"blocks":[[106365505368,2992]],"off_ns":5392249570638798,"best_rtt_ns":42544,"t_start_ns":103366789632,"peer_closed_read":0}
+HB up=107.14 409.30 MemAvailable:846984 SUnreclaim:20492 
+HB up=108.15 413.31 MemAvailable:846960 SUnreclaim:20492 
+HB up=109.16 417.32 MemAvailable:843796 SUnreclaim:20496 
+HB up=110.17 421.33 MemAvailable:843592 SUnreclaim:20496 
+HB up=111.17 425.35 MemAvailable:843248 SUnreclaim:20496 
+{"ev":"send_end","label":"detect-B","trial":1,"outcome":"done","sent":268435456,"secs":3.197,"mibps":80.1,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[111290419868,2988]],"off_ns":5392249570633474,"best_rtt_ns":59840,"t_start_ns":108295302358,"peer_closed_read":0}
+HB up=112.18 429.06 MemAvailable:845700 SUnreclaim:20496 
+HB up=113.19 433.08 MemAvailable:845700 SUnreclaim:20496 
+HB up=114.19 437.08 MemAvailable:846004 SUnreclaim:20500 
+HB up=115.20 441.10 MemAvailable:846004 SUnreclaim:20500 
+HB up=116.21 445.11 MemAvailable:846004 SUnreclaim:20500 
+{"ev":"send_end","label":"detect-B","trial":2,"outcome":"done","sent":268435456,"secs":3.235,"mibps":79.1,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[116223199866,2989]],"off_ns":5392249570642846,"best_rtt_ns":55874,"t_start_ns":113227057322,"peer_closed_read":0}
+HB up=117.21 448.82 MemAvailable:845556 SUnreclaim:20500 
+HB up=118.22 452.83 MemAvailable:845620 SUnreclaim:20520 
+HB up=119.23 456.84 MemAvailable:845620 SUnreclaim:20520 
+HB up=120.23 460.86 MemAvailable:845620 SUnreclaim:20520 
+HB up=121.24 464.82 MemAvailable:845668 SUnreclaim:20520 
+{"ev":"send_end","label":"detect-B","trial":3,"outcome":"done","sent":268435456,"secs":3.213,"mibps":79.7,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[121190971664,2988]],"off_ns":5392249570640470,"best_rtt_ns":61483,"t_start_ns":118195435353,"peer_closed_read":0}
+HB up=122.25 468.62 MemAvailable:846468 SUnreclaim:20520 
+HB up=123.26 472.63 MemAvailable:843668 SUnreclaim:20552 
+HB up=124.26 476.64 MemAvailable:843668 SUnreclaim:20556 
+HB up=125.27 480.66 MemAvailable:843668 SUnreclaim:20556 
+HB up=126.28 484.47 MemAvailable:846900 SUnreclaim:20556 
+{"ev":"send_end","label":"detect-B","trial":4,"outcome":"done","sent":268435456,"secs":3.223,"mibps":79.4,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[126139570318,2988]],"off_ns":5392249570641993,"best_rtt_ns":61733,"t_start_ns":123143480104,"peer_closed_read":0}
+HB up=127.28 488.38 MemAvailable:844996 SUnreclaim:20588 
+HB up=128.29 492.39 MemAvailable:847044 SUnreclaim:20588 
+HB up=129.30 496.40 MemAvailable:847044 SUnreclaim:20588 
+HB up=130.30 500.42 MemAvailable:847044 SUnreclaim:20588 
+HB up=131.31 504.18 MemAvailable:846436 SUnreclaim:20588 
+{"ev":"send_end","label":"detect-B","trial":5,"outcome":"done","sent":268435456,"secs":3.203,"mibps":79.9,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[131096470275,2988]],"off_ns":5392249570640812,"best_rtt_ns":69455,"t_start_ns":128100913794,"peer_closed_read":0}
+HB up=132.32 508.17 MemAvailable:846324 SUnreclaim:20588 
+HB up=133.32 512.18 MemAvailable:846068 SUnreclaim:20588 
+HB up=134.33 516.19 MemAvailable:846132 SUnreclaim:20588 
+HB up=135.34 520.21 MemAvailable:846020 SUnreclaim:20588 
+HB up=136.34 523.98 MemAvailable:848260 SUnreclaim:20596 
+{"ev":"send_end","label":"detect-B","trial":6,"outcome":"done","sent":268435456,"secs":3.204,"mibps":79.9,"max_send_ms":2990,"sent_at_longest_block_start":7077888,"blocks":[[136035676003,2990]],"off_ns":5392249570644575,"best_rtt_ns":61273,"t_start_ns":133038684512,"peer_closed_read":0}
+HB up=137.35 527.98 MemAvailable:848148 SUnreclaim:20596 
+HB up=138.35 531.98 MemAvailable:845332 SUnreclaim:20600 
+HB up=139.36 536.00 MemAvailable:845332 SUnreclaim:20600 
+HB up=140.37 540.01 MemAvailable:845220 SUnreclaim:20600 
+{"ev":"send_end","label":"detect-B","trial":7,"outcome":"done","sent":268435456,"secs":3.180,"mibps":80.5,"max_send_ms":2986,"sent_at_longest_block_start":7077888,"blocks":[[140970690844,2986]],"off_ns":5392249570646262,"best_rtt_ns":61613,"t_start_ns":137976871196,"peer_closed_read":0}
+HB up=141.38 543.77 MemAvailable:844740 SUnreclaim:20600 
+HB up=142.39 547.79 MemAvailable:844740 SUnreclaim:20604 
+HB up=143.39 551.79 MemAvailable:845892 SUnreclaim:20604 
+HB up=144.40 555.80 MemAvailable:845780 SUnreclaim:20608 
+HB up=145.41 559.82 MemAvailable:845780 SUnreclaim:20608 
+{"ev":"send_end","label":"detect-B","trial":8,"outcome":"done","sent":268435456,"secs":3.200,"mibps":80.0,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[145885960369,2988]],"off_ns":5392249570649460,"best_rtt_ns":59991,"t_start_ns":142890842588,"peer_closed_read":0}
+HB up=146.41 563.56 MemAvailable:844084 SUnreclaim:20608 
+HB up=147.42 567.58 MemAvailable:844004 SUnreclaim:20608 
+HB up=148.43 571.58 MemAvailable:844132 SUnreclaim:20608 
+HB up=149.43 575.60 MemAvailable:844196 SUnreclaim:20608 
+HB up=150.44 579.61 MemAvailable:844084 SUnreclaim:20608 
+{"ev":"send_end","label":"detect-B","trial":9,"outcome":"done","sent":268435456,"secs":3.198,"mibps":80.0,"max_send_ms":2986,"sent_at_longest_block_start":7077888,"blocks":[[150819474351,2986]],"off_ns":5392249570650165,"best_rtt_ns":61984,"t_start_ns":147824591142,"peer_closed_read":0}
+HB up=151.45 583.36 MemAvailable:844772 SUnreclaim:20608 
+HB up=152.46 587.38 MemAvailable:844772 SUnreclaim:20608 
+HB up=153.46 591.38 MemAvailable:845092 SUnreclaim:20608 
+HB up=154.47 595.40 MemAvailable:845092 SUnreclaim:20608 
+HB up=155.48 599.41 MemAvailable:844980 SUnreclaim:20608 
+{"ev":"send_end","label":"detect-B","trial":10,"outcome":"done","sent":268435456,"secs":3.201,"mibps":80.0,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[155750481270,2987]],"off_ns":5392249570652099,"best_rtt_ns":62414,"t_start_ns":152756742153,"peer_closed_read":0}
+HB up=156.48 603.15 MemAvailable:845620 SUnreclaim:20608 
+HB up=157.49 607.17 MemAvailable:845620 SUnreclaim:20608 
+HB up=158.50 611.17 MemAvailable:844868 SUnreclaim:20608 
+HB up=159.50 615.19 MemAvailable:844900 SUnreclaim:20612 
+HB up=160.51 619.20 MemAvailable:844788 SUnreclaim:20612 
+{"ev":"send_end","label":"detect-B","trial":11,"outcome":"done","sent":268435456,"secs":3.208,"mibps":79.8,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[160687598194,2988]],"off_ns":5392249570655338,"best_rtt_ns":59450,"t_start_ns":157691483272,"peer_closed_read":0}
+HB up=161.52 622.92 MemAvailable:845396 SUnreclaim:20612 
+HB up=162.53 626.94 MemAvailable:845284 SUnreclaim:20612 
+HB up=163.53 630.94 MemAvailable:847348 SUnreclaim:20616 
+HB up=164.54 634.96 MemAvailable:847444 SUnreclaim:20616 
+HB up=165.55 638.97 MemAvailable:847332 SUnreclaim:20620 
+{"ev":"send_end","label":"detect-B","trial":12,"outcome":"done","sent":268435456,"secs":3.233,"mibps":79.2,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[165628530670,2987]],"off_ns":5392249570659201,"best_rtt_ns":58879,"t_start_ns":162634204100,"peer_closed_read":0}
+HB up=166.56 642.67 MemAvailable:847192 SUnreclaim:20620 
+HB up=167.56 646.69 MemAvailable:847256 SUnreclaim:20620 
+HB up=168.57 650.69 MemAvailable:847760 SUnreclaim:20620 
+HB up=169.58 654.70 MemAvailable:847524 SUnreclaim:20620 
+HB up=170.58 658.72 MemAvailable:847412 SUnreclaim:20620 
+{"ev":"send_end","label":"detect-B","trial":13,"outcome":"done","sent":268435456,"secs":3.240,"mibps":79.0,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[170595849988,2988]],"off_ns":5392249570661976,"best_rtt_ns":57367,"t_start_ns":167600355710,"peer_closed_read":0}
+HB up=171.59 662.41 MemAvailable:847316 SUnreclaim:20624 
+HB up=172.60 666.41 MemAvailable:847460 SUnreclaim:20624 
+HB up=173.60 670.43 MemAvailable:847360 SUnreclaim:20624 
+HB up=174.61 674.44 MemAvailable:847212 SUnreclaim:20624 
+HB up=175.62 678.39 MemAvailable:845132 SUnreclaim:20624 
+{"ev":"send_end","label":"detect-B","trial":14,"outcome":"done","sent":268435456,"secs":3.299,"mibps":77.6,"max_send_ms":2986,"sent_at_longest_block_start":7077888,"blocks":[[175569047923,2986]],"off_ns":5392249570663690,"best_rtt_ns":59139,"t_start_ns":172574444136,"peer_closed_read":0}
+HB up=176.63 682.11 MemAvailable:844380 SUnreclaim:20624 
+HB up=177.63 686.11 MemAvailable:846556 SUnreclaim:20624 
+HB up=178.64 690.13 MemAvailable:846652 SUnreclaim:20624 
+HB up=179.65 694.14 MemAvailable:846652 SUnreclaim:20624 
+HB up=180.65 698.07 MemAvailable:843932 SUnreclaim:20624 
+{"ev":"send_end","label":"detect-B","trial":15,"outcome":"done","sent":268435456,"secs":3.309,"mibps":77.4,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[180603611782,2989]],"off_ns":5392249570665334,"best_rtt_ns":59039,"t_start_ns":177607121054,"peer_closed_read":0}
+HB up=181.66 701.79 MemAvailable:845972 SUnreclaim:20624 
+HB up=182.67 705.80 MemAvailable:845588 SUnreclaim:20624 
+HB up=183.67 709.81 MemAvailable:845588 SUnreclaim:20624 
+HB up=184.68 713.82 MemAvailable:845364 SUnreclaim:20624 
+HB up=185.69 717.78 MemAvailable:843860 SUnreclaim:20624 
+{"ev":"send_end","label":"detect-B","trial":16,"outcome":"done","sent":268435456,"secs":3.288,"mibps":77.9,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[185645418591,2987]],"off_ns":5392249570662821,"best_rtt_ns":83475,"t_start_ns":182650406639,"peer_closed_read":0}
+HB up=186.69 721.49 MemAvailable:843844 SUnreclaim:20624 
+HB up=187.70 725.50 MemAvailable:843732 SUnreclaim:20624 
+HB up=188.71 729.51 MemAvailable:843732 SUnreclaim:20624 
+HB up=189.72 733.53 MemAvailable:843732 SUnreclaim:20624 
+HB up=190.72 737.48 MemAvailable:843732 SUnreclaim:20628 
+{"ev":"send_end","label":"detect-B","trial":17,"outcome":"done","sent":268435456,"secs":3.227,"mibps":79.3,"max_send_ms":2986,"sent_at_longest_block_start":7077888,"blocks":[[190667854708,2986]],"off_ns":5392249570669996,"best_rtt_ns":58949,"t_start_ns":187672807523,"peer_closed_read":0}
+HB up=191.73 741.31 MemAvailable:846996 SUnreclaim:20628 
+HB up=192.74 745.32 MemAvailable:844004 SUnreclaim:20628 
+HB up=193.74 749.33 MemAvailable:844004 SUnreclaim:20648 
+HB up=194.75 753.35 MemAvailable:844004 SUnreclaim:20648 
+HB up=195.76 757.22 MemAvailable:842532 SUnreclaim:20648 
+{"ev":"send_end","label":"detect-B","trial":18,"outcome":"done","sent":268435456,"secs":3.224,"mibps":79.4,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[195629879918,2988]],"off_ns":5392249570670558,"best_rtt_ns":68163,"t_start_ns":192633668591,"peer_closed_read":0}
+HB up=196.76 761.13 MemAvailable:844436 SUnreclaim:20652 
+HB up=197.77 765.13 MemAvailable:843028 SUnreclaim:20652 
+HB up=198.77 769.15 MemAvailable:842916 SUnreclaim:20652 
+HB up=199.78 773.16 MemAvailable:842916 SUnreclaim:20656 
+HB up=200.79 776.88 MemAvailable:843172 SUnreclaim:20656 
+{"ev":"send_end","label":"detect-B","trial":19,"outcome":"done","sent":268435456,"secs":3.196,"mibps":80.1,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[200586913747,2988]],"off_ns":5392249570674815,"best_rtt_ns":58839,"t_start_ns":197591883016,"peer_closed_read":0}
+HB up=201.79 780.89 MemAvailable:843060 SUnreclaim:20656 
+HB up=202.80 784.90 MemAvailable:842948 SUnreclaim:20656 
+HB up=203.81 788.92 MemAvailable:842948 SUnreclaim:20656 
+HB up=204.81 792.94 MemAvailable:842948 SUnreclaim:20656 
+HB up=205.82 796.95 MemAvailable:842948 SUnreclaim:20656 
+{"ev":"send_ready","label":"gate-B","uname":"7.0.0-29-generic","cid":2,"port":7138,"bytes":268435456,"trials":40}
+HB up=206.83 800.94 MemAvailable:842948 SUnreclaim:20656 
+HB up=207.84 804.96 MemAvailable:842836 SUnreclaim:20656 
+HB up=208.84 808.97 MemAvailable:842724 SUnreclaim:20656 
+HB up=209.85 812.75 MemAvailable:842212 SUnreclaim:20656 
+{"ev":"send_end","label":"gate-B","trial":0,"outcome":"done","sent":268435456,"secs":3.324,"mibps":77.0,"max_send_ms":2980,"sent_at_longest_block_start":7274496,"blocks":[[209627483188,2980]],"off_ns":5392249570675515,"best_rtt_ns":55864,"t_start_ns":206630717547,"peer_closed_read":0}
+HB up=210.86 816.62 MemAvailable:843016 SUnreclaim:20656 
+HB up=211.87 820.63 MemAvailable:841396 SUnreclaim:20656 
+HB up=212.87 824.64 MemAvailable:841324 SUnreclaim:20656 
+HB up=213.88 828.66 MemAvailable:841324 SUnreclaim:20656 
+HB up=214.89 832.43 MemAvailable:843884 SUnreclaim:20656 
+{"ev":"send_end","label":"gate-B","trial":1,"outcome":"done","sent":268435456,"secs":3.220,"mibps":79.5,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[214694385395,2989]],"off_ns":5392249570679076,"best_rtt_ns":59951,"t_start_ns":211698339748,"peer_closed_read":0}
+HB up=215.89 836.40 MemAvailable:842556 SUnreclaim:20656 
+HB up=216.90 840.41 MemAvailable:844704 SUnreclaim:20656 
+HB up=217.90 844.42 MemAvailable:844704 SUnreclaim:20656 
+HB up=218.91 848.43 MemAvailable:844468 SUnreclaim:20656 
+HB up=219.92 852.18 MemAvailable:843028 SUnreclaim:20656 
+{"ev":"send_end","label":"gate-B","trial":2,"outcome":"done","sent":268435456,"secs":3.218,"mibps":79.6,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[219649414266,2989]],"off_ns":5392249570681214,"best_rtt_ns":60431,"t_start_ns":216653030099,"peer_closed_read":0}
+HB up=220.92 856.18 MemAvailable:843280 SUnreclaim:20656 
+HB up=221.93 860.18 MemAvailable:842956 SUnreclaim:20656 
+HB up=222.94 864.20 MemAvailable:842756 SUnreclaim:20656 
+HB up=223.94 868.21 MemAvailable:842756 SUnreclaim:20656 
+HB up=224.95 871.92 MemAvailable:841504 SUnreclaim:20656 
+{"ev":"send_end","label":"gate-B","trial":3,"outcome":"done","sent":268435456,"secs":3.244,"mibps":78.9,"max_send_ms":2988,"sent_at_longest_block_start":7143424,"blocks":[[224620072319,2988]],"off_ns":5392249570682786,"best_rtt_ns":61733,"t_start_ns":221624844752,"peer_closed_read":0}
+HB up=225.95 875.93 MemAvailable:841256 SUnreclaim:20656 
+HB up=226.96 879.93 MemAvailable:841392 SUnreclaim:20660 
+HB up=227.97 883.95 MemAvailable:841452 SUnreclaim:20660 
+HB up=228.97 887.96 MemAvailable:841492 SUnreclaim:20660 
+HB up=229.98 891.67 MemAvailable:842764 SUnreclaim:20660 
+{"ev":"send_end","label":"gate-B","trial":4,"outcome":"done","sent":268435456,"secs":3.249,"mibps":78.8,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[229618032590,2987]],"off_ns":5392249570685508,"best_rtt_ns":59279,"t_start_ns":226623994784,"peer_closed_read":0}
+HB up=230.98 895.67 MemAvailable:843032 SUnreclaim:20660 
+HB up=231.99 899.68 MemAvailable:842504 SUnreclaim:20660 
+HB up=233.00 903.69 MemAvailable:842492 SUnreclaim:20660 
+HB up=234.00 907.70 MemAvailable:842616 SUnreclaim:20664 
+HB up=235.01 911.44 MemAvailable:843756 SUnreclaim:20664 
+{"ev":"send_end","label":"gate-B","trial":5,"outcome":"done","sent":268435456,"secs":3.225,"mibps":79.4,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[234603064845,2989]],"off_ns":5392249570688020,"best_rtt_ns":59190,"t_start_ns":231607216114,"peer_closed_read":0}
+HB up=236.02 915.45 MemAvailable:843408 SUnreclaim:20664 
+HB up=237.02 919.45 MemAvailable:842892 SUnreclaim:20664 
+HB up=238.03 923.47 MemAvailable:843180 SUnreclaim:20664 
+HB up=239.04 927.48 MemAvailable:843180 SUnreclaim:20664 
+{"ev":"send_end","label":"gate-B","trial":6,"outcome":"done","sent":268435456,"secs":3.223,"mibps":79.4,"max_send_ms":2986,"sent_at_longest_block_start":7077888,"blocks":[[239561364940,2986]],"off_ns":5392249570690209,"best_rtt_ns":59139,"t_start_ns":236566796265,"peer_closed_read":0}
+HB up=240.04 931.21 MemAvailable:843432 SUnreclaim:20664 
+HB up=241.05 935.22 MemAvailable:843452 SUnreclaim:20664 
+HB up=242.05 939.22 MemAvailable:845792 SUnreclaim:20668 
+HB up=243.06 943.24 MemAvailable:845580 SUnreclaim:20668 
+HB up=244.07 947.25 MemAvailable:845532 SUnreclaim:20668 
+{"ev":"send_end","label":"gate-B","trial":7,"outcome":"done","sent":268435456,"secs":3.261,"mibps":78.5,"max_send_ms":2984,"sent_at_longest_block_start":7077888,"blocks":[[244519752846,2984]],"off_ns":5392249570691850,"best_rtt_ns":59059,"t_start_ns":241523731485,"peer_closed_read":0}
+HB up=245.07 950.95 MemAvailable:846192 SUnreclaim:20668 
+HB up=246.08 954.96 MemAvailable:846492 SUnreclaim:20668 
+HB up=247.09 958.97 MemAvailable:843736 SUnreclaim:20668 
+HB up=248.10 962.98 MemAvailable:843736 SUnreclaim:20668 
+HB up=249.10 967.00 MemAvailable:843944 SUnreclaim:20668 
+{"ev":"send_end","label":"gate-B","trial":8,"outcome":"done","sent":268435456,"secs":3.231,"mibps":79.2,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[249535386846,2988]],"off_ns":5392249570692262,"best_rtt_ns":62684,"t_start_ns":246539637474,"peer_closed_read":0}
+HB up=250.11 970.73 MemAvailable:844816 SUnreclaim:20668 
+HB up=251.12 974.75 MemAvailable:844816 SUnreclaim:20668 
+HB up=252.12 978.75 MemAvailable:844320 SUnreclaim:20668 
+HB up=253.13 982.77 MemAvailable:844316 SUnreclaim:20668 
+HB up=254.14 986.78 MemAvailable:844508 SUnreclaim:20668 
+{"ev":"send_end","label":"gate-B","trial":9,"outcome":"done","sent":268435456,"secs":3.232,"mibps":79.2,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[254517943405,2987]],"off_ns":5392249570696269,"best_rtt_ns":58899,"t_start_ns":251524033232,"peer_closed_read":0}
+HB up=255.15 990.50 MemAvailable:845316 SUnreclaim:20672 
+HB up=256.15 994.51 MemAvailable:845272 SUnreclaim:20672 
+HB up=257.16 998.52 MemAvailable:845752 SUnreclaim:20672 
+HB up=258.17 1002.53 MemAvailable:845640 SUnreclaim:20672 
+HB up=259.17 1006.55 MemAvailable:845640 SUnreclaim:20672 
+{"ev":"send_end","label":"gate-B","trial":10,"outcome":"done","sent":268435456,"secs":3.242,"mibps":79.0,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[259485718870,2988]],"off_ns":5392249570698692,"best_rtt_ns":67041,"t_start_ns":256491112638,"peer_closed_read":0}
+HB up=260.18 1010.25 MemAvailable:842136 SUnreclaim:20672 
+HB up=261.19 1014.27 MemAvailable:842136 SUnreclaim:20672 
+HB up=262.20 1018.27 MemAvailable:843080 SUnreclaim:20672 
+HB up=263.20 1022.28 MemAvailable:843080 SUnreclaim:20672 
+HB up=264.21 1026.30 MemAvailable:843080 SUnreclaim:20676 
+{"ev":"send_end","label":"gate-B","trial":11,"outcome":"done","sent":268435456,"secs":3.270,"mibps":78.3,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[264463748386,2989]],"off_ns":5392249570699996,"best_rtt_ns":67051,"t_start_ns":261466512908,"peer_closed_read":0}
+HB up=265.22 1029.99 MemAvailable:842504 SUnreclaim:20676 
+HB up=266.22 1034.01 MemAvailable:842672 SUnreclaim:20676 
+HB up=267.23 1038.01 MemAvailable:844692 SUnreclaim:20676 
+HB up=268.24 1042.03 MemAvailable:844924 SUnreclaim:20676 
+HB up=269.24 1046.04 MemAvailable:844808 SUnreclaim:20676 
+HB up=270.25 1049.70 MemAvailable:845400 SUnreclaim:20676 
+{"ev":"send_end","label":"gate-B","trial":12,"outcome":"done","sent":268435456,"secs":3.814,"mibps":67.1,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[269465863390,2987]],"off_ns":5392249570700178,"best_rtt_ns":63246,"t_start_ns":266470793611,"peer_closed_read":0}
+HB up=271.26 1053.68 MemAvailable:845940 SUnreclaim:20676 
+HB up=272.26 1057.67 MemAvailable:846340 SUnreclaim:20676 
+HB up=273.27 1061.69 MemAvailable:846404 SUnreclaim:20676 
+HB up=274.28 1065.70 MemAvailable:846404 SUnreclaim:20676 
+HB up=275.28 1069.41 MemAvailable:842916 SUnreclaim:20676 
+{"ev":"send_end","label":"gate-B","trial":13,"outcome":"done","sent":268435456,"secs":3.205,"mibps":79.9,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[275034403014,2988]],"off_ns":5392249570704740,"best_rtt_ns":65859,"t_start_ns":272039306075,"peer_closed_read":0}
+HB up=276.29 1073.41 MemAvailable:842916 SUnreclaim:20676 
+HB up=277.30 1077.42 MemAvailable:845108 SUnreclaim:20676 
+HB up=278.30 1081.43 MemAvailable:845364 SUnreclaim:20676 
+HB up=279.31 1085.45 MemAvailable:845240 SUnreclaim:20680 
+HB up=280.32 1089.13 MemAvailable:846488 SUnreclaim:20680 
+{"ev":"send_end","label":"gate-B","trial":14,"outcome":"done","sent":268435456,"secs":3.222,"mibps":79.4,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[279975173147,2987]],"off_ns":5392249570706183,"best_rtt_ns":65218,"t_start_ns":276980379734,"peer_closed_read":0}
+HB up=281.32 1093.14 MemAvailable:846488 SUnreclaim:20680 
+HB up=282.33 1097.14 MemAvailable:843560 SUnreclaim:20688 
+HB up=283.33 1101.15 MemAvailable:843792 SUnreclaim:20688 
+HB up=284.34 1105.16 MemAvailable:843792 SUnreclaim:20688 
+HB up=285.35 1108.91 MemAvailable:845776 SUnreclaim:20688 
+{"ev":"send_end","label":"gate-B","trial":15,"outcome":"done","sent":268435456,"secs":3.219,"mibps":79.5,"max_send_ms":2986,"sent_at_longest_block_start":7077888,"blocks":[[284952799606,2986]],"off_ns":5392249570707219,"best_rtt_ns":62124,"t_start_ns":281957972883,"peer_closed_read":0}
+HB up=286.35 1112.92 MemAvailable:846024 SUnreclaim:20692 
+HB up=287.36 1116.92 MemAvailable:845812 SUnreclaim:20692 
+HB up=288.37 1120.93 MemAvailable:845976 SUnreclaim:20692 
+HB up=289.37 1124.95 MemAvailable:845864 SUnreclaim:20692 
+{"ev":"send_end","label":"gate-B","trial":16,"outcome":"done","sent":268435456,"secs":3.223,"mibps":79.4,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[289926427188,2988]],"off_ns":5392249570709515,"best_rtt_ns":67822,"t_start_ns":286930673960,"peer_closed_read":0}
+HB up=290.38 1128.67 MemAvailable:845288 SUnreclaim:20696 
+HB up=291.39 1132.69 MemAvailable:845320 SUnreclaim:20696 
+HB up=292.39 1136.69 MemAvailable:845032 SUnreclaim:20696 
+HB up=293.40 1140.70 MemAvailable:845032 SUnreclaim:20696 
+HB up=294.41 1144.72 MemAvailable:845032 SUnreclaim:20696 
+{"ev":"send_end","label":"gate-B","trial":17,"outcome":"done","sent":268435456,"secs":3.258,"mibps":78.6,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[294882752400,2988]],"off_ns":5392249570711953,"best_rtt_ns":61383,"t_start_ns":291887603442,"peer_closed_read":0}
+HB up=295.42 1148.40 MemAvailable:843576 SUnreclaim:20696 
+HB up=296.42 1152.42 MemAvailable:843676 SUnreclaim:20696 
+HB up=297.43 1156.42 MemAvailable:843376 SUnreclaim:20696 
+HB up=298.44 1160.44 MemAvailable:843376 SUnreclaim:20696 
+HB up=299.44 1164.45 MemAvailable:843264 SUnreclaim:20696 
+{"ev":"send_end","label":"gate-B","trial":18,"outcome":"done","sent":268435456,"secs":3.277,"mibps":78.1,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[299896410136,2988]],"off_ns":5392249570712182,"best_rtt_ns":63476,"t_start_ns":296899853609,"peer_closed_read":0}
+HB up=300.45 1168.10 MemAvailable:844896 SUnreclaim:20696 
+HB up=301.46 1172.12 MemAvailable:844896 SUnreclaim:20696 
+HB up=302.46 1176.12 MemAvailable:844992 SUnreclaim:20696 
+HB up=303.47 1180.13 MemAvailable:844880 SUnreclaim:20696 
+HB up=304.48 1184.15 MemAvailable:844880 SUnreclaim:20696 
+{"ev":"send_end","label":"gate-B","trial":19,"outcome":"done","sent":268435456,"secs":3.271,"mibps":78.3,"max_send_ms":2986,"sent_at_longest_block_start":7077888,"blocks":[[304905566977,2986]],"off_ns":5392249570709933,"best_rtt_ns":79509,"t_start_ns":301912074663,"peer_closed_read":0}
+HB up=305.49 1187.80 MemAvailable:844736 SUnreclaim:20696 
+HB up=306.49 1191.82 MemAvailable:844736 SUnreclaim:20696 
+HB up=307.50 1195.82 MemAvailable:845504 SUnreclaim:20696 
+HB up=308.51 1199.83 MemAvailable:845504 SUnreclaim:20696 
+HB up=309.52 1203.85 MemAvailable:845392 SUnreclaim:20696 
+{"ev":"send_end","label":"gate-B","trial":20,"outcome":"done","sent":268435456,"secs":3.220,"mibps":79.5,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[309912758832,2988]],"off_ns":5392249570714893,"best_rtt_ns":82134,"t_start_ns":306917946461,"peer_closed_read":0}
+HB up=310.52 1207.57 MemAvailable:841936 SUnreclaim:20696 
+HB up=311.53 1211.59 MemAvailable:841936 SUnreclaim:20696 
+HB up=312.54 1215.59 MemAvailable:842504 SUnreclaim:20696 
+HB up=313.54 1219.61 MemAvailable:842388 SUnreclaim:20700 
+HB up=314.55 1223.62 MemAvailable:842388 SUnreclaim:20700 
+{"ev":"send_end","label":"gate-B","trial":21,"outcome":"done","sent":268435456,"secs":3.248,"mibps":78.8,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[314868853067,2989]],"off_ns":5392249570718636,"best_rtt_ns":72199,"t_start_ns":311872665896,"peer_closed_read":0}
+HB up=315.56 1227.33 MemAvailable:842208 SUnreclaim:20700 
+HB up=316.56 1231.35 MemAvailable:842120 SUnreclaim:20700 
+HB up=317.57 1235.35 MemAvailable:841496 SUnreclaim:20700 
+HB up=318.58 1239.37 MemAvailable:841496 SUnreclaim:20700 
+HB up=319.59 1243.38 MemAvailable:841496 SUnreclaim:20700 
+{"ev":"send_end","label":"gate-B","trial":22,"outcome":"done","sent":268435456,"secs":3.252,"mibps":78.7,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[319849826283,2987]],"off_ns":5392249570723290,"best_rtt_ns":59209,"t_start_ns":316854972810,"peer_closed_read":0}
+HB up=320.59 1247.08 MemAvailable:839988 SUnreclaim:20700 
+HB up=321.60 1251.10 MemAvailable:839964 SUnreclaim:20704 
+HB up=322.61 1255.10 MemAvailable:840732 SUnreclaim:20704 
+HB up=323.61 1259.12 MemAvailable:840652 SUnreclaim:20704 
+HB up=324.62 1263.13 MemAvailable:840540 SUnreclaim:20704 
+{"ev":"send_end","label":"gate-B","trial":23,"outcome":"done","sent":268435456,"secs":3.248,"mibps":78.8,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[324857391069,2989]],"off_ns":5392249570725223,"best_rtt_ns":59089,"t_start_ns":321861435778,"peer_closed_read":0}
+HB up=325.63 1266.83 MemAvailable:841628 SUnreclaim:20704 
+HB up=326.64 1270.84 MemAvailable:841116 SUnreclaim:20704 
+HB up=327.64 1274.85 MemAvailable:841112 SUnreclaim:20704 
+HB up=328.65 1278.86 MemAvailable:841088 SUnreclaim:20704 
+HB up=329.65 1282.87 MemAvailable:840976 SUnreclaim:20704 
+{"ev":"send_end","label":"gate-B","trial":24,"outcome":"done","sent":268435456,"secs":3.249,"mibps":78.8,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[329837755509,2987]],"off_ns":5392249570726448,"best_rtt_ns":60791,"t_start_ns":326843098091,"peer_closed_read":0}
+HB up=330.66 1286.55 MemAvailable:840000 SUnreclaim:20704 
+HB up=331.67 1290.57 MemAvailable:839900 SUnreclaim:20704 
+HB up=332.68 1294.58 MemAvailable:838596 SUnreclaim:20704 
+HB up=333.68 1298.59 MemAvailable:838468 SUnreclaim:20708 
+HB up=334.69 1302.61 MemAvailable:838332 SUnreclaim:20708 
+{"ev":"send_end","label":"gate-B","trial":25,"outcome":"done","sent":268435456,"secs":3.239,"mibps":79.0,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[334842139048,2989]],"off_ns":5392249570727785,"best_rtt_ns":62033,"t_start_ns":331846654845,"peer_closed_read":0}
+HB up=335.70 1306.31 MemAvailable:838044 SUnreclaim:20708 
+HB up=336.70 1310.32 MemAvailable:838240 SUnreclaim:20708 
+HB up=337.71 1314.33 MemAvailable:841620 SUnreclaim:20708 
+HB up=338.72 1318.34 MemAvailable:841496 SUnreclaim:20708 
+HB up=339.73 1322.36 MemAvailable:841372 SUnreclaim:20708 
+{"ev":"send_end","label":"gate-B","trial":26,"outcome":"done","sent":268435456,"secs":3.248,"mibps":78.8,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[339814777170,2989]],"off_ns":5392249570729659,"best_rtt_ns":61002,"t_start_ns":336818553154,"peer_closed_read":0}
+HB up=340.73 1326.04 MemAvailable:837756 SUnreclaim:20708 
+HB up=341.74 1330.06 MemAvailable:837788 SUnreclaim:20708 
+HB up=342.75 1334.07 MemAvailable:840460 SUnreclaim:20708 
+HB up=343.75 1338.09 MemAvailable:840348 SUnreclaim:20708 
+HB up=344.76 1342.10 MemAvailable:840236 SUnreclaim:20708 
+{"ev":"send_end","label":"gate-B","trial":27,"outcome":"done","sent":268435456,"secs":3.258,"mibps":78.6,"max_send_ms":2991,"sent_at_longest_block_start":7077888,"blocks":[[344793655113,2991]],"off_ns":5392249570738843,"best_rtt_ns":39329,"t_start_ns":341798749792,"peer_closed_read":0}
+HB up=345.77 1345.80 MemAvailable:839788 SUnreclaim:20708 
+HB up=346.78 1349.82 MemAvailable:839788 SUnreclaim:20708 
+HB up=347.78 1353.82 MemAvailable:839676 SUnreclaim:20708 
+HB up=348.79 1357.84 MemAvailable:839676 SUnreclaim:20712 
+HB up=349.79 1361.83 MemAvailable:837468 SUnreclaim:20712 
+{"ev":"send_end","label":"gate-B","trial":28,"outcome":"done","sent":268435456,"secs":3.266,"mibps":78.4,"max_send_ms":2984,"sent_at_longest_block_start":7077888,"blocks":[[349787727414,2984]],"off_ns":5392249570734044,"best_rtt_ns":61753,"t_start_ns":346791318720,"peer_closed_read":0}
+HB up=350.80 1365.54 MemAvailable:839484 SUnreclaim:20712 
+HB up=351.81 1369.54 MemAvailable:838972 SUnreclaim:20712 
+HB up=352.81 1373.55 MemAvailable:839036 SUnreclaim:20712 
+HB up=353.82 1377.57 MemAvailable:839036 SUnreclaim:20712 
+HB up=354.83 1381.53 MemAvailable:837708 SUnreclaim:20712 
+{"ev":"send_end","label":"gate-B","trial":29,"outcome":"done","sent":268435456,"secs":3.225,"mibps":79.4,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[354785766063,2987]],"off_ns":5392249570735062,"best_rtt_ns":67141,"t_start_ns":351790643575,"peer_closed_read":0}
+HB up=355.83 1385.31 MemAvailable:838552 SUnreclaim:20712 
+HB up=356.84 1389.32 MemAvailable:837352 SUnreclaim:20712 
+HB up=357.85 1393.33 MemAvailable:837240 SUnreclaim:20712 
+HB up=358.85 1397.35 MemAvailable:837128 SUnreclaim:20712 
+HB up=359.86 1401.22 MemAvailable:837480 SUnreclaim:20712 
+{"ev":"send_end","label":"gate-B","trial":30,"outcome":"done","sent":268435456,"secs":3.245,"mibps":78.9,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[359746553561,2989]],"off_ns":5392249570737759,"best_rtt_ns":65829,"t_start_ns":356749702631,"peer_closed_read":0}
+HB up=360.87 1405.09 MemAvailable:836776 SUnreclaim:20712 
+HB up=361.87 1409.09 MemAvailable:836776 SUnreclaim:20716 
+HB up=362.88 1413.11 MemAvailable:836776 SUnreclaim:20716 
+HB up=363.89 1417.12 MemAvailable:836652 SUnreclaim:20720 
+HB up=364.89 1420.95 MemAvailable:836488 SUnreclaim:20720 
+{"ev":"send_end","label":"gate-B","trial":31,"outcome":"done","sent":268435456,"secs":3.240,"mibps":79.0,"max_send_ms":2983,"sent_at_longest_block_start":7077888,"blocks":[[364724087681,2983]],"off_ns":5392249570741072,"best_rtt_ns":59589,"t_start_ns":361729192245,"peer_closed_read":0}
+HB up=365.90 1424.87 MemAvailable:837732 SUnreclaim:20720 
+HB up=366.90 1428.87 MemAvailable:837812 SUnreclaim:20720 
+HB up=367.91 1432.88 MemAvailable:837700 SUnreclaim:20720 
+HB up=368.92 1436.90 MemAvailable:837700 SUnreclaim:20720 
+HB up=369.92 1440.60 MemAvailable:837652 SUnreclaim:20720 
+{"ev":"send_end","label":"gate-B","trial":32,"outcome":"done","sent":268435456,"secs":3.261,"mibps":78.5,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[369718739975,2989]],"off_ns":5392249570743443,"best_rtt_ns":59780,"t_start_ns":366723236954,"peer_closed_read":0}
+HB up=370.93 1444.53 MemAvailable:837204 SUnreclaim:20720 
+HB up=371.94 1448.54 MemAvailable:838260 SUnreclaim:20724 
+HB up=372.94 1452.55 MemAvailable:838148 SUnreclaim:20724 
+HB up=373.95 1456.57 MemAvailable:838148 SUnreclaim:20724 
+HB up=374.96 1460.30 MemAvailable:838756 SUnreclaim:20724 
+{"ev":"send_end","label":"gate-B","trial":33,"outcome":"done","sent":268435456,"secs":3.249,"mibps":78.8,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[374734412783,2988]],"off_ns":5392249570741682,"best_rtt_ns":71147,"t_start_ns":371738227175,"peer_closed_read":0}
+HB up=375.96 1464.28 MemAvailable:839684 SUnreclaim:20724 
+HB up=376.97 1468.28 MemAvailable:840100 SUnreclaim:20724 
+HB up=377.98 1472.30 MemAvailable:840100 SUnreclaim:20724 
+HB up=378.99 1476.31 MemAvailable:840100 SUnreclaim:20724 
+HB up=379.99 1480.14 MemAvailable:838180 SUnreclaim:20724 
+{"ev":"send_end","label":"gate-B","trial":34,"outcome":"done","sent":268435456,"secs":3.359,"mibps":76.2,"max_send_ms":2988,"sent_at_longest_block_start":7077888,"blocks":[[379737735585,2988]],"off_ns":5392249570746793,"best_rtt_ns":60902,"t_start_ns":376741278438,"peer_closed_read":0}
+HB up=381.00 1484.03 MemAvailable:838068 SUnreclaim:20724 
+HB up=382.00 1488.03 MemAvailable:838068 SUnreclaim:20736 
+HB up=383.01 1492.05 MemAvailable:837956 SUnreclaim:20736 
+HB up=384.02 1496.07 MemAvailable:837844 SUnreclaim:20736 
+HB up=385.03 1499.86 MemAvailable:837844 SUnreclaim:20736 
+{"ev":"send_end","label":"gate-B","trial":35,"outcome":"done","sent":268435456,"secs":3.302,"mibps":77.5,"max_send_ms":2983,"sent_at_longest_block_start":7077888,"blocks":[[384830292000,2983]],"off_ns":5392249570747146,"best_rtt_ns":69114,"t_start_ns":381834975900,"peer_closed_read":0}
+HB up=386.03 1503.74 MemAvailable:838484 SUnreclaim:20736 
+HB up=387.04 1507.75 MemAvailable:838196 SUnreclaim:20740 
+HB up=388.05 1511.76 MemAvailable:838196 SUnreclaim:20740 
+HB up=389.05 1515.78 MemAvailable:838196 SUnreclaim:20740 
+HB up=390.06 1519.55 MemAvailable:838020 SUnreclaim:20740 
+{"ev":"send_end","label":"gate-B","trial":36,"outcome":"done","sent":268435456,"secs":3.224,"mibps":79.4,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[389867080407,2989]],"off_ns":5392249570750859,"best_rtt_ns":59860,"t_start_ns":386870922791,"peer_closed_read":0}
+HB up=391.07 1523.52 MemAvailable:837940 SUnreclaim:20740 
+HB up=392.07 1527.52 MemAvailable:837828 SUnreclaim:20740 
+HB up=393.08 1531.53 MemAvailable:837828 SUnreclaim:20740 
+HB up=394.09 1535.55 MemAvailable:837828 SUnreclaim:20740 
+HB up=395.09 1539.29 MemAvailable:837316 SUnreclaim:20740 
+{"ev":"send_end","label":"gate-B","trial":37,"outcome":"done","sent":268435456,"secs":3.317,"mibps":77.2,"max_send_ms":2986,"sent_at_longest_block_start":7077888,"blocks":[[394844260334,2986]],"off_ns":5392249570755799,"best_rtt_ns":59460,"t_start_ns":391849071536,"peer_closed_read":0}
+HB up=396.10 1543.22 MemAvailable:838436 SUnreclaim:20740 
+HB up=397.11 1547.22 MemAvailable:837972 SUnreclaim:20740 
+HB up=398.11 1551.24 MemAvailable:837972 SUnreclaim:20740 
+HB up=399.12 1555.26 MemAvailable:837972 SUnreclaim:20740 
+HB up=400.13 1558.99 MemAvailable:836500 SUnreclaim:20740 
+{"ev":"send_end","label":"gate-B","trial":38,"outcome":"done","sent":268435456,"secs":3.279,"mibps":78.1,"max_send_ms":2989,"sent_at_longest_block_start":7077888,"blocks":[[399896726235,2989]],"off_ns":5392249570755809,"best_rtt_ns":59389,"t_start_ns":396900632475,"peer_closed_read":0}
+HB up=401.13 1562.94 MemAvailable:836276 SUnreclaim:20740 
+HB up=402.14 1566.95 MemAvailable:839716 SUnreclaim:20740 
+HB up=403.15 1570.96 MemAvailable:839716 SUnreclaim:20740 
+HB up=404.16 1574.98 MemAvailable:839716 SUnreclaim:20744 
+HB up=405.16 1578.68 MemAvailable:837460 SUnreclaim:20744 
+{"ev":"send_end","label":"gate-B","trial":39,"outcome":"done","sent":268435456,"secs":3.249,"mibps":78.8,"max_send_ms":2987,"sent_at_longest_block_start":7077888,"blocks":[[404907856497,2987]],"off_ns":5392249570756891,"best_rtt_ns":61613,"t_start_ns":401913356125,"peer_closed_read":0}
+HB up=406.17 1582.69 MemAvailable:837460 SUnreclaim:20744 
+HB up=407.17 1586.70 MemAvailable:837460 SUnreclaim:20744 
+HB up=408.18 1590.72 MemAvailable:837460 SUnreclaim:20744 
+HB up=409.19 1594.74 MemAvailable:837348 SUnreclaim:20744 
+HB up=410.20 1598.75 MemAvailable:837348 SUnreclaim:20744 
+{"ev":"send_ready","label":"purepump-B","uname":"7.0.0-29-generic","cid":2,"port":7144,"bytes":268435456,"trials":10}
+HB up=411.20 1602.75 MemAvailable:837556 SUnreclaim:20744 
+HB up=412.21 1606.76 MemAvailable:837556 SUnreclaim:20744 
+HB up=413.22 1610.78 MemAvailable:837556 SUnreclaim:20744 
+HB up=414.22 1614.53 MemAvailable:836708 SUnreclaim:20744 
+{"ev":"send_end","label":"purepump-B","trial":0,"outcome":"done","sent":268435456,"secs":3.260,"mibps":78.5,"max_send_ms":2993,"sent_at_longest_block_start":2949120,"blocks":[[414027082224,2993]],"off_ns":5392249570762068,"best_rtt_ns":57066,"t_start_ns":411030438316,"peer_closed_read":0}
+HB up=415.24 1618.48 MemAvailable:839972 SUnreclaim:20776 
+HB up=416.24 1622.49 MemAvailable:837092 SUnreclaim:20776 
+HB up=417.25 1626.51 MemAvailable:837092 SUnreclaim:20776 
+HB up=418.26 1630.52 MemAvailable:836980 SUnreclaim:20776 
+HB up=419.26 1634.23 MemAvailable:837716 SUnreclaim:20744 
+{"ev":"send_end","label":"purepump-B","trial":1,"outcome":"done","sent":268435456,"secs":3.258,"mibps":78.6,"max_send_ms":2991,"sent_at_longest_block_start":2949120,"blocks":[[419031216837,2991]],"off_ns":5392249570764581,"best_rtt_ns":57797,"t_start_ns":416036480951,"peer_closed_read":0}
+HB up=420.27 1638.20 MemAvailable:837504 SUnreclaim:20744 
+HB up=421.28 1642.22 MemAvailable:838192 SUnreclaim:20748 
+HB up=422.28 1646.23 MemAvailable:838192 SUnreclaim:20748 
+HB up=423.29 1650.25 MemAvailable:838192 SUnreclaim:20748 
+HB up=424.30 1653.94 MemAvailable:837072 SUnreclaim:20748 
+{"ev":"send_end","label":"purepump-B","trial":2,"outcome":"done","sent":268435456,"secs":3.238,"mibps":79.1,"max_send_ms":2991,"sent_at_longest_block_start":2949120,"blocks":[[424024356724,2991]],"off_ns":5392249570765892,"best_rtt_ns":58929,"t_start_ns":421030264426,"peer_closed_read":0}
+HB up=425.30 1657.94 MemAvailable:837072 SUnreclaim:20752 
+HB up=426.31 1661.95 MemAvailable:838144 SUnreclaim:20752 
+HB up=427.31 1665.97 MemAvailable:838032 SUnreclaim:20752 
+HB up=428.32 1669.98 MemAvailable:838032 SUnreclaim:20752 
+HB up=429.33 1673.68 MemAvailable:837268 SUnreclaim:20752 
+{"ev":"send_end","label":"purepump-B","trial":3,"outcome":"done","sent":268435456,"secs":3.236,"mibps":79.1,"max_send_ms":2990,"sent_at_longest_block_start":2949120,"blocks":[[428998063855,2990]],"off_ns":5392249570767533,"best_rtt_ns":60381,"t_start_ns":426004085078,"peer_closed_read":0}
+HB up=430.34 1677.68 MemAvailable:837572 SUnreclaim:20752 
+HB up=431.34 1681.69 MemAvailable:836484 SUnreclaim:20784 
+HB up=432.35 1685.71 MemAvailable:836436 SUnreclaim:20784 
+HB up=433.36 1689.72 MemAvailable:836324 SUnreclaim:20784 
+HB up=434.36 1693.42 MemAvailable:837348 SUnreclaim:20784 
+{"ev":"send_end","label":"purepump-B","trial":4,"outcome":"done","sent":268435456,"secs":3.236,"mibps":79.1,"max_send_ms":2991,"sent_at_longest_block_start":2949120,"blocks":[[433969525487,2991]],"off_ns":5392249570769055,"best_rtt_ns":61052,"t_start_ns":430975515503,"peer_closed_read":0}
+HB up=435.37 1697.42 MemAvailable:837624 SUnreclaim:20784 
+HB up=436.38 1701.43 MemAvailable:836472 SUnreclaim:20784 
+HB up=437.38 1705.44 MemAvailable:836472 SUnreclaim:20784 
+HB up=438.39 1709.46 MemAvailable:836740 SUnreclaim:20784 
+HB up=439.40 1713.15 MemAvailable:838512 SUnreclaim:20756 
+{"ev":"send_end","label":"purepump-B","trial":5,"outcome":"done","sent":268435456,"secs":3.239,"mibps":79.0,"max_send_ms":2991,"sent_at_longest_block_start":2949120,"blocks":[[438940913338,2991]],"off_ns":5392249570772474,"best_rtt_ns":58378,"t_start_ns":435946807590,"peer_closed_read":0}
+HB up=440.40 1717.16 MemAvailable:838512 SUnreclaim:20756 
+HB up=441.41 1721.17 MemAvailable:837296 SUnreclaim:20756 
+HB up=442.42 1725.18 MemAvailable:837584 SUnreclaim:20756 
+HB up=443.42 1729.20 MemAvailable:837748 SUnreclaim:20756 
+{"ev":"send_end","label":"purepump-B","trial":6,"outcome":"done","sent":268435456,"secs":3.229,"mibps":79.3,"max_send_ms":2991,"sent_at_longest_block_start":2949120,"blocks":[[443916113937,2991]],"off_ns":5392249570773780,"best_rtt_ns":60101,"t_start_ns":440921856290,"peer_closed_read":0}
+HB up=444.43 1732.89 MemAvailable:840816 SUnreclaim:20756 
+HB up=445.44 1736.91 MemAvailable:840972 SUnreclaim:20756 
+HB up=446.44 1740.92 MemAvailable:841364 SUnreclaim:20756 
+HB up=447.45 1744.94 MemAvailable:841580 SUnreclaim:20756 
+HB up=448.46 1748.95 MemAvailable:841592 SUnreclaim:20756 
+{"ev":"send_end","label":"purepump-B","trial":7,"outcome":"done","sent":268435456,"secs":3.246,"mibps":78.9,"max_send_ms":2992,"sent_at_longest_block_start":2949120,"blocks":[[448880427161,2992]],"off_ns":5392249570776464,"best_rtt_ns":58178,"t_start_ns":445885464353,"peer_closed_read":0}
+HB up=449.46 1752.63 MemAvailable:841508 SUnreclaim:20756 
+HB up=450.47 1756.65 MemAvailable:841540 SUnreclaim:20756 
+HB up=451.48 1760.66 MemAvailable:841156 SUnreclaim:20796 
+HB up=452.48 1764.67 MemAvailable:841044 SUnreclaim:20796 
+HB up=453.49 1768.69 MemAvailable:841044 SUnreclaim:20796 
+{"ev":"send_end","label":"purepump-B","trial":8,"outcome":"done","sent":268435456,"secs":3.221,"mibps":79.5,"max_send_ms":2989,"sent_at_longest_block_start":2949120,"blocks":[[453859580268,2989]],"off_ns":5392249570778237,"best_rtt_ns":58598,"t_start_ns":450867203893,"peer_closed_read":0}
+HB up=454.50 1772.39 MemAvailable:843608 SUnreclaim:20800 
+HB up=455.50 1776.41 MemAvailable:843632 SUnreclaim:20800 
+HB up=456.51 1780.42 MemAvailable:840640 SUnreclaim:20804 
+HB up=457.52 1784.44 MemAvailable:840628 SUnreclaim:20804 
+HB up=458.53 1788.45 MemAvailable:840752 SUnreclaim:20804 
+{"ev":"send_end","label":"purepump-B","trial":9,"outcome":"done","sent":268435456,"secs":3.210,"mibps":79.7,"max_send_ms":2991,"sent_at_longest_block_start":2949120,"blocks":[[458818329789,2991]],"off_ns":5392249570780116,"best_rtt_ns":59269,"t_start_ns":455824502810,"peer_closed_read":0}
+HB up=459.53 1792.17 MemAvailable:841352 SUnreclaim:20804 
+HB up=460.54 1796.19 MemAvailable:841128 SUnreclaim:20772 
+HB up=461.55 1800.21 MemAvailable:841128 SUnreclaim:20772 
+HB up=462.56 1804.22 MemAvailable:841128 SUnreclaim:20772 
+{"ev":"sink_ready","label":"purepump-T","kind":"tcpsrc","uname":"7.0.0-29-generic","port":7145,"bytes":268435456,"high_kb":0,"low_kb":0,"resume":"pump","rejoin":false,"app":"s3000,f","mode":0,"redir_flags":0,"owner_delay_ms":0}
+HB up=463.56 1808.10 MemAvailable:826924 SUnreclaim:21044 
+HB up=464.57 1812.10 MemAvailable:826948 SUnreclaim:21044 
+HB up=465.58 1816.10 MemAvailable:827104 SUnreclaim:21044 
+{"ev":"sample","label":"purepump-T","trial":0,"t_ms":3246,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":268435456,"parked":0,"rs_zero":0,"mem_avail_kb":821500,"sunreclaim_kb":21068,"skb_head":452}
+{"ev":"sample","label":"purepump-T","trial":0,"t_ms":3299,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":268435456,"parked":0,"rs_zero":0,"mem_avail_kb":821500,"sunreclaim_kb":21068,"skb_head":452}
+{"ev":"sample","label":"purepump-T","trial":0,"t_ms":3349,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":268435456,"parked":0,"rs_zero":0,"mem_avail_kb":821500,"sunreclaim_kb":21068,"skb_head":452}
+{"ev":"sample","label":"purepump-T","trial":0,"t_ms":3400,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":268435456,"pumped":268435456,"parked":0,"rs_zero":0,"mem_avail_kb":821500,"sunreclaim_kb":21068,"skb_head":452}
+HB up=466.58 1819.50 MemAvailable:821388 SUnreclaim:21068 
+HB up=467.59 1823.52 MemAvailable:823968 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":0,"outcome":"complete","secs":3.448,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":465986018619,"reader_done_ns":466206531693,"reader_mibps":1160.9,"stall_ends":[[465985977987,0]],"t0_ns":462982304871,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3244,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.221,"max_send_ms":3000,"sent_at_longest_block_start":5308416,"outcome":"done","blocks":[[465987927031,3000]]},"avail_start_kb":829620,"min_avail_kb":821500,"avail_end_kb":821500,"avail_after_close_kb":824156,"sunreclaim_start_kb":21012,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=468.60 1827.47 MemAvailable:818876 SUnreclaim:21068 
+HB up=469.61 1831.47 MemAvailable:818764 SUnreclaim:21068 
+HB up=470.61 1835.46 MemAvailable:820088 SUnreclaim:21068 
+HB up=471.62 1838.85 MemAvailable:829416 SUnreclaim:21068 
+HB up=472.63 1842.87 MemAvailable:830072 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":1,"outcome":"complete","secs":3.526,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":470968891093,"reader_done_ns":471239922006,"reader_mibps":944.5,"stall_ends":[[470968870212,0]],"t0_ns":467936349601,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3323,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.303,"max_send_ms":2986,"sent_at_longest_block_start":7208960,"outcome":"done","blocks":[[470971356514,2986]]},"avail_start_kb":824156,"min_avail_kb":824156,"avail_end_kb":829516,"avail_after_close_kb":831132,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=473.63 1846.83 MemAvailable:828724 SUnreclaim:21068 
+HB up=474.64 1850.82 MemAvailable:831348 SUnreclaim:21068 
+HB up=475.65 1854.82 MemAvailable:831504 SUnreclaim:21068 
+HB up=476.66 1858.11 MemAvailable:834280 SUnreclaim:21068 
+HB up=477.66 1862.12 MemAvailable:833964 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":2,"outcome":"complete","secs":3.490,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":475967731509,"reader_done_ns":476236330211,"reader_mibps":953.1,"stall_ends":[[475967641584,0]],"t0_ns":472968514559,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3287,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.238,"max_send_ms":2965,"sent_at_longest_block_start":5242880,"outcome":"done","blocks":[[475970040815,2965]]},"avail_start_kb":831132,"min_avail_kb":831132,"avail_end_kb":834280,"avail_after_close_kb":833964,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=478.67 1866.08 MemAvailable:831548 SUnreclaim:21068 
+HB up=479.68 1870.08 MemAvailable:831548 SUnreclaim:21068 
+HB up=480.68 1874.08 MemAvailable:831572 SUnreclaim:21068 
+HB up=481.69 1877.51 MemAvailable:818780 SUnreclaim:21068 
+HB up=482.70 1881.53 MemAvailable:821076 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":3,"outcome":"complete","secs":3.443,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":480964232405,"reader_done_ns":481184506910,"reader_mibps":1162.2,"stall_ends":[[480964134047,0]],"t0_ns":477964682593,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3239,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.187,"max_send_ms":2965,"sent_at_longest_block_start":5242880,"outcome":"done","blocks":[[480966053315,2965]]},"avail_start_kb":833964,"min_avail_kb":818780,"avail_end_kb":818780,"avail_after_close_kb":821248,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=483.71 1885.48 MemAvailable:821124 SUnreclaim:21068 
+HB up=484.71 1889.48 MemAvailable:820676 SUnreclaim:21068 
+HB up=485.72 1893.48 MemAvailable:821520 SUnreclaim:21068 
+HB up=486.73 1896.84 MemAvailable:835344 SUnreclaim:21068 
+HB up=487.73 1900.85 MemAvailable:835132 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":4,"outcome":"complete","secs":3.519,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":485912761223,"reader_done_ns":486209326624,"reader_mibps":863.2,"stall_ends":[[485912676726,0]],"t0_ns":482913261477,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3316,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.296,"max_send_ms":2956,"sent_at_longest_block_start":7143424,"outcome":"done","blocks":[[485915376008,2956]]},"avail_start_kb":821248,"min_avail_kb":821248,"avail_end_kb":835444,"avail_after_close_kb":835132,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=488.74 1904.81 MemAvailable:832428 SUnreclaim:21068 
+HB up=489.75 1908.80 MemAvailable:832428 SUnreclaim:21068 
+HB up=490.76 1912.80 MemAvailable:832428 SUnreclaim:21068 
+HB up=491.76 1916.26 MemAvailable:824772 SUnreclaim:21068 
+HB up=492.77 1920.28 MemAvailable:826232 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":5,"outcome":"complete","secs":3.467,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":490969282367,"reader_done_ns":491182314693,"reader_mibps":1201.7,"stall_ends":[[490969189287,0]],"t0_ns":487938105418,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3264,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.241,"max_send_ms":3028,"sent_at_longest_block_start":5242880,"outcome":"done","blocks":[[490971775629,3028]]},"avail_start_kb":835132,"min_avail_kb":824540,"avail_end_kb":825052,"avail_after_close_kb":827844,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=493.78 1924.23 MemAvailable:827432 SUnreclaim:21068 
+HB up=494.79 1928.22 MemAvailable:827136 SUnreclaim:21068 
+HB up=495.79 1932.22 MemAvailable:827048 SUnreclaim:21068 
+HB up=496.80 1935.70 MemAvailable:829656 SUnreclaim:21068 
+HB up=497.81 1939.72 MemAvailable:830992 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":6,"outcome":"complete","secs":3.453,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":495941726868,"reader_done_ns":496141390515,"reader_mibps":1282.2,"stall_ends":[[495941643162,0]],"t0_ns":492911027257,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3250,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.228,"max_send_ms":2987,"sent_at_longest_block_start":7143424,"outcome":"done","blocks":[[495944059799,2987]]},"avail_start_kb":827844,"min_avail_kb":827108,"avail_end_kb":827876,"avail_after_close_kb":830868,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=498.81 1943.67 MemAvailable:830004 SUnreclaim:21068 
+HB up=499.82 1947.67 MemAvailable:830636 SUnreclaim:21068 
+HB up=500.83 1951.67 MemAvailable:831696 SUnreclaim:21068 
+HB up=501.83 1955.04 MemAvailable:835336 SUnreclaim:21068 
+HB up=502.84 1959.05 MemAvailable:835364 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":7,"outcome":"complete","secs":3.550,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":500900878574,"reader_done_ns":501197318947,"reader_mibps":863.6,"stall_ends":[[500900858073,0]],"t0_ns":497869926904,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3347,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.327,"max_send_ms":3027,"sent_at_longest_block_start":5242880,"outcome":"done","blocks":[[500902748448,3027]]},"avail_start_kb":830868,"min_avail_kb":830868,"avail_end_kb":835548,"avail_after_close_kb":835364,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=503.85 1963.01 MemAvailable:835364 SUnreclaim:21068 
+HB up=504.86 1967.00 MemAvailable:835364 SUnreclaim:21068 
+HB up=505.86 1971.00 MemAvailable:835264 SUnreclaim:21068 
+HB up=506.87 1974.44 MemAvailable:832280 SUnreclaim:21068 
+HB up=507.88 1978.46 MemAvailable:832880 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":8,"outcome":"complete","secs":3.466,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":505956097618,"reader_done_ns":506169349214,"reader_mibps":1200.5,"stall_ends":[[505956017017,0]],"t0_ns":502925900193,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3263,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.240,"max_send_ms":3027,"sent_at_longest_block_start":5242880,"outcome":"done","blocks":[[505958563789,3027]]},"avail_start_kb":835364,"min_avail_kb":831636,"avail_end_kb":831636,"avail_after_close_kb":832880,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=508.88 1982.40 MemAvailable:832768 SUnreclaim:21068 
+HB up=509.89 1986.40 MemAvailable:832800 SUnreclaim:21068 
+HB up=510.90 1990.40 MemAvailable:832800 SUnreclaim:21068 
+HB up=511.91 1993.88 MemAvailable:836592 SUnreclaim:21068 
+{"ev":"trial_end","label":"purepump-T","kind":"tcpsrc","trial":9,"outcome":"complete","secs":3.442,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"reader_first_byte_ns":510929268282,"reader_done_ns":511118708964,"reader_mibps":1351.3,"stall_ends":[[510929177065,0]],"t0_ns":507897726414,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":268435456,"pump_sent":268435456,"pump_ms":3239,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":268435456,"secs":3.219,"max_send_ms":3028,"sent_at_longest_block_start":5242880,"outcome":"done","blocks":[[510931473991,3028]]},"avail_start_kb":832880,"min_avail_kb":832880,"avail_end_kb":836496,"avail_after_close_kb":836592,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21068,"sunreclaim_end_kb":21068,"sunreclaim_after_close_kb":21068,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+{"ev":"sink_done","label":"purepump-T","t_ms":49864}
+HB up=512.91 1997.83 MemAvailable:836592 SUnreclaim:21068 
+HB up=513.92 2001.83 MemAvailable:838580 SUnreclaim:21068 
+HB up=514.93 2005.84 MemAvailable:838468 SUnreclaim:21068 
+{"ev":"send_ready","label":"purepumpslow-B","uname":"7.0.0-29-generic","cid":2,"port":7147,"bytes":134217728,"trials":10}
+HB up=515.94 2009.82 MemAvailable:842628 SUnreclaim:21068 
+HB up=516.94 2013.80 MemAvailable:841924 SUnreclaim:21068 
+HB up=517.95 2017.78 MemAvailable:845452 SUnreclaim:21068 
+HB up=518.96 2021.75 MemAvailable:845236 SUnreclaim:21068 
+HB up=519.96 2025.72 MemAvailable:845024 SUnreclaim:21068 
+HB up=520.97 2029.69 MemAvailable:845000 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":0,"outcome":"done","sent":134217728,"secs":6.244,"mibps":20.5,"max_send_ms":40,"sent_at_longest_block_start":29163520,"blocks":[],"off_ns":5392249570804244,"best_rtt_ns":57126,"t_start_ns":515122360865,"peer_closed_read":0}
+HB up=521.98 2033.68 MemAvailable:844764 SUnreclaim:21068 
+HB up=522.98 2037.70 MemAvailable:844764 SUnreclaim:21068 
+HB up=523.99 2041.67 MemAvailable:844764 SUnreclaim:21068 
+HB up=525.00 2045.65 MemAvailable:844764 SUnreclaim:21068 
+HB up=526.01 2049.62 MemAvailable:844764 SUnreclaim:21068 
+HB up=527.01 2053.59 MemAvailable:844764 SUnreclaim:21068 
+HB up=528.02 2057.57 MemAvailable:844540 SUnreclaim:21068 
+HB up=529.03 2061.54 MemAvailable:844540 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":1,"outcome":"done","sent":134217728,"secs":6.251,"mibps":20.5,"max_send_ms":20,"sent_at_longest_block_start":4194304,"blocks":[],"off_ns":5392249570807450,"best_rtt_ns":62945,"t_start_ns":523251806566,"peer_closed_read":0}
+HB up=530.04 2065.52 MemAvailable:844304 SUnreclaim:21068 
+HB up=531.04 2069.54 MemAvailable:844304 SUnreclaim:21068 
+HB up=532.05 2073.52 MemAvailable:848624 SUnreclaim:21068 
+HB up=533.06 2077.51 MemAvailable:848268 SUnreclaim:21068 
+HB up=534.07 2081.49 MemAvailable:844372 SUnreclaim:21068 
+HB up=535.07 2085.45 MemAvailable:845256 SUnreclaim:21068 
+HB up=536.08 2089.40 MemAvailable:846164 SUnreclaim:21068 
+HB up=537.09 2093.37 MemAvailable:845180 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":2,"outcome":"done","sent":134217728,"secs":6.257,"mibps":20.5,"max_send_ms":20,"sent_at_longest_block_start":3211264,"blocks":[],"off_ns":5392249570808421,"best_rtt_ns":61723,"t_start_ns":531360426365,"peer_closed_read":0}
+HB up=538.09 2097.34 MemAvailable:844380 SUnreclaim:21068 
+HB up=539.10 2101.36 MemAvailable:844256 SUnreclaim:21068 
+HB up=540.11 2105.33 MemAvailable:843968 SUnreclaim:21068 
+HB up=541.11 2109.29 MemAvailable:846524 SUnreclaim:21068 
+HB up=542.12 2113.27 MemAvailable:846388 SUnreclaim:21068 
+HB up=543.13 2117.24 MemAvailable:846388 SUnreclaim:21068 
+HB up=544.14 2121.21 MemAvailable:846276 SUnreclaim:21068 
+HB up=545.14 2125.19 MemAvailable:846176 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":3,"outcome":"done","sent":134217728,"secs":6.261,"mibps":20.4,"max_send_ms":20,"sent_at_longest_block_start":3211264,"blocks":[],"off_ns":5392249570816828,"best_rtt_ns":62014,"t_start_ns":539473995673,"peer_closed_read":0}
+HB up=546.15 2129.16 MemAvailable:845904 SUnreclaim:21068 
+HB up=547.16 2133.18 MemAvailable:845804 SUnreclaim:21068 
+HB up=548.16 2137.16 MemAvailable:845668 SUnreclaim:21068 
+HB up=549.17 2141.14 MemAvailable:845544 SUnreclaim:21068 
+HB up=550.18 2145.11 MemAvailable:845544 SUnreclaim:21068 
+HB up=551.19 2149.08 MemAvailable:845332 SUnreclaim:21068 
+HB up=552.19 2153.05 MemAvailable:845096 SUnreclaim:21068 
+HB up=553.20 2157.02 MemAvailable:844960 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":4,"outcome":"done","sent":134217728,"secs":6.255,"mibps":20.5,"max_send_ms":20,"sent_at_longest_block_start":3735552,"blocks":[],"off_ns":5392249570818420,"best_rtt_ns":59460,"t_start_ns":547592546838,"peer_closed_read":0}
+HB up=554.21 2160.99 MemAvailable:844836 SUnreclaim:21068 
+HB up=555.21 2165.01 MemAvailable:844724 SUnreclaim:21068 
+HB up=556.22 2168.99 MemAvailable:844600 SUnreclaim:21068 
+HB up=557.23 2172.97 MemAvailable:845944 SUnreclaim:21068 
+HB up=558.23 2176.93 MemAvailable:845528 SUnreclaim:21068 
+HB up=559.24 2180.89 MemAvailable:844008 SUnreclaim:21068 
+HB up=560.25 2184.85 MemAvailable:843896 SUnreclaim:21068 
+HB up=561.25 2188.81 MemAvailable:843032 SUnreclaim:21068 
+HB up=562.26 2192.79 MemAvailable:845208 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":5,"outcome":"done","sent":134217728,"secs":6.262,"mibps":20.4,"max_send_ms":20,"sent_at_longest_block_start":3670016,"blocks":[],"off_ns":5392249570820065,"best_rtt_ns":61292,"t_start_ns":555703488131,"peer_closed_read":0}
+HB up=563.27 2196.80 MemAvailable:845208 SUnreclaim:21068 
+HB up=564.28 2200.77 MemAvailable:844072 SUnreclaim:21068 
+HB up=565.28 2204.75 MemAvailable:845560 SUnreclaim:21068 
+HB up=566.29 2208.73 MemAvailable:845560 SUnreclaim:21068 
+HB up=567.30 2212.69 MemAvailable:845560 SUnreclaim:21068 
+HB up=568.30 2216.67 MemAvailable:845448 SUnreclaim:21068 
+HB up=569.31 2220.64 MemAvailable:845448 SUnreclaim:21068 
+HB up=570.32 2224.62 MemAvailable:845448 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":6,"outcome":"done","sent":134217728,"secs":6.257,"mibps":20.5,"max_send_ms":20,"sent_at_longest_block_start":3473408,"blocks":[],"off_ns":5392249570827228,"best_rtt_ns":61562,"t_start_ns":563822952220,"peer_closed_read":0}
+HB up=571.32 2228.62 MemAvailable:845448 SUnreclaim:21068 
+HB up=572.33 2232.62 MemAvailable:846056 SUnreclaim:21068 
+HB up=573.34 2236.60 MemAvailable:845896 SUnreclaim:21068 
+HB up=574.35 2240.58 MemAvailable:845416 SUnreclaim:21068 
+HB up=575.35 2244.56 MemAvailable:844392 SUnreclaim:21068 
+HB up=576.36 2248.54 MemAvailable:842536 SUnreclaim:21068 
+HB up=577.37 2252.52 MemAvailable:842760 SUnreclaim:21068 
+HB up=578.37 2256.51 MemAvailable:845096 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":7,"outcome":"done","sent":134217728,"secs":6.249,"mibps":20.5,"max_send_ms":20,"sent_at_longest_block_start":3211264,"blocks":[],"off_ns":5392249570827120,"best_rtt_ns":59570,"t_start_ns":571936067385,"peer_closed_read":0}
+HB up=579.38 2260.51 MemAvailable:845096 SUnreclaim:21068 
+HB up=580.39 2264.51 MemAvailable:842856 SUnreclaim:21068 
+HB up=581.39 2268.49 MemAvailable:844712 SUnreclaim:21068 
+HB up=582.40 2272.47 MemAvailable:843016 SUnreclaim:21068 
+HB up=583.41 2276.45 MemAvailable:842712 SUnreclaim:21068 
+HB up=584.41 2280.43 MemAvailable:846060 SUnreclaim:21068 
+HB up=585.42 2284.41 MemAvailable:845964 SUnreclaim:21068 
+HB up=586.43 2288.39 MemAvailable:844412 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":8,"outcome":"done","sent":134217728,"secs":6.248,"mibps":20.5,"max_send_ms":40,"sent_at_longest_block_start":54591488,"blocks":[],"off_ns":5392249570831731,"best_rtt_ns":57827,"t_start_ns":580060845391,"peer_closed_read":0}
+HB up=587.44 2292.40 MemAvailable:844396 SUnreclaim:21068 
+HB up=588.44 2296.39 MemAvailable:843276 SUnreclaim:21068 
+HB up=589.45 2300.38 MemAvailable:845292 SUnreclaim:21068 
+HB up=590.46 2304.36 MemAvailable:845260 SUnreclaim:21068 
+HB up=591.46 2308.34 MemAvailable:845164 SUnreclaim:21068 
+HB up=592.47 2312.32 MemAvailable:845036 SUnreclaim:21068 
+HB up=593.48 2316.30 MemAvailable:841324 SUnreclaim:21068 
+HB up=594.48 2320.28 MemAvailable:844940 SUnreclaim:21068 
+{"ev":"send_end","label":"purepumpslow-B","trial":9,"outcome":"done","sent":134217728,"secs":6.235,"mibps":20.5,"max_send_ms":20,"sent_at_longest_block_start":3473408,"blocks":[],"off_ns":5392249570833631,"best_rtt_ns":66380,"t_start_ns":588186652677,"peer_closed_read":0}
+HB up=595.49 2324.29 MemAvailable:844828 SUnreclaim:21068 
+HB up=596.50 2328.31 MemAvailable:844716 SUnreclaim:21068 
+HB up=597.51 2332.32 MemAvailable:844604 SUnreclaim:21068 
+{"ev":"sink_ready","label":"purepumpslow-T","kind":"tcpsrc","uname":"7.0.0-29-generic","port":7148,"bytes":134217728,"high_kb":0,"low_kb":0,"resume":"pump","rejoin":false,"app":"r20","mode":0,"redir_flags":0,"owner_delay_ms":0}
+HB up=598.51 2336.20 MemAvailable:825716 SUnreclaim:21068 
+HB up=599.52 2340.14 MemAvailable:814092 SUnreclaim:21068 
+HB up=600.53 2344.08 MemAvailable:811376 SUnreclaim:21068 
+HB up=601.53 2348.03 MemAvailable:815656 SUnreclaim:21068 
+HB up=602.54 2351.97 MemAvailable:816552 SUnreclaim:21068 
+HB up=603.55 2355.91 MemAvailable:824896 SUnreclaim:21068 
+HB up=604.55 2359.86 MemAvailable:822752 SUnreclaim:21068 
+{"ev":"sample","label":"purepumpslow-T","trial":0,"t_ms":6416,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":134217728,"pumped":134217728,"parked":0,"rs_zero":0,"mem_avail_kb":826180,"sunreclaim_kb":21084,"skb_head":452}
+{"ev":"sample","label":"purepumpslow-T","trial":0,"t_ms":6467,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":134217728,"pumped":134217728,"parked":0,"rs_zero":0,"mem_avail_kb":826180,"sunreclaim_kb":21084,"skb_head":452}
+{"ev":"sample","label":"purepumpslow-T","trial":0,"t_ms":6517,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":134217728,"pumped":134217728,"parked":0,"rs_zero":0,"mem_avail_kb":826180,"sunreclaim_kb":21084,"skb_head":452}
+{"ev":"sample","label":"purepumpslow-T","trial":0,"t_ms":6568,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":134217728,"pumped":134217728,"parked":0,"rs_zero":0,"mem_avail_kb":826180,"sunreclaim_kb":21084,"skb_head":452}
+{"ev":"sample","label":"purepumpslow-T","trial":0,"t_ms":6619,"state":"done","fwd":0,"sent":0,"queued":0,"peak":0,"src_inq":0,"tgt_outq":0,"peer_inq":0,"app_read":134217728,"pumped":134217728,"parked":0,"rs_zero":0,"mem_avail_kb":826180,"sunreclaim_kb":21084,"skb_head":452}
+HB up=605.56 2363.79 MemAvailable:827380 SUnreclaim:21084 
+HB up=606.57 2367.80 MemAvailable:828516 SUnreclaim:21084 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":0,"outcome":"complete","secs":6.623,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":598495814067,"reader_done_ns":604894838222,"reader_mibps":20.0,"stall_ends":[],"t0_ns":598495093923,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6412,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.089,"max_send_ms":80,"sent_at_longest_block_start":39256064,"outcome":"done","blocks":[[598642346523,60],[598703492115,60],[598764677838,60],[598867108162,60],[598928533735,60],[598989880430,60],[599051178712,60],[599112831637,60],[599174139483,60],[599235454000,60],[599296895367,60],[599357978315,60],[599460143540,60],[599521592559,60],[599582755567,60],[599766790093,60],[599868862909,60],[599930580512,60],[600012200547,59],[600093895205,80],[600175511815,80],[600257142246,80],[600338918927,80],[600420732674,80],[600502279660,80],[600583885063,80],[600665729756,80],[600747051142,80],[600828897919,80],[600910586918,80],[600992215687,80],[601073834841,80],[601155543520,80],[601237148012,80],[601318953326,80],[601400402865,80],[601482196051,80],[601543324196,59],[601624715317,80],[601706311637,80],[601787524680,80],[601868622149,79],[601930057477,60],[602011484602,80],[602093123866,80],[602174825114,80],[602236351780,60],[602317953457,80],[602399546602,80],[602481146718,80],[602562664159,80],[602644241910,80],[602726060475,80],[602807880401,80],[602889429379,80],[602971120462,80],[603052935941,80],[603134492110,80],[603216370725,80],[603298043239,80],[603379856095,80],[603461414367,80],[603522683555,60],[603604137501,80]]},"avail_start_kb":829200,"min_avail_kb":826180,"avail_end_kb":826180,"avail_after_close_kb":828836,"sunreclaim_start_kb":21068,"max_sunreclaim_kb":21084,"sunreclaim_end_kb":21084,"sunreclaim_after_close_kb":21084,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=607.58 2371.67 MemAvailable:814924 SUnreclaim:21084 
+HB up=608.58 2375.61 MemAvailable:813376 SUnreclaim:21096 
+HB up=609.59 2379.55 MemAvailable:824292 SUnreclaim:21096 
+HB up=610.60 2383.49 MemAvailable:822872 SUnreclaim:21096 
+HB up=611.60 2387.43 MemAvailable:823004 SUnreclaim:21096 
+HB up=612.61 2391.38 MemAvailable:821592 SUnreclaim:21096 
+HB up=613.62 2395.36 MemAvailable:823292 SUnreclaim:21096 
+HB up=614.62 2399.38 MemAvailable:823292 SUnreclaim:21096 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":1,"outcome":"complete","secs":6.663,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":606680939254,"reader_done_ns":613080957555,"reader_mibps":20.0,"stall_ends":[],"t0_ns":606625873341,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6459,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.176,"max_send_ms":81,"sent_at_longest_block_start":10289152,"outcome":"done","blocks":[[606751582730,80],[606833387083,80],[606915624137,81],[606977653469,60],[607059944213,81],[607142217772,81],[607224892906,81],[607306984951,80],[607369040853,60],[607451062563,81],[607533308951,81],[607595156400,60],[607676768944,80],[607759103615,81],[607821237544,61],[607903507688,81],[607985724531,81],[608047650248,60],[608129278305,80],[608190584258,60],[608272027678,80],[608353525830,80],[608435096391,80],[608517049217,80],[608598723164,80],[608659807083,60],[608741516403,80],[608802897109,60],[608884647210,80],[608945801375,60],[609027393348,80],[609088848426,60],[609170508201,80],[609252187185,80],[609333702863,80],[609415502639,80],[609497177297,80],[609558560717,60],[609639911848,80],[609721671443,80],[609803399721,80],[609885068710,80],[609966707554,80],[610048336533,80],[610130228097,80],[610211691537,80],[610293391713,80],[610375062545,80],[610456577982,80],[610538291148,80],[610599768269,60],[610681227172,80],[610762628819,80],[610844279590,80],[610925759755,80],[611007384077,80],[611088855138,80],[611170434813,80],[611251784662,80],[611333666501,80],[611414855207,80],[611496608513,80],[611558062600,60],[611639264716,80]]},"avail_start_kb":828836,"min_avail_kb":823404,"avail_end_kb":823404,"avail_after_close_kb":823292,"sunreclaim_start_kb":21084,"max_sunreclaim_kb":21096,"sunreclaim_end_kb":21096,"sunreclaim_after_close_kb":21096,"max_skb_head":452,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=615.63 2403.27 MemAvailable:816460 SUnreclaim:21096 
+HB up=616.64 2407.20 MemAvailable:815756 SUnreclaim:21096 
+HB up=617.65 2411.13 MemAvailable:815912 SUnreclaim:21096 
+HB up=618.65 2415.08 MemAvailable:810280 SUnreclaim:21096 
+HB up=619.66 2419.01 MemAvailable:815276 SUnreclaim:21096 
+HB up=620.67 2422.96 MemAvailable:825500 SUnreclaim:21096 
+HB up=621.67 2426.93 MemAvailable:825404 SUnreclaim:21096 
+HB up=622.68 2430.95 MemAvailable:826572 SUnreclaim:21096 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":2,"outcome":"complete","secs":6.663,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":614851054842,"reader_done_ns":621251100464,"reader_mibps":20.0,"stall_ends":[],"t0_ns":614794507470,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6459,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.136,"max_send_ms":100,"sent_at_longest_block_start":7208960,"outcome":"done","blocks":[[614940359592,100],[615022052558,80],[615083570480,60],[615165293450,80],[615246912314,80],[615308221903,60],[615389719133,80],[615471288903,80],[615532735849,60],[615614292188,80],[615675584792,60],[615757301122,80],[615838915989,80],[615900439030,60],[615982111173,80],[616063734173,80],[616125181039,60],[616206872271,80],[616288505617,80],[616350027495,60],[616431694611,80],[616513291001,80],[616574788863,60],[616656574157,80],[616737753830,80],[616799343460,60],[616881373693,81],[616943544097,61],[617025715973,81],[617107924665,81],[617169971673,60],[617252263650,81],[617334367714,81],[617416694162,81],[617499050536,81],[617561232838,61],[617643457243,81],[617725136758,80],[617786639237,60],[617868356699,80],[617949982333,80],[618011482789,60],[618093182394,80],[618174674087,80],[618236219781,60],[618317773526,80],[618399322284,80],[618460745354,60],[618542316947,80],[618623869260,80],[618685122013,60],[618766750592,80],[618848360131,80],[618909751824,60],[618991493502,80],[619073091324,79],[619134532511,59],[619216363664,80],[619297699983,79],[619379334810,80],[619440749648,59],[619522297644,80],[619603815065,80],[619665364525,60]]},"avail_start_kb":823292,"min_avail_kb":823292,"avail_end_kb":825404,"avail_after_close_kb":826500,"sunreclaim_start_kb":21096,"max_sunreclaim_kb":21096,"sunreclaim_end_kb":21096,"sunreclaim_after_close_kb":21096,"max_skb_head":592,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=623.69 2434.84 MemAvailable:813808 SUnreclaim:21104 
+HB up=624.70 2438.77 MemAvailable:809356 SUnreclaim:21104 
+HB up=625.70 2442.71 MemAvailable:814400 SUnreclaim:21104 
+HB up=626.71 2446.66 MemAvailable:819312 SUnreclaim:21104 
+HB up=627.72 2450.60 MemAvailable:810536 SUnreclaim:21104 
+HB up=628.72 2454.55 MemAvailable:805696 SUnreclaim:21104 
+HB up=629.73 2458.52 MemAvailable:818436 SUnreclaim:21104 
+HB up=630.74 2462.53 MemAvailable:819236 SUnreclaim:21104 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":3,"outcome":"complete","secs":6.669,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":623020895146,"reader_done_ns":629420965716,"reader_mibps":20.0,"stall_ends":[],"t0_ns":622965096861,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6466,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.103,"max_send_ms":98,"sent_at_longest_block_start":5242880,"outcome":"done","blocks":[[623072069091,98],[623133366481,60],[623215113377,60],[623398907842,60],[623460320796,60],[623521528732,60],[623705284388,60],[623766510842,60],[623827780190,60],[623929865966,60],[623991180813,60],[624093253779,60],[624195386345,60],[624297480584,60],[624358693146,60],[624460672211,60],[624562737176,60],[624664694458,60],[624807238101,60],[624868485657,60],[624929756077,60],[624990954498,60],[625052107492,59],[625113475729,60],[625215376796,79],[625297116772,80],[625378785100,80],[625460440689,80],[625542313856,80],[625623964117,80],[625705567367,80],[625787212690,80],[625848499845,60],[625930243076,80],[626011817022,80],[626093493522,80],[626175123353,80],[626256933634,80],[626338363233,80],[626420103610,80],[626501664476,80],[626583288197,80],[626664936124,80],[626746393555,80],[626828074943,80],[626909726145,80],[626971231619,60],[627052764703,80],[627134415605,80],[627216133708,80],[627277528906,60],[627359068099,80],[627440586892,80],[627522164534,80],[627603739722,80],[627685427549,80],[627766854995,80],[627848386457,80],[627929976277,80],[628011556693,80],[628092806381,80],[628174192714,79],[628255331596,79],[628336476266,79]]},"avail_start_kb":826500,"min_avail_kb":815524,"avail_end_kb":818340,"avail_after_close_kb":820200,"sunreclaim_start_kb":21096,"max_sunreclaim_kb":21104,"sunreclaim_end_kb":21104,"sunreclaim_after_close_kb":21104,"max_skb_head":592,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=631.74 2466.43 MemAvailable:827288 SUnreclaim:21104 
+HB up=632.75 2470.37 MemAvailable:825312 SUnreclaim:21104 
+HB up=633.76 2474.32 MemAvailable:818208 SUnreclaim:21104 
+HB up=634.77 2478.26 MemAvailable:821260 SUnreclaim:21104 
+HB up=635.77 2482.21 MemAvailable:818672 SUnreclaim:21104 
+HB up=636.78 2486.15 MemAvailable:827836 SUnreclaim:21104 
+HB up=637.79 2490.11 MemAvailable:836124 SUnreclaim:21104 
+HB up=638.79 2494.12 MemAvailable:836012 SUnreclaim:21104 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":4,"outcome":"complete","secs":6.616,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":631144354177,"reader_done_ns":637542791730,"reader_mibps":20.0,"stall_ends":[],"t0_ns":631143778110,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6413,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.109,"max_send_ms":81,"sent_at_longest_block_start":103022592,"outcome":"done","blocks":[[631250297048,79],[631311305313,59],[631392526218,80],[631473692530,79],[631554882098,80],[631636294310,80],[631717474113,79],[631778472213,59],[631859748552,80],[631940994554,80],[632022201538,80],[632103605438,80],[632184806042,80],[632266057903,80],[632347453221,80],[632428609518,80],[632489672366,59],[632570865819,80],[632652065832,79],[632733502512,80],[632794158467,59],[632875496358,80],[632936465504,59],[633017642563,79],[633098899872,80],[633180062119,79],[633261254370,80],[633342445470,80],[633423673746,80],[633505055433,80],[633586232702,79],[633667435990,80],[633748658738,80],[633830201377,80],[633911997517,80],[633993679536,80],[634075635176,80],[634156564131,79],[634237758086,80],[634319086242,79],[634400392875,80],[634481450084,79],[634562686242,80],[634643768107,79],[634725119588,79],[634806249206,79],[634887539615,80],[634968701391,80],[635049988555,79],[635131227547,80],[635212434350,79],[635293762987,79],[635374932375,80],[635456165468,79],[635537327444,80],[635618775771,80],[635699667740,79],[635782560151,81],[635864133105,80],[635945951529,80],[636028235704,80],[636110333148,80],[636192038932,80],[636273596934,79]]},"avail_start_kb":820200,"min_avail_kb":820200,"avail_end_kb":836124,"avail_after_close_kb":836012,"sunreclaim_start_kb":21104,"max_sunreclaim_kb":21104,"sunreclaim_end_kb":21104,"sunreclaim_after_close_kb":21104,"max_skb_head":592,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=639.80 2498.02 MemAvailable:831692 SUnreclaim:21104 
+HB up=640.81 2501.96 MemAvailable:826692 SUnreclaim:21104 
+HB up=641.82 2505.90 MemAvailable:824304 SUnreclaim:21104 
+HB up=642.82 2509.84 MemAvailable:817376 SUnreclaim:21104 
+HB up=643.83 2513.79 MemAvailable:827564 SUnreclaim:21104 
+HB up=644.84 2517.74 MemAvailable:830784 SUnreclaim:21104 
+HB up=645.84 2521.70 MemAvailable:833676 SUnreclaim:21104 
+HB up=646.85 2525.72 MemAvailable:833876 SUnreclaim:21104 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":5,"outcome":"complete","secs":6.603,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":639323620937,"reader_done_ns":645666916964,"reader_mibps":20.2,"stall_ends":[],"t0_ns":639267824305,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6399,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.062,"max_send_ms":80,"sent_at_longest_block_start":62521344,"outcome":"done","blocks":[[639387648046,61],[639449555715,60],[639511518437,61],[639573556813,60],[639635497952,61],[639697469106,60],[639800759825,60],[639862235825,60],[639924047048,60],[639978171754,53],[640078184781,50],[640161169350,51],[640211803422,50],[640273691712,60],[640335395985,60],[640396813075,60],[640499759466,60],[640561381285,60],[640622863243,60],[640684794998,60],[640746278769,60],[640889874636,60],[641033676914,60],[641136427650,60],[641198158884,60],[641259797438,60],[641321253567,60],[641382866703,60],[641526791595,61],[641670779282,61],[641732398236,60],[641834914580,60],[641937571565,60],[642019458522,80],[642081062113,60],[642142568779,60],[642204197278,60],[642265874460,60],[642327697131,60],[642409434583,80],[642491097272,80],[642552413591,60],[642613713956,60],[642674990996,60],[642756434566,80],[642817731636,60],[642878702545,60],[642940031283,60],[643001376866,60],[643082831653,80],[643144149895,60],[643205456799,60],[643266704315,60],[643348127714,80],[643409481089,60],[643470761274,60],[643532074708,60],[643613514963,80],[643674852795,60],[643736388313,60],[643797517070,60],[643860565035,62],[643942061545,80],[644003288399,60]]},"avail_start_kb":836012,"min_avail_kb":833888,"avail_end_kb":833900,"avail_after_close_kb":834032,"sunreclaim_start_kb":21104,"max_sunreclaim_kb":21104,"sunreclaim_end_kb":21104,"sunreclaim_after_close_kb":21104,"max_skb_head":592,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=647.86 2529.63 MemAvailable:832268 SUnreclaim:21104 
+HB up=648.87 2533.57 MemAvailable:824856 SUnreclaim:21104 
+HB up=649.87 2537.51 MemAvailable:821428 SUnreclaim:21104 
+HB up=650.88 2541.44 MemAvailable:824420 SUnreclaim:21104 
+HB up=651.89 2545.37 MemAvailable:825316 SUnreclaim:21104 
+HB up=652.89 2549.31 MemAvailable:827280 SUnreclaim:21104 
+HB up=653.90 2553.25 MemAvailable:823444 SUnreclaim:21104 
+HB up=654.91 2557.27 MemAvailable:823712 SUnreclaim:21104 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":6,"outcome":"complete","secs":6.604,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":647433375695,"reader_done_ns":653832625499,"reader_mibps":20.0,"stall_ends":[],"t0_ns":647433107922,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6399,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.075,"max_send_ms":81,"sent_at_longest_block_start":39321600,"outcome":"done","blocks":[[647578400963,60],[647679966626,60],[647740840238,60],[647801756786,60],[647903545154,60],[647964939180,60],[648067048841,80],[648148628766,80],[648230364876,80],[648311959463,80],[648393634281,80],[648475358413,80],[648556916736,80],[648638620648,80],[648720414835,80],[648801782581,80],[648883810660,80],[648965700432,80],[649048170767,81],[649130511386,81],[649212834169,81],[649295200989,81],[649377193194,80],[649459604100,80],[649541805480,80],[649623832027,80],[649705961439,81],[649788416011,81],[649870419113,80],[649951741420,79],[650033394755,80],[650115962507,81],[650198227724,81],[650260288373,60],[650342339968,80],[650424309148,80],[650486403168,60],[650568416876,80],[650650492126,80],[650733063854,81],[650794613063,60],[650876636175,80],[650958473968,80],[651040942931,81],[651123299996,81],[651184889747,60],[651266866849,80],[651348968159,80],[651431189489,80],[651513595638,80],[651595794514,81],[651657936897,60],[651740082803,80],[651822121629,80],[651904389630,80],[651986163727,80],[652068655745,81],[652150858757,81],[652233328301,81],[652315496141,80],[652377150449,60],[652459278729,81],[652541489193,81],[652623618495,80]]},"avail_start_kb":834032,"min_avail_kb":823512,"avail_end_kb":823512,"avail_after_close_kb":823800,"sunreclaim_start_kb":21104,"max_sunreclaim_kb":21104,"sunreclaim_end_kb":21104,"sunreclaim_after_close_kb":21104,"max_skb_head":592,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=655.91 2561.18 MemAvailable:823356 SUnreclaim:21104 
+HB up=656.92 2565.11 MemAvailable:823012 SUnreclaim:21104 
+HB up=657.93 2569.04 MemAvailable:818224 SUnreclaim:21104 
+HB up=658.94 2572.98 MemAvailable:824240 SUnreclaim:21104 
+HB up=659.94 2576.91 MemAvailable:824756 SUnreclaim:21104 
+HB up=660.95 2580.84 MemAvailable:825276 SUnreclaim:21104 
+HB up=661.96 2584.78 MemAvailable:831260 SUnreclaim:21104 
+HB up=662.96 2588.79 MemAvailable:834512 SUnreclaim:21104 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":7,"outcome":"complete","secs":6.614,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":655545424294,"reader_done_ns":661943910029,"reader_mibps":20.0,"stall_ends":[],"t0_ns":655544870891,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6409,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.083,"max_send_ms":101,"sent_at_longest_block_start":89784320,"outcome":"done","blocks":[[655650863977,80],[655732741540,80],[655794657892,60],[655876841846,81],[655958851918,80],[656040934770,80],[656123060397,80],[656184753873,60],[656246373969,60],[656308118192,60],[656389896937,80],[656451640989,60],[656533557601,80],[656615950379,81],[656677635574,60],[656739540548,60],[656821407075,80],[656882835853,60],[656944590692,60],[657026404850,80],[657088120019,60],[657149941678,60],[657231899232,80],[657293432327,60],[657355180946,60],[657437048965,80],[657498901431,60],[657580832064,80],[657663041086,80],[657724890347,60],[657786798667,60],[657868833066,81],[657950897179,80],[658012292858,60],[658093886363,80],[658175910347,80],[658237832477,60],[658299572564,60],[658381627444,80],[658443396124,60],[658525581540,80],[658607850542,81],[658669515836,60],[658731458197,60],[658813447699,80],[658875281466,60],[658957349967,81],[659039280209,80],[659121526377,80],[659183240064,60],[659245045008,60],[659326911024,80],[659388580324,60],[659470688013,81],[659573587453,101],[659655848684,80],[659717646407,60],[659779552083,60],[659861524249,80],[659923404797,60],[659984995509,60],[660066821514,80],[660128628381,60],[660210711143,81]]},"avail_start_kb":823800,"min_avail_kb":823800,"avail_end_kb":834592,"avail_after_close_kb":834512,"sunreclaim_start_kb":21104,"max_sunreclaim_kb":21104,"sunreclaim_end_kb":21104,"sunreclaim_after_close_kb":21104,"max_skb_head":592,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=663.97 2592.73 MemAvailable:829216 SUnreclaim:21104 
+HB up=664.98 2596.67 MemAvailable:837184 SUnreclaim:21104 
+HB up=665.98 2600.61 MemAvailable:831996 SUnreclaim:21104 
+HB up=666.99 2604.55 MemAvailable:831108 SUnreclaim:21104 
+HB up=668.00 2608.49 MemAvailable:832100 SUnreclaim:21104 
+HB up=669.01 2612.44 MemAvailable:834708 SUnreclaim:21104 
+HB up=670.01 2616.38 MemAvailable:838452 SUnreclaim:21104 
+HB up=671.02 2620.39 MemAvailable:840212 SUnreclaim:21104 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":8,"outcome":"complete","secs":6.608,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":663712535170,"reader_done_ns":670111665054,"reader_mibps":20.0,"stall_ends":[],"t0_ns":663712115418,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6404,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.121,"max_send_ms":80,"sent_at_longest_block_start":73465856,"outcome":"done","blocks":[[663818408396,60],[663879687749,60],[663981696098,60],[664083562123,60],[664144755086,60],[664246932520,60],[664308089659,60],[664369470405,60],[664512119327,60],[664573543078,60],[664716183787,60],[664777470912,60],[664838681202,60],[664981521111,60],[665165102505,60],[665267041039,60],[665369112112,60],[665430610375,60],[665573190543,60],[665715979426,60],[665777233411,59],[665838605824,60],[665981257000,60],[666042188049,59],[666103160450,60],[666246261863,60],[666388913479,60],[666450068936,60],[666511437013,60],[666695270506,60],[666838160611,60],[666939979975,80],[667021680462,80],[667103072694,80],[667184529013,80],[667266181438,80],[667347693611,80],[667429187446,80],[667510683715,80],[667592160215,80],[667673804637,80],[667755320365,80],[667836740269,80],[667918198912,80],[667979550574,59],[668060922115,80],[668142416231,80],[668223893943,80],[668305466997,80],[668387045260,80],[668468685025,80],[668550168515,80],[668631709651,80],[668713476868,80],[668794767418,80],[668855902043,59],[668937473986,80],[669018856775,80],[669100068165,80],[669181332916,80],[669262871649,80],[669344232024,80],[669425857307,80],[669507391193,80]]},"avail_start_kb":834512,"min_avail_kb":834512,"avail_end_kb":840116,"avail_after_close_kb":840212,"sunreclaim_start_kb":21104,"max_sunreclaim_kb":21104,"sunreclaim_end_kb":21104,"sunreclaim_after_close_kb":21104,"max_skb_head":592,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+HB up=672.03 2624.32 MemAvailable:837812 SUnreclaim:21104 
+HB up=673.03 2628.26 MemAvailable:836628 SUnreclaim:21104 
+HB up=674.04 2632.20 MemAvailable:826000 SUnreclaim:21104 
+HB up=675.05 2636.15 MemAvailable:813304 SUnreclaim:21120 
+HB up=676.05 2640.09 MemAvailable:813076 SUnreclaim:21120 
+HB up=677.06 2644.03 MemAvailable:814196 SUnreclaim:21120 
+HB up=678.07 2647.97 MemAvailable:818340 SUnreclaim:21120 
+HB up=679.08 2651.97 MemAvailable:823232 SUnreclaim:21120 
+{"ev":"trial_end","label":"purepumpslow-T","kind":"tcpsrc","trial":9,"outcome":"complete","secs":6.607,"bytes":134217728,"app_read":134217728,"app_ok":true,"first_bad":-1,"hash":6468305205165800162,"ehash":6468305205165800162,"reader_first_byte_ns":671883416090,"reader_done_ns":678282667758,"reader_mibps":20.0,"stall_ends":[],"t0_ns":671883047034,"fwd":0,"sent":0,"queued_end":0,"peak_queued":0,"verdicts":0,"refused":0,"send_ok":0,"send_fail":0,"last_errno":0,"high_events":0,"drained_events":0,"passed":0,"hard_drops":0,"rb_fail":0,"valve_closes":0,"resumes":0,"close_queued":[],"pump_recv":134217728,"pump_sent":134217728,"pump_ms":6403,"rejoins":0,"rejoin_fail":0,"final_state":"done","src_inq_end":0,"closes":[],"writer":{"sent":134217728,"secs":6.161,"max_send_ms":61,"sent_at_longest_block_start":16318464,"outcome":"done","blocks":[[672070808679,60],[672132380242,60],[672235382708,60],[672296878146,60],[672358746256,60],[672461710403,61],[672523353845,60],[672626397271,60],[672688077829,60],[672750032679,60],[672852207068,60],[672913115423,60],[672974284780,60],[673035252995,60],[673177528485,60],[673360338428,60],[673421287825,60],[673482225484,59],[673543166668,60],[673604150988,60],[673746194118,60],[673888316367,60],[674030486578,60],[674132080654,60],[674233350311,60],[674375139239,60],[674476793906,60],[674618910727,60],[674761154249,60],[674903786896,60],[675005612230,60],[675066647285,59],[675127889503,60],[675189045200,60],[675250330813,60],[675392743739,60],[675494577926,60],[675555715196,59],[675616903392,60],[675678078559,60],[675739276419,59],[675800492167,60],[675943209021,60],[676085698874,59],[676146822252,60],[676330315844,60],[676432230933,60],[676493480852,59],[676554681487,60],[676615937244,60],[676677167594,60],[676819933141,60],[676962718809,60],[677023892674,60],[677085048531,60],[677146228074,60],[677207465775,60],[677350173605,60],[677533836672,60],[677595038849,60],[677737761963,60],[677839846386,60],[677901088554,60],[678003205226,60]]},"avail_start_kb":840212,"min_avail_kb":822140,"avail_end_kb":822140,"avail_after_close_kb":825236,"sunreclaim_start_kb":21104,"max_sunreclaim_kb":21120,"sunreclaim_end_kb":21120,"sunreclaim_after_close_kb":21120,"max_skb_head":592,"parked":0,"forwarded":0,"rs_ok":0,"rs_zero":0,"rs_err":0,"rs_bytes":0,"vr_ok":0,"vr_zero":0,"vr_err":0}
+{"ev":"sink_done","label":"purepumpslow-T","t_ms":81558}
+HB up=680.08 2655.91 MemAvailable:824524 SUnreclaim:21120 

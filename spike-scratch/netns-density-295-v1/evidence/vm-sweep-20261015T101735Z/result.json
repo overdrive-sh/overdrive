@@ -1,0 +1,1135 @@
+{
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "G-65536": {
+   "trials": {
+    "total": 4,
+    "pass": 0,
+    "fail": {
+     "cli_short_no_eof": 4
+    },
+    "examples": [
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       1,
+       0,
+       65536,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       true,
+       null,
+       131072,
+       65536
+      ],
+      "srv": [
+       1,
+       0,
+       true,
+       true,
+       null,
+       65536,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       2,
+       0,
+       65536,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       false,
+       null,
+       131072,
+       65536
+      ],
+      "srv": [
+       2,
+       0,
+       true,
+       true,
+       null,
+       65536,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       4,
+       0,
+       65536,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       true,
+       null,
+       131072,
+       65536
+      ],
+      "srv": [
+       4,
+       0,
+       true,
+       true,
+       null,
+       65536,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       3,
+       0,
+       65536,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       false,
+       null,
+       131072,
+       65536
+      ],
+      "srv": [
+       3,
+       0,
+       true,
+       true,
+       null,
+       65536,
+       null,
+       false,
+       0,
+       0
+      ]
+     }
+    ]
+   },
+   "guest_live_at_end": 0,
+   "host_live_at_end": 0
+  },
+  "H-65536": {
+   "trials": {
+    "total": 4,
+    "pass": 0,
+    "fail": {
+     "srv_short_no_eof": 4
+    },
+    "examples": [
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       1,
+       65536,
+       0,
+       65536,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6002,
+       4294967295,
+       true,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       1,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       65536
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       2,
+       65536,
+       0,
+       65536,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6002,
+       4294967295,
+       false,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       2,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       65536
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       3,
+       65536,
+       0,
+       65536,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6002,
+       4294967295,
+       false,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       3,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       65536
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       4,
+       65536,
+       0,
+       65536,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6003,
+       4294967295,
+       true,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       4,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       65536
+      ]
+     }
+    ]
+   },
+   "guest_live_at_end": 0,
+   "host_live_at_end": 0
+  },
+  "G-131072": {
+   "trials": {
+    "total": 4,
+    "pass": 0,
+    "fail": {
+     "cli_short_no_eof": 4
+    },
+    "examples": [
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       1,
+       0,
+       131072,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       true,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       1,
+       0,
+       true,
+       true,
+       null,
+       131072,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       2,
+       0,
+       131072,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       false,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       2,
+       0,
+       true,
+       true,
+       null,
+       131072,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       3,
+       0,
+       131072,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       false,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       3,
+       0,
+       true,
+       true,
+       null,
+       131072,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       4,
+       0,
+       131072,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       true,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       4,
+       0,
+       true,
+       true,
+       null,
+       131072,
+       null,
+       false,
+       0,
+       0
+      ]
+     }
+    ]
+   },
+   "guest_live_at_end": 0,
+   "host_live_at_end": 0
+  },
+  "H-131072": {
+   "trials": {
+    "total": 4,
+    "pass": 0,
+    "fail": {
+     "srv_short_no_eof": 4
+    },
+    "examples": [
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       1,
+       131072,
+       0,
+       131072,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6004,
+       4294967295,
+       true,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       1,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       2,
+       131072,
+       0,
+       131072,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6004,
+       4294967295,
+       false,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       2,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       3,
+       131072,
+       0,
+       131072,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6005,
+       4294967295,
+       false,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       3,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       4,
+       131072,
+       0,
+       131072,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6005,
+       4294967295,
+       true,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       4,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     }
+    ]
+   },
+   "guest_live_at_end": 0,
+   "host_live_at_end": 0
+  },
+  "G-1048576": {
+   "trials": {
+    "total": 4,
+    "pass": 0,
+    "fail": {
+     "cli_short_no_eof": 4
+    },
+    "examples": [
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       1,
+       0,
+       1048576,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       true,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       1,
+       0,
+       true,
+       true,
+       null,
+       1048576,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       2,
+       0,
+       1048576,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       false,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       2,
+       0,
+       true,
+       true,
+       null,
+       1048576,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       3,
+       0,
+       1048576,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       false,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       3,
+       0,
+       true,
+       true,
+       null,
+       1048576,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       4,
+       0,
+       1048576,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       true,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       4,
+       0,
+       true,
+       true,
+       null,
+       1048576,
+       null,
+       false,
+       0,
+       0
+      ]
+     }
+    ]
+   },
+   "guest_live_at_end": 0,
+   "host_live_at_end": 0
+  },
+  "H-1048576": {
+   "trials": {
+    "total": 4,
+    "pass": 0,
+    "fail": {
+     "srv_short_no_eof": 4
+    },
+    "examples": [
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       1,
+       1048576,
+       0,
+       1048576,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6003,
+       4294967295,
+       true,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       1,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       2,
+       1048576,
+       0,
+       1048576,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6003,
+       4294967295,
+       false,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       2,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       3,
+       1048576,
+       0,
+       1048576,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6003,
+       4294967295,
+       false,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       3,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       4,
+       1048576,
+       0,
+       1048576,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6004,
+       4294967295,
+       true,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       4,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     }
+    ]
+   },
+   "guest_live_at_end": 0,
+   "host_live_at_end": 0
+  },
+  "G-4194304": {
+   "trials": {
+    "total": 4,
+    "pass": 0,
+    "fail": {
+     "cli_short_no_eof": 4
+    },
+    "examples": [
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       1,
+       0,
+       4194304,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       true,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       1,
+       0,
+       true,
+       true,
+       null,
+       4194304,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       3,
+       0,
+       4194304,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       false,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       3,
+       0,
+       true,
+       true,
+       null,
+       4194304,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       4,
+       0,
+       4194304,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       true,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       4,
+       0,
+       true,
+       true,
+       null,
+       4194304,
+       null,
+       false,
+       0,
+       0
+      ]
+     },
+     {
+      "why": "cli_short_no_eof",
+      "row": [
+       2,
+       0,
+       4194304,
+       0,
+       null,
+       0,
+       false,
+       false,
+       null,
+       6000,
+       0,
+       false,
+       null,
+       131072,
+       110228
+      ],
+      "srv": [
+       2,
+       0,
+       true,
+       true,
+       null,
+       4194304,
+       null,
+       false,
+       0,
+       0
+      ]
+     }
+    ]
+   },
+   "guest_live_at_end": 0,
+   "host_live_at_end": 0
+  },
+  "H-4194304": {
+   "trials": {
+    "total": 4,
+    "pass": 0,
+    "fail": {
+     "srv_short_no_eof": 4
+    },
+    "examples": [
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       1,
+       4194304,
+       0,
+       4194304,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6004,
+       4294967295,
+       true,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       1,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       2,
+       4194304,
+       0,
+       4194304,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6004,
+       4294967295,
+       false,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       2,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       4,
+       4194304,
+       0,
+       4194304,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6004,
+       4294967295,
+       true,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       4,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     },
+     {
+      "why": "srv_short_no_eof",
+      "row": [
+       3,
+       4194304,
+       0,
+       4194304,
+       null,
+       0,
+       true,
+       false,
+       "ECONNRESET",
+       6005,
+       4294967295,
+       false,
+       null,
+       0,
+       0
+      ],
+      "srv": [
+       3,
+       0,
+       false,
+       false,
+       null,
+       0,
+       null,
+       false,
+       131072,
+       112557
+      ]
+     }
+    ]
+   },
+   "guest_live_at_end": 0,
+   "host_live_at_end": 0
+  }
+ }
+}

@@ -1,0 +1,397 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}
+HB up=0.41 0.96 MemAvailable:822172 SUnreclaim:19532 
+HB up=1.42 4.97 MemAvailable:821996 SUnreclaim:19532 
+HB up=2.43 8.99 MemAvailable:821932 SUnreclaim:19680 
+HB up=3.43 13.00 MemAvailable:821808 SUnreclaim:19700 
+HB up=4.44 17.02 MemAvailable:823224 SUnreclaim:19700 
+HB up=5.45 21.03 MemAvailable:822976 SUnreclaim:19704 
+HB up=6.46 25.05 MemAvailable:826284 SUnreclaim:19704 
+HB up=7.46 29.06 MemAvailable:826400 SUnreclaim:19708 
+HB up=8.47 33.08 MemAvailable:829460 SUnreclaim:19708 
+HB up=9.48 37.10 MemAvailable:829260 SUnreclaim:19708 
+HB up=10.49 41.12 MemAvailable:832184 SUnreclaim:19708 
+HB up=11.49 45.13 MemAvailable:831952 SUnreclaim:19708 
+HB up=12.50 49.15 MemAvailable:833876 SUnreclaim:19712 
+HB up=13.51 53.17 MemAvailable:833784 SUnreclaim:19712 
+HB up=14.52 57.18 MemAvailable:834108 SUnreclaim:19712 
+HB up=15.52 61.20 MemAvailable:833836 SUnreclaim:19712 
+HB up=16.53 65.22 MemAvailable:833724 SUnreclaim:19744 
+HB up=17.54 69.23 MemAvailable:833624 SUnreclaim:19744 
+HB up=18.55 73.25 MemAvailable:833768 SUnreclaim:19744 
+HB up=19.55 77.27 MemAvailable:833644 SUnreclaim:19744 
+HB up=20.56 81.28 MemAvailable:833332 SUnreclaim:19744 
+HB up=21.57 85.30 MemAvailable:833128 SUnreclaim:19744 
+HB up=22.58 89.31 MemAvailable:832824 SUnreclaim:19748 
+HB up=23.58 93.33 MemAvailable:832700 SUnreclaim:19764 
+HB up=24.59 97.34 MemAvailable:832824 SUnreclaim:19764 
+HB up=25.60 101.36 MemAvailable:832588 SUnreclaim:19764 
+HB up=26.61 105.37 MemAvailable:832364 SUnreclaim:19764 
+HB up=27.61 109.39 MemAvailable:832340 SUnreclaim:19764 
+HB up=28.62 113.41 MemAvailable:832340 SUnreclaim:19764 
+HB up=29.63 117.42 MemAvailable:832128 SUnreclaim:19764 
+HB up=30.63 121.44 MemAvailable:832104 SUnreclaim:19764 
+HB up=31.64 125.45 MemAvailable:831868 SUnreclaim:19768 
+HB up=32.65 129.47 MemAvailable:831456 SUnreclaim:19768 
+HB up=33.66 133.49 MemAvailable:831400 SUnreclaim:19768 
+HB up=34.66 137.50 MemAvailable:831276 SUnreclaim:19768 
+HB up=35.67 141.52 MemAvailable:831540 SUnreclaim:19768 
+HB up=36.68 145.53 MemAvailable:831540 SUnreclaim:19768 
+HB up=37.69 149.55 MemAvailable:831540 SUnreclaim:19768 
+HB up=38.70 153.57 MemAvailable:831416 SUnreclaim:19768 
+HB up=39.70 157.58 MemAvailable:831192 SUnreclaim:19768 
+HB up=40.71 161.60 MemAvailable:831416 SUnreclaim:19768 
+HB up=41.72 165.61 MemAvailable:831616 SUnreclaim:19768 
+HB up=42.73 169.63 MemAvailable:831980 SUnreclaim:19768 
+HB up=43.73 173.65 MemAvailable:832116 SUnreclaim:19772 
+HB up=44.74 177.66 MemAvailable:832308 SUnreclaim:19776 
+HB up=45.75 181.68 MemAvailable:832196 SUnreclaim:19776 
+HB up=46.76 185.69 MemAvailable:831960 SUnreclaim:19776 
+HB up=47.77 189.71 MemAvailable:831860 SUnreclaim:19776 
+HB up=48.77 193.73 MemAvailable:831612 SUnreclaim:19780 
+HB up=49.78 197.74 MemAvailable:831352 SUnreclaim:19780 
+HB up=50.79 201.76 MemAvailable:831240 SUnreclaim:19812 
+HB up=51.80 205.78 MemAvailable:831016 SUnreclaim:19812 
+HB up=52.80 209.79 MemAvailable:830632 SUnreclaim:19828 
+HB up=53.81 213.81 MemAvailable:830632 SUnreclaim:19828 
+HB up=54.82 217.83 MemAvailable:830632 SUnreclaim:19828 
+HB up=55.83 221.84 MemAvailable:830296 SUnreclaim:19828 
+HB up=56.83 225.86 MemAvailable:830172 SUnreclaim:19836 
+HB up=57.84 229.88 MemAvailable:830036 SUnreclaim:19868 
+HB up=58.85 233.89 MemAvailable:829936 SUnreclaim:19868 
+HB up=59.86 237.91 MemAvailable:829800 SUnreclaim:19868 
+HB up=60.86 241.93 MemAvailable:829676 SUnreclaim:19868 
+HB up=61.87 245.95 MemAvailable:829564 SUnreclaim:19868 
+HB up=62.88 249.97 MemAvailable:829448 SUnreclaim:19868 
+HB up=63.89 253.98 MemAvailable:829448 SUnreclaim:19868 
+HB up=64.90 258.00 MemAvailable:829448 SUnreclaim:19872 
+HB up=65.90 262.02 MemAvailable:829348 SUnreclaim:19872 
+HB up=66.91 266.03 MemAvailable:829212 SUnreclaim:19872 
+HB up=67.92 270.05 MemAvailable:829148 SUnreclaim:19872 
+HB up=68.93 274.07 MemAvailable:829004 SUnreclaim:19904 
+HB up=69.93 278.09 MemAvailable:829004 SUnreclaim:19904 
+HB up=70.94 282.11 MemAvailable:829016 SUnreclaim:19904 
+HB up=71.95 286.12 MemAvailable:828792 SUnreclaim:19904 
+HB up=72.96 290.14 MemAvailable:829216 SUnreclaim:19904 
+HB up=73.96 294.15 MemAvailable:829488 SUnreclaim:19904 
+HB up=74.97 298.17 MemAvailable:829488 SUnreclaim:19904 
+HB up=75.98 302.19 MemAvailable:829612 SUnreclaim:19908 
+HB up=76.99 306.21 MemAvailable:829612 SUnreclaim:19908 
+HB up=77.99 310.22 MemAvailable:829600 SUnreclaim:19908 
+HB up=79.00 314.24 MemAvailable:829924 SUnreclaim:19908 
+HB up=80.01 318.26 MemAvailable:829924 SUnreclaim:19908 
+HB up=81.02 322.28 MemAvailable:830380 SUnreclaim:19908 
+HB up=82.02 326.29 MemAvailable:830380 SUnreclaim:19908 
+HB up=83.03 330.31 MemAvailable:830380 SUnreclaim:19908 
+HB up=84.04 334.33 MemAvailable:830268 SUnreclaim:19912 
+HB up=85.04 338.34 MemAvailable:830156 SUnreclaim:19912 
+HB up=86.05 342.36 MemAvailable:830032 SUnreclaim:19912 
+HB up=87.06 346.38 MemAvailable:829808 SUnreclaim:19912 
+HB up=88.07 350.39 MemAvailable:829808 SUnreclaim:19912 
+HB up=89.07 354.41 MemAvailable:829808 SUnreclaim:19912 
+HB up=90.08 358.43 MemAvailable:829808 SUnreclaim:19912 
+HB up=91.09 362.44 MemAvailable:829696 SUnreclaim:19912 
+HB up=92.10 366.46 MemAvailable:829696 SUnreclaim:19912 
+HB up=93.10 370.48 MemAvailable:829696 SUnreclaim:19912 
+HB up=94.11 374.50 MemAvailable:829584 SUnreclaim:19912 
+HB up=95.12 378.52 MemAvailable:829584 SUnreclaim:19916 
+HB up=96.13 382.53 MemAvailable:829584 SUnreclaim:19916 
+HB up=97.13 386.55 MemAvailable:829584 SUnreclaim:19916 
+HB up=98.14 390.57 MemAvailable:829584 SUnreclaim:19916 
+HB up=99.15 394.58 MemAvailable:829584 SUnreclaim:19916 
+HB up=100.16 398.60 MemAvailable:829584 SUnreclaim:19916 
+HB up=101.17 402.62 MemAvailable:829584 SUnreclaim:19916 
+HB up=102.17 406.64 MemAvailable:829472 SUnreclaim:19916 
+HB up=103.18 410.66 MemAvailable:829360 SUnreclaim:19916 
+HB up=104.19 414.67 MemAvailable:829360 SUnreclaim:19916 
+HB up=105.20 418.69 MemAvailable:829360 SUnreclaim:19916 
+HB up=106.20 422.71 MemAvailable:829360 SUnreclaim:19916 
+HB up=107.21 426.73 MemAvailable:829360 SUnreclaim:19916 
+HB up=108.22 430.74 MemAvailable:829248 SUnreclaim:19916 
+HB up=109.23 434.76 MemAvailable:829448 SUnreclaim:19916 
+HB up=110.23 438.78 MemAvailable:829468 SUnreclaim:19916 
+HB up=111.24 442.80 MemAvailable:829468 SUnreclaim:19916 
+HB up=112.25 446.81 MemAvailable:829468 SUnreclaim:19916 
+HB up=113.26 450.83 MemAvailable:829356 SUnreclaim:19916 
+HB up=114.27 454.85 MemAvailable:829244 SUnreclaim:19916 
+HB up=115.27 458.86 MemAvailable:829244 SUnreclaim:19916 
+HB up=116.28 462.88 MemAvailable:829244 SUnreclaim:19916 
+HB up=117.29 466.90 MemAvailable:829244 SUnreclaim:19916 
+HB up=118.30 470.91 MemAvailable:829244 SUnreclaim:19916 
+HB up=119.31 474.93 MemAvailable:829132 SUnreclaim:19916 
+HB up=120.31 478.95 MemAvailable:829132 SUnreclaim:19916 
+HB up=121.32 482.96 MemAvailable:829132 SUnreclaim:19916 
+HB up=122.33 486.98 MemAvailable:829132 SUnreclaim:19916 
+HB up=123.34 491.00 MemAvailable:829020 SUnreclaim:19916 
+HB up=124.34 495.01 MemAvailable:829020 SUnreclaim:19916 
+HB up=125.35 499.03 MemAvailable:828908 SUnreclaim:19916 
+HB up=126.36 503.05 MemAvailable:829032 SUnreclaim:19916 
+HB up=127.37 507.07 MemAvailable:828808 SUnreclaim:19916 
+HB up=128.38 511.08 MemAvailable:828708 SUnreclaim:19920 
+HB up=129.38 515.10 MemAvailable:828684 SUnreclaim:19928 
+HB up=130.39 519.12 MemAvailable:828472 SUnreclaim:19928 
+HB up=131.40 523.14 MemAvailable:828656 SUnreclaim:19928 
+HB up=132.41 527.15 MemAvailable:828520 SUnreclaim:19928 
+HB up=133.41 531.17 MemAvailable:828596 SUnreclaim:19928 
+HB up=134.42 535.19 MemAvailable:828680 SUnreclaim:19960 
+HB up=135.43 539.20 MemAvailable:828680 SUnreclaim:19960 
+HB up=136.44 543.22 MemAvailable:828680 SUnreclaim:19960 
+HB up=137.45 547.24 MemAvailable:828680 SUnreclaim:19960 
+HB up=138.45 551.25 MemAvailable:828468 SUnreclaim:19960 
+HB up=139.46 555.27 MemAvailable:828612 SUnreclaim:19960 
+HB up=140.47 559.29 MemAvailable:828504 SUnreclaim:19976 
+HB up=141.48 563.30 MemAvailable:828480 SUnreclaim:19976 
+HB up=142.48 567.32 MemAvailable:828564 SUnreclaim:19976 
+HB up=143.49 571.34 MemAvailable:828564 SUnreclaim:19980 
+HB up=144.50 575.35 MemAvailable:828564 SUnreclaim:19980 
+HB up=145.51 579.37 MemAvailable:828564 SUnreclaim:19980 
+HB up=146.51 583.39 MemAvailable:828452 SUnreclaim:19980 
+HB up=147.52 587.40 MemAvailable:828452 SUnreclaim:19980 
+HB up=148.53 591.42 MemAvailable:828548 SUnreclaim:19980 
+HB up=149.54 595.43 MemAvailable:828648 SUnreclaim:19980 
+HB up=150.54 599.45 MemAvailable:828720 SUnreclaim:19980 
+HB up=151.55 603.47 MemAvailable:828696 SUnreclaim:19988 
+HB up=152.56 607.49 MemAvailable:828728 SUnreclaim:19988 
+HB up=153.57 611.50 MemAvailable:828604 SUnreclaim:19988 
+HB up=154.57 615.52 MemAvailable:828524 SUnreclaim:19988 
+HB up=155.58 619.53 MemAvailable:828580 SUnreclaim:19988 
+HB up=156.59 623.55 MemAvailable:828628 SUnreclaim:19988 
+HB up=157.59 627.56 MemAvailable:828748 SUnreclaim:19992 
+HB up=158.60 631.58 MemAvailable:828624 SUnreclaim:19992 
+HB up=159.61 635.59 MemAvailable:828400 SUnreclaim:19992 
+HB up=160.62 639.61 MemAvailable:828400 SUnreclaim:19992 
+HB up=161.62 643.63 MemAvailable:828400 SUnreclaim:19992 
+HB up=162.63 647.65 MemAvailable:828400 SUnreclaim:19996 
+HB up=163.64 651.66 MemAvailable:828400 SUnreclaim:19996 
+HB up=164.65 655.68 MemAvailable:828176 SUnreclaim:19996 
+HB up=165.66 659.70 MemAvailable:828428 SUnreclaim:19996 
+HB up=166.66 663.72 MemAvailable:828560 SUnreclaim:19996 
+HB up=167.67 667.73 MemAvailable:828560 SUnreclaim:19996 
+HB up=168.68 671.75 MemAvailable:828560 SUnreclaim:20000 
+HB up=169.69 675.77 MemAvailable:828560 SUnreclaim:20000 
+HB up=170.69 679.79 MemAvailable:828448 SUnreclaim:20000 
+HB up=171.70 683.80 MemAvailable:828448 SUnreclaim:20000 
+HB up=172.71 687.82 MemAvailable:828448 SUnreclaim:20000 
+HB up=173.72 691.84 MemAvailable:828448 SUnreclaim:20000 
+HB up=174.73 695.85 MemAvailable:828336 SUnreclaim:20000 
+HB up=175.73 699.87 MemAvailable:828224 SUnreclaim:20000 
+HB up=176.74 703.89 MemAvailable:828224 SUnreclaim:20000 
+HB up=177.75 707.91 MemAvailable:828112 SUnreclaim:20000 
+HB up=178.76 711.93 MemAvailable:828000 SUnreclaim:20000 
+HB up=179.76 715.94 MemAvailable:828000 SUnreclaim:20000 
+HB up=180.77 719.96 MemAvailable:828000 SUnreclaim:20000 
+HB up=181.78 723.97 MemAvailable:828124 SUnreclaim:20000 
+HB up=182.79 727.99 MemAvailable:828012 SUnreclaim:20000 
+HB up=183.80 732.01 MemAvailable:828392 SUnreclaim:20000 
+HB up=184.80 736.03 MemAvailable:828524 SUnreclaim:20000 
+HB up=185.81 740.05 MemAvailable:828808 SUnreclaim:20004 
+HB up=186.82 744.06 MemAvailable:829052 SUnreclaim:20004 
+HB up=187.83 748.08 MemAvailable:828940 SUnreclaim:20004 
+HB up=188.83 752.09 MemAvailable:828940 SUnreclaim:20004 
+HB up=189.84 756.11 MemAvailable:829172 SUnreclaim:20004 
+HB up=190.85 760.13 MemAvailable:829296 SUnreclaim:20004 
+HB up=191.86 764.14 MemAvailable:829196 SUnreclaim:20004 
+HB up=192.86 768.16 MemAvailable:829444 SUnreclaim:20004 
+HB up=193.87 772.18 MemAvailable:829596 SUnreclaim:20004 
+HB up=194.88 776.19 MemAvailable:829800 SUnreclaim:20004 
+HB up=195.89 780.21 MemAvailable:829956 SUnreclaim:20004 
+HB up=196.89 784.23 MemAvailable:829956 SUnreclaim:20004 
+HB up=197.90 788.25 MemAvailable:829956 SUnreclaim:20004 
+HB up=198.91 792.26 MemAvailable:829844 SUnreclaim:20008 
+HB up=199.92 796.28 MemAvailable:829732 SUnreclaim:20008 
+HB up=200.92 800.29 MemAvailable:829732 SUnreclaim:20008 
+HB up=201.93 804.31 MemAvailable:829732 SUnreclaim:20008 
+HB up=202.94 808.33 MemAvailable:829836 SUnreclaim:20008 
+HB up=203.95 812.35 MemAvailable:830088 SUnreclaim:20008 
+HB up=204.95 816.37 MemAvailable:830088 SUnreclaim:20008 
+HB up=205.96 820.38 MemAvailable:830088 SUnreclaim:20008 
+HB up=206.97 824.40 MemAvailable:829864 SUnreclaim:20008 
+HB up=207.98 828.42 MemAvailable:829864 SUnreclaim:20008 
+{"ev":"sink_ready","label":"ek-unloadaftf-T","kind":"tcpsrc","uname":"7.0.0-29-generic","port":7387,"bytes":268435456,"app":"f","back":0,"eof":true,"ntasks":84}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":8,"src_inq":94336,"tgt_outq":65536,"peer_inq":151989,"ap_outq":1795264,"pipe":311861,"app_read":607755,"moved":825280,"stall_dst":0,"stall_src":2,"mem_avail_kb":827752,"sunreclaim_kb":20152,"skb_head":367}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":60,"src_inq":51990,"tgt_outq":73406,"peer_inq":51990,"ap_outq":776457,"pipe":177386,"app_read":30825441,"moved":30877431,"stall_dst":0,"stall_src":114,"mem_avail_kb":822072,"sunreclaim_kb":20400,"skb_head":367}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":111,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":65483,"pipe":0,"app_read":65929216,"moved":65929216,"stall_dst":1,"stall_src":195,"mem_avail_kb":812824,"sunreclaim_kb":20436,"skb_head":423}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":162,"src_inq":523970,"tgt_outq":0,"peer_inq":0,"ap_outq":4191336,"pipe":523970,"app_read":102367232,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":813208,"sunreclaim_kb":20444,"skb_head":423}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":213,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":32768,"pipe":0,"app_read":119078912,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":812424,"sunreclaim_kb":19964,"skb_head":423}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":263,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":65483,"pipe":0,"app_read":161284096,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":812424,"sunreclaim_kb":19964,"skb_head":423}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":314,"src_inq":0,"tgt_outq":65483,"peer_inq":65483,"ap_outq":32768,"pipe":130966,"app_read":212205568,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":812424,"sunreclaim_kb":19964,"skb_head":423}
+HB up=208.99 831.63 MemAvailable:812312 SUnreclaim:19964 
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":365,"src_inq":524076,"tgt_outq":131019,"peer_inq":0,"ap_outq":1703088,"pipe":655095,"app_read":265289675,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":812312,"sunreclaim_kb":19964,"skb_head":423}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":416,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":268435456,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":812792,"sunreclaim_kb":19964,"skb_head":423}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":468,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":268435456,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":812792,"sunreclaim_kb":19964,"skb_head":423}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":519,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":268435456,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":812792,"sunreclaim_kb":19964,"skb_head":423}
+{"ev":"sample","label":"ek-unloadaftf-T","trial":0,"t_ms":570,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":268435456,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":812792,"sunreclaim_kb":19964,"skb_head":423}
+HB up=209.99 835.57 MemAvailable:814428 SUnreclaim:19984 
+{"ev":"trial_end","label":"ek-unloadaftf-T","kind":"tcpsrc","trial":0,"outcome":"complete","secs":0.577,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"eof_seen":true,"extra":0,"reader_first_byte_ns":208635561429,"reader_done_ns":209003397944,"reader_mibps":696.0,"stall_ends":[],"t0_ns":208627615029,"off_ns":0,"peak_pipe":655095,"peak_src_inq":524076,"peak_tgt_outq":131019,"peak_peer_inq":151989,"peak_ap_outq":4191336,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":{"sent":268435456,"secs":0.360,"max_send_ms":31,"sent_at_longest_block_start":106561536,"outcome":"done","end_ns":208993512426,"blocks":[]},"back_writer":null,"back":{"bytes":0,"ok":true,"first_bad":-1,"eof_seen":false,"extra":0},"avail_start_kb":829864,"min_avail_kb":812312,"avail_end_kb":812792,"avail_after_close_kb":814744,"sunreclaim_start_kb":20024,"max_sunreclaim_kb":20444,"sunreclaim_end_kb":19964,"sunreclaim_after_close_kb":19984,"max_skb_head":423,"tasks_start":84,"tasks_max":85,"sys_busy_ms":770,"reader_end":"bytes","x":{"ktls_mask":3,"ktls_order":"after","ktls_err":"target:TCP_ULP tls: No such file or directory (os error 2);source:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":150,"rc":0,"ms":32,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=734 kicks=1892 queued=735 requeue=253 bytes_v2t=0 bytes_t2v=0 bytes_t2t=101777408 stall_dst=1 stall_src=481 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":166068224,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=211.00 839.15 MemAvailable:819664 SUnreclaim:20168 
+HB up=212.01 842.73 MemAvailable:817088 SUnreclaim:20192 
+{"ev":"trial_end","label":"ek-unloadaftf-T","kind":"tcpsrc","trial":1,"outcome":"complete","secs":0.563,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"eof_seen":true,"extra":0,"reader_first_byte_ns":210811213301,"reader_done_ns":211170027173,"reader_mibps":713.5,"stall_ends":[],"t0_ns":210808814683,"off_ns":0,"peak_pipe":565815,"peak_src_inq":565815,"peak_tgt_outq":109184,"peak_peer_inq":239872,"peak_ap_outq":2955481,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":{"sent":268435456,"secs":0.357,"max_send_ms":20,"sent_at_longest_block_start":94175232,"outcome":"done","end_ns":211166110999,"blocks":[]},"back_writer":null,"back":{"bytes":0,"ok":true,"first_bad":-1,"eof_seen":false,"extra":0},"avail_start_kb":815696,"min_avail_kb":811376,"avail_end_kb":815088,"avail_after_close_kb":817032,"sunreclaim_start_kb":20636,"max_sunreclaim_kb":20664,"sunreclaim_end_kb":20172,"sunreclaim_after_close_kb":20192,"max_skb_head":423,"tasks_start":84,"tasks_max":85,"sys_busy_ms":750,"reader_end":"bytes","x":{"ktls_mask":3,"ktls_order":"after","ktls_err":"target:TCP_ULP tls: No such file or directory (os error 2);source:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":150,"rc":0,"ms":20,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=448 kicks=1289 queued=449 requeue=264 bytes_v2t=0 bytes_t2v=0 bytes_t2t=91101161 stall_dst=0 stall_src=184 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":176975851,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=213.01 846.46 MemAvailable:811352 SUnreclaim:20752 
+HB up=214.02 849.96 MemAvailable:811372 SUnreclaim:20240 
+{"ev":"trial_end","label":"ek-unloadaftf-T","kind":"tcpsrc","trial":2,"outcome":"complete","secs":0.523,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"eof_seen":true,"extra":0,"reader_first_byte_ns":212933105946,"reader_done_ns":213251706288,"reader_mibps":803.5,"stall_ends":[],"t0_ns":212931397704,"off_ns":0,"peak_pipe":589453,"peak_src_inq":589453,"peak_tgt_outq":422826,"peak_peer_inq":128150,"peak_ap_outq":3773504,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":{"sent":268435456,"secs":0.320,"max_send_ms":27,"sent_at_longest_block_start":136708096,"outcome":"done","end_ns":213251636674,"blocks":[]},"back_writer":null,"back":{"bytes":0,"ok":true,"first_bad":-1,"eof_seen":false,"extra":0},"avail_start_kb":815752,"min_avail_kb":808088,"avail_end_kb":808696,"avail_after_close_kb":811152,"sunreclaim_start_kb":20732,"max_sunreclaim_kb":20752,"sunreclaim_end_kb":20240,"sunreclaim_after_close_kb":20240,"max_skb_head":423,"tasks_start":84,"tasks_max":85,"sys_busy_ms":710,"reader_end":"bytes","x":{"ktls_mask":3,"ktls_order":"after","ktls_err":"target:TCP_ULP tls: No such file or directory (os error 2);source:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":150,"rc":0,"ms":27,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=579 kicks=1774 queued=580 requeue=452 bytes_v2t=0 bytes_t2v=0 bytes_t2t=131596288 stall_dst=0 stall_src=128 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":135921664,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=215.03 853.87 MemAvailable:810160 SUnreclaim:20240 
+HB up=216.04 857.20 MemAvailable:811160 SUnreclaim:20344 
+HB up=217.04 861.21 MemAvailable:812244 SUnreclaim:20344 
+{"ev":"trial_end","label":"ek-unloadaftf-T","kind":"tcpsrc","trial":3,"outcome":"complete","secs":0.517,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"eof_seen":true,"extra":0,"reader_first_byte_ns":215053956267,"reader_done_ns":215365483230,"reader_mibps":821.8,"stall_ends":[],"t0_ns":215051646002,"off_ns":0,"peak_pipe":565552,"peak_src_inq":536737,"peak_tgt_outq":65536,"peak_peer_inq":127680,"peak_ap_outq":4169911,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":{"sent":268435456,"secs":0.311,"max_send_ms":21,"sent_at_longest_block_start":95813632,"outcome":"done","end_ns":215363026134,"blocks":[]},"back_writer":null,"back":{"bytes":0,"ok":true,"first_bad":-1,"eof_seen":false,"extra":0},"avail_start_kb":809648,"min_avail_kb":804720,"avail_end_kb":807984,"avail_after_close_kb":812340,"sunreclaim_start_kb":20752,"max_sunreclaim_kb":20816,"sunreclaim_end_kb":20344,"sunreclaim_after_close_kb":20344,"max_skb_head":423,"tasks_start":84,"tasks_max":86,"sys_busy_ms":680,"reader_end":"bytes","x":{"ktls_mask":3,"ktls_order":"after","ktls_err":"target:TCP_ULP tls: No such file or directory (os error 2);source:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":150,"rc":0,"ms":22,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=444 kicks=1265 queued=444 requeue=275 bytes_v2t=0 bytes_t2v=0 bytes_t2t=89980928 stall_dst=0 stall_src=169 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":177078272,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=218.05 864.48 MemAvailable:818724 SUnreclaim:20388 
+HB up=219.06 868.50 MemAvailable:818500 SUnreclaim:20388 
+{"ev":"trial_end","label":"ek-unloadaftf-T","kind":"tcpsrc","trial":4,"outcome":"complete","secs":0.519,"bytes":268435456,"app_read":268435456,"app_ok":true,"first_bad":-1,"hash":18127672720111336350,"ehash":18127672720111336350,"eof_seen":true,"extra":0,"reader_first_byte_ns":217172199558,"reader_done_ns":217488168113,"reader_mibps":810.2,"stall_ends":[],"t0_ns":217169838326,"off_ns":0,"peak_pipe":355254,"peak_src_inq":322486,"peak_tgt_outq":131072,"peak_peer_inq":65483,"peak_ap_outq":2637037,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":{"sent":268435456,"secs":0.316,"max_send_ms":23,"sent_at_longest_block_start":92667904,"outcome":"done","end_ns":217486542695,"blocks":[]},"back_writer":null,"back":{"bytes":0,"ok":true,"first_bad":-1,"eof_seen":false,"extra":0},"avail_start_kb":811060,"min_avail_kb":811060,"avail_end_kb":818724,"avail_after_close_kb":818748,"sunreclaim_start_kb":20856,"max_sunreclaim_kb":20864,"sunreclaim_end_kb":20388,"sunreclaim_after_close_kb":20388,"max_skb_head":451,"tasks_start":85,"tasks_max":86,"sys_busy_ms":680,"reader_end":"bytes","x":{"ktls_mask":3,"ktls_order":"after","ktls_err":"target:TCP_ULP tls: No such file or directory (os error 2);source:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":150,"rc":0,"ms":23,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=405 kicks=1249 queued=406 requeue=264 bytes_v2t=0 bytes_t2v=0 bytes_t2t=89758388 stall_dst=0 stall_src=141 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":178349706,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=220.07 872.46 MemAvailable:820240 SUnreclaim:20388 
+{"ev":"leak_check","label":"ek-unloadaftf-T","module_loaded":false,"avail_delta_kb":-9736,"sunreclaim_delta_kb":364,"slab_delta_kb":380,"named_start_end":{"AF_VSOCK":[24,24],"TCP":[0,12],"sock_inode_cache":[84,84],"skbuff_head_cache":[367,535],"skbuff_fclone_cache":[0,0],"skbuff_small_head":[112,224]},"slab_objs_delta_top":{"vmap_area":-240,"pool_workqueue":196,"file_lock_cache":180,"pde_opener":180,"skbuff_head_cache":168,"maple_node":160,"eventpoll_epi":120,"kernfs_node_cache":120,"kmalloc-rnd-02-16":120,"kmalloc-rnd-03-32":120,"kmalloc-rnd-03-8":120,"kmalloc-rnd-08-32":120}}
+{"ev":"sink_done","label":"ek-unloadaftf-T","t_ms":12122}
+HB up=221.07 876.43 MemAvailable:820624 SUnreclaim:20388 
+{"ev":"sink_ready","label":"ek-unloadaft-A","kind":"vsock","uname":"7.0.0-29-generic","port":7376,"bytes":67108864,"app":"s2500,f","back":0,"eof":true,"ntasks":85}
+HB up=222.08 880.42 MemAvailable:819936 SUnreclaim:20900 
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":9,"src_inq":234240,"tgt_outq":2616603,"peer_inq":112704,"ap_outq":0,"pipe":2963547,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21028,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":61,"src_inq":234240,"tgt_outq":2536640,"peer_inq":112704,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21052,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":112,"src_inq":234240,"tgt_outq":2536640,"peer_inq":112704,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21052,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":163,"src_inq":234240,"tgt_outq":2536640,"peer_inq":112704,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21052,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":215,"src_inq":234240,"tgt_outq":2536640,"peer_inq":112704,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21052,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":267,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21052,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":319,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21052,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":370,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21052,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":422,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819980,"sunreclaim_kb":21052,"skb_head":535}
+HB up=223.09 884.25 MemAvailable:819868 SUnreclaim:21116 
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":474,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819868,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":525,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":576,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":627,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":678,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":729,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":780,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":831,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":882,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":933,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":984,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1035,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1086,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":819884,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1137,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":820712,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1188,"src_inq":234240,"tgt_outq":2522176,"peer_inq":127168,"ap_outq":0,"pipe":2883584,"app_read":0,"moved":2649344,"stall_dst":2,"stall_src":57,"mem_avail_kb":820712,"sunreclaim_kb":21116,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1239,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821224,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1290,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821224,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1341,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821224,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1392,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821224,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1443,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821224,"sunreclaim_kb":20476,"skb_head":535}
+HB up=224.10 887.97 MemAvailable:820912 SUnreclaim:20476 
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1494,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1545,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1596,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1647,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1698,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1749,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1800,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1851,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1902,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":1953,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2004,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2055,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2107,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":821056,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2158,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":822236,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2209,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":822236,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2259,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":822236,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2310,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":822236,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2361,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":822236,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2412,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":822236,"sunreclaim_kb":20476,"skb_head":535}
+HB up=225.10 891.77 MemAvailable:822236 SUnreclaim:20476 
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2463,"src_inq":103168,"tgt_outq":2616512,"peer_inq":127168,"ap_outq":0,"pipe":2846848,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":822136,"sunreclaim_kb":20476,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2514,"src_inq":131072,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":131072,"app_read":9109504,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":827188,"sunreclaim_kb":20452,"skb_head":563}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2565,"src_inq":29856,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":29856,"app_read":38535168,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":823156,"sunreclaim_kb":20516,"skb_head":563}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2617,"src_inq":0,"tgt_outq":1,"peer_inq":0,"ap_outq":0,"pipe":1,"app_read":67108864,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":824116,"sunreclaim_kb":20484,"skb_head":563}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2669,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":67108864,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":824116,"sunreclaim_kb":20484,"skb_head":563}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2720,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":67108864,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":824116,"sunreclaim_kb":20484,"skb_head":563}
+{"ev":"sample","label":"ek-unloadaft-A","trial":0,"t_ms":2771,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":67108864,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":824116,"sunreclaim_kb":20484,"skb_head":563}
+HB up=226.11 895.55 MemAvailable:824104 SUnreclaim:20484 
+{"ev":"trial_end","label":"ek-unloadaft-A","kind":"vsock","trial":0,"outcome":"complete","secs":2.798,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"eof_seen":true,"extra":0,"reader_first_byte_ns":225153022399,"reader_done_ns":225246480353,"reader_mibps":684.8,"stall_ends":[[225152916710,0]],"t0_ns":222650304686,"off_ns":0,"peak_pipe":2963547,"peak_src_inq":234240,"peak_tgt_outq":2616603,"peak_peer_inq":127168,"peak_ap_outq":0,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":null,"back_writer":null,"back":null,"avail_start_kb":819980,"min_avail_kb":819868,"avail_end_kb":824116,"avail_after_close_kb":824316,"sunreclaim_start_kb":20900,"max_sunreclaim_kb":21116,"sunreclaim_end_kb":20484,"sunreclaim_after_close_kb":20484,"max_skb_head":563,"tasks_start":85,"tasks_max":85,"sys_busy_ms":420,"reader_end":"bytes","x":{"ktls_mask":1,"ktls_order":"after","ktls_err":"target:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":1200,"rc":0,"ms":22,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=35 kicks=1610 queued=35 requeue=1 bytes_v2t=2649344 bytes_t2v=0 bytes_t2t=0 stall_dst=2 stall_src=57 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":64459520,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=227.12 899.42 MemAvailable:829440 SUnreclaim:21140 
+HB up=228.12 903.41 MemAvailable:829564 SUnreclaim:21140 
+HB up=229.13 907.39 MemAvailable:829980 SUnreclaim:20628 
+HB up=230.14 911.20 MemAvailable:828584 SUnreclaim:20532 
+HB up=231.15 915.22 MemAvailable:828484 SUnreclaim:20532 
+{"ev":"trial_end","label":"ek-unloadaft-A","kind":"vsock","trial":1,"outcome":"complete","secs":2.806,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"eof_seen":true,"extra":0,"reader_first_byte_ns":229499148196,"reader_done_ns":229604043206,"reader_mibps":610.1,"stall_ends":[[229499066564,0]],"t0_ns":226998422942,"off_ns":0,"peak_pipe":2883584,"peak_src_inq":234240,"peak_tgt_outq":2616512,"peak_peer_inq":138368,"peak_ap_outq":0,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":null,"back_writer":null,"back":null,"avail_start_kb":822952,"min_avail_kb":822952,"avail_end_kb":828584,"avail_after_close_kb":828460,"sunreclaim_start_kb":21028,"max_sunreclaim_kb":21140,"sunreclaim_end_kb":20532,"sunreclaim_after_close_kb":20532,"max_skb_head":563,"tasks_start":85,"tasks_max":87,"sys_busy_ms":240,"reader_end":"bytes","x":{"ktls_mask":1,"ktls_order":"after","ktls_err":"target:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":1200,"rc":0,"ms":21,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=35 kicks=1611 queued=35 requeue=1 bytes_v2t=2649344 bytes_t2v=0 bytes_t2t=0 stall_dst=2 stall_src=57 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":64459520,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=232.15 919.15 MemAvailable:827068 SUnreclaim:21140 
+HB up=233.16 923.13 MemAvailable:827644 SUnreclaim:20628 
+HB up=234.17 926.92 MemAvailable:831328 SUnreclaim:20540 
+HB up=235.17 930.93 MemAvailable:831560 SUnreclaim:20508 
+{"ev":"trial_end","label":"ek-unloadaft-A","kind":"vsock","trial":2,"outcome":"complete","secs":2.808,"bytes":67108864,"app_read":67108864,"app_ok":true,"first_bad":-1,"hash":16227903447944583845,"ehash":16227903447944583845,"eof_seen":true,"extra":0,"reader_first_byte_ns":233855457319,"reader_done_ns":233960465879,"reader_mibps":609.5,"stall_ends":[[233855377239,0]],"t0_ns":231353501489,"off_ns":0,"peak_pipe":2883584,"peak_src_inq":234240,"peak_tgt_outq":2616512,"peak_peer_inq":127168,"peak_ap_outq":0,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":null,"back_writer":null,"back":null,"avail_start_kb":827180,"min_avail_kb":827068,"avail_end_kb":831228,"avail_after_close_kb":831764,"sunreclaim_start_kb":21044,"max_sunreclaim_kb":21172,"sunreclaim_end_kb":20532,"sunreclaim_after_close_kb":20508,"max_skb_head":563,"tasks_start":86,"tasks_max":87,"sys_busy_ms":240,"reader_end":"bytes","x":{"ktls_mask":1,"ktls_order":"after","ktls_err":"target:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":1200,"rc":0,"ms":26,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=28 kicks=1608 queued=28 requeue=1 bytes_v2t=2649344 bytes_t2v=0 bytes_t2t=0 stall_dst=2 stall_src=47 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":64459520,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=236.18 934.90 MemAvailable:831652 SUnreclaim:20508 
+{"ev":"leak_check","label":"ek-unloadaft-A","module_loaded":false,"avail_delta_kb":12528,"sunreclaim_delta_kb":-392,"slab_delta_kb":-392,"named_start_end":{"AF_VSOCK":[24,24],"TCP":[12,12],"sock_inode_cache":[84,84],"skbuff_head_cache":[535,535],"skbuff_fclone_cache":[0,0],"skbuff_small_head":[224,224]},"slab_objs_delta_top":{"filp":60,"kmalloc-rnd-02-128":60,"kmalloc-rnd-02-192":60,"kmalloc-rnd-13-4k":-60,"lsm_file_cache":60,"maple_node":32,"kmalloc-rnd-02-256":28,"kmalloc-rnd-05-512":28,"tw_sock_TCP":28}}
+{"ev":"sink_done","label":"ek-unloadaft-A","t_ms":16024}
+HB up=237.19 938.87 MemAvailable:831652 SUnreclaim:20508 
+HB up=238.20 942.89 MemAvailable:830260 SUnreclaim:21020 
+HB up=239.21 946.90 MemAvailable:830428 SUnreclaim:21020 
+{"ev":"sink_ready","label":"ek-unloadaft-G","kind":"tcp2vsock","uname":"7.0.0-29-generic","port":7396,"bytes":67108864,"app":"s2500,f","back":0,"eof":true,"ntasks":85}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":8,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828860,"sunreclaim_kb":21120,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":59,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":110,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":162,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":213,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":264,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":315,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":366,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":417,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":468,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":519,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":570,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":621,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":672,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":723,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":774,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":825,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":876,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":927,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":978,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+HB up=240.22 950.64 MemAvailable:828520 SUnreclaim:21144 
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1029,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1080,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1131,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1182,"src_inq":83520,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":83520,"app_read":0,"moved":262144,"stall_dst":3,"stall_src":2,"mem_avail_kb":828520,"sunreclaim_kb":21144,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1233,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2303680,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829032,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1284,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829032,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1335,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829032,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1386,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829032,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1437,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829032,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1488,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829032,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1539,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829032,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1590,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829500,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1641,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829500,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1693,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829500,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1744,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829500,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1795,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829500,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1847,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829624,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1898,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829624,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":1949,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829624,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2001,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829624,"sunreclaim_kb":20632,"skb_head":535}
+HB up=241.23 954.37 MemAvailable:829512 SUnreclaim:20632 
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2052,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2104,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2155,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2206,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2258,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2309,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2360,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2412,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2463,"src_inq":112320,"tgt_outq":0,"peer_inq":0,"ap_outq":2209344,"pipe":112320,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":829512,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2514,"src_inq":154496,"tgt_outq":0,"peer_inq":0,"ap_outq":2595737,"pipe":154496,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":828632,"sunreclaim_kb":20632,"skb_head":535}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2565,"src_inq":0,"tgt_outq":589824,"peer_inq":0,"ap_outq":32714,"pipe":589824,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":836388,"sunreclaim_kb":20728,"skb_head":507}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2616,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":1,"pipe":0,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":836692,"sunreclaim_kb":20728,"skb_head":507}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2667,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":836692,"sunreclaim_kb":20728,"skb_head":507}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2719,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":836692,"sunreclaim_kb":20728,"skb_head":507}
+{"ev":"sample","label":"ek-unloadaft-G","trial":0,"t_ms":2769,"src_inq":0,"tgt_outq":0,"peer_inq":0,"ap_outq":0,"pipe":0,"app_read":0,"moved":0,"stall_dst":0,"stall_src":0,"mem_avail_kb":836692,"sunreclaim_kb":20728,"skb_head":507}
+HB up=242.23 958.02 MemAvailable:836692 SUnreclaim:20728 
+HB up=243.24 962.04 MemAvailable:836692 SUnreclaim:20728 
+{"ev":"trial_end","label":"ek-unloadaft-G","kind":"tcp2vsock","trial":0,"outcome":"complete","secs":2.809,"bytes":67108864,"app_read":0,"app_ok":false,"first_bad":-2,"hash":0,"ehash":0,"eof_seen":false,"extra":0,"reader_first_byte_ns":0,"reader_done_ns":0,"reader_mibps":0.0,"stall_ends":[],"t0_ns":239225062139,"off_ns":11094155527379,"peak_pipe":589824,"peak_src_inq":154496,"peak_tgt_outq":589824,"peak_peer_inq":0,"peak_ap_outq":2595737,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":{"sent":67108864,"secs":2.602,"max_send_ms":2492,"sent_at_longest_block_start":2621440,"outcome":"done","end_ns":241832824076,"blocks":[[241725657789,2492]]},"back_writer":null,"back":{"bytes":0,"ok":true,"first_bad":-1,"eof_seen":false,"extra":0},"avail_start_kb":830428,"min_avail_kb":828520,"avail_end_kb":836692,"avail_after_close_kb":836692,"sunreclaim_start_kb":21020,"max_sunreclaim_kb":21144,"sunreclaim_end_kb":20728,"sunreclaim_after_close_kb":20728,"max_skb_head":535,"tasks_start":86,"tasks_max":86,"sys_busy_ms":380,"reader_end":"none","x":{"ktls_mask":2,"ktls_order":"after","ktls_err":"source:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":1200,"rc":0,"ms":22,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=4 kicks=14 queued=4 requeue=1 bytes_v2t=0 bytes_t2v=262144 bytes_t2t=0 stall_dst=3 stall_src=2 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":66846720,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=244.25 965.92 MemAvailable:832548 SUnreclaim:21252 
+HB up=245.26 969.91 MemAvailable:833060 SUnreclaim:20740 
+HB up=246.26 973.76 MemAvailable:835564 SUnreclaim:20848 
+HB up=247.27 977.77 MemAvailable:835596 SUnreclaim:20784 
+{"ev":"trial_end","label":"ek-unloadaft-G","kind":"tcp2vsock","trial":1,"outcome":"complete","secs":2.802,"bytes":67108864,"app_read":0,"app_ok":false,"first_bad":-2,"hash":0,"ehash":0,"eof_seen":false,"extra":0,"reader_first_byte_ns":0,"reader_done_ns":0,"reader_mibps":0.0,"stall_ends":[],"t0_ns":243594416279,"off_ns":11094155556286,"peak_pipe":207872,"peak_src_inq":207872,"peak_tgt_outq":65536,"peak_peer_inq":0,"peak_ap_outq":2587840,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":{"sent":67108864,"secs":2.600,"max_send_ms":2497,"sent_at_longest_block_start":2883584,"outcome":"done","end_ns":246194897955,"blocks":[[246094845038,2497]]},"back_writer":null,"back":{"bytes":0,"ok":true,"first_bad":-1,"eof_seen":false,"extra":0},"avail_start_kb":835348,"min_avail_kb":832548,"avail_end_kb":835564,"avail_after_close_kb":835596,"sunreclaim_start_kb":21240,"max_sunreclaim_kb":21252,"sunreclaim_end_kb":20848,"sunreclaim_after_close_kb":20784,"max_skb_head":507,"tasks_start":86,"tasks_max":87,"sys_busy_ms":210,"reader_end":"none","x":{"ktls_mask":2,"ktls_order":"after","ktls_err":"source:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":1200,"rc":0,"ms":22,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=5 kicks=14 queued=5 requeue=1 bytes_v2t=0 bytes_t2v=262144 bytes_t2t=0 stall_dst=4 stall_src=2 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":66846720,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=248.28 981.67 MemAvailable:831156 SUnreclaim:21296 
+HB up=249.28 985.66 MemAvailable:831668 SUnreclaim:20784 
+HB up=250.29 989.65 MemAvailable:831556 SUnreclaim:20784 
+HB up=251.30 993.49 MemAvailable:836844 SUnreclaim:20812 
+{"ev":"trial_end","label":"ek-unloadaft-G","kind":"tcp2vsock","trial":2,"outcome":"complete","secs":2.800,"bytes":67108864,"app_read":0,"app_ok":false,"first_bad":-2,"hash":0,"ehash":0,"eof_seen":false,"extra":0,"reader_first_byte_ns":0,"reader_done_ns":0,"reader_mibps":0.0,"stall_ends":[],"t0_ns":247957545632,"off_ns":11094155581557,"peak_pipe":197504,"peak_src_inq":135168,"peak_tgt_outq":131072,"peak_peer_inq":0,"peak_ap_outq":2592384,"src_inq_end":0,"tgt_outq_end":0,"moved":0,"stall_dst":0,"stall_src":0,"runs":0,"requeue":0,"err":0,"aborted":0,"completed":0,"live_end":0,"held_max":0,"short_consume":0,"fault_hits":0,"eof_fwd":0,"detached":false,"writer":{"sent":67108864,"secs":2.597,"max_send_ms":2498,"sent_at_longest_block_start":2949120,"outcome":"done","end_ns":250554852576,"blocks":[[250458392588,2498]]},"back_writer":null,"back":{"bytes":0,"ok":true,"first_bad":-1,"eof_seen":false,"extra":0},"avail_start_kb":834132,"min_avail_kb":831156,"avail_end_kb":836844,"avail_after_close_kb":836844,"sunreclaim_start_kb":21296,"max_sunreclaim_kb":21296,"sunreclaim_end_kb":20812,"sunreclaim_after_close_kb":20812,"max_skb_head":507,"tasks_start":86,"tasks_max":88,"sys_busy_ms":210,"reader_end":"none","x":{"ktls_mask":2,"ktls_order":"after","ktls_err":"source:TCP_ULP tls: No such file or directory (os error 2);","tls_alert":false,"ss_ulp":"","tls_stat_before":{},"tls_stat_after":{},"unload":{"after_ms":1200,"rc":0,"ms":22,"info":"live=1 attached=1 detached=0 completed=0 aborted=0 err=0 runs=6 kicks=17 queued=6 requeue=0 bytes_v2t=0 bytes_t2v=262144 bytes_t2t=0 stall_dst=3 stall_src=5 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=65536 pair_size=248 buf_bytes=65536|"},"pump":{"moved":66846720,"lost_wakeups":0,"eof":true,"err":""}}}
+HB up=252.31 997.45 MemAvailable:836844 SUnreclaim:20812 
+HB up=253.31 1001.46 MemAvailable:836844 SUnreclaim:20812 
+{"ev":"leak_check","label":"ek-unloadaft-G","module_loaded":false,"avail_delta_kb":6416,"sunreclaim_delta_kb":-208,"slab_delta_kb":-180,"named_start_end":{"AF_VSOCK":[24,36],"TCP":[12,24],"sock_inode_cache":[84,112],"skbuff_head_cache":[535,507],"skbuff_fclone_cache":[0,0],"skbuff_small_head":[224,224]},"slab_objs_delta_top":{"kmalloc-rnd-13-96":180,"kmalloc-rnd-13-128":120,"kmalloc-rnd-13-4k":72,"dentry":60,"kmalloc-cg-192":60,"kmalloc-cg-64":60,"kmalloc-rnd-02-64":60,"kmalloc-rnd-08-8":60,"kmalloc-rnd-13-192":60,"kmalloc-rnd-13-64":60,"maple_node":-32,"skbuff_head_cache":-28}}
+{"ev":"sink_done","label":"ek-unloadaft-G","t_ms":14556}

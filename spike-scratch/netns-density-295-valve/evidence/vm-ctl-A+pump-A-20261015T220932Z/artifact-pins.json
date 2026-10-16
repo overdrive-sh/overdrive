@@ -1,0 +1,10 @@
+{
+ "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.zst": "0483edc8e3794b93ed747f7a481d0d97a2b3012490d9170149aad5cf636763d1",
+ "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.zst": "478dc2790cab03b9c494133a8a20d96ca4c126b43ad226b69e2df57968e27306",
+ "/lib/modules/7.0.0-29-generic/kernel/net/vmw_vsock/vsock.ko.zst": "dcab15ab168919bfe43d49d3a9f5ba8d8b884acfe62e090d4684ea73eb43c680",
+ "bpf_obj": "2983cf89ceee4ac956d9d1814575a1d50c13163d5b23ea2bb33696f95254d980",
+ "cloud_hypervisor": "eadddf1bbcdcb1901a82f76bb827e387e49d9e40a308ab9846806668b90989b6",
+ "guest_kernel": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+ "initramfs": "be0f5f8bd4ca97a75085a5eec3274025e83b342158af210645126da5688fbd4a",
+ "valveprobe": "399f73c83df633a94e2e5eecf8929a609d685b3fe84e707d388f433184deaa3d"
+}

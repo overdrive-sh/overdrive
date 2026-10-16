@@ -1,0 +1,4 @@
+{"ev":"send_ready","label":"pass-A","uname":"7.0.0-29-generic","cid":3370,"port":7131,"bytes":268435456,"trials":3}
+{"ev":"send_end","label":"pass-A","trial":0,"outcome":"done","sent":268435456,"secs":0.719,"mibps":356.2,"max_send_ms":3,"sent_at_longest_block_start":1507328,"blocks":[],"off_ns":-5425470915096369,"best_rtt_ns":54331,"t_start_ns":5425495419548080,"peer_closed_read":0}
+{"ev":"send_end","label":"pass-A","trial":1,"outcome":"done","sent":268435456,"secs":0.652,"mibps":392.8,"max_send_ms":0,"sent_at_longest_block_start":0,"blocks":[],"off_ns":-5425470915110202,"best_rtt_ns":60692,"t_start_ns":5425536995898641,"peer_closed_read":0}
+{"ev":"send_end","label":"pass-A","trial":2,"outcome":"done","sent":268435456,"secs":0.795,"mibps":322.2,"max_send_ms":1,"sent_at_longest_block_start":262144,"blocks":[],"off_ns":-5425470915123589,"best_rtt_ns":57537,"t_start_ns":5425578541434092,"peer_closed_read":0}

@@ -1,0 +1,128 @@
+[19:11:17] === evmod vm ['ek-ver-T'] {'panic': '0', 'loglevel': '7', 'adhoc_timeout': '40', 'adhoc': 'for m in $(cat /mods/order-tls); do insmod /mods/$m; done; insmod /mods/evmod.ko; /evprobe sink --kind tcpsrc --port 7386 --trials 1 --bytes 67108864 --label adhoc --app s2500,f --max-s 30 --verbose-trials 1 --modparams "" --abort-queued-mb 160 --ktls 3 --ktls-order after --eof 1 --unload-after-ms 1200 > /tmp/s.log 2>&1; echo SINK_EXIT=$?'}
+[19:11:17] === preflight (fail closed)
+[19:11:17] substrate: {"host_uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16, "meminfo_head": ["MemTotal:       65401732 kB", "MemFree:        59999768 kB", "MemAvailable:   64166280 kB"]}
+[19:11:17] $ modprobe vhost_vsock; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[19:11:17]     vhost_vsock            28672  0
+[19:11:17]     vmw_vsock_virtio_transport_common    61440  1 vhost_vsock
+[19:11:17]     vhost                  69632  1 vhost_vsock
+[19:11:17]     vhost_iotlb            16384  1 vhost
+[19:11:17]     vsock                  73728  2 vmw_vsock_virtio_transport_common,vhost_vsock
+[19:11:17] === guest image
+[19:11:18] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "f24cbcd17e49", "evprobe": "0d38614a22a6", "valveprobe": "bcae8c50f89e", "valve_bpf_obj": "f3a5e587c64d", "evmod.ko": "1eecbe0154f0", "cloud_hypervisor": "eadddf1bbcdc"}
+[19:11:18] launch VM: /var/tmp/evmod2-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /var/tmp/evmod2-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=0 loglevel=7 --cpus boot=4 --memory size=1024M --serial file=/var/tmp/evmod2-work/out/vm-20261016T191117Z/serial.log --console off --vsock cid=3371,backend=vhost-kernel --log-file /var/tmp/evmod2-work/out/vm-20261016T191117Z/ch.log -v
+[19:11:19] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[19:11:19] 7.0.0-29-generic
+MemTotal:         977368 kB
+MemAvailable:     822904 kB
+evmod                  28672  0 
+vmw_vsock_virtio_transport    20480  1 
+vmw_vsock_virtio_transport_common    57344  1 vmw_vsock_virtio_transport
+vsock                  73728  7 vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common
+live=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=248 buf_bytes=65536
+crw-------    1 0        0          10, 263 Oct 16 19:11 /dev/evmod
+tcp_rmem=4096 131072 7284416
+tcp_wmem=4096 16384 4194304
+tcp_mem=10668 14227 21336
+rmem_max=4194304
+vsock_buf_default
+4
+0-3
+
+[19:11:59] ADHOC $ for m in $(cat /mods/order-tls); do insmod /mods/$m; done; insmod /mods/evmod.ko; /evprobe sink --kind tcpsrc --port 7386 --trials 1 --bytes 67108864 --label adhoc --app s2500,f --max-s 30 --verbose-trials 1 --modparams "" --abort-queued-mb 160 --ktls 3 --ktls-order after --eof 1 --unload-after-ms 1200 > /tmp/s.log 2>&1; echo SINK_EXIT=$?
+
+HARNESS_EXCEPTION TimeoutError('timed out')
+[19:12:02] SERIAL tail after adhoc:
+[    0.754052] PM:   Magic number: 14:858:192
+[    0.756056] acpi device:1e: hash matches
+[    0.758269] RAS: Correctable Errors collector initialized.
+[    0.761326] clk: Disabling unused clocks
+[    0.763170] PM: genpd: Disabling unused power domains
+[    0.768987] Freeing unused decrypted memory: 2028K
+[    0.771451] Freeing unused kernel image (initmem) memory: 5292K
+[    0.773137] Write protecting the kernel read-only data: 43008k
+[    0.775709] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    0.777861] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    0.847604] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.848647] Run /init as init process
+GUEST_BOOT uname_r=7.0.0-29-generic
+[    0.879443] NET: Registered PF_VSOCK protocol family
+[    0.895888] evmod: loading out-of-tree module taints kernel.
+[    0.896803] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    0.898851] evmod: loaded (per-cpu workqueue)
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}
+[    2.318341] evmod: unloaded attached=1 completed=1 detached=1 aborted=0
+[    2.333121] Oops: int3: 0000 [#1] SMP NOPTI
+[    2.333131] CPU: 3 UID: 0 PID: 155 Comm: evprobe Tainted: G           OE       7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    2.333140] Tainted: [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+[    2.333142] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    2.333145] RIP: 0010:0xffffffffc060fd01
+[    2.333153] Code: cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc <cc> cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc
+[    2.333157] RSP: 0018:ff888d3580397a60 EFLAGS: 00000206
+[    2.333162] RAX: ffffffffc060fd00 RBX: ff3bf831c226ae58 RCX: ff3bf831c226ae58
+[    2.333165] RDX: ff3bf831c51ecc00 RSI: 0000000000000180 RDI: ff3bf831c51ecc00
+[    2.333167] RBP: ff888d3580397a68 R08: 000000000db823ef R09: ff3bf831c2235ce8
+[    2.333170] R10: 0000000000000000 R11: 0000000000000000 R12: ff3bf831c226ae00
+[    2.333172] R13: ff3bf831c5781800 R14: ff888d3580397c28 R15: 0000000000010000
+[    2.333180] FS:  00007789520b66c0(0000) GS:ff3bf8326477f000(0000) knlGS:0000000000000000
+[    2.333184] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    2.333187] CR2: 0000778944010000 CR3: 0000000005826005 CR4: 0000000000f71ef0
+[    2.333194] PKRU: 55555554
+[    2.333196] Call Trace:
+[    2.333199]  <TASK>
+[    2.333202]  ? tls_rx_msg_ready+0x18/0x30 [tls]
+[    2.333218]  tls_strp_check_rcv+0x177/0x210 [tls]
+[    2.333232]  tls_strp_msg_done+0x37/0x60 [tls]
+[    2.333242]  tls_sw_recvmsg+0x54c/0x910 [tls]
+[    2.333259]  inet_recvmsg+0x125/0x130
+[    2.333266]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    2.333273]  ? security_socket_recvmsg+0x70/0x1e0
+[    2.333282]  sock_recvmsg+0xb6/0xc0
+[    2.333298]  ? fdget+0xcb/0x120
+[    2.333307]  __sys_recvfrom+0xd3/0x180
+[    2.333325]  __x64_sys_recvfrom+0x24/0x40
+[    2.333329]  x64_sys_call+0x1952/0x2390
+[    2.333337]  do_syscall_64+0x105/0x5a0
+[    2.333343]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    2.333348]  ? __handle_mm_fault+0x493/0x720
+[    2.333359]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    2.333363]  ? count_memcg_events+0x103/0x250
+[    2.333371]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    2.333375]  ? handle_mm_fault+0x1be/0x2e0
+[    2.333382]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    2.333386]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[    2.333393]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    2.333398]  ? irqentry_exit+0x97/0x6f0
+[    2.333405]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    2.333409]  ? exc_page_fault+0x94/0x1e0
+[    2.333415]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    2.333419] RIP: 0033:0x7789523e9082
+[    2.333423] Code: 08 0f 85 71 47 fe ff 49 89 fb 48 89 f0 48 89 d7 48 89 ce 4c 89 c2 4d 89 ca 4c 8b 44 24 08 4c 8b 4c 24 10 4c 89 5c 24 08 0f 05 <c3> cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc
+[    2.333426] RSP: 002b:00007789520b5f58 EFLAGS: 00000246 ORIG_RAX: 000000000000002d
+[    2.333431] RAX: ffffffffffffffda RBX: 0000778944001130 RCX: 00007789523e9082
+[    2.333433] RDX: 0000000000010000 RSI: 0000778944001130 RDI: 0000000000000009
+[    2.333436] RBP: 00007789520b5f80 R08: 0000000000000000 R09: 0000000000000000
+[    2.333438] R10: 0000000000000040 R11: 0000000000000246 R12: 0000000000010000
+[    2.333440] R13: 0000000000010000 R14: 000077895241c840 R15: 000000000000007a
+[    2.333451]  </TASK>
+[    2.333452] Modules linked in: aesni_intel tls vmw_vsock_virtio_transport vmw_vsock_virtio_transport_common vsock [last unloaded: evmod(OE)]
+[    2.333466] ---[ end trace 0000000000000000 ]---
+[    2.333469] RIP: 0010:0xffffffffc060fd01
+[    2.333473] Code: cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc <cc> cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc
+[    2.333476] RSP: 0018:ff888d3580397a60 EFLAGS: 00000206
+[    2.333480] RAX: ffffffffc060fd00 RBX: ff3bf831c226ae58 RCX: ff3bf831c226ae58
+[    2.333482] RDX: ff3bf831c51ecc00 RSI: 0000000000000180 RDI: ff3bf831c51ecc00
+[    2.333484] RBP: ff888d3580397a68 R08: 000000000db823ef R09: ff3bf831c2235ce8
+[    2.333486] R10: 0000000000000000 R11: 0000000000000000 R12: ff3bf831c226ae00
+[    2.333489] R13: ff3bf831c5781800 R14: ff888d3580397c28 R15: 0000000000010000
+[    2.333495] FS:  00007789520b66c0(0000) GS:ff3bf8326477f000(0000) knlGS:0000000000000000
+[    2.333498] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    2.333500] CR2: 0000778944010000 CR3: 0000000005826005 CR4: 0000000000f71ef0
+[    2.333506] PKRU: 55555554
+[    2.333509] Kernel panic - not syncing: Fatal exception in interrupt
+[    2.333778] Kernel Offset: 0x15400000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    2.414092] ---[ end Kernel panic - not syncing: Fatal exception in interrupt ]---
+[19:12:02] $ pgrep -af 'cloud-hypervisor|evprobe|valveprobe' | grep -v pgrep; true (rc=0)
+[19:12:02]     23158 sudo -n env HOME=/home/ubuntu PATH=/home/ubuntu/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel bash -c python3 /var/tmp/evmod2-work/src/driver/vmrun.py ek-ver-T panic=0 loglevel=7 adhoc_timeout=40 adhoc='for m in $(cat /mods/order-tls); do insmod /mods/$m; done; insmod /mods/evmod.ko; /evprobe sink --kind tcpsrc --port 7386 --trials 1 --bytes 67108864 --label adhoc --app s2500,f --max-s 30 --verbose-trials 1 --modparams "" --abort-queued-mb 160 --ktls 3 --ktls-order after --eof 1 --unload-after-ms 1200 > /tmp/s.log 2>&1; echo SINK_EXIT=$?'
+[19:12:02]     23160 python3 /var/tmp/evmod2-work/src/driver/vmrun.py ek-ver-T panic=0 loglevel=7 adhoc_timeout=40 adhoc=for m in $(cat /mods/order-tls); do insmod /mods/$m; done; insmod /mods/evmod.ko; /evprobe sink --kind tcpsrc --port 7386 --trials 1 --bytes 67108864 --label adhoc --app s2500,f --max-s 30 --verbose-trials 1 --modparams "" --abort-queued-mb 160 --ktls 3 --ktls-order after --eof 1 --unload-after-ms 1200 > /tmp/s.log 2>&1; echo SINK_EXIT=$?
+[19:12:02] physical host module names+sizes unchanged: True diff=[] evmod/tls/shmproxy=[] raw_equal=False

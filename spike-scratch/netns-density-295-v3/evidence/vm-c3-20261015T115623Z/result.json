@@ -1,0 +1,82 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "sink_trial_end": [
+   {
+    "ev": "trial_end",
+    "label": "c3",
+    "kind": "tcpsrc",
+    "src": "tcp",
+    "trial": 0,
+    "outcome": "abort_cap",
+    "secs": 1.81,
+    "samples": 12,
+    "fwd": 131989451,
+    "sent": 2721408,
+    "queued_end": 129268043,
+    "peak_queued": 105806208,
+    "peak_queued_at_ms": 303,
+    "verdicts": 3997,
+    "drops": 0,
+    "send_calls": 53,
+    "send_fail": 31,
+    "app_sent": 132382720,
+    "app_state": 0,
+    "avail_start_kb": 815812,
+    "avail_end_kb": 681964,
+    "avail_after_close_kb": 804248,
+    "sunreclaim_start_kb": 18840,
+    "sunreclaim_end_kb": 23588,
+    "sunreclaim_after_close_kb": 19256
+   }
+  ],
+  "n_samples": 12,
+  "peak_queued_MiB": 100.9,
+  "peak_tcp_mem_MiB": 3.0,
+  "last_sample": {
+   "ev": "sample",
+   "label": "c3",
+   "trial": 0,
+   "t_ms": 303,
+   "fwd": 108527616,
+   "sent": 2721408,
+   "queued": 105806208,
+   "verdicts": 3281,
+   "drops": 0,
+   "send_calls": 53,
+   "send_fail": 29,
+   "last_errno": 11,
+   "src_inq": 0,
+   "tgt_outq": 2608758,
+   "peer_inq": 112650,
+   "app_sent": 108527616,
+   "app_state": 0,
+   "mem_total_kb": 977368,
+   "mem_free_kb": 753276,
+   "mem_avail_kb": 705876,
+   "slab_kb": 24160,
+   "sunreclaim_kb": 22732,
+   "sreclaim_kb": 1428,
+   "tcp_mem_pages": 769,
+   "skbuff_head_active": 367,
+   "slab_top_mib": [
+    [
+     "kernfs_node_cache",
+     3
+    ],
+    [
+     "skbuff_small_head",
+     2
+    ],
+    [
+     "pool_workqueue",
+     1
+    ]
+   ]
+  },
+  "bad_json_lines": 0
+ }
+}

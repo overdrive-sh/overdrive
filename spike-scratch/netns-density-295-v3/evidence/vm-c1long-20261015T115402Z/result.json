@@ -1,0 +1,94 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "boot": {
+  "guest_uname": "7.0.0-29-generic"
+ },
+ "result": {
+  "post_run_guest_meminfo": "\nHARNESS_EXCEPTION ConnectionResetError(104, 'Connection reset by peer')",
+  "vm_died_after_s": null,
+  "vm_alive_at_end": true,
+  "n_samples": 8,
+  "sink_trial_end": [],
+  "send_end": [
+   {
+    "ev": "send_end",
+    "label": "c1long",
+    "trial": 0,
+    "outcome": "err_32",
+    "sent": 421658624,
+    "secs": 0.613,
+    "mbps": 656.1,
+    "max_send_ms": 5,
+    "slow_sends": 0,
+    "sends": 6435,
+    "peer_closed_read": 0
+   }
+  ],
+  "send_prog_last": [
+   {
+    "ev": "send_prog",
+    "label": "c1long",
+    "trial": 0,
+    "t_ms": 500,
+    "sent": 336134144,
+    "max_send_ms": 0,
+    "slow_sends": 0
+   }
+  ],
+  "oom_lines": [
+   "[    2.702628] Out of memory: Killed process 115 (v3probe) total-vm:5620kB, anon-rss:3228kB, file-rss:8kB, shmem-rss:2008kB, UID:0 pgtables:44kB oom_score_adj:0",
+   "[    2.707533] Out of memory: Killed process 104 (v3probe) total-vm:70204kB, anon-rss:112kB, file-rss:8kB, shmem-rss:1656kB, UID:0 pgtables:48kB oom_score_adj:0"
+  ],
+  "peak_queued_MiB": 348.3,
+  "min_avail_MiB": 387.7,
+  "mem_total_MiB": 954.5,
+  "last_sample": {
+   "ev": "sample",
+   "label": "c1long",
+   "trial": 0,
+   "t_ms": 540,
+   "fwd": 367919104,
+   "sent": 2693256,
+   "queued": 365225848,
+   "verdicts": 101056,
+   "drops": 0,
+   "send_calls": 741,
+   "send_fail": 268,
+   "last_errno": 11,
+   "src_inq": 0,
+   "tgt_outq": 2583040,
+   "peer_inq": 110216,
+   "app_sent": 0,
+   "app_state": 0,
+   "mem_total_kb": 977364,
+   "mem_free_kb": 444252,
+   "mem_avail_kb": 396964,
+   "slab_kb": 447392,
+   "sunreclaim_kb": 445740,
+   "sreclaim_kb": 1652,
+   "tcp_mem_pages": 512,
+   "skbuff_head_active": 100776,
+   "slab_top_mib": [
+    [
+     "kmalloc-rnd-15-4k",
+     393
+    ],
+    [
+     "skbuff_head_cache",
+     24
+    ],
+    [
+     "kernfs_node_cache",
+     3
+    ]
+   ],
+   "cg_current": 6438912,
+   "cg_anon": 3207168,
+   "cg_kernel": 61440,
+   "cg_slab": 38976,
+   "cg_sock": 2748416,
+   "cg_oom_kill": 0
+  },
+  "bad_json_lines": 0
+ }
+}

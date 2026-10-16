@@ -1,0 +1,8 @@
+{"t": 1792106443.306635, "cmd": "uname -r; ls /sys/kernel/btf/vmlinux; grep -E 'MemTotal|MemAvailable' /proc/meminfo", "rc": 0, "out": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\nMemTotal:         977368 kB\nMemAvailable:     828500 kB\n"}
+{"t": 1792106443.3089964, "cmd": "/valveprobe sink --kind tcpsrc --obj /valve-bpf.o --port 7151 --trials 20 --bytes 268435456 --label detect-T --app s3000,f --max-s 12 --verbose-trials 1 --high-kb 4096 --low-kb 0 --resume pump > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}
+{"t": 1792106546.0907044, "cmd": "/valveprobe send --cid 2 --port 7150 --bytes 268435456 --trials 20 --label detect-B  > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}
+{"t": 1792106649.3544521, "cmd": "/valveprobe send --cid 2 --port 7138 --bytes 268435456 --trials 40 --label gate-B  > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}
+{"t": 1792106853.7546155, "cmd": "/valveprobe send --cid 2 --port 7144 --bytes 268435456 --trials 10 --label purepump-B  > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}
+{"t": 1792106905.6079967, "cmd": "/valveprobe sink --kind tcpsrc --obj /valve-bpf.o --port 7145 --trials 10 --bytes 268435456 --label purepump-T --app s3000,f --max-s 30 --verbose-trials 1 --force-pump 1 > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}
+{"t": 1792106957.8462744, "cmd": "/valveprobe send --cid 2 --port 7147 --bytes 134217728 --trials 10 --label purepumpslow-B  > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}
+{"t": 1792107041.1189237, "cmd": "/valveprobe sink --kind tcpsrc --obj /valve-bpf.o --port 7148 --trials 10 --bytes 134217728 --label purepumpslow-T --app r20 --max-s 60 --verbose-trials 1 --force-pump 1 > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}

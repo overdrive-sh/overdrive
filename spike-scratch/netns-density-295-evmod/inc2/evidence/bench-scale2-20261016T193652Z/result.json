@@ -1,0 +1,6 @@
+{
+  "all_pass": true,
+  "cells": "aya-tcp:20,evmodub-tcp:21",
+  "maximum": 16384,
+  "physical_modules_links_preserved": true
+}

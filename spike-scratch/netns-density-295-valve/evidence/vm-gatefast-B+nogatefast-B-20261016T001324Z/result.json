@@ -1,0 +1,335 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "scenarios": {
+  "gatefast-B": {
+   "scenario": "gatefast-B",
+   "dir": "B",
+   "wall_s": 248.7,
+   "trials_planned": 100,
+   "trial_end": 100,
+   "send_end": 100,
+   "outcomes": {
+    "complete": 100
+   },
+   "send_outcomes": {
+    "done": 100
+   },
+   "app_ok": "100/100",
+   "bytes_verified_total_MiB": 51200.0,
+   "first_bad": [],
+   "hash_eq": "100/100",
+   "peak_queued_MiB": {
+    "min": 4.01,
+    "p50": 4.01,
+    "max": 4.58,
+    "n": 100
+   },
+   "queued_at_remove_MiB": {
+    "min": 4.01,
+    "p50": 4.01,
+    "max": 4.58,
+    "n": 100
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 100
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 0.0,
+    "p50": 6.15,
+    "max": 389.9,
+    "n": 100
+   },
+   "unreclaim_after_close_minus_start_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 100
+   },
+   "valve_closes": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 1,
+    "n": 100
+   },
+   "resumes": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 1,
+    "n": 100
+   },
+   "pump_MiB": {
+    "min": 504.94,
+    "p50": 505.5,
+    "max": 505.5,
+    "n": 100
+   },
+   "pump_ms": {
+    "min": 311,
+    "p50": 422.5,
+    "max": 648,
+    "n": 100
+   },
+   "rejoins": 0,
+   "rejoin_fail": 0,
+   "refused": 0,
+   "hard_drops": 0,
+   "passed": 0,
+   "rb_fail": 0,
+   "rs_zero_total(kretprobe read_skb==0)": 0,
+   "vr_zero_total(fexit sk_psock_verdict_recv==0)": 0,
+   "vr_ok_total": 10427,
+   "trials_with_vr_zero": 0,
+   "rs_ok_total": 10427,
+   "parked_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 100
+   },
+   "forwarded_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 100
+   },
+   "lost_bytes_per_trial": [],
+   "queued_end_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 100
+   },
+   "src_inq_end": {
+    "min": 0,
+    "p50": 0.0,
+    "max": 0,
+    "n": 100
+   },
+   "reader_MiBps": {
+    "min": 810.5,
+    "p50": 1262.15,
+    "max": 1740.6,
+    "n": 100
+   },
+   "owner_cpu_ms": {
+    "min": 229,
+    "p50": 317.5,
+    "max": 422,
+    "n": 100
+   },
+   "sys_busy_ms": {
+    "min": 1250,
+    "p50": 1900.0,
+    "max": 2400,
+    "n": 100
+   },
+   "owner_trial_secs": {
+    "min": 0.81,
+    "p50": 0.92,
+    "max": 1.14,
+    "n": 100
+   },
+   "sender_MiBps": {
+    "min": 554.6,
+    "p50": 735.2,
+    "max": 875.0,
+    "n": 100
+   },
+   "sender_max_send_ms": {
+    "min": 286,
+    "p50": 290.0,
+    "max": 292,
+    "n": 100
+   },
+   "sender_sent_at_longest_block_start_MiB": {
+    "min": 6.75,
+    "p50": 6.75,
+    "max": 7.31,
+    "n": 100
+   },
+   "resume_latency_ms(unblock-resume)": {
+    "min": 1.23,
+    "p50": 3.45,
+    "max": 5.54,
+    "n": 100
+   },
+   "final_state": {
+    "done": 100
+   },
+   "oom_lines": [],
+   "bad_json_lines": 0
+  },
+  "nogatefast-B": {
+   "scenario": "nogatefast-B",
+   "dir": "B",
+   "wall_s": 143.3,
+   "trials_planned": 40,
+   "trial_end": 40,
+   "send_end": 40,
+   "outcomes": {
+    "complete": 36,
+    "timeout": 4
+   },
+   "send_outcomes": {
+    "done": 40
+   },
+   "app_ok": "36/40",
+   "bytes_verified_total_MiB": 18432.0,
+   "first_bad": [],
+   "hash_eq": "36/40",
+   "peak_queued_MiB": {
+    "min": 4.01,
+    "p50": 4.01,
+    "max": 4.2,
+    "n": 40
+   },
+   "queued_at_remove_MiB": {
+    "min": 4.01,
+    "p50": 4.01,
+    "max": 4.2,
+    "n": 40
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 40
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 0.0,
+    "p50": 5.35,
+    "max": 388.8,
+    "n": 40
+   },
+   "unreclaim_after_close_minus_start_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 40
+   },
+   "valve_closes": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 1,
+    "n": 40
+   },
+   "resumes": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 1,
+    "n": 40
+   },
+   "pump_MiB": {
+    "min": 505.31,
+    "p50": 505.5,
+    "max": 507.5,
+    "n": 40
+   },
+   "pump_ms": {
+    "min": 257,
+    "p50": 360.0,
+    "max": 11725,
+    "n": 40
+   },
+   "rejoins": 0,
+   "rejoin_fail": 0,
+   "refused": 0,
+   "hard_drops": 0,
+   "passed": 0,
+   "rb_fail": 0,
+   "rs_zero_total(kretprobe read_skb==0)": 1,
+   "vr_zero_total(fexit sk_psock_verdict_recv==0)": 1,
+   "vr_ok_total": 4143,
+   "trials_with_vr_zero": 1,
+   "rs_ok_total": 4143,
+   "parked_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 40
+   },
+   "forwarded_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 40
+   },
+   "lost_bytes_per_trial": [
+    65536,
+    65536,
+    65536,
+    65536
+   ],
+   "queued_end_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 40
+   },
+   "src_inq_end": {
+    "min": 0,
+    "p50": 0.0,
+    "max": 0,
+    "n": 40
+   },
+   "reader_MiBps": {
+    "min": 43.6,
+    "p50": 1488.8,
+    "max": 2143.8,
+    "n": 40
+   },
+   "owner_cpu_ms": {
+    "min": 202,
+    "p50": 266.0,
+    "max": 412,
+    "n": 40
+   },
+   "sys_busy_ms": {
+    "min": 1140,
+    "p50": 1500.0,
+    "max": 1940,
+    "n": 40
+   },
+   "owner_trial_secs": {
+    "min": 0.75,
+    "p50": 0.86,
+    "max": 12.02,
+    "n": 40
+   },
+   "sender_MiBps": {
+    "min": 702.3,
+    "p50": 821.1,
+    "max": 967.3,
+    "n": 40
+   },
+   "sender_max_send_ms": {
+    "min": 286,
+    "p50": 290.0,
+    "max": 292,
+    "n": 40
+   },
+   "sender_sent_at_longest_block_start_MiB": {
+    "min": 4.75,
+    "p50": 6.75,
+    "max": 6.94,
+    "n": 40
+   },
+   "resume_latency_ms(unblock-resume)": {
+    "min": 1.63,
+    "p50": 3.46,
+    "max": 4.02,
+    "n": 40
+   },
+   "final_state": {
+    "done": 36,
+    "err": 4
+   },
+   "oom_lines": [],
+   "bad_json_lines": 0
+  }
+ },
+ "guest_boot": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\nMemTotal:         977368 kB\nMemAvailable:     831920 kB\n"
+}

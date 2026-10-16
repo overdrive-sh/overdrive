@@ -1,0 +1,738 @@
+{
+ "host_uname_r": "7.0.0-38-generic",
+ "scenarios": {
+  "ev-fault1-G": {
+   "unload_output": null,
+   "scenario": "ev-fault1-G",
+   "dir": "G",
+   "probe": "ev",
+   "wall_s": 24.8,
+   "trials_planned": 3,
+   "trial_end": 3,
+   "send_end": 0,
+   "vread_trial_end": 3,
+   "outcomes": {
+    "complete": 1,
+    "timeout": 2
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "main_stream_ok": "1/3",
+   "main_stream_first_bad": [
+    1098432,
+    1060224
+   ],
+   "main_hash_eq": "1/3",
+   "eof_seen": "0/3",
+   "extra_after_eof": 0,
+   "bytes_verified_MiB": 16.0,
+   "peak_pipe_MiB(src_inq+tgt_outq+peer_inq)": {
+    "min": 0.0,
+    "p50": 0.1,
+    "max": 0.14,
+    "n": 3
+   },
+   "peak_src_inq_KiB": {
+    "min": 0.0,
+    "p50": 13.0,
+    "max": 144.2,
+    "n": 3
+   },
+   "peak_tgt_outq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 84.6,
+    "n": 3
+   },
+   "peak_peer_inq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "peak_ap_outq_KiB": {
+    "min": 1263.3,
+    "p50": 1356.1,
+    "max": 2034.8,
+    "n": 3
+   },
+   "guest_unreclaim_rise_MiB(max-start)": {
+    "min": 0.1,
+    "p50": 0.2,
+    "max": 0.2,
+    "n": 3
+   },
+   "guest_avail_drop_MiB(start-min)": {
+    "min": 3.4,
+    "p50": 3.8,
+    "max": 5.1,
+    "n": 3
+   },
+   "guest_unreclaim_after_close_minus_start_MiB": {
+    "min": 0.1,
+    "p50": 0.1,
+    "max": 0.2,
+    "n": 3
+   },
+   "max_skb_head": {
+    "min": 368,
+    "p50": 368,
+    "max": 396,
+    "n": 3
+   },
+   "module_moved_MiB": {
+    "min": 16.0,
+    "p50": 16.0,
+    "max": 16.0,
+    "n": 3
+   },
+   "module_stall_dst": {
+    "min": 68,
+    "p50": 110,
+    "max": 136,
+    "n": 3
+   },
+   "module_stall_src": {
+    "min": 28,
+    "p50": 50,
+    "max": 102,
+    "n": 3
+   },
+   "module_runs": {
+    "min": 158,
+    "p50": 165,
+    "max": 182,
+    "n": 3
+   },
+   "module_requeue": {
+    "min": 27,
+    "p50": 35,
+    "max": 39,
+    "n": 3
+   },
+   "module_err": 0,
+   "pairs_aborted": 0,
+   "pairs_completed": 0,
+   "live_end": [
+    1,
+    1,
+    1
+   ],
+   "short_consume": 0,
+   "fault_hits": 3,
+   "pair_self_completed_before_detach": 0,
+   "tasks_start": {
+    "min": 83,
+    "p50": 84,
+    "max": 85,
+    "n": 3
+   },
+   "tasks_max": {
+    "min": 85,
+    "p50": 86,
+    "max": 87,
+    "n": 3
+   },
+   "reader_MiBps": {
+    "min": 2.0,
+    "p50": 2.0,
+    "max": 535.7,
+    "n": 3
+   },
+   "sys_busy_ms": {
+    "min": 50,
+    "p50": 280,
+    "max": 690,
+    "n": 3
+   },
+   "trial_secs": {
+    "min": 0.27,
+    "p50": 8.0,
+    "max": 8.0,
+    "n": 3
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 50000000.0,
+    "p50": 280000000.0,
+    "max": 690000000.0,
+    "n": 3
+   },
+   "back_ok": "3/3",
+   "sender_back_ok": "0/0",
+   "sender_outcomes": {},
+   "sender_MiBps": null,
+   "sender_max_send_ms": null,
+   "sender_sent_at_longest_block_start_MiB": null,
+   "writer_max_send_ms": {
+    "min": 0,
+    "p50": 1,
+    "max": 2,
+    "n": 3
+   },
+   "writer_sent_at_longest_block_start_MiB": {
+    "min": 0.0,
+    "p50": 5.0,
+    "max": 9.5,
+    "n": 3
+   },
+   "writer_outcomes": {
+    "done": 3
+   },
+   "host_unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "host_peak_vsock_inq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 61.2,
+    "n": 3
+   },
+   "resume_latency_ms(stall_end->sender_unblocked)": null,
+   "reader_end": {
+    "abort": 1,
+    "bytes": 1,
+    "eof": 1
+   },
+   "writer_outcomes_all": {
+    "done": 3
+   },
+   "leak_check": {
+    "ev": "leak_check",
+    "label": "ev-fault1-G",
+    "module_loaded": true,
+    "avail_delta_kb": 3628,
+    "sunreclaim_delta_kb": 580,
+    "slab_delta_kb": 700,
+    "named_start_end": {
+     "AF_VSOCK": [
+      24,
+      36
+     ],
+     "TCP": [
+      0,
+      12
+     ],
+     "sock_inode_cache": [
+      84,
+      84
+     ],
+     "skbuff_head_cache": [
+      368,
+      396
+     ],
+     "skbuff_fclone_cache": [
+      0,
+      0
+     ],
+     "skbuff_small_head": [
+      112,
+      196
+     ]
+    },
+    "slab_objs_delta_top": {
+     "pde_opener": 180,
+     "trace_event_file": 180,
+     "vmap_area": 180,
+     "pool_workqueue": 140,
+     "anon_vma": 120,
+     "dentry": 120,
+     "kmalloc-rnd-03-96": 120,
+     "proc_inode_cache": 84,
+     "skbuff_small_head": 84,
+     "eventpoll_epi": 60,
+     "file_lock_cache": 60,
+     "kmalloc-rnd-03-192": 60
+    }
+   }
+  },
+  "ev-fault2-G": {
+   "unload_output": null,
+   "scenario": "ev-fault2-G",
+   "dir": "G",
+   "probe": "ev",
+   "wall_s": 8.8,
+   "trials_planned": 3,
+   "trial_end": 3,
+   "send_end": 0,
+   "vread_trial_end": 3,
+   "outcomes": {
+    "complete": 3
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "main_stream_ok": "0/3",
+   "main_stream_first_bad": [
+    1053768,
+    1050760,
+    1080008
+   ],
+   "main_hash_eq": "0/3",
+   "eof_seen": "0/3",
+   "extra_after_eof": 0,
+   "bytes_verified_MiB": 0.0,
+   "peak_pipe_MiB(src_inq+tgt_outq+peer_inq)": {
+    "min": 0.09,
+    "p50": 0.23,
+    "max": 0.27,
+    "n": 3
+   },
+   "peak_src_inq_KiB": {
+    "min": 33.1,
+    "p50": 77.4,
+    "max": 78.4,
+    "n": 3
+   },
+   "peak_tgt_outq_KiB": {
+    "min": 13.4,
+    "p50": 156.8,
+    "max": 240.3,
+    "n": 3
+   },
+   "peak_peer_inq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "peak_ap_outq_KiB": {
+    "min": 1410.4,
+    "p50": 1714.6,
+    "max": 1828.6,
+    "n": 3
+   },
+   "guest_unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.1,
+    "n": 3
+   },
+   "guest_avail_drop_MiB(start-min)": {
+    "min": 0.0,
+    "p50": 1.4,
+    "max": 6.8,
+    "n": 3
+   },
+   "guest_unreclaim_after_close_minus_start_MiB": {
+    "min": -0.1,
+    "p50": 0.0,
+    "max": 0.1,
+    "n": 3
+   },
+   "max_skb_head": {
+    "min": 396,
+    "p50": 396,
+    "max": 396,
+    "n": 3
+   },
+   "module_moved_MiB": {
+    "min": 16.0,
+    "p50": 16.0,
+    "max": 16.0,
+    "n": 3
+   },
+   "module_stall_dst": {
+    "min": 81,
+    "p50": 122,
+    "max": 147,
+    "n": 3
+   },
+   "module_stall_src": {
+    "min": 32,
+    "p50": 46,
+    "max": 57,
+    "n": 3
+   },
+   "module_runs": {
+    "min": 145,
+    "p50": 161,
+    "max": 178,
+    "n": 3
+   },
+   "module_requeue": {
+    "min": 35,
+    "p50": 38,
+    "max": 41,
+    "n": 3
+   },
+   "module_err": 0,
+   "pairs_aborted": 0,
+   "pairs_completed": 0,
+   "live_end": [
+    1,
+    1,
+    1
+   ],
+   "short_consume": 0,
+   "fault_hits": 3,
+   "pair_self_completed_before_detach": 0,
+   "tasks_start": {
+    "min": 86,
+    "p50": 86,
+    "max": 86,
+    "n": 3
+   },
+   "tasks_max": {
+    "min": 86,
+    "p50": 86,
+    "max": 86,
+    "n": 3
+   },
+   "reader_MiBps": {
+    "min": 492.4,
+    "p50": 549.0,
+    "max": 606.9,
+    "n": 3
+   },
+   "sys_busy_ms": {
+    "min": 40,
+    "p50": 40,
+    "max": 60,
+    "n": 3
+   },
+   "trial_secs": {
+    "min": 0.23,
+    "p50": 0.23,
+    "max": 0.24,
+    "n": 3
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 40000000.0,
+    "p50": 40000000.0,
+    "max": 60000000.0,
+    "n": 3
+   },
+   "back_ok": "3/3",
+   "sender_back_ok": "0/0",
+   "sender_outcomes": {},
+   "sender_MiBps": null,
+   "sender_max_send_ms": null,
+   "sender_sent_at_longest_block_start_MiB": null,
+   "writer_max_send_ms": {
+    "min": 1,
+    "p50": 2,
+    "max": 2,
+    "n": 3
+   },
+   "writer_sent_at_longest_block_start_MiB": {
+    "min": 3.5,
+    "p50": 3.94,
+    "max": 8.25,
+    "n": 3
+   },
+   "writer_outcomes": {
+    "done": 3
+   },
+   "host_unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.2,
+    "max": 0.2,
+    "n": 3
+   },
+   "host_peak_vsock_inq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "resume_latency_ms(stall_end->sender_unblocked)": null,
+   "reader_end": {
+    "bytes": 3
+   },
+   "writer_outcomes_all": {
+    "done": 3
+   },
+   "leak_check": {
+    "ev": "leak_check",
+    "label": "ev-fault2-G",
+    "module_loaded": true,
+    "avail_delta_kb": 152,
+    "sunreclaim_delta_kb": 152,
+    "slab_delta_kb": 200,
+    "named_start_end": {
+     "AF_VSOCK": [
+      36,
+      48
+     ],
+     "TCP": [
+      12,
+      12
+     ],
+     "sock_inode_cache": [
+      84,
+      112
+     ],
+     "skbuff_head_cache": [
+      396,
+      396
+     ],
+     "skbuff_fclone_cache": [
+      0,
+      0
+     ],
+     "skbuff_small_head": [
+      196,
+      196
+     ]
+    },
+    "slab_objs_delta_top": {
+     "eventpoll_epi": 60,
+     "file_lock_cache": 60,
+     "kmalloc-rnd-09-96": 60,
+     "kmalloc-rnd-07-4k": 40,
+     "maple_node": 32,
+     "inode_cache": 28,
+     "kmalloc-rnd-07-256": 28,
+     "proc_inode_cache": 28,
+     "request_sock_TCP": 28,
+     "sock_inode_cache": 28,
+     "tw_sock_TCP": 28,
+     "kmalloc-rnd-07-2k": 24
+    }
+   }
+  },
+  "ev-fault3-G": {
+   "unload_output": null,
+   "scenario": "ev-fault3-G",
+   "dir": "G",
+   "probe": "ev",
+   "wall_s": 8.8,
+   "trials_planned": 3,
+   "trial_end": 3,
+   "send_end": 0,
+   "vread_trial_end": 3,
+   "outcomes": {
+    "complete": 3
+   },
+   "oom_or_bug_lines": [],
+   "bad_json_lines": 0,
+   "main_stream_ok": "0/3",
+   "main_stream_first_bad": [
+    1071040,
+    1055488,
+    1108288
+   ],
+   "main_hash_eq": "0/3",
+   "eof_seen": "0/3",
+   "extra_after_eof": 0,
+   "bytes_verified_MiB": 0.0,
+   "peak_pipe_MiB(src_inq+tgt_outq+peer_inq)": {
+    "min": 0.09,
+    "p50": 0.13,
+    "max": 0.21,
+    "n": 3
+   },
+   "peak_src_inq_KiB": {
+    "min": 92.1,
+    "p50": 133.7,
+    "max": 148.2,
+    "n": 3
+   },
+   "peak_tgt_outq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 64.0,
+    "n": 3
+   },
+   "peak_peer_inq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "peak_ap_outq_KiB": {
+    "min": 1565.1,
+    "p50": 1734.1,
+    "max": 2536.2,
+    "n": 3
+   },
+   "guest_unreclaim_rise_MiB(max-start)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "guest_avail_drop_MiB(start-min)": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 3.1,
+    "n": 3
+   },
+   "guest_unreclaim_after_close_minus_start_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "max_skb_head": {
+    "min": 396,
+    "p50": 396,
+    "max": 396,
+    "n": 3
+   },
+   "module_moved_MiB": {
+    "min": 16.0,
+    "p50": 16.0,
+    "max": 16.0,
+    "n": 3
+   },
+   "module_stall_dst": {
+    "min": 41,
+    "p50": 117,
+    "max": 144,
+    "n": 3
+   },
+   "module_stall_src": {
+    "min": 33,
+    "p50": 46,
+    "max": 447,
+    "n": 3
+   },
+   "module_runs": {
+    "min": 160,
+    "p50": 167,
+    "max": 480,
+    "n": 3
+   },
+   "module_requeue": {
+    "min": 15,
+    "p50": 27,
+    "max": 35,
+    "n": 3
+   },
+   "module_err": 0,
+   "pairs_aborted": 0,
+   "pairs_completed": 0,
+   "live_end": [
+    1,
+    1,
+    1
+   ],
+   "short_consume": 0,
+   "fault_hits": 3,
+   "pair_self_completed_before_detach": 0,
+   "tasks_start": {
+    "min": 86,
+    "p50": 86,
+    "max": 86,
+    "n": 3
+   },
+   "tasks_max": {
+    "min": 86,
+    "p50": 86,
+    "max": 86,
+    "n": 3
+   },
+   "reader_MiBps": {
+    "min": 502.9,
+    "p50": 514.6,
+    "max": 538.7,
+    "n": 3
+   },
+   "sys_busy_ms": {
+    "min": 40,
+    "p50": 50,
+    "max": 50,
+    "n": 3
+   },
+   "trial_secs": {
+    "min": 0.23,
+    "p50": 0.23,
+    "max": 0.24,
+    "n": 3
+   },
+   "cpu_core_s_per_GiB": {
+    "min": 40000000.0,
+    "p50": 50000000.0,
+    "max": 50000000.0,
+    "n": 3
+   },
+   "back_ok": "3/3",
+   "sender_back_ok": "0/0",
+   "sender_outcomes": {},
+   "sender_MiBps": null,
+   "sender_max_send_ms": null,
+   "sender_sent_at_longest_block_start_MiB": null,
+   "writer_max_send_ms": {
+    "min": 0,
+    "p50": 1,
+    "max": 2,
+    "n": 3
+   },
+   "writer_sent_at_longest_block_start_MiB": {
+    "min": 0.0,
+    "p50": 4.06,
+    "max": 5.12,
+    "n": 3
+   },
+   "writer_outcomes": {
+    "done": 3
+   },
+   "host_unreclaim_rise_MiB(max-start)": {
+    "min": 0.1,
+    "p50": 0.2,
+    "max": 0.4,
+    "n": 3
+   },
+   "host_peak_vsock_inq_KiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "resume_latency_ms(stall_end->sender_unblocked)": null,
+   "reader_end": {
+    "bytes": 3
+   },
+   "writer_outcomes_all": {
+    "done": 3
+   },
+   "leak_check": {
+    "ev": "leak_check",
+    "label": "ev-fault3-G",
+    "module_loaded": true,
+    "avail_delta_kb": 3136,
+    "sunreclaim_delta_kb": 40,
+    "slab_delta_kb": 40,
+    "named_start_end": {
+     "AF_VSOCK": [
+      48,
+      48
+     ],
+     "TCP": [
+      12,
+      12
+     ],
+     "sock_inode_cache": [
+      112,
+      112
+     ],
+     "skbuff_head_cache": [
+      396,
+      396
+     ],
+     "skbuff_fclone_cache": [
+      0,
+      0
+     ],
+     "skbuff_small_head": [
+      196,
+      196
+     ]
+    },
+    "slab_objs_delta_top": {
+     "kmalloc-rnd-03-128": 60,
+     "vmap_area": 60,
+     "kmalloc-rnd-07-4k": -56,
+     "kmalloc-rnd-07-256": 28,
+     "kmalloc-rnd-08-256": 28,
+     "kmalloc-cg-1k": 12
+    }
+   }
+  }
+ },
+ "guest_boot": "7.0.0-29-generic\nMemTotal:         977368 kB\nMemAvailable:     820068 kB\nevmod                  28672  0 \nvmw_vsock_virtio_transport    20480  1 \nvmw_vsock_virtio_transport_common    57344  1 vmw_vsock_virtio_transport\nvsock                  73728  7 vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common\nlive=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=248 buf_bytes=65536\ncrw-------    1 0        0          10, 263 Oct 16 18:24 /dev/evmod\ntcp_rmem=4096 131072 7284416\ntcp_wmem=4096 16384 4194304\ntcp_mem=10668 14227 21336\nrmem_max=4194304\nvsock_buf_default\n4\n0-3\n",
+ "physical_modules_unchanged": false
+}

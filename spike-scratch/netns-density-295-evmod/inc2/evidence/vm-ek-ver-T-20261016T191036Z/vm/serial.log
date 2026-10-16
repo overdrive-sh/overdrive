@@ -1,0 +1,69 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}
+HB up=0.43 0.95 MemAvailable:826004 SUnreclaim:19140 
+HB up=1.43 4.85 MemAvailable:815088 SUnreclaim:20012 
+[    1.863244] Oops: int3: 0000 [#1] SMP NOPTI
+[    1.863257] CPU: 2 UID: 0 PID: 155 Comm: evprobe Tainted: G           OE       7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    1.863266] Tainted: [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+[    1.863268] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    1.863271] RIP: 0010:0xffffffffc040ed01
+[    1.863281] Code: cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc <cc> cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc
+[    1.863284] RSP: 0018:ff7419a7003afaf0 EFLAGS: 00000202
+[    1.863290] RAX: ffffffffc040ed00 RBX: ff41362b03fcb258 RCX: ff41362b03fcb258
+[    1.863292] RDX: ff41362b05aac280 RSI: 0000000000000180 RDI: ff41362b05aac280
+[    1.863295] RBP: ff7419a7003afaf8 R08: 000000009501c560 R09: ff41362b05bb98e8
+[    1.863297] R10: 0000000000000000 R11: 0000000000000000 R12: ff41362b03fcb200
+[    1.863300] R13: ff41362b03d76800 R14: ff7419a7003afcb8 R15: 0000000000010000
+[    1.863308] FS:  00007dd531f566c0(0000) GS:ff41362b92eff000(0000) knlGS:0000000000000000
+[    1.863312] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    1.863315] CR2: 00007dd524010000 CR3: 0000000003e08002 CR4: 0000000000f71ef0
+[    1.863322] PKRU: 55555554
+[    1.863324] Call Trace:
+[    1.863327]  <TASK>
+[    1.863330]  ? tls_rx_msg_ready+0x18/0x30 [tls]
+[    1.863348]  tls_strp_check_rcv+0x177/0x210 [tls]
+[    1.863361]  tls_strp_msg_done+0x37/0x60 [tls]
+[    1.863371]  tls_sw_recvmsg+0x54c/0x910 [tls]
+[    1.863388]  inet_recvmsg+0x125/0x130
+[    1.863396]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.863403]  ? security_socket_recvmsg+0x70/0x1e0
+[    1.863413]  sock_recvmsg+0xb6/0xc0
+[    1.863420]  ? fdget+0xcb/0x120
+[    1.863429]  __sys_recvfrom+0xd3/0x180
+[    1.863446]  __x64_sys_recvfrom+0x24/0x40
+[    1.863450]  x64_sys_call+0x1952/0x2390
+[    1.863457]  do_syscall_64+0x105/0x5a0
+[    1.863470]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.863475]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.863479]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[    1.863484]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.863489]  ? do_syscall_64+0x140/0x5a0
+[    1.863494]  ? srso_alias_return_thunk+0x5/0xfbef5
+[    1.863499]  ? exc_page_fault+0x94/0x1e0
+[    1.863505]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[    1.863509] RIP: 0033:0x7dd532289082
+[    1.863513] Code: 08 0f 85 71 47 fe ff 49 89 fb 48 89 f0 48 89 d7 48 89 ce 4c 89 c2 4d 89 ca 4c 8b 44 24 08 4c 8b 4c 24 10 4c 89 5c 24 08 0f 05 <c3> cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc
+[    1.863517] RSP: 002b:00007dd531f55f58 EFLAGS: 00000246 ORIG_RAX: 000000000000002d
+[    1.863521] RAX: ffffffffffffffda RBX: 00007dd524001130 RCX: 00007dd532289082
+[    1.863524] RDX: 0000000000010000 RSI: 00007dd524001130 RDI: 0000000000000009
+[    1.863526] RBP: 00007dd531f55f80 R08: 0000000000000000 R09: 0000000000000000
+[    1.863528] R10: 0000000000000040 R11: 0000000000000246 R12: 0000000000010000
+[    1.863531] R13: 0000000000010000 R14: 00007dd5322bc840 R15: 0000000000000079
+[    1.863541]  </TASK>
+[    1.863543] Modules linked in: aesni_intel tls vmw_vsock_virtio_transport vmw_vsock_virtio_transport_common vsock [last unloaded: evmod(OE)]
+[    1.863557] ---[ end trace 0000000000000000 ]---
+[    1.863560] RIP: 0010:0xffffffffc040ed01
+[    1.863564] Code: cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc <cc> cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc
+[    1.863567] RSP: 0018:ff7419a7003afaf0 EFLAGS: 00000202
+[    1.863570] RAX: ffffffffc040ed00 RBX: ff41362b03fcb258 RCX: ff41362b03fcb258
+[    1.863572] RDX: ff41362b05aac280 RSI: 0000000000000180 RDI: ff41362b05aac280
+[    1.863575] RBP: ff7419a7003afaf8 R08: 000000009501c560 R09: ff41362b05bb98e8
+[    1.863577] R10: 0000000000000000 R11: 0000000000000000 R12: ff41362b03fcb200
+[    1.863579] R13: ff41362b03d76800 R14: ff7419a7003afcb8 R15: 0000000000010000
+[    1.863586] FS:  00007dd531f566c0(0000) GS:ff41362b92eff000(0000) knlGS:0000000000000000
+[    1.863589] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    1.863592] CR2: 00007dd524010000 CR3: 0000000003e08002 CR4: 0000000000f71ef0
+[    1.863598] PKRU: 55555554
+[    1.863601] Kernel panic - not syncing: Fatal exception in interrupt
+[    1.863806] Kernel Offset: 0x26c00000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)

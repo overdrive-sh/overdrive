@@ -1,0 +1,10 @@
+{
+  "qemu_exit": 0,
+  "passed": true,
+  "elapsed_s": 248.30849962799994,
+  "variant": "evmod",
+  "protocol": "tcp",
+  "max_population": 1,
+  "repeat": 0,
+  "private_kernel_only": true
+}

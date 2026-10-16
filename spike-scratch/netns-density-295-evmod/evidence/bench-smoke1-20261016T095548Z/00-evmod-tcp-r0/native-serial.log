@@ -1,0 +1,1086 @@
+qemu-system-x86_64: -accel kvm: warning: Number of hotpluggable cpus requested (64) exceeds the recommended cpus supported by KVM (16)
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2J[    0.000000] Linux version 7.0.0-29-generic (buildd@lcy02-amd64-113) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 (Ubuntu 7.0.0-29.29-generic 7.0.12)
+[    0.000000] Command line: console=ttyS0 rdinit=/init panic=-1
+[    0.000000] KERNEL supported cpus:
+[    0.000000]   Intel GenuineIntel
+[    0.000000]   AMD AuthenticAMD
+[    0.000000]   Hygon HygonGenuine
+[    0.000000]   Centaur CentaurHauls
+[    0.000000]   zhaoxin   Shanghai  
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000effff]
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000007ffdffff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000007ffe0000-0x000000007fffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000080000000-0x00000000afffffff]
+[    0.000000] BIOS-e820: [mem 0x00000000b0000000-0x00000000bfffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000c0000000-0x00000000fed1bfff]
+[    0.000000] BIOS-e820: [mem 0x00000000fed1c000-0x00000000fed1ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000fed20000-0x00000000feffbfff]
+[    0.000000] BIOS-e820: [mem 0x00000000feffc000-0x00000000feffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000ff000000-0x00000000fffbffff]
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000100000000-0x000000047fffffff]  System RAM
+[    0.000000] BIOS-e820: [gap 0x0000000480000000-0x000000fcffffffff]
+[    0.000000] BIOS-e820: [mem 0x000000fd00000000-0x000000ffffffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] SMBIOS 2.8 present.
+[    0.000000] DMI: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.17.0-debian-1.17.0-1ubuntu1 04/01/2014
+[    0.000000] DMI: Memory slots populated: 1/1
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x7ffe0 max_arch_pfn = 0x10000000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000001] kvm-clock: using sched offset of 199447163 cycles
+[    0.000003] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000007] tsc: Detected 2396.388 MHz processor
+[    0.000397] last_pfn = 0x480000 max_arch_pfn = 0x10000000000
+[    0.000443] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
+[    0.000447] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.000510] last_pfn = 0x7ffe0 max_arch_pfn = 0x10000000000
+[    0.003299] found SMP MP-table at [mem 0x000f5460-0x000f546f]
+[    0.003318] Using GB pages for direct mapping
+[    0.003470] RAMDISK: [mem 0x7bd04000-0x7ffdffff]
+[    0.003541] ACPI: Early table checksum verification disabled
+[    0.003545] ACPI: RSDP 0x00000000000F5270 000014 (v00 BOCHS )
+[    0.003549] ACPI: RSDT 0x000000007FFE3A02 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003554] ACPI: FACP 0x000000007FFE3602 0000F4 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003559] ACPI: DSDT 0x000000007FFE0040 0035C2 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003562] ACPI: FACS 0x000000007FFE0000 000040
+[    0.003564] ACPI: APIC 0x000000007FFE36F6 000270 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003566] ACPI: HPET 0x000000007FFE3966 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003568] ACPI: MCFG 0x000000007FFE399E 00003C (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003571] ACPI: WAET 0x000000007FFE39DA 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.003573] ACPI: Reserving FACP table memory at [mem 0x7ffe3602-0x7ffe36f5]
+[    0.003574] ACPI: Reserving DSDT table memory at [mem 0x7ffe0040-0x7ffe3601]
+[    0.003575] ACPI: Reserving FACS table memory at [mem 0x7ffe0000-0x7ffe003f]
+[    0.003576] ACPI: Reserving APIC table memory at [mem 0x7ffe36f6-0x7ffe3965]
+[    0.003576] ACPI: Reserving HPET table memory at [mem 0x7ffe3966-0x7ffe399d]
+[    0.003577] ACPI: Reserving MCFG table memory at [mem 0x7ffe399e-0x7ffe39d9]
+[    0.003578] ACPI: Reserving WAET table memory at [mem 0x7ffe39da-0x7ffe3a01]
+[    0.004162] No NUMA configuration found
+[    0.004164] Faking a node at [mem 0x0000000000000000-0x000000047fffffff]
+[    0.004176] NODE_DATA(0) allocated [mem 0x47ffd5280-0x47fffffff]
+[    0.005041] ACPI: PM-Timer IO Port: 0x608
+[    0.005062] ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+[    0.005095] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.005098] ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+[    0.005100] ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+[    0.005101] ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+[    0.005102] ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+[    0.005103] ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+[    0.005106] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.005107] ACPI: HPET id: 0x8086a201 base: 0xfed00000
+[    0.005111] TSC deadline timer available
+[    0.005113] CPU topo: Max. logical packages:   1
+[    0.005114] CPU topo: Max. logical nodes:      1
+[    0.005115] CPU topo: Num. nodes per package:  1
+[    0.005117] CPU topo: Max. logical dies:       1
+[    0.005118] CPU topo: Max. dies per package:   1
+[    0.005122] CPU topo: Max. threads per core:   1
+[    0.005123] CPU topo: Num. cores per package:    64
+[    0.005123] CPU topo: Num. threads per package:  64
+[    0.005124] CPU topo: Allowing 4 present CPUs plus 60 hotplug CPUs
+[    0.005142] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.005155] kvm-guest: KVM setup pv remote TLB flush
+[    0.005160] kvm-guest: setup PV sched yield
+[    0.005168] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.005169] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.005171] PM: hibernation: Registered nosave memory: [mem 0x7ffe0000-0xffffffff]
+[    0.005172] [gap 0xc0000000-0xfed1bfff] available for PCI devices
+[    0.005174] Booting paravirtualized kernel on KVM
+[    0.005175] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.005237] Zone ranges:
+[    0.005237]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.005239]   DMA32    [mem 0x0000000001000000-0x00000000ffffffff]
+[    0.005241]   Normal   [mem 0x0000000100000000-0x000000047fffffff]
+[    0.005242]   Device   empty
+[    0.005243] Movable zone start for each node
+[    0.005245] Early memory node ranges
+[    0.005246]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.005247]   node   0: [mem 0x0000000000100000-0x000000007ffdffff]
+[    0.005248]   node   0: [mem 0x0000000100000000-0x000000047fffffff]
+[    0.005251] Initmem setup node 0 [mem 0x0000000000001000-0x000000047fffffff]
+[    0.005349] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.005365] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.029156] On node 0, zone Normal: 32 pages in unavailable ranges
+[    0.029176] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:64 nr_cpu_ids:64 nr_node_ids:1
+[    0.031964] percpu: Embedded 85 pages/cpu s225280 r8192 d114688 u524288
+[    0.032069] kvm-guest: PV spinlocks enabled
+[    0.032071] PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.032075] Kernel command line: console=ttyS0 rdinit=/init panic=-1
+[    0.032116] random: crng init done
+[    0.032116] printk: log_buf_len individual max cpu contribution: 4096 bytes
+[    0.032117] printk: log_buf_len total cpu_extra contributions: 258048 bytes
+[    0.032118] printk: log_buf_len min size: 262144 bytes
+[    0.032472] printk: log buffer data + meta data: 524288 + 2228224 = 2752512 bytes
+[    0.032473] printk: early log buf free: 253976(96%)
+[    0.033585] Dentry cache hash table entries: 2097152 (order: 12, 16777216 bytes, linear)
+[    0.034132] Inode-cache hash table entries: 1048576 (order: 11, 8388608 bytes, linear)
+[    0.034637] software IO TLB: area num 64.
+[    0.041059] Fallback order for Node 0: 0 
+[    0.041071] Built 1 zonelists, mobility grouping on.  Total pages: 4194174
+[    0.041072] Policy zone: Normal
+[    0.041083] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.068384] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=64, Nodes=1
+[    0.082284] ftrace: allocating 63941 entries in 252 pages
+[    0.082287] ftrace: allocated 252 pages with 6 groups
+[    0.083118] Dynamic Preempt: lazy
+[    0.083511] rcu: Preemptible hierarchical RCU implementation.
+[    0.083513] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=64.
+[    0.083515] 	Trampoline variant of Tasks RCU enabled.
+[    0.083515] 	Rude variant of Tasks RCU enabled.
+[    0.083516] 	Tracing variant of Tasks RCU enabled.
+[    0.083517] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.083518] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=64
+[    0.083548] RCU Tasks: Setting shift to 6 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=64.
+[    0.083551] RCU Tasks Rude: Setting shift to 6 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=64.
+[    0.088636] NR_IRQS: 524544, nr_irqs: 936, preallocated irqs: 16
+[    0.088906] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.089194] Console: colour *CGA 80x25
+[    0.089266] printk: legacy console [ttyS0] enabled
+[    0.310747] ACPI: Core revision 20251212
+[    0.312059] clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604467 ns
+[    0.314610] APIC: Switch to symmetric I/O mode setup
+[    0.316184] x2apic enabled
+[    0.317277] APIC: Switched APIC routing to: physical x2apic
+[    0.318753] kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+[    0.320656] kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+[    0.323039] kvm-guest: setup PV IPIs
+[    0.325351] ..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+[    0.326957] clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x228ae3847f6, max_idle_ns: 440795295175 ns
+[    0.329719] Calibrating delay loop (skipped) preset value.. 4792.77 BogoMIPS (lpj=2396388)
+[    0.330862] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.331904] Last level iTLB entries: 4KB 512, 2MB 255, 4MB 127
+[    0.332717] Last level dTLB entries: 4KB 512, 2MB 255, 4MB 127, 1GB 0
+[    0.333727] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.334718] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.335718] Transient Scheduler Attacks: Vulnerable: No microcode
+[    0.336717] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.337717] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.338717] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.339724] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.340718] active return thunk: srso_alias_return_thunk
+[    0.341747] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.342717] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.343717] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.344717] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.345717] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.346717] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.347717] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.348718] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.349717] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.350718] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.351718] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.352717] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.353717] x86/fpu: Enabled xstate features 0x2e7, context size is 2440 bytes, using 'compacted' format.
+[    0.394578] Freeing SMP alternatives memory: 56K
+[    0.394719] pid_max: default: 65536 minimum: 512
+[    0.396018] landlock: Up and running.
+[    0.396717] Yama: becoming mindful.
+[    0.397896] AppArmor: AppArmor initialized
+[    0.398717] AppArmor: AppArmor secmark mediation reserved: ready to be enabled
+[    0.399924] Mount-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.400727] Mountpoint-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.402800] VFS: Finished mounting rootfs on nullfs
+[    0.404866] smpboot: CPU0: AMD EPYC 8024P 8-Core Processor (family: 0x19, model: 0xa0, stepping: 0x2)
+[    0.406056] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.406731] ... version:                   2
+[    0.407719] ... bit width:                 48
+[    0.408719] ... generic counters:          6
+[    0.409719] ... generic bitmap:            000000000000003f
+[    0.410730] ... fixed-purpose counters:    0
+[    0.411719] ... fixed-purpose bitmap:      0000000000000000
+[    0.412719] ... value mask:                0000ffffffffffff
+[    0.413719] ... max period:                00007fffffffffff
+[    0.414719] ... global_ctrl mask:          000000000000003f
+[    0.415992] signal: max sigframe size: 3376
+[    0.416774] rcu: Hierarchical SRCU implementation.
+[    0.417725] rcu: 	Max phase no-delay instances is 400.
+[    0.418799] Timer migration: 2 hierarchy levels; 8 children per group; 2 crossnode level
+[    0.428182] smp: Bringing up secondary CPUs ...
+[    0.429009] smpboot: x86: Booting SMP configuration:
+[    0.429732] .... node  #0, CPUs:        #1  #2  #3
+[    0.433789] smp: Brought up 1 node, 4 CPUs
+[    0.435724] smpboot: Total of 4 processors activated (19171.10 BogoMIPS)
+[    0.437469] Memory: 14409716K/16776696K available (23799K kernel code, 4952K rwdata, 16764K rodata, 5292K init, 5856K bss, 2348884K reserved, 0K cma-reserved)
+[    0.438236] devtmpfs: initialized
+[    0.438828] x86/mm: Memory block size: 128MB
+[    0.442866] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.444003] posixtimers hash table entries: 32768 (order: 7, 524288 bytes, linear)
+[    0.444849] futex hash table entries: 16384 (1048576 bytes on 1 NUMA nodes, total 1024 KiB, linear).
+[    0.446283] PM: RTC time: 09:56:13, date: 2026-10-16
+[    0.447388] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.448131] DMA: preallocated 2048 KiB GFP_KERNEL pool for atomic allocations
+[    0.448795] DMA: preallocated 2048 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.449798] DMA: preallocated 2048 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.450736] audit: initializing netlink subsys (disabled)
+[    0.451765] audit: type=2000 audit(1792144574.061:1): state=initialized audit_enabled=0 res=1
+[    0.451991] thermal_sys: Registered thermal governor 'fair_share'
+[    0.452727] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.453722] thermal_sys: Registered thermal governor 'step_wise'
+[    0.454721] thermal_sys: Registered thermal governor 'user_space'
+[    0.455720] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.456740] cpuidle: using governor ladder
+[    0.458729] cpuidle: using governor menu
+[    0.460889] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.462042] PCI: ECAM [mem 0xb0000000-0xbfffffff] (base 0xb0000000) for domain 0000 [bus 00-ff]
+[    0.462723] PCI: ECAM [mem 0xb0000000-0xbfffffff] reserved as E820 entry
+[    0.463734] PCI: Using configuration type 1 for base access
+[    0.464836] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.466800] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.469737] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.473733] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.476727] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.484329] ACPI: Added _OSI(Module Device)
+[    0.484721] ACPI: Added _OSI(Processor Device)
+[    0.485720] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.491380] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.494742] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.500104] ACPI: Interpreter enabled
+[    0.501772] ACPI: PM: (supports S0 S3 S4 S5)
+[    0.503730] ACPI: Using IOAPIC for interrupt routing
+[    0.507789] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.512727] PCI: Using E820 reservations for host bridge windows
+[    0.517501] ACPI: Enabled 2 GPEs in block 00 to 3F
+[    0.543743] ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+[    0.546733] acpi PNP0A08:00: _OSC: OS supports [ExtendedConfig ASPM ClockPM Segments MSI EDR HPX-Type3]
+[    0.550832] acpi PNP0A08:00: _OSC: platform does not support [PCIeHotplug LTR DPC]
+[    0.552894] acpi PNP0A08:00: _OSC: OS now controls [SHPCHotplug PME AER PCIeCapability]
+[    0.554987] PCI host bridge to bus 0000:00
+[    0.556727] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    0.557724] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    0.559720] pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+[    0.561721] pci_bus 0000:00: root bus resource [mem 0x80000000-0xafffffff window]
+[    0.563720] pci_bus 0000:00: root bus resource [mem 0xc0000000-0xfebfffff window]
+[    0.565721] pci_bus 0000:00: root bus resource [mem 0x480000000-0xc7fffffff window]
+[    0.567723] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    0.568899] pci 0000:00:00.0: [8086:29c0] type 00 class 0x060000 conventional PCI endpoint
+[    0.582207] pci 0000:00:1f.0: [8086:2918] type 00 class 0x060100 conventional PCI endpoint
+[    0.584456] pci 0000:00:1f.0: quirk: [io  0x0600-0x067f] claimed by ICH6 ACPI/GPIO/TCO
+[    0.587219] pci 0000:00:1f.2: [8086:2922] type 00 class 0x010601 conventional PCI endpoint
+[    0.590797] pci 0000:00:1f.2: BAR 4 [io  0xc040-0xc05f]
+[    0.591736] pci 0000:00:1f.2: BAR 5 [mem 0xfebff000-0xfebfffff]
+[    0.594441] pci 0000:00:1f.3: [8086:2930] type 00 class 0x0c0500 conventional PCI endpoint
+[    0.596719] pci 0000:00:1f.3: BAR 4 [io  0x0700-0x073f]
+[    0.600561] ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+[    0.601917] ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+[    0.603907] ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+[    0.605909] ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+[    0.606907] ACPI: PCI: Interrupt link LNKE configured for IRQ 10
+[    0.608927] ACPI: PCI: Interrupt link LNKF configured for IRQ 10
+[    0.610910] ACPI: PCI: Interrupt link LNKG configured for IRQ 11
+[    0.612907] ACPI: PCI: Interrupt link LNKH configured for IRQ 11
+[    0.613790] ACPI: PCI: Interrupt link GSIA configured for IRQ 16
+[    0.615741] ACPI: PCI: Interrupt link GSIB configured for IRQ 17
+[    0.616740] ACPI: PCI: Interrupt link GSIC configured for IRQ 18
+[    0.618741] ACPI: PCI: Interrupt link GSID configured for IRQ 19
+[    0.620740] ACPI: PCI: Interrupt link GSIE configured for IRQ 20
+[    0.621740] ACPI: PCI: Interrupt link GSIF configured for IRQ 21
+[    0.623744] ACPI: PCI: Interrupt link GSIG configured for IRQ 22
+[    0.624740] ACPI: PCI: Interrupt link GSIH configured for IRQ 23
+[    0.632725] iommu: Default domain type: Translated
+[    0.633721] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.635057] SCSI subsystem initialized
+[    0.636779] ACPI: bus type USB registered
+[    0.637754] usbcore: registered new interface driver usbfs
+[    0.638733] usbcore: registered new interface driver hub
+[    0.640745] usbcore: registered new device driver usb
+[    0.641758] pps_core: LinuxPPS API ver. 1 registered
+[    0.642719] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.645726] PTP clock support registered
+[    0.646774] EDAC MC: Ver: 3.0.0
+[    0.648230] NetLabel: Initializing
+[    0.649721] NetLabel:  domain hash size = 128
+[    0.650719] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.651746] NetLabel:  unlabeled traffic allowed by default
+[    0.653859] mctp: management component transport protocol core
+[    0.654721] NET: Registered PF_MCTP protocol family
+[    0.656754] PCI: Using ACPI for IRQ routing
+[    0.854534] e820: register RAM buffer resource [mem 0x0009fc00-0x0009ffff]
+[    0.855729] e820: register RAM buffer resource [mem 0x7ffe0000-0x7fffffff]
+[    0.857779] vgaarb: loaded
+[    0.858771] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+[    0.859720] hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+[    0.867080] clocksource: Switched to clocksource kvm-clock
+[    0.868516] VFS: Disk quotas dquot_6.6.0
+[    0.869592] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.871826] AppArmor: AppArmor Filesystem Enabled
+[    0.873094] acpi PNP0C01:00: Reserved [mem 0xb0000000-0xbfffffff]
+[    0.874711] pnp: PnP ACPI init
+[    0.876313] pnp: PnP ACPI: found 4 devices
+[    0.885569] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    0.888028] NET: Registered PF_INET protocol family
+[    0.889466] IP idents hash table entries: 262144 (order: 9, 2097152 bytes, linear)
+[    0.911750] tcp_listen_portaddr_hash hash table entries: 8192 (order: 5, 131072 bytes, linear)
+[    0.914018] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.916131] TCP established hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.918361] TCP bind hash table entries: 65536 (order: 9, 2097152 bytes, linear)
+[    0.920369] TCP: Hash tables configured (established 131072 bind 65536)
+[    0.922289] MPTCP token hash table entries: 16384 (order: 7, 393216 bytes, linear)
+[    0.924329] UDP hash table entries: 8192 (order: 7, 524288 bytes, linear)
+[    0.926238] UDP-Lite hash table entries: 8192 (order: 7, 524288 bytes, linear)
+[    0.928289] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.929794] NET: Registered PF_XDP protocol family
+[    0.931073] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    0.932684] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    0.934303] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    0.936085] pci_bus 0000:00: resource 7 [mem 0x80000000-0xafffffff window]
+[    0.937871] pci_bus 0000:00: resource 8 [mem 0xc0000000-0xfebfffff window]
+[    0.939651] pci_bus 0000:00: resource 9 [mem 0x480000000-0xc7fffffff window]
+[    0.941587] PCI: CLS 0 bytes, default 64
+[    0.942716] PCI-DMA: Using software bounce buffering for IO (SWIOTLB)
+[    0.942887] Trying to unpack rootfs image as initramfs...
+[    0.944393] software IO TLB: mapped [mem 0x0000000077d04000-0x000000007bd04000] (64MB)
+[    0.949472] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x228ae3847f6, max_idle_ns: 440795295175 ns
+[    0.953745] Initialise system trusted keyrings
+[    0.954932] Key type blacklist registered
+[    0.956138] workingset: timestamp_bits=36 max_order=22 bucket_order=0
+[    0.958472] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.960280] fuse: init (API version 7.45)
+[    0.961682] integrity: Platform Keyring initialized
+[    0.962983] integrity: Machine keyring initialized
+[    0.976973] Key type asymmetric registered
+[    0.978073] Asymmetric key parser 'x509' registered
+[    0.979412] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 242)
+[    0.981503] io scheduler mq-deadline registered
+[    0.985837] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.987680] input: Power Button as /devices/platform/LNXPWRBN:00/input/input0
+[    0.989628] ACPI: button: Power Button [PWRF]
+[    0.992322] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    1.009508] Freeing initrd memory: 68464K
+[    1.021091] 00:02: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    1.030113] Linux agpgart interface v0.103
+[    1.043487] loop: module loaded
+[    1.046027] ACPI: bus type drm_connector registered
+[    1.049517] tun: Universal TUN/TAP device driver, 1.6
+[    1.052641] PPP generic driver version 2.4.2
+[    1.055596] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    1.062360] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    1.065302] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    1.068588] mousedev: PS/2 mouse device common for all mice
+[    1.072138] rtc_cmos 00:03: RTC can wake from S4
+[    1.076580] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+[    1.076852] rtc_cmos 00:03: registered as rtc0
+[    1.083480] rtc_cmos 00:03: setting system clock to 2026-10-16T09:56:14 UTC (1792144574)
+[    1.085871] rtc_cmos 00:03: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    1.087898] i2c_dev: i2c /dev entries driver
+[    1.089099] device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+[    1.092430] device-mapper: uevent: version 1.0.3
+[    1.093873] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[    1.096226] amd_pstate: The CPPC feature is supported but currently disabled by the BIOS.
+[    1.096226] Please enable it if your BIOS has the CPPC option.
+[    1.099907] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    1.101968] drop_monitor: Initializing network drop monitor service
+[    1.103922] NET: Registered PF_INET6 protocol family
+[    1.106124] Segment Routing with IPv6
+[    1.107172] In-situ OAM (IOAM) with IPv6
+[    1.108256] NET: Registered PF_PACKET protocol family
+[    1.109737] Key type dns_resolver registered
+[    1.111745] IPI shorthand broadcast: enabled
+[    1.116311] sched_clock: Marking stable (883003023, 232798842)->(1185674345, -69872480)
+[    1.119311] registered taskstats version 1
+[    1.122139] Loading compiled-in X.509 certificates
+[    1.125882] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    1.131908] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    1.138305] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    1.144276] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    1.150793] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    1.155974] blacklist: Loading compiled-in revocation X.509 certificates
+[    1.159503] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    1.164635] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    1.170084] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    1.174579] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    1.178899] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    1.183273] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    1.187642] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    1.192040] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    1.203958] Demotion targets for Node 0: null
+[    1.205368] Key type .fscrypt registered
+[    1.206395] Key type fscrypt-provisioning registered
+[    1.207833] Key type big_key registered
+[    1.210045] Key type encrypted registered
+[    1.211112] AppArmor: AppArmor sha256 policy hashing enabled
+[    1.212591] ima: No TPM chip found, activating TPM-bypass!
+[    1.214029] Loading compiled-in module X.509 certificates
+[    1.215912] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    1.218458] ima: Allocated hash algorithm: sha256
+[    1.219710] ima: No architecture policies found
+[    1.220935] evm: Initialising EVM extended attributes:
+[    1.222282] evm: security.selinux
+[    1.223186] evm: security.SMACK64
+[    1.224068] evm: security.SMACK64EXEC
+[    1.225051] evm: security.SMACK64TRANSMUTE
+[    1.226131] evm: security.SMACK64MMAP
+[    1.227108] evm: security.apparmor
+[    1.228021] evm: security.ima
+[    1.228832] evm: security.capability
+[    1.229772] evm: HMAC attrs: 0x1
+[    1.230988] PM:   Magic number: 14:72:930
+[    1.232418] RAS: Correctable Errors collector initialized.
+[    1.234249] clk: Disabling unused clocks
+[    1.235282] PM: genpd: Disabling unused power domains
+[    1.238467] Freeing unused decrypted memory: 2028K
+[    1.240139] Freeing unused kernel image (initmem) memory: 5292K
+[    1.241282] Write protecting the kernel read-only data: 43008k
+[    1.243051] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    1.244648] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    1.312006] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    1.313224] Run /init as init process
+Linux (none) 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+65536
+112721
+0-3
+0-63
+[    1.329216] NET: Registered PF_VSOCK protocol family
+BENCH_PRE_VARIANT_MEMINFO
+MemTotal:       16347192 kB
+MemFree:        16174132 kB
+MemAvailable:   16003724 kB
+Buffers:               0 kB
+Cached:            68404 kB
+SwapCached:            0 kB
+Active:            68600 kB
+Inactive:              0 kB
+Active(anon):      68600 kB
+Inactive(anon):        0 kB
+Active(file):          0 kB
+Inactive(file):        0 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:           196 kB
+Mapped:             1764 kB
+Shmem:             68404 kB
+KReclaimable:       4268 kB
+Slab:              37148 kB
+SReclaimable:       4268 kB
+SUnreclaim:        32880 kB
+KernelStack:        2336 kB
+PageTables:          640 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8173596 kB
+Committed_AS:      69236 kB
+VmallocTotal:   13743895347199 kB
+VmallocUsed:        6720 kB
+VmallocChunk:          0 kB
+Percpu:            21760 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+CmaTotal:              0 kB
+CmaFree:         1837056 kB
+Unaccepted:            0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       34688 kB
+DirectMap2M:     4159488 kB
+DirectMap1G:    14680064 kB
+BENCH_PRE_VARIANT_SLABINFO
+slabinfo - version: 2.1
+# name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab> : tunables <limit> <batchcount> <sharedfactor> : slabdata <active_slabs> <num_slabs> <sharedavail>
+AF_VSOCK               0      0   1280   25    8 : tunables    0    0    0 : slabdata      0      0      0
+fsverity_info          0      0    272   30    2 : tunables    0    0    0 : slabdata      0      0      0
+fscrypt_inode_info      0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+MPTCPv6                0      0   2176   15    8 : tunables    0    0    0 : slabdata      0      0      0
+request_sock_subflow_v6      0      0    400   20    2 : tunables    0    0    0 : slabdata      0      0      0
+ip6-frags              0      0    184   22    1 : tunables    0    0    0 : slabdata      0      0      0
+ip6_dst_cache          0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+PINGv6                 0      0   1408   23    8 : tunables    0    0    0 : slabdata      0      0      0
+RAWv6                132    138   1408   23    8 : tunables    0    0    0 : slabdata      6      6      0
+UDPv6                  0      0   1472   22    8 : tunables    0    0    0 : slabdata      0      0      0
+tw_sock_TCPv6          0      0    280   29    2 : tunables    0    0    0 : slabdata      0      0      0
+request_sock_TCPv6      0      0    328   24    2 : tunables    0    0    0 : slabdata      0      0      0
+TCPv6                  0      0   2560   12    8 : tunables    0    0    0 : slabdata      0      0      0
+kcopyd_job             0      0   3240   10    8 : tunables    0    0    0 : slabdata      0      0      0
+dm_uevent              0      0   2888   11    8 : tunables    0    0    0 : slabdata      0      0      0
+bio-136               60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0
+io_kiocb               0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+bio-264               28     50    320   25    2 : tunables    0    0    0 : slabdata      2      2      0
+mqueue_inode_cache     28     34    960   17    4 : tunables    0    0    0 : slabdata      2      2      0
+fuse_request           0      0    176   23    1 : tunables    0    0    0 : slabdata      0      0      0
+fuse_inode             0      0    896   18    4 : tunables    0    0    0 : slabdata      0      0      0
+ecryptfs_inode_cache      0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+ecryptfs_file_cache      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+fat_inode_cache        0      0    768   21    4 : tunables    0    0    0 : slabdata      0      0      0
+fat_cache              0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0
+squashfs_inode_cache      0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0
+jbd2_transaction_s      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+jbd2_journal_head      0      0    120   34    1 : tunables    0    0    0 : slabdata      0      0      0
+jbd2_revoke_table_s      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+ext4_inode_cache       0      0   1128   29    8 : tunables    0    0    0 : slabdata      0      0      0
+ext4_allocation_context      0      0    168   24    1 : tunables    0    0    0 : slabdata      0      0      0
+ext4_prealloc_space      0      0    112   36    1 : tunables    0    0    0 : slabdata      0      0      0
+ext4_io_end_vec        0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+ext4_io_end            0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+pending_reservation      0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+extent_status          0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0
+mb_cache_entry       180    219     56   73    1 : tunables    0    0    0 : slabdata      3      3      0
+kioctx                 0      0    576   28    4 : tunables    0    0    0 : slabdata      0      0      0
+userfaultfd_ctx_cache      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+fanotify_perm_event      0      0    112   36    1 : tunables    0    0    0 : slabdata      0      0      0
+dnotify_struct         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+dio                    0      0    640   25    4 : tunables    0    0    0 : slabdata      0      0      0
+zs_handle              0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0
+pid_namespace          0      0    576   28    4 : tunables    0    0    0 : slabdata      0      0      0
+ip4-frags              0      0    200   20    1 : tunables    0    0    0 : slabdata      0      0      0
+MPTCP                  0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+request_sock_subflow_v4      0      0    400   20    2 : tunables    0    0    0 : slabdata      0      0      0
+xfrm_dst               0      0    320   25    2 : tunables    0    0    0 : slabdata      0      0      0
+xfrm_state             0      0    832   19    4 : tunables    0    0    0 : slabdata      0      0      0
+ip_fib_trie           60     85     48   85    1 : tunables    0    0    0 : slabdata      1      1      0
+ip_fib_alias          60     73     56   73    1 : tunables    0    0    0 : slabdata      1      1      0
+PING                   0      0   1088   30    8 : tunables    0    0    0 : slabdata      0      0      0
+RAW                  192    208   1216   26    8 : tunables    0    0    0 : slabdata      8      8      0
+UDP                   24     24   1344   24    8 : tunables    0    0    0 : slabdata      1      1      0
+tw_sock_TCP            0      0    280   29    2 : tunables    0    0    0 : slabdata      0      0      0
+request_sock_TCP       0      0    328   24    2 : tunables    0    0    0 : slabdata      0      0      0
+TCP                    0      0   2432   13    8 : tunables    0    0    0 : slabdata      0      0      0
+hugetlbfs_inode_cache     28     52    624   26    4 : tunables    0    0    0 : slabdata      2      2      0
+dquot                  0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+bio-280               56     75    320   25    2 : tunables    0    0    0 : slabdata      3      3      0
+ep_head                0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+eventpoll_epi         60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+dax_cache             28     42    768   21    4 : tunables    0    0    0 : slabdata      2      2      0
+bio_integrity_data     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+request_queue         28     32    992   16    4 : tunables    0    0    0 : slabdata      2      2      0
+bio-200               28     32    256   16    1 : tunables    0    0    0 : slabdata      2      2      0
+biovec-max            44     48   4096    8    8 : tunables    0    0    0 : slabdata      6      6      0
+biovec-128            12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0
+msg_msg-8k             0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-4k             0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-2k             0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-1k             0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-512            0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-256            0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-128            0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-64             0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-32             0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-16             0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-8              0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-192            0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+msg_msg-96             0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-16        60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+memdup_user-8        120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+memdup_user-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+memdup_user-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0
+user_namespace         0      0    896   18    4 : tunables    0    0    0 : slabdata      0      0      0
+iommu_iova_magazine     12     16   1024   16    4 : tunables    0    0    0 : slabdata      1      1      0
+dmaengine-unmap-256     12     15   2112   15    8 : tunables    0    0    0 : slabdata      1      1      0
+dmaengine-unmap-128     12     30   1088   30    8 : tunables    0    0    0 : slabdata      1      1      0
+dmaengine-unmap-2     60     64     64   64    1 : tunables    0    0    0 : slabdata      1      1      0
+sock_inode_cache     364    380    832   19    4 : tunables    0    0    0 : slabdata     20     20      0
+skbuff_small_head     84     92    704   23    4 : tunables    0    0    0 : slabdata      4      4      0
+skbuff_head_cache     88     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0
+tracefs_inode_cache    896    900    648   25    4 : tunables    0    0    0 : slabdata     36     36      0
+debugfs_inode_cache   2940   2950    632   25    4 : tunables    0    0    0 : slabdata    118    118      0
+configfs_dir_cache     60     92     88   46    1 : tunables    0    0    0 : slabdata      2      2      0
+file_lease_cache       0      0    160   25    1 : tunables    0    0    0 : slabdata      0      0      0
+file_lock_cache      180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0
+fsnotify_mark_connector      0      0     24  170    1 : tunables    0    0    0 : slabdata      0      0      0
+buffer_head            0      0    104   39    1 : tunables    0    0    0 : slabdata      0      0      0
+task_delay_info        0      0    368   22    2 : tunables    0    0    0 : slabdata      0      0      0
+taskstats              0      0    688   23    4 : tunables    0    0    0 : slabdata      0      0      0
+mem_cgroup_per_node     12     17   1920   17    8 : tunables    0    0    0 : slabdata      1      1      0
+mem_cgroup            12     18   1728   18    8 : tunables    0    0    0 : slabdata      1      1      0
+pidfs_xattr_cache      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+pidfs_attr_cache       0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+proc_dir_entry       360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+pde_opener             0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0
+proc_inode_cache      84     92    688   23    4 : tunables    0    0    0 : slabdata      4      4      0
+seq_file             120    136    120   34    1 : tunables    0    0    0 : slabdata      4      4      0
+sigqueue             180    204     80   51    1 : tunables    0    0    0 : slabdata      4      4      0
+bdev_cache            24     38   1664   19    8 : tunables    0    0    0 : slabdata      2      2      0
+shmem_inode_cache    280    294    768   21    4 : tunables    0    0    0 : slabdata     14     14      0
+kernfs_node_cache  29100  29100    136   30    1 : tunables    0    0    0 : slabdata    970    970      0
+mnt_cache            112    126    384   21    2 : tunables    0    0    0 : slabdata      6      6      0
+bfilp                  0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+filp                 240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0
+inode_cache          252    260    616   26    4 : tunables    0    0    0 : slabdata     10     10      0
+dentry              4260   4263    192   21    1 : tunables    0    0    0 : slabdata    203    203      0
+names_cache          240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0
+net_namespace          0      0   6336    5    8 : tunables    0    0    0 : slabdata      0      0      0
+ima_iint_cache         0      0    104   39    1 : tunables    0    0    0 : slabdata      0      0      0
+apparmor_auditcache      0      0    344   23    2 : tunables    0    0    0 : slabdata      0      0      0
+lsm_file_cache       360    408     40  102    1 : tunables    0    0    0 : slabdata      4      4      0
+key_jar               56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0
+uts_namespace          0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0
+nsproxy               60    112     72   56    1 : tunables    0    0    0 : slabdata      2      2      0
+vm_area_struct       360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+files_cache          168    184    704   23    4 : tunables    0    0    0 : slabdata      8      8      0
+signal_cache         180    196   1152   28    8 : tunables    0    0    0 : slabdata      7      7      0
+sighand_cache        168    180   2112   15    8 : tunables    0    0    0 : slabdata     12     12      0
+task_struct          168    168  12544    2    8 : tunables    0    0    0 : slabdata     84     84      0
+anon_vma_chain       420    448     64   64    1 : tunables    0    0    0 : slabdata      7      7      0
+anon_vma             300    312    104   39    1 : tunables    0    0    0 : slabdata      8      8      0
+pid                  420    420    192   21    1 : tunables    0    0    0 : slabdata     20     20      0
+Acpi-ParseExt         60     78    104   39    1 : tunables    0    0    0 : slabdata      2      2      0
+Acpi-State            60    102     80   51    1 : tunables    0    0    0 : slabdata      2      2      0
+shared_policy_node    660    680     48   85    1 : tunables    0    0    0 : slabdata      8      8      0
+numa_policy           84     84    288   28    2 : tunables    0    0    0 : slabdata      3      3      0
+perf_event            12     24   1352   24    8 : tunables    0    0    0 : slabdata      1      1      0
+trace_event_file    6420   6426     96   42    1 : tunables    0    0    0 : slabdata    153    153      0
+ftrace_event_field   5100   5110     56   73    1 : tunables    0    0    0 : slabdata     70     70      0
+pool_workqueue      3920   3920    512   16    2 : tunables    0    0    0 : slabdata    245    245      0
+radix_tree_node     1008   1008    584   28    4 : tunables    0    0    0 : slabdata     36     36      0
+task_group             0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0
+maple_node           190    192    256   16    1 : tunables    0    0    0 : slabdata     12     12      0
+mm_struct             60     72   1792   18    8 : tunables    0    0    0 : slabdata      4      4      0
+vmap_area           2512   2520     72   56    1 : tunables    0    0    0 : slabdata     45     45      0
+kmalloc_buckets      120    144    112   36    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-cg-8k          4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-cg-4k         84     88   4096    8    8 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-cg-2k        168    176   2048   16    8 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-cg-1k        108    112   1024   16    4 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-cg-512       168    176    512   16    2 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-cg-256       336    336    256   16    1 : tunables    0    0    0 : slabdata     21     21      0
+kmalloc-cg-128       420    448    128   32    1 : tunables    0    0    0 : slabdata     14     14      0
+kmalloc-cg-64        360    384     64   64    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-cg-32        600    640     32  128    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-cg-16        420    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-cg-8         240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-cg-192       480    483    192   21    1 : tunables    0    0    0 : slabdata     23     23      0
+kmalloc-cg-96        360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0
+dma-kmalloc-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-16         0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-8          0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+dma-kmalloc-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-16         0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-8          0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rcl-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-15-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-15-4k     16     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-15-2k      0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-15-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-15-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-15-256    476    480    256   16    1 : tunables    0    0    0 : slabdata     30     30      0
+kmalloc-rnd-15-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-15-64    480    512     64   64    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-15-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-15-16    360    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-15-8    2520   2560      8  512    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-15-192    360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+kmalloc-rnd-15-96   1980   2016     96   42    1 : tunables    0    0    0 : slabdata     48     48      0
+kmalloc-rnd-14-8k     12     12   8192    4    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-14-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-14-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-14-1k     60     64   1024   16    4 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-14-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-14-256    196    208    256   16    1 : tunables    0    0    0 : slabdata     13     13      0
+kmalloc-rnd-14-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-14-64    368    384     64   64    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-14-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-14-16    120    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-14-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-14-192    180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-14-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-13-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-13-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-13-2k     96     96   2048   16    8 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-13-1k     60     64   1024   16    4 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-13-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-13-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-13-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-13-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-13-32    780    896     32  128    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-13-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-13-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-13-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-13-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-12-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-12-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-12-2k    120    128   2048   16    8 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-12-1k     24     32   1024   16    4 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-12-512   1428   1440    512   16    2 : tunables    0    0    0 : slabdata     90     90      0
+kmalloc-rnd-12-256    496    496    256   16    1 : tunables    0    0    0 : slabdata     31     31      0
+kmalloc-rnd-12-128    564    576    128   32    1 : tunables    0    0    0 : slabdata     18     18      0
+kmalloc-rnd-12-64    684    704     64   64    1 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-rnd-12-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-12-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-12-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-12-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-12-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-11-8k     16     16   8192    4    8 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-11-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-11-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-11-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-11-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-11-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-11-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-11-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-11-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-11-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-11-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-11-192    240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0
+kmalloc-rnd-11-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-10-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-10-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-10-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-10-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-10-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-10-256    168    176    256   16    1 : tunables    0    0    0 : slabdata     11     11      0
+kmalloc-rnd-10-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-10-64    301    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-10-32    360    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-10-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-10-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-10-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-10-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-09-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-09-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-09-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-09-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-09-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-09-256     56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-09-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-09-64    300    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-09-32    780   1152     32  128    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-09-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-09-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-09-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-09-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-08-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-08-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-08-2k     12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-08-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-08-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-08-256     28     32    256   16    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-08-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-08-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-08-32    900   1024     32  128    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-08-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-08-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-08-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-08-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-07-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-07-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-07-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-07-1k     12     16   1024   16    4 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-07-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-07-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-07-128    240    256    128   32    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-07-64   1200   1216     64   64    1 : tunables    0    0    0 : slabdata     19     19      0
+kmalloc-rnd-07-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-07-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-07-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-07-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-07-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-06-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-06-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-06-2k     60     64   2048   16    8 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-06-1k     24     32   1024   16    4 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-06-512  12262  12272    512   16    2 : tunables    0    0    0 : slabdata    767    767      0
+kmalloc-rnd-06-256   5618   5632    256   16    1 : tunables    0    0    0 : slabdata    352    352      0
+kmalloc-rnd-06-128   4270   4288    128   32    1 : tunables    0    0    0 : slabdata    134    134      0
+kmalloc-rnd-06-64   2830   2880     64   64    1 : tunables    0    0    0 : slabdata     45     45      0
+kmalloc-rnd-06-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-06-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-06-8      60    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-06-192    360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0
+kmalloc-rnd-06-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-05-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-05-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-05-2k     84     96   2048   16    8 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-05-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-05-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-05-256    112    112    256   16    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-05-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-05-64    480    512     64   64    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-05-32    120    128     32  128    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-05-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-05-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-05-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-05-96    360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-04-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-04-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-04-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-04-1k    120    128   1024   16    4 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-04-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-04-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-04-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-04-64    420    448     64   64    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-04-32    300    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-04-16   1620   1792     16  256    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-04-8    1860   2048      8  512    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-04-192    240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0
+kmalloc-rnd-04-96    300    336     96   42    1 : tunables    0    0    0 : slabdata      8      8      0
+kmalloc-rnd-03-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-03-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-03-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-03-1k    192    192   1024   16    4 : tunables    0    0    0 : slabdata     12     12      0
+kmalloc-rnd-03-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-03-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-03-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-03-64    420    448     64   64    1 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-rnd-03-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-03-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-03-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-03-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-03-96    360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-02-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-02-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-02-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-02-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-02-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-02-256     56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-02-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-02-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0
+kmalloc-rnd-02-32    120    128     32  128    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-02-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-02-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-rnd-02-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-02-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0
+kmalloc-rnd-01-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0
+kmalloc-rnd-01-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-01-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-01-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-01-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-01-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0
+kmalloc-rnd-01-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-01-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-rnd-01-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-01-16    480    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-01-8     720   1024      8  512    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-rnd-01-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-rnd-01-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-8k             8      8   8192    4    8 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-4k             4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-2k            48     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-1k            36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-512          112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0
+kmalloc-256          196    208    256   16    1 : tunables    0    0    0 : slabdata     13     13      0
+kmalloc-128          180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0
+kmalloc-64           579    640     64   64    1 : tunables    0    0    0 : slabdata     10     10      0
+kmalloc-32           300    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0
+kmalloc-16           360    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0
+kmalloc-8            120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0
+kmalloc-192          241    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0
+kmalloc-96           300    336     96   42    1 : tunables    0    0    0 : slabdata      8      8      0
+kmem_cache_node      407    416    128   32    1 : tunables    0    0    0 : slabdata     13     13      0
+kmem_cache           407    416    256   16    1 : tunables    0    0    0 : slabdata     26     26      0
+BENCH_PRE_VARIANT_END
+[    2.273615] evmod: loading out-of-tree module taints kernel.
+[    2.274719] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    2.277291] evmod: loaded (per-cpu workqueue)
+BENCH_POST_LOAD_MEMINFO
+MemTotal:       16347192 kB
+MemFree:        16174504 kB
+MemAvailable:   16004212 kB
+Buffers:               0 kB
+Cached:            68556 kB
+SwapCached:            0 kB
+Active:            68612 kB
+Inactive:              0 kB
+Active(anon):      68612 kB
+Inactive(anon):        0 kB
+Active(file):          0 kB
+Inactive(file):        0 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:            96 kB
+Mapped:             1864 kB
+Shmem:             68556 kB
+KReclaimable:       4504 kB
+Slab:              38192 kB
+SReclaimable:       4504 kB
+SUnreclaim:        33688 kB
+KernelStack:        2272 kB
+PageTables:          372 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8173596 kB
+Committed_AS:      69236 kB
+VmallocTotal:   13743895347199 kB
+VmallocUsed:        6692 kB
+VmallocChunk:          0 kB
+Percpu:            21760 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+CmaTotal:              0 kB
+CmaFree:         1837056 kB
+Unaccepted:            0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       34688 kB
+DirectMap2M:     4159488 kB
+DirectMap1G:    14680064 kB
+BENCH_POST_LOAD_END
+BENCH_PERF_PMU_PROBE
+
+ Performance counter stats for 'system wide':
+
+           3779597      cycles                                                                
+           2672034      instructions                                                          
+
+       0.102693250 seconds time elapsed
+
+BENCH_PERF_SOFTWARE_PROBE
+
+ Performance counter stats for 'system wide':
+
+            408.12 msec cpu-clock                                                             
+            408.12 msec task-clock                                                            
+                30      context-switches                                                      
+                 5      cpu-migrations                                                        
+
+       0.102049903 seconds time elapsed
+
+{"baseline":{"all_tasks":79,"evmod_stats":"live=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 held_max=0 pair_size=248 pool_bytes=16777216\n","kernel_workers":{"kworker/":42},"meminfo":"MemTotal:       16347192 kB\nMemFree:        16171860 kB\nMemAvailable:   16001704 kB\nBuffers:               0 kB\nCached:            68556 kB\nSwapCached:            0 kB\nActive:            68716 kB\nInactive:              0 kB\nActive(anon):      68712 kB\nInactive(anon):        0 kB\nActive(file):          4 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:           180 kB\nMapped:             4600 kB\nShmem:             68556 kB\nKReclaimable:       4764 kB\nSlab:              38868 kB\nSReclaimable:       4764 kB\nSUnreclaim:        34104 kB\nKernelStack:        2272 kB\nPageTables:          456 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:      69340 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:        6652 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1837056 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       34688 kB\nDirectMap2M:     4159488 kB\nDirectMap1G:    14680064 kB\n","module_stats":"UNAVAILABLE: No such file or directory (os error 2)","modules":"evmod 24576 0 - Live 0xffffffffc0417000 (OE)\nvhost_vsock 28672 0 - Live 0xffffffffc0415000\nvmw_vsock_virtio_transport_common 57344 1 vhost_vsock, Live 0xffffffffc0411000\nvhost 69632 1 vhost_vsock, Live 0xffffffffc0409000\nvhost_iotlb 16384 1 vhost, Live 0xffffffffc0408000\nvsock 73728 2 vhost_vsock,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000\n","proc_stat":"cpu  1 0 160 607 0 0 2 0 0 0\ncpu0 0 0 11 165 0 0 0 0 0 0\ncpu1 1 0 76 102 0 0 1 0 0 0\ncpu2 0 0 13 201 0 0 0 0 0 0\ncpu3 0 0 58 137 0 0 0 0 0 0\nintr 8250 83 9 0 0 1679 0 0 0 1 0 0 0 3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\nctxt 2380\nbtime 1792144573\nprocesses 173\nprocs_running 1\nprocs_blocked 0\nsoftirq 1470 0 302 0 0 0 0 1 678 0 489\n","self_fds":4,"self_smaps_rollup":"6085d61a3000-7ffcb7d73000 ---p 00000000 00:00 0                          [rollup]\nRss:                3072 kB\nPss:                3070 kB\nPss_Dirty:          3064 kB\nPss_Anon:            300 kB\nPss_File:              6 kB\nPss_Shmem:          2764 kB\nShared_Clean:          4 kB\nShared_Dirty:          0 kB\nPrivate_Clean:         4 kB\nPrivate_Dirty:      3064 kB\nReferenced:         3072 kB\nAnonymous:           300 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:         0 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:         0 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n","self_stat":"110 (probe) R 1 0 0 0 -1 4194560 151 0 0 0 0 0 0 0 20 0 1 0 235 4792320 755 18446744073709551615 106127939340672 106127940545200 140723392816992 0 0 0 0 4096 1088 0 0 0 17 1 0 0 0 0 0 106127940593768 106127940596352 106128667148288 140723392819084 140723392819103 140723392819103 140723392819185 0\n","self_status":"Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t110\nNgid:\t0\nPid:\t110\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t64\nGroups:\t \nNStgid:\t110\nNSpid:\t110\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t    4680 kB\nVmSize:\t    4680 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t    3072 kB\nVmRSS:\t    3072 kB\nRssAnon:\t     300 kB\nRssFile:\t       8 kB\nRssShmem:\t    2764 kB\nVmData:\t     372 kB\nVmStk:\t     132 kB\nVmExe:\t    1180 kB\nVmLib:\t    1972 kB\nVmPTE:\t      56 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t1\nSigQ:\t0/56360\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000000000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t0\nnonvoluntary_ctxt_switches:\t0\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n","self_tasks":1,"slabinfo":"slabinfo - version: 2.1\n# name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab> : tunables <limit> <batchcount> <sharedfactor> : slabdata <active_slabs> <num_slabs> <sharedavail>\nAF_VSOCK               0      0   1280   25    8 : tunables    0    0    0 : slabdata      0      0      0\nfsverity_info          0      0    272   30    2 : tunables    0    0    0 : slabdata      0      0      0\nfscrypt_inode_info      0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\nMPTCPv6                0      0   2176   15    8 : tunables    0    0    0 : slabdata      0      0      0\nrequest_sock_subflow_v6      0      0    400   20    2 : tunables    0    0    0 : slabdata      0      0      0\nip6-frags              0      0    184   22    1 : tunables    0    0    0 : slabdata      0      0      0\nip6_dst_cache          0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nPINGv6                 0      0   1408   23    8 : tunables    0    0    0 : slabdata      0      0      0\nRAWv6                132    138   1408   23    8 : tunables    0    0    0 : slabdata      6      6      0\nUDPv6                  0      0   1472   22    8 : tunables    0    0    0 : slabdata      0      0      0\ntw_sock_TCPv6          0      0    280   29    2 : tunables    0    0    0 : slabdata      0      0      0\nrequest_sock_TCPv6      0      0    328   24    2 : tunables    0    0    0 : slabdata      0      0      0\nTCPv6                  0      0   2560   12    8 : tunables    0    0    0 : slabdata      0      0      0\nkcopyd_job             0      0   3240   10    8 : tunables    0    0    0 : slabdata      0      0      0\ndm_uevent              0      0   2888   11    8 : tunables    0    0    0 : slabdata      0      0      0\nbio-136               60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0\nio_kiocb               0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nbio-264               28     50    320   25    2 : tunables    0    0    0 : slabdata      2      2      0\nmqueue_inode_cache     28     34    960   17    4 : tunables    0    0    0 : slabdata      2      2      0\nfuse_request           0      0    176   23    1 : tunables    0    0    0 : slabdata      0      0      0\nfuse_inode             0      0    896   18    4 : tunables    0    0    0 : slabdata      0      0      0\necryptfs_inode_cache      0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\necryptfs_file_cache      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\nfat_inode_cache        0      0    768   21    4 : tunables    0    0    0 : slabdata      0      0      0\nfat_cache              0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0\nsquashfs_inode_cache      0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0\njbd2_transaction_s      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\njbd2_journal_head      0      0    120   34    1 : tunables    0    0    0 : slabdata      0      0      0\njbd2_revoke_table_s      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\next4_inode_cache       0      0   1128   29    8 : tunables    0    0    0 : slabdata      0      0      0\next4_allocation_context      0      0    168   24    1 : tunables    0    0    0 : slabdata      0      0      0\next4_prealloc_space      0      0    112   36    1 : tunables    0    0    0 : slabdata      0      0      0\next4_io_end_vec        0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\next4_io_end            0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\npending_reservation      0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\nextent_status          0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0\nmb_cache_entry       180    219     56   73    1 : tunables    0    0    0 : slabdata      3      3      0\nkioctx                 0      0    576   28    4 : tunables    0    0    0 : slabdata      0      0      0\nuserfaultfd_ctx_cache      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\nfanotify_perm_event      0      0    112   36    1 : tunables    0    0    0 : slabdata      0      0      0\ndnotify_struct         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\ndio                    0      0    640   25    4 : tunables    0    0    0 : slabdata      0      0      0\nzs_handle              0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0\npid_namespace          0      0    576   28    4 : tunables    0    0    0 : slabdata      0      0      0\nip4-frags              0      0    200   20    1 : tunables    0    0    0 : slabdata      0      0      0\nMPTCP                  0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nrequest_sock_subflow_v4      0      0    400   20    2 : tunables    0    0    0 : slabdata      0      0      0\nxfrm_dst               0      0    320   25    2 : tunables    0    0    0 : slabdata      0      0      0\nxfrm_state             0      0    832   19    4 : tunables    0    0    0 : slabdata      0      0      0\nip_fib_trie           60     85     48   85    1 : tunables    0    0    0 : slabdata      1      1      0\nip_fib_alias          60     73     56   73    1 : tunables    0    0    0 : slabdata      1      1      0\nPING                   0      0   1088   30    8 : tunables    0    0    0 : slabdata      0      0      0\nRAW                  192    208   1216   26    8 : tunables    0    0    0 : slabdata      8      8      0\nUDP                   24     24   1344   24    8 : tunables    0    0    0 : slabdata      1      1      0\ntw_sock_TCP            0      0    280   29    2 : tunables    0    0    0 : slabdata      0      0      0\nrequest_sock_TCP       0      0    328   24    2 : tunables    0    0    0 : slabdata      0      0      0\nTCP                    0      0   2432   13    8 : tunables    0    0    0 : slabdata      0      0      0\nhugetlbfs_inode_cache     28     52    624   26    4 : tunables    0    0    0 : slabdata      2      2      0\ndquot                  0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nbio-280               56     75    320   25    2 : tunables    0    0    0 : slabdata      3      3      0\nep_head                0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\neventpoll_epi         60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\ndax_cache             28     42    768   21    4 : tunables    0    0    0 : slabdata      2      2      0\nbio_integrity_data     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nrequest_queue         28     32    992   16    4 : tunables    0    0    0 : slabdata      2      2      0\nbio-200               28     32    256   16    1 : tunables    0    0    0 : slabdata      2      2      0\nbiovec-max            44     48   4096    8    8 : tunables    0    0    0 : slabdata      6      6      0\nbiovec-128            12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0\nmsg_msg-8k             0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-4k             0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-2k             0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-1k             0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-512            0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-256            0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-128            0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-64             0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-32             0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-16             0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-8              0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-192            0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-96             0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-16        60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nmemdup_user-8        120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nmemdup_user-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0\nuser_namespace         0      0    896   18    4 : tunables    0    0    0 : slabdata      0      0      0\niommu_iova_magazine     12     16   1024   16    4 : tunables    0    0    0 : slabdata      1      1      0\ndmaengine-unmap-256     12     15   2112   15    8 : tunables    0    0    0 : slabdata      1      1      0\ndmaengine-unmap-128     12     30   1088   30    8 : tunables    0    0    0 : slabdata      1      1      0\ndmaengine-unmap-2     60     64     64   64    1 : tunables    0    0    0 : slabdata      1      1      0\nsock_inode_cache     364    380    832   19    4 : tunables    0    0    0 : slabdata     20     20      0\nskbuff_small_head     84     92    704   23    4 : tunables    0    0    0 : slabdata      4      4      0\nskbuff_head_cache     88     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0\ntracefs_inode_cache    896    900    648   25    4 : tunables    0    0    0 : slabdata     36     36      0\ndebugfs_inode_cache   2940   2950    632   25    4 : tunables    0    0    0 : slabdata    118    118      0\nconfigfs_dir_cache     60     92     88   46    1 : tunables    0    0    0 : slabdata      2      2      0\nfile_lease_cache       0      0    160   25    1 : tunables    0    0    0 : slabdata      0      0      0\nfile_lock_cache      180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0\nfsnotify_mark_connector      0      0     24  170    1 : tunables    0    0    0 : slabdata      0      0      0\nbuffer_head            0      0    104   39    1 : tunables    0    0    0 : slabdata      0      0      0\ntask_delay_info        0      0    368   22    2 : tunables    0    0    0 : slabdata      0      0      0\ntaskstats              0      0    688   23    4 : tunables    0    0    0 : slabdata      0      0      0\nmem_cgroup_per_node     12     17   1920   17    8 : tunables    0    0    0 : slabdata      1      1      0\nmem_cgroup            12     18   1728   18    8 : tunables    0    0    0 : slabdata      1      1      0\npidfs_xattr_cache      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\npidfs_attr_cache       0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\nproc_dir_entry       360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0\npde_opener             0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0\nproc_inode_cache     420    437    688   23    4 : tunables    0    0    0 : slabdata     19     19      0\nseq_file             120    136    120   34    1 : tunables    0    0    0 : slabdata      4      4      0\nsigqueue             180    204     80   51    1 : tunables    0    0    0 : slabdata      4      4      0\nbdev_cache            24     38   1664   19    8 : tunables    0    0    0 : slabdata      2      2      0\nshmem_inode_cache    280    294    768   21    4 : tunables    0    0    0 : slabdata     14     14      0\nkernfs_node_cache  29160  29160    136   30    1 : tunables    0    0    0 : slabdata    972    972      0\nmnt_cache            112    126    384   21    2 : tunables    0    0    0 : slabdata      6      6      0\nbfilp                  0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nfilp                 300    315    192   21    1 : tunables    0    0    0 : slabdata     15     15      0\ninode_cache          280    286    616   26    4 : tunables    0    0    0 : slabdata     11     11      0\ndentry              4800   4809    192   21    1 : tunables    0    0    0 : slabdata    229    229      0\nnames_cache          240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0\nnet_namespace          0      0   6336    5    8 : tunables    0    0    0 : slabdata      0      0      0\nima_iint_cache         0      0    104   39    1 : tunables    0    0    0 : slabdata      0      0      0\napparmor_auditcache      0      0    344   23    2 : tunables    0    0    0 : slabdata      0      0      0\nlsm_file_cache       420    510     40  102    1 : tunables    0    0    0 : slabdata      5      5      0\nkey_jar               56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0\nuts_namespace          0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0\nnsproxy               60    112     72   56    1 : tunables    0    0    0 : slabdata      2      2      0\nvm_area_struct       780    798    192   21    1 : tunables    0    0    0 : slabdata     38     38      0\nfiles_cache          168    184    704   23    4 : tunables    0    0    0 : slabdata      8      8      0\nsignal_cache         180    196   1152   28    8 : tunables    0    0    0 : slabdata      7      7      0\nsighand_cache        168    180   2112   15    8 : tunables    0    0    0 : slabdata     12     12      0\ntask_struct          168    168  12544    2    8 : tunables    0    0    0 : slabdata     84     84      0\nanon_vma_chain       720    768     64   64    1 : tunables    0    0    0 : slabdata     12     12      0\nanon_vma             540    546    104   39    1 : tunables    0    0    0 : slabdata     14     14      0\npid                  420    420    192   21    1 : tunables    0    0    0 : slabdata     20     20      0\nAcpi-ParseExt         60     78    104   39    1 : tunables    0    0    0 : slabdata      2      2      0\nAcpi-State            60    102     80   51    1 : tunables    0    0    0 : slabdata      2      2      0\nshared_policy_node    660    680     48   85    1 : tunables    0    0    0 : slabdata      8      8      0\nnuma_policy           84     84    288   28    2 : tunables    0    0    0 : slabdata      3      3      0\nperf_event            48     48   1352   24    8 : tunables    0    0    0 : slabdata      2      2      0\ntrace_event_file    6840   6846     96   42    1 : tunables    0    0    0 : slabdata    163    163      0\nftrace_event_field   5100   5110     56   73    1 : tunables    0    0    0 : slabdata     70     70      0\npool_workqueue      3920   3920    512   16    2 : tunables    0    0    0 : slabdata    245    245      0\nradix_tree_node     1008   1008    584   28    4 : tunables    0    0    0 : slabdata     36     36      0\ntask_group             0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0\nmaple_node           598    720    256   16    1 : tunables    0    0    0 : slabdata     45     45      0\nmm_struct             60     72   1792   18    8 : tunables    0    0    0 : slabdata      4      4      0\nvmap_area           2512   2520     72   56    1 : tunables    0    0    0 : slabdata     45     45      0\nkmalloc_buckets      120    144    112   36    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-cg-8k          4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-cg-4k         84     88   4096    8    8 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-cg-2k        168    176   2048   16    8 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-cg-1k        108    112   1024   16    4 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-cg-512       168    176    512   16    2 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-cg-256       336    336    256   16    1 : tunables    0    0    0 : slabdata     21     21      0\nkmalloc-cg-128       420    448    128   32    1 : tunables    0    0    0 : slabdata     14     14      0\nkmalloc-cg-64        360    384     64   64    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-cg-32        600    640     32  128    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-cg-16        420    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-cg-8         240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-cg-192       480    483    192   21    1 : tunables    0    0    0 : slabdata     23     23      0\nkmalloc-cg-96        360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0\ndma-kmalloc-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-16         0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-8          0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-16         0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-8          0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-15-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-15-4k     16     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-15-2k      0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-15-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-15-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-15-256    476    480    256   16    1 : tunables    0    0    0 : slabdata     30     30      0\nkmalloc-rnd-15-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-15-64    480    512     64   64    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-15-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-15-16    360    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-15-8    2520   2560      8  512    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-15-192    360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0\nkmalloc-rnd-15-96   1980   2016     96   42    1 : tunables    0    0    0 : slabdata     48     48      0\nkmalloc-rnd-14-8k     12     12   8192    4    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-14-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-14-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-14-1k     60     64   1024   16    4 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-14-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-14-256    196    208    256   16    1 : tunables    0    0    0 : slabdata     13     13      0\nkmalloc-rnd-14-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-14-64    368    384     64   64    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-14-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-14-16    120    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-14-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-14-192    180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-14-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-13-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-13-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-13-2k     96     96   2048   16    8 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-1k     60     64   1024   16    4 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-13-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-13-32    780    896     32  128    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-13-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-13-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-13-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-12-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-12-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-12-2k    120    128   2048   16    8 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-12-1k     24     32   1024   16    4 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-12-512   1428   1440    512   16    2 : tunables    0    0    0 : slabdata     90     90      0\nkmalloc-rnd-12-256    496    496    256   16    1 : tunables    0    0    0 : slabdata     31     31      0\nkmalloc-rnd-12-128    564    576    128   32    1 : tunables    0    0    0 : slabdata     18     18      0\nkmalloc-rnd-12-64    684    704     64   64    1 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-rnd-12-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-12-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-12-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-12-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-12-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-11-8k     16     16   8192    4    8 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-11-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-11-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-11-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-11-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-11-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-11-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-11-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-11-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-11-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-11-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-11-192    240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0\nkmalloc-rnd-11-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-10-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-10-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-10-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-10-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-10-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-10-256    168    176    256   16    1 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-rnd-10-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-10-64    301    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-10-32    360    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-10-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-10-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-10-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-10-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-09-8k     16     16   8192    4    8 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-09-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-09-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-09-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-09-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-09-256     56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-09-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-09-64    300    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-09-32    780   1152     32  128    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-09-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-09-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-09-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-09-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-08-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-08-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-08-2k     12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-08-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-08-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-08-256     28     32    256   16    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-08-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-08-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-08-32    900   1024     32  128    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-08-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-08-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-08-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-08-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-07-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-07-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-07-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-07-1k     12     16   1024   16    4 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-07-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-07-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-07-128    240    256    128   32    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-07-64   1200   1216     64   64    1 : tunables    0    0    0 : slabdata     19     19      0\nkmalloc-rnd-07-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-07-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-07-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-07-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-07-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-06-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-06-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-06-2k     60     64   2048   16    8 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-06-1k     24     32   1024   16    4 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-06-512  12262  12272    512   16    2 : tunables    0    0    0 : slabdata    767    767      0\nkmalloc-rnd-06-256   5618   5632    256   16    1 : tunables    0    0    0 : slabdata    352    352      0\nkmalloc-rnd-06-128   4270   4288    128   32    1 : tunables    0    0    0 : slabdata    134    134      0\nkmalloc-rnd-06-64   2830   2880     64   64    1 : tunables    0    0    0 : slabdata     45     45      0\nkmalloc-rnd-06-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-06-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-06-8      60    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-06-192    360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0\nkmalloc-rnd-06-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-05-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-05-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-05-2k     84     96   2048   16    8 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-05-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-05-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-05-256    112    112    256   16    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-05-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-05-64    480    512     64   64    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-05-32    120    128     32  128    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-05-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-05-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-05-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-05-96    360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-04-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-04-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-04-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-04-1k    120    128   1024   16    4 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-04-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-04-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-04-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-04-64    420    448     64   64    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-04-32    360    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-04-16   1620   1792     16  256    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-04-8    1860   2048      8  512    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-04-192    240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0\nkmalloc-rnd-04-96    300    336     96   42    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-03-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-03-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-03-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-03-1k    192    192   1024   16    4 : tunables    0    0    0 : slabdata     12     12      0\nkmalloc-rnd-03-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-03-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-03-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-03-64    420    448     64   64    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-03-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-03-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-03-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-03-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-03-96    360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-02-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-02-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-02-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-02-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-02-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-02-256     56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-02-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-02-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-02-32    120    128     32  128    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-02-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-02-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-02-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-02-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-01-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-01-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-01-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-01-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-01-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-01-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-16    480    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-8     720   1024      8  512    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-01-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-8k             8      8   8192    4    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-4k             8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-2k            48     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-1k            36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-512          112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-256          196    208    256   16    1 : tunables    0    0    0 : slabdata     13     13      0\nkmalloc-128          180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-64           579    640     64   64    1 : tunables    0    0    0 : slabdata     10     10      0\nkmalloc-32           300    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-16           360    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-8            120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-192          241    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0\nkmalloc-96           300    336     96   42    1 : tunables    0    0    0 : slabdata      8      8      0\nkmem_cache_node      407    416    128   32    1 : tunables    0    0    0 : slabdata     13     13      0\nkmem_cache           407    416    256   16    1 : tunables    0    0    0 : slabdata     26     26      0\n","sockstat":"sockets: used 0\nTCP: inuse 0 orphan 0 tw 0 alloc 0 mem 0\nUDP: inuse 0 mem 0\nUDPLITE: inuse 0\nRAW: inuse 0\nFRAG: inuse 0 memory 0\n","sockstat6":"TCP6: inuse 0\nUDP6: inuse 0\nUDPLITE6: inuse 0\nRAW6: inuse 0\nFRAG6: inuse 0 memory 0\n","uptime":"2.36 6.07\n"},"clock_ticks":100,"corrected_candidate":"original-kernel-module","cpus_online":"0-3\n","cpus_possible":"0-63\n","event":"begin","maximum_population":1,"measured_repeat":0,"memory_per_peer":262144,"protocol":"tcp","queue_size":8,"socketbuf_requested":262144,"variant":"evmod"}
+{"event":"loaded","snapshot":{"all_tasks":79,"evmod_stats":"live=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 held_max=0 pair_size=248 pool_bytes=16777216\n","kernel_workers":{"kworker/":42},"meminfo":"MemTotal:       16347192 kB\nMemFree:        16171860 kB\nMemAvailable:   16001700 kB\nBuffers:               0 kB\nCached:            68556 kB\nSwapCached:            0 kB\nActive:            68820 kB\nInactive:              0 kB\nActive(anon):      68820 kB\nInactive(anon):        0 kB\nActive(file):          0 kB\nInactive(file):        0 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:                 0 kB\nWriteback:             0 kB\nAnonPages:           268 kB\nMapped:             4740 kB\nShmem:             68556 kB\nKReclaimable:       4764 kB\nSlab:              38868 kB\nSReclaimable:       4764 kB\nSUnreclaim:        34104 kB\nKernelStack:        2272 kB\nPageTables:          364 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     8173596 kB\nCommitted_AS:      69472 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:        6652 kB\nVmallocChunk:          0 kB\nPercpu:            21760 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         1837056 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       34688 kB\nDirectMap2M:     4159488 kB\nDirectMap1G:    14680064 kB\n","module_stats":"UNAVAILABLE: No such file or directory (os error 2)","modules":"evmod 24576 1 - Live 0xffffffffc0417000 (OE)\nvhost_vsock 28672 0 - Live 0xffffffffc0415000\nvmw_vsock_virtio_transport_common 57344 1 vhost_vsock, Live 0xffffffffc0411000\nvhost 69632 1 vhost_vsock, Live 0xffffffffc0409000\nvhost_iotlb 16384 1 vhost, Live 0xffffffffc0408000\nvsock 73728 4 vhost_vsock,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000\n","proc_stat":"cpu  1 0 167 898 0 0 2 0 0 0\ncpu0 0 0 11 262 0 0 0 0 0 0\ncpu1 1 0 83 102 0 0 2 0 0 0\ncpu2 0 0 13 298 0 0 0 0 0 0\ncpu3 0 0 58 234 0 0 0 0 0 0\nintr 9162 83 9 0 0 1786 0 0 0 1 0 0 0 3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\nctxt 2544\nbtime 1792144573\nprocesses 173\nprocs_running 1\nprocs_blocked 0\nsoftirq 1704 0 386 0 0 0 0 1 807 0 510\n","self_fds":6,"self_smaps_rollup":"6085d61a3000-7ffcb7d73000 ---p 00000000 00:00 0                          [rollup]\nRss:                3316 kB\nPss:                3314 kB\nPss_Dirty:          3308 kB\nPss_Anon:            344 kB\nPss_File:              6 kB\nPss_Shmem:          2964 kB\nShared_Clean:          4 kB\nShared_Dirty:          0 kB\nPrivate_Clean:         4 kB\nPrivate_Dirty:      3308 kB\nReferenced:         3316 kB\nAnonymous:           344 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:         0 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:         0 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n","self_stat":"110 (probe) R 1 0 0 0 -1 4194560 166 0 0 0 3 94 0 0 20 0 1 0 235 4792320 787 18446744073709551615 106127939340672 106127940545200 140723392816992 0 0 0 0 4096 1088 0 0 0 17 1 0 0 0 0 0 106127940593768 106127940596352 106128667148288 140723392819084 140723392819103 140723392819103 140723392819185 0\n","self_status":"Name:\tprobe\nUmask:\t0022\nState:\tR (running)\nTgid:\t110\nNgid:\t0\nPid:\t110\nPPid:\t1\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t64\nGroups:\t \nNStgid:\t110\nNSpid:\t110\nNSpgid:\t0\nNSsid:\t0\nKthread:\t0\nVmPeak:\t    4680 kB\nVmSize:\t    4680 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t    3316 kB\nVmRSS:\t    3316 kB\nRssAnon:\t     344 kB\nRssFile:\t       8 kB\nRssShmem:\t    2964 kB\nVmData:\t     372 kB\nVmStk:\t     132 kB\nVmExe:\t    1180 kB\nVmLib:\t    1972 kB\nVmPTE:\t      56 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t1\nSigQ:\t0/56360\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000000000440\nCapInh:\t0000000000000000\nCapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tffffffff,ffffffff\nCpus_allowed_list:\t0-63\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t0\nnonvoluntary_ctxt_switches:\t2\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n","self_tasks":1,"slabinfo":"slabinfo - version: 2.1\n# name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab> : tunables <limit> <batchcount> <sharedfactor> : slabdata <active_slabs> <num_slabs> <sharedavail>\nAF_VSOCK              12     25   1280   25    8 : tunables    0    0    0 : slabdata      1      1      0\nfsverity_info          0      0    272   30    2 : tunables    0    0    0 : slabdata      0      0      0\nfscrypt_inode_info      0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\nMPTCPv6                0      0   2176   15    8 : tunables    0    0    0 : slabdata      0      0      0\nrequest_sock_subflow_v6      0      0    400   20    2 : tunables    0    0    0 : slabdata      0      0      0\nip6-frags              0      0    184   22    1 : tunables    0    0    0 : slabdata      0      0      0\nip6_dst_cache          0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nPINGv6                 0      0   1408   23    8 : tunables    0    0    0 : slabdata      0      0      0\nRAWv6                132    138   1408   23    8 : tunables    0    0    0 : slabdata      6      6      0\nUDPv6                  0      0   1472   22    8 : tunables    0    0    0 : slabdata      0      0      0\ntw_sock_TCPv6          0      0    280   29    2 : tunables    0    0    0 : slabdata      0      0      0\nrequest_sock_TCPv6      0      0    328   24    2 : tunables    0    0    0 : slabdata      0      0      0\nTCPv6                  0      0   2560   12    8 : tunables    0    0    0 : slabdata      0      0      0\nkcopyd_job             0      0   3240   10    8 : tunables    0    0    0 : slabdata      0      0      0\ndm_uevent              0      0   2888   11    8 : tunables    0    0    0 : slabdata      0      0      0\nbio-136               60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0\nio_kiocb               0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nbio-264               28     50    320   25    2 : tunables    0    0    0 : slabdata      2      2      0\nmqueue_inode_cache     28     34    960   17    4 : tunables    0    0    0 : slabdata      2      2      0\nfuse_request           0      0    176   23    1 : tunables    0    0    0 : slabdata      0      0      0\nfuse_inode             0      0    896   18    4 : tunables    0    0    0 : slabdata      0      0      0\necryptfs_inode_cache      0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\necryptfs_file_cache      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\nfat_inode_cache        0      0    768   21    4 : tunables    0    0    0 : slabdata      0      0      0\nfat_cache              0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0\nsquashfs_inode_cache      0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0\njbd2_transaction_s      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\njbd2_journal_head      0      0    120   34    1 : tunables    0    0    0 : slabdata      0      0      0\njbd2_revoke_table_s      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\next4_inode_cache       0      0   1128   29    8 : tunables    0    0    0 : slabdata      0      0      0\next4_allocation_context      0      0    168   24    1 : tunables    0    0    0 : slabdata      0      0      0\next4_prealloc_space      0      0    112   36    1 : tunables    0    0    0 : slabdata      0      0      0\next4_io_end_vec        0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\next4_io_end            0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\npending_reservation      0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\nextent_status          0      0     40  102    1 : tunables    0    0    0 : slabdata      0      0      0\nmb_cache_entry       180    219     56   73    1 : tunables    0    0    0 : slabdata      3      3      0\nkioctx                 0      0    576   28    4 : tunables    0    0    0 : slabdata      0      0      0\nuserfaultfd_ctx_cache      0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\nfanotify_perm_event      0      0    112   36    1 : tunables    0    0    0 : slabdata      0      0      0\ndnotify_struct         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\ndio                    0      0    640   25    4 : tunables    0    0    0 : slabdata      0      0      0\nzs_handle              0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0\npid_namespace          0      0    576   28    4 : tunables    0    0    0 : slabdata      0      0      0\nip4-frags              0      0    200   20    1 : tunables    0    0    0 : slabdata      0      0      0\nMPTCP                  0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nrequest_sock_subflow_v4      0      0    400   20    2 : tunables    0    0    0 : slabdata      0      0      0\nxfrm_dst               0      0    320   25    2 : tunables    0    0    0 : slabdata      0      0      0\nxfrm_state             0      0    832   19    4 : tunables    0    0    0 : slabdata      0      0      0\nip_fib_trie           60     85     48   85    1 : tunables    0    0    0 : slabdata      1      1      0\nip_fib_alias          60     73     56   73    1 : tunables    0    0    0 : slabdata      1      1      0\nPING                   0      0   1088   30    8 : tunables    0    0    0 : slabdata      0      0      0\nRAW                  192    208   1216   26    8 : tunables    0    0    0 : slabdata      8      8      0\nUDP                   24     24   1344   24    8 : tunables    0    0    0 : slabdata      1      1      0\ntw_sock_TCP            0      0    280   29    2 : tunables    0    0    0 : slabdata      0      0      0\nrequest_sock_TCP       0      0    328   24    2 : tunables    0    0    0 : slabdata      0      0      0\nTCP                    0      0   2432   13    8 : tunables    0    0    0 : slabdata      0      0      0\nhugetlbfs_inode_cache     28     52    624   26    4 : tunables    0    0    0 : slabdata      2      2      0\ndquot                  0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nbio-280               56     75    320   25    2 : tunables    0    0    0 : slabdata      3      3      0\nep_head                0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\neventpoll_epi         60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\ndax_cache             28     42    768   21    4 : tunables    0    0    0 : slabdata      2      2      0\nbio_integrity_data     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nrequest_queue         28     32    992   16    4 : tunables    0    0    0 : slabdata      2      2      0\nbio-200               28     32    256   16    1 : tunables    0    0    0 : slabdata      2      2      0\nbiovec-max            44     48   4096    8    8 : tunables    0    0    0 : slabdata      6      6      0\nbiovec-128            12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0\nmsg_msg-8k             0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-4k             0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-2k             0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-1k             0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-512            0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-256            0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-128            0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-64             0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-32             0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-16             0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-8              0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-192            0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\nmsg_msg-96             0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-16        60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nmemdup_user-8        120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nmemdup_user-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\nmemdup_user-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0\nuser_namespace         0      0    896   18    4 : tunables    0    0    0 : slabdata      0      0      0\niommu_iova_magazine     12     16   1024   16    4 : tunables    0    0    0 : slabdata      1      1      0\ndmaengine-unmap-256     12     15   2112   15    8 : tunables    0    0    0 : slabdata      1      1      0\ndmaengine-unmap-128     12     30   1088   30    8 : tunables    0    0    0 : slabdata      1      1      0\ndmaengine-unmap-2     60     64     64   64    1 : tunables    0    0    0 : slabdata      1      1      0\nsock_inode_cache     364    380    832   19    4 : tunables    0    0    0 : slabdata     20     20      0\nskbuff_small_head     84     92    704   23    4 : tunables    0    0    0 : slabdata      4      4      0\nskbuff_head_cache     88     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0\ntracefs_inode_cache    896    900    648   25    4 : tunables    0    0    0 : slabdata     36     36      0\ndebugfs_inode_cache   2940   2950    632   25    4 : tunables    0    0    0 : slabdata    118    118      0\nconfigfs_dir_cache     60     92     88   46    1 : tunables    0    0    0 : slabdata      2      2      0\nfile_lease_cache       0      0    160   25    1 : tunables    0    0    0 : slabdata      0      0      0\nfile_lock_cache      180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0\nfsnotify_mark_connector      0      0     24  170    1 : tunables    0    0    0 : slabdata      0      0      0\nbuffer_head            0      0    104   39    1 : tunables    0    0    0 : slabdata      0      0      0\ntask_delay_info        0      0    368   22    2 : tunables    0    0    0 : slabdata      0      0      0\ntaskstats              0      0    688   23    4 : tunables    0    0    0 : slabdata      0      0      0\nmem_cgroup_per_node     12     17   1920   17    8 : tunables    0    0    0 : slabdata      1      1      0\nmem_cgroup            12     18   1728   18    8 : tunables    0    0    0 : slabdata      1      1      0\npidfs_xattr_cache      0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\npidfs_attr_cache       0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\nproc_dir_entry       360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0\npde_opener            60    102     40  102    1 : tunables    0    0    0 : slabdata      1      1      0\nproc_inode_cache     420    437    688   23    4 : tunables    0    0    0 : slabdata     19     19      0\nseq_file             120    136    120   34    1 : tunables    0    0    0 : slabdata      4      4      0\nsigqueue             180    204     80   51    1 : tunables    0    0    0 : slabdata      4      4      0\nbdev_cache            24     38   1664   19    8 : tunables    0    0    0 : slabdata      2      2      0\nshmem_inode_cache    280    294    768   21    4 : tunables    0    0    0 : slabdata     14     14      0\nkernfs_node_cache  29160  29160    136   30    1 : tunables    0    0    0 : slabdata    972    972      0\nmnt_cache            112    126    384   21    2 : tunables    0    0    0 : slabdata      6      6      0\nbfilp                  0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nfilp                 300    315    192   21    1 : tunables    0    0    0 : slabdata     15     15      0\ninode_cache          280    286    616   26    4 : tunables    0    0    0 : slabdata     11     11      0\ndentry              4860   4872    192   21    1 : tunables    0    0    0 : slabdata    232    232      0\nnames_cache          240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0\nnet_namespace          0      0   6336    5    8 : tunables    0    0    0 : slabdata      0      0      0\nima_iint_cache         0      0    104   39    1 : tunables    0    0    0 : slabdata      0      0      0\napparmor_auditcache      0      0    344   23    2 : tunables    0    0    0 : slabdata      0      0      0\nlsm_file_cache       420    510     40  102    1 : tunables    0    0    0 : slabdata      5      5      0\nkey_jar               56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0\nuts_namespace          0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0\nnsproxy               60    112     72   56    1 : tunables    0    0    0 : slabdata      2      2      0\nvm_area_struct       780    798    192   21    1 : tunables    0    0    0 : slabdata     38     38      0\nfiles_cache          168    184    704   23    4 : tunables    0    0    0 : slabdata      8      8      0\nsignal_cache         180    196   1152   28    8 : tunables    0    0    0 : slabdata      7      7      0\nsighand_cache        168    180   2112   15    8 : tunables    0    0    0 : slabdata     12     12      0\ntask_struct          168    168  12544    2    8 : tunables    0    0    0 : slabdata     84     84      0\nanon_vma_chain       720    768     64   64    1 : tunables    0    0    0 : slabdata     12     12      0\nanon_vma             540    546    104   39    1 : tunables    0    0    0 : slabdata     14     14      0\npid                  420    420    192   21    1 : tunables    0    0    0 : slabdata     20     20      0\nAcpi-ParseExt         60     78    104   39    1 : tunables    0    0    0 : slabdata      2      2      0\nAcpi-State            60    102     80   51    1 : tunables    0    0    0 : slabdata      2      2      0\nshared_policy_node    660    680     48   85    1 : tunables    0    0    0 : slabdata      8      8      0\nnuma_policy           84     84    288   28    2 : tunables    0    0    0 : slabdata      3      3      0\nperf_event            48     48   1352   24    8 : tunables    0    0    0 : slabdata      2      2      0\ntrace_event_file    6840   6846     96   42    1 : tunables    0    0    0 : slabdata    163    163      0\nftrace_event_field   5100   5110     56   73    1 : tunables    0    0    0 : slabdata     70     70      0\npool_workqueue      3920   3920    512   16    2 : tunables    0    0    0 : slabdata    245    245      0\nradix_tree_node     1008   1008    584   28    4 : tunables    0    0    0 : slabdata     36     36      0\ntask_group             0      0    704   23    4 : tunables    0    0    0 : slabdata      0      0      0\nmaple_node           534    720    256   16    1 : tunables    0    0    0 : slabdata     45     45      0\nmm_struct             60     72   1792   18    8 : tunables    0    0    0 : slabdata      4      4      0\nvmap_area           2512   2520     72   56    1 : tunables    0    0    0 : slabdata     45     45      0\nkmalloc_buckets      120    144    112   36    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-cg-8k          4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-cg-4k         84     88   4096    8    8 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-cg-2k        168    176   2048   16    8 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-cg-1k        108    112   1024   16    4 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-cg-512       168    176    512   16    2 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-cg-256       336    336    256   16    1 : tunables    0    0    0 : slabdata     21     21      0\nkmalloc-cg-128       420    448    128   32    1 : tunables    0    0    0 : slabdata     14     14      0\nkmalloc-cg-64        360    384     64   64    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-cg-32        600    640     32  128    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-cg-16        420    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-cg-8         240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-cg-192       480    483    192   21    1 : tunables    0    0    0 : slabdata     23     23      0\nkmalloc-cg-96        360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0\ndma-kmalloc-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-16         0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-8          0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\ndma-kmalloc-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-8k         0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-4k         0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-2k         0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-1k         0      0   1024   16    4 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-512        0      0    512   16    2 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-256        0      0    256   16    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-128        0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-64         0      0     64   64    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-32         0      0     32  128    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-16         0      0     16  256    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-8          0      0      8  512    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-192        0      0    192   21    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rcl-96         0      0     96   42    1 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-15-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-15-4k     16     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-15-2k      0      0   2048   16    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-15-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-15-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-15-256    476    480    256   16    1 : tunables    0    0    0 : slabdata     30     30      0\nkmalloc-rnd-15-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-15-64    480    512     64   64    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-15-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-15-16    360    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-15-8    2520   2560      8  512    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-15-192    360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0\nkmalloc-rnd-15-96   1980   2016     96   42    1 : tunables    0    0    0 : slabdata     48     48      0\nkmalloc-rnd-14-8k     12     12   8192    4    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-14-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-14-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-14-1k     60     64   1024   16    4 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-14-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-14-256    196    208    256   16    1 : tunables    0    0    0 : slabdata     13     13      0\nkmalloc-rnd-14-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-14-64    368    384     64   64    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-14-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-14-16    120    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-14-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-14-192    180    189    192   21    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-14-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-13-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-13-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-13-2k     96     96   2048   16    8 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-1k     60     64   1024   16    4 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-13-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-13-32    780    896     32  128    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-13-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-13-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-13-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-13-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-12-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-12-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-12-2k    120    128   2048   16    8 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-12-1k     24     32   1024   16    4 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-12-512   1428   1440    512   16    2 : tunables    0    0    0 : slabdata     90     90      0\nkmalloc-rnd-12-256    496    496    256   16    1 : tunables    0    0    0 : slabdata     31     31      0\nkmalloc-rnd-12-128    564    576    128   32    1 : tunables    0    0    0 : slabdata     18     18      0\nkmalloc-rnd-12-64    684    704     64   64    1 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-rnd-12-32    240    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-12-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-12-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-12-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-12-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-11-8k     16     16   8192    4    8 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-11-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-11-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-11-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-11-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-11-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-11-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-11-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-11-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-11-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-11-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-11-192    240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0\nkmalloc-rnd-11-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-10-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-10-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-10-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-10-1k     72     80   1024   16    4 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-10-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-10-256    168    176    256   16    1 : tunables    0    0    0 : slabdata     11     11      0\nkmalloc-rnd-10-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-10-64    301    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-10-32    360    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-10-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-10-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-10-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-10-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-09-8k     16     16   8192    4    8 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-09-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-09-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-09-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-09-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-09-256     56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-09-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-09-64    300    320     64   64    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-09-32    780   1152     32  128    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-09-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-09-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-09-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-09-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-08-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-08-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-08-2k     12     16   2048   16    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-08-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-08-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-08-256     28     32    256   16    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-08-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-08-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-08-32    900   1024     32  128    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-08-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-08-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-08-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-08-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-07-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-07-4k      0      0   4096    8    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-07-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-07-1k     12     16   1024   16    4 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-07-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-07-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-07-128    240    256    128   32    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-07-64   1200   1216     64   64    1 : tunables    0    0    0 : slabdata     19     19      0\nkmalloc-rnd-07-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-07-16     60    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-07-8     180    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-07-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-07-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-06-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-06-4k      8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-06-2k     60     64   2048   16    8 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-06-1k     24     32   1024   16    4 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-06-512  12262  12272    512   16    2 : tunables    0    0    0 : slabdata    767    767      0\nkmalloc-rnd-06-256   5618   5632    256   16    1 : tunables    0    0    0 : slabdata    352    352      0\nkmalloc-rnd-06-128   4270   4288    128   32    1 : tunables    0    0    0 : slabdata    134    134      0\nkmalloc-rnd-06-64   2830   2880     64   64    1 : tunables    0    0    0 : slabdata     45     45      0\nkmalloc-rnd-06-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-06-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-06-8      60    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-06-192    360    378    192   21    1 : tunables    0    0    0 : slabdata     18     18      0\nkmalloc-rnd-06-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-05-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-05-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-05-2k     84     96   2048   16    8 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-05-1k     48     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-05-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-05-256    112    112    256   16    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-05-128    120    128    128   32    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-05-64    480    512     64   64    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-05-32    120    128     32  128    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-05-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-05-8     120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-05-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-05-96    360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-04-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-04-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-04-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-04-1k    120    128   1024   16    4 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-04-512    112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-04-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-04-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-04-64    420    448     64   64    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-04-32    360    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-04-16   1620   1792     16  256    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-04-8    1860   2048      8  512    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-04-192    240    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0\nkmalloc-rnd-04-96    300    336     96   42    1 : tunables    0    0    0 : slabdata      8      8      0\nkmalloc-rnd-03-8k      4      4   8192    4    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-03-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-03-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-03-1k    192    192   1024   16    4 : tunables    0    0    0 : slabdata     12     12      0\nkmalloc-rnd-03-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-03-256     84     96    256   16    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-03-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-03-64    420    448     64   64    1 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-rnd-03-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-03-16    180    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-03-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-03-192     60     63    192   21    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-03-96    360    378     96   42    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-02-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-02-4k      4      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-02-2k     36     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-02-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-02-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-02-256     56     64    256   16    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-02-128    180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-02-64    240    256     64   64    1 : tunables    0    0    0 : slabdata      4      4      0\nkmalloc-rnd-02-32    120    128     32  128    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-02-16    240    256     16  256    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-02-8     240    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-rnd-02-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-02-96    180    210     96   42    1 : tunables    0    0    0 : slabdata      5      5      0\nkmalloc-rnd-01-8k      0      0   8192    4    8 : tunables    0    0    0 : slabdata      0      0      0\nkmalloc-rnd-01-4k     12     16   4096    8    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-2k     24     32   2048   16    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-1k     36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-01-512     84     96    512   16    2 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-01-256    140    144    256   16    1 : tunables    0    0    0 : slabdata      9      9      0\nkmalloc-rnd-01-128     60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-64    180    192     64   64    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-rnd-01-32    180    256     32  128    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-16    480    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-8     720   1024      8  512    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-rnd-01-192    120    126    192   21    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-rnd-01-96    240    252     96   42    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-8k             8      8   8192    4    8 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-4k             8      8   4096    8    8 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-2k            48     48   2048   16    8 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-1k            36     48   1024   16    4 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-512          112    112    512   16    2 : tunables    0    0    0 : slabdata      7      7      0\nkmalloc-256          196    208    256   16    1 : tunables    0    0    0 : slabdata     13     13      0\nkmalloc-128          180    192    128   32    1 : tunables    0    0    0 : slabdata      6      6      0\nkmalloc-64           579    640     64   64    1 : tunables    0    0    0 : slabdata     10     10      0\nkmalloc-32           300    384     32  128    1 : tunables    0    0    0 : slabdata      3      3      0\nkmalloc-16           360    512     16  256    1 : tunables    0    0    0 : slabdata      2      2      0\nkmalloc-8            120    512      8  512    1 : tunables    0    0    0 : slabdata      1      1      0\nkmalloc-192          241    252    192   21    1 : tunables    0    0    0 : slabdata     12     12      0\nkmalloc-96           300    336     96   42    1 : tunables    0    0    0 : slabdata      8      8      0\nkmem_cache_node      407    416    128   32    1 : tunables    0    0    0 : slabdata     13     13      0\nkmem_cache           407    416    256   16    1 : tunables    0    0    0 : slabdata     26     26      0\n","sockstat":"sockets: used 1\nTCP: inuse 0 orphan 0 tw 0 alloc 0 mem 0\nUDP: inuse 0 mem 0\nUDPLITE: inuse 0\nRAW: inuse 0\nFRAG: inuse 0 memory 0\n","sockstat6":"TCP6: inuse 0\nUDP6: inuse 0\nUDPLITE6: inuse 0\nRAW6: inuse 0\nFRAG6: inuse 0 memory 0\n","uptime":"3.33 8.98\n"}}
+{"actual_peer":"127.0.0.1:38563","actual_proxy":"127.0.0.1:38563","application_size":64,"both_directions_byte_exact":true,"cid":316385,"event":"preflight_message","ordinary_udp_recv_buffer_size":65536,"zero_requires_pollin":false}
+{"actual_peer":"127.0.0.1:38563","actual_proxy":"127.0.0.1:38563","application_size":1024,"both_directions_byte_exact":true,"cid":316385,"event":"preflight_message","ordinary_udp_recv_buffer_size":65536,"zero_requires_pollin":false}
+{"actual_peer":"127.0.0.1:38563","actual_proxy":"127.0.0.1:38563","application_size":65536,"both_directions_byte_exact":true,"cid":316385,"event":"preflight_message","ordinary_udp_recv_buffer_size":65536,"zero_requires_pollin":false}
+{"actual_peer":"127.0.0.1:42935","actual_proxy":"127.0.0.1:42935","application_size":64,"both_directions_byte_exact":true,"cid":316386,"event":"preflight_message","ordinary_udp_recv_buffer_size":65536,"zero_requires_pollin":false}
+{"actual_peer":"127.0.0.1:42935","actual_proxy":"127.0.0.1:42935","application_size":1024,"both_directions_byte_exact":true,"cid":316386,"event":"preflight_message","ordinary_udp_recv_buffer_size":65536,"zero_requires_pollin":false}
+{"actual_peer":"127.0.0.1:42935","actual_proxy":"127.0.0.1:42935","application_size":65536,"both_directions_byte_exact":true,"cid":316386,"event":"preflight_message","ordinary_udp_recv_buffer_size":65536,"zero_requires_pollin":false}
+{"backend":{"evmod_stats":"live=2 attached=2 detached=0 completed=0 aborted=0 err=0 runs=34 kicks=51 queued=34 requeue=0 bytes_v2t=133248 bytes_t2v=198784 bytes_t2t=0 stall_dst=2 stall_src=42 pool_miss=0 short_consume=0 fault_hits=0 held_max=65536 pair_size=248 pool_bytes=16777216\n"},"bytes_offered":262144,"cid":316386,"event":"preflight_backpressure_hold","guest_rx_descriptors_posted_during_hold":0}
+{"aya_controller_only_shutdown_control":false,"bytes_each_direction":262144,"event":"preflight_tcp_backpressure_halfclose","module_propagated_fin":true,"reverse_after_guest_fin":true}
+{"event":"preflight_owned_mapping_fail_closed","no_userspace_proxy_payload_operations":true,"owner_boundary":"EVMOD_DETACH","protocol":"tcp"}
+
+thread 'main' (110) panicked at src/main.rs:197:9:
+assertion `left == right` failed: EVMOD_DETACH 1: No such file or directory (os error 2)
+  left: -1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+BENCH_HARNESS_EXIT=101
+evmod 24576 0 - Live 0xffffffffc0417000 (OE)
+vhost_vsock 28672 0 - Live 0xffffffffc0415000
+vmw_vsock_virtio_transport_common 57344 1 vhost_vsock, Live 0xffffffffc0411000
+vhost 69632 1 vhost_vsock, Live 0xffffffffc0409000
+vhost_iotlb 16384 1 vhost, Live 0xffffffffc0408000
+vsock 73728 2 vhost_vsock,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+[    5.103858] evmod: unloaded attached=2 completed=2 detached=1 aborted=0
+BENCH_MODULE_UNLOAD_EXIT=0
+BENCH_LIVE_MODULES_AFTER_UNLOAD
+vhost_vsock 28672 0 - Live 0xffffffffc0415000
+vmw_vsock_virtio_transport_common 57344 1 vhost_vsock, Live 0xffffffffc0411000
+vhost 69632 1 vhost_vsock, Live 0xffffffffc0409000
+vhost_iotlb 16384 1 vhost, Live 0xffffffffc0408000
+vsock 73728 2 vhost_vsock,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+[    1.111745] IPI shorthand broadcast: enabled
+[    1.116311] sched_clock: Marking stable (883003023, 232798842)->(1185674345, -69872480)
+[    1.119311] registered taskstats version 1
+[    1.122139] Loading compiled-in X.509 certificates
+[    1.125882] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e[    5.150281] ACPI: PM: Preparing to enter system sleep state S5
+9802e3c39a997a1e[    5.153583] reboot: Power down
+8863aaf8b3df15fbc0'
+[    1.131908] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    1.138305] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    1.144276] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    1.150793] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    1.155974] blacklist: Loading compiled-in revocation X.509 certificates
+[    1.159503] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    1.164635] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    1.170084] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    1.174579] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    1.178899] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    1.183273] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    1.187642] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    1.192040] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    1.203958] Demotion targets for Node 0: null
+[    1.205368] Key type .fscrypt registered
+[    1.206395] Key type fscrypt-provisioning registered
+[    1.207833] Key type big_key registered
+[    1.210045] Key type encrypted registered
+[    1.211112] AppArmor: AppArmor sha256 policy hashing enabled
+[    1.212591] ima: No TPM chip found, activating TPM-bypass!
+[    1.214029] Loading compiled-in module X.509 certificates
+[    1.215912] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    1.218458] ima: Allocated hash algorithm: sha256
+[    1.219710] ima: No architecture policies found
+[    1.220935] evm: Initialising EVM extended attributes:
+[    1.222282] evm: security.selinux
+[    1.223186] evm: security.SMACK64
+[    1.224068] evm: security.SMACK64EXEC
+[    1.225051] evm: security.SMACK64TRANSMUTE
+[    1.226131] evm: security.SMACK64MMAP
+[    1.227108] evm: security.apparmor
+[    1.228021] evm: security.ima
+[    1.228832] evm: security.capability
+[    1.229772] evm: HMAC attrs: 0x1
+[    1.230988] PM:   Magic number: 14:72:930
+[    1.232418] RAS: Correctable Errors collector initialized.
+[    1.234249] clk: Disabling unused clocks
+[    1.235282] PM: genpd: Disabling unused power domains
+[    1.238467] Freeing unused decrypted memory: 2028K
+[    1.240139] Freeing unused kernel image (initmem) memory: 5292K
+[    1.241282] Write protecting the kernel read-only data: 43008k
+[    1.243051] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    1.244648] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    1.312006] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    1.313224] Run /init as init process
+[    1.313910]   with arguments:
+[    1.313915]     /init
+[    1.313918]   with environment:
+[    1.313921]     HOME=/
+[    1.313923]     TERM=linux
+[    1.329216] NET: Registered PF_VSOCK protocol family
+[    2.273615] evmod: loading out-of-tree module taints kernel.
+[    2.274719] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    2.277291] evmod: loaded (per-cpu workqueue)
+[    5.103858] evmod: unloaded attached=2 completed=2 detached=1 aborted=0
+BENCH_COMPLETE_EXIT=101

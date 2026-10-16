@@ -1,0 +1,266 @@
+{
+ "host_uname_r": "7.0.0-29-generic",
+ "scenarios": {
+  "ctl-A": {
+   "scenario": "ctl-A",
+   "dir": "A",
+   "wall_s": 7.0,
+   "trials_planned": 3,
+   "trial_end": 3,
+   "send_end": 3,
+   "outcomes": {
+    "abort_cap": 3
+   },
+   "send_outcomes": {
+    "err_32": 3
+   },
+   "app_ok": "0/3",
+   "bytes_verified_total_MiB": 0.0,
+   "first_bad": [],
+   "hash_eq": "0/3",
+   "peak_queued_MiB": {
+    "min": 160.2,
+    "p50": 160.81,
+    "max": 165.99,
+    "n": 3
+   },
+   "queued_at_remove_MiB": null,
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 175.1,
+    "p50": 181.0,
+    "max": 192.2,
+    "n": 3
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 178.8,
+    "p50": 184.3,
+    "max": 194.8,
+    "n": 3
+   },
+   "unreclaim_after_close_minus_start_MiB": {
+    "min": 0.0,
+    "p50": -0.0,
+    "max": 0.8,
+    "n": 3
+   },
+   "valve_closes": {
+    "min": 0,
+    "p50": 0,
+    "max": 0,
+    "n": 3
+   },
+   "resumes": {
+    "min": 0,
+    "p50": 0,
+    "max": 0,
+    "n": 3
+   },
+   "pump_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "pump_ms": {
+    "min": 0,
+    "p50": 0,
+    "max": 0,
+    "n": 3
+   },
+   "rejoins": 0,
+   "rejoin_fail": 0,
+   "refused": 0,
+   "hard_drops": 0,
+   "passed": 0,
+   "rb_fail": 0,
+   "queued_end_MiB": {
+    "min": 160.19,
+    "p50": 160.8,
+    "max": 165.99,
+    "n": 3
+   },
+   "src_inq_end": {
+    "min": 0,
+    "p50": 0,
+    "max": 0,
+    "n": 3
+   },
+   "reader_MiBps": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 3
+   },
+   "owner_trial_secs": {
+    "min": 0.27,
+    "p50": 0.32,
+    "max": 0.33,
+    "n": 3
+   },
+   "sender_MiBps": {
+    "min": 500.8,
+    "p50": 511.4,
+    "max": 635.4,
+    "n": 3
+   },
+   "sender_max_send_ms": {
+    "min": 0,
+    "p50": 0,
+    "max": 2,
+    "n": 3
+   },
+   "sender_sent_at_longest_block_start_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 1.62,
+    "n": 3
+   },
+   "resume_latency_ms(unblock-resume)": null,
+   "final_state": {
+    "open": 3
+   },
+   "oom_lines": [],
+   "bad_json_lines": 0
+  },
+  "pump-A": {
+   "scenario": "pump-A",
+   "dir": "A",
+   "wall_s": 882.8,
+   "trials_planned": 20,
+   "trial_end": 20,
+   "send_end": 20,
+   "outcomes": {
+    "complete": 11,
+    "timeout": 9
+   },
+   "send_outcomes": {
+    "done": 20
+   },
+   "app_ok": "11/20",
+   "bytes_verified_total_MiB": 2816.0,
+   "first_bad": [
+    6888744,
+    6864256,
+    6867992,
+    6860528,
+    6871720
+   ],
+   "hash_eq": "11/20",
+   "peak_queued_MiB": {
+    "min": 4.01,
+    "p50": 4.03,
+    "max": 4.23,
+    "n": 20
+   },
+   "queued_at_remove_MiB": {
+    "min": 4.01,
+    "p50": 4.03,
+    "max": 4.23,
+    "n": 20
+   },
+   "unreclaim_rise_MiB(max-start)": {
+    "min": 4.5,
+    "p50": 4.8,
+    "max": 5.0,
+    "n": 20
+   },
+   "avail_drop_MiB(start-min)": {
+    "min": 5.5,
+    "p50": 7.2,
+    "max": 7.8,
+    "n": 20
+   },
+   "unreclaim_after_close_minus_start_MiB": {
+    "min": -0.1,
+    "p50": 0.0,
+    "max": 0.3,
+    "n": 20
+   },
+   "valve_closes": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 1,
+    "n": 20
+   },
+   "resumes": {
+    "min": 1,
+    "p50": 1.0,
+    "max": 1,
+    "n": 20
+   },
+   "pump_MiB": {
+    "min": 249.25,
+    "p50": 249.45,
+    "max": 249.47,
+    "n": 20
+   },
+   "pump_ms": {
+    "min": 365,
+    "p50": 455.0,
+    "max": 87013,
+    "n": 20
+   },
+   "rejoins": 0,
+   "rejoin_fail": 0,
+   "refused": 0,
+   "hard_drops": 0,
+   "passed": 0,
+   "rb_fail": 0,
+   "queued_end_MiB": {
+    "min": 0.0,
+    "p50": 0.0,
+    "max": 0.0,
+    "n": 20
+   },
+   "src_inq_end": {
+    "min": 0,
+    "p50": 0.0,
+    "max": 0,
+    "n": 20
+   },
+   "reader_MiBps": {
+    "min": 2.9,
+    "p50": 581.05,
+    "max": 724.9,
+    "n": 20
+   },
+   "owner_trial_secs": {
+    "min": 3.58,
+    "p50": 3.68,
+    "max": 90.02,
+    "n": 20
+   },
+   "sender_MiBps": {
+    "min": 73.9,
+    "p50": 75.2,
+    "max": 76.4,
+    "n": 20
+   },
+   "sender_max_send_ms": {
+    "min": 2977,
+    "p50": 2993.0,
+    "max": 3016,
+    "n": 20
+   },
+   "sender_sent_at_longest_block_start_MiB": {
+    "min": 6.75,
+    "p50": 6.75,
+    "max": 7.0,
+    "n": 20
+   },
+   "resume_latency_ms(unblock-resume)": {
+    "min": 5.26,
+    "p50": 6.64,
+    "max": 8.88,
+    "n": 20
+   },
+   "final_state": {
+    "done": 11,
+    "err": 9
+   },
+   "oom_lines": [],
+   "bad_json_lines": 0
+  }
+ },
+ "guest_boot": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\nMemTotal:         977368 kB\nMemAvailable:     828324 kB\n"
+}

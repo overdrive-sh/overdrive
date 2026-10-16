@@ -1,0 +1,26 @@
+[08:26:40] === valve vm ['elig'] {}
+[08:26:40] === preflight (fail closed)
+[08:26:40] substrate: {"host_uname_r": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16, "meminfo_head": ["MemTotal:       65401772 kB", "MemFree:        20613420 kB", "MemAvailable:   60163084 kB"]}
+[08:26:40] $ modprobe vhost_vsock; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[08:26:40]     vsock_diag             12288  0
+[08:26:40]     vhost_vsock            28672  0
+[08:26:40]     vhost                  69632  1 vhost_vsock
+[08:26:40]     vhost_iotlb            16384  1 vhost
+[08:26:40]     vsock_loopback         12288  0
+[08:26:40]     vmw_vsock_virtio_transport_common    57344  2 vhost_vsock,vsock_loopback
+[08:26:40]     vmw_vsock_vmci_transport    53248  0
+[08:26:40]     vsock                  73728  5 vmw_vsock_virtio_transport_common,vhost_vsock,vsock_loopback,vsock_diag,vmw_vsock_vmci_transport
+[08:26:40]     vmw_vmci              106496  1 vmw_vsock_vmci_transport
+[08:26:40] === guest image
+[08:26:41] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "63a05abe3d06", "valveprobe": "9623a5f0044a", "bpf_obj": "f3a5e587c64d", "eligprobe": "c631f34d634d", "cloud_hypervisor": "eadddf1bbcdc"}
+[08:26:41] launch VM: /tmp/bpf-credit-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /tmp/bpf-credit-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=1024M --serial file=/tmp/bpf-credit-work/out/vm-20261016T082640Z/serial.log --console off --vsock cid=3370,backend=vhost-kernel --log-file /tmp/bpf-credit-work/out/vm-20261016T082640Z/ch.log -v
+[08:26:42] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[08:26:42] 7.0.0-29-generic
+/sys/kernel/btf/vmlinux
+MemTotal:         977368 kB
+MemAvailable:     829952 kB
+
+[08:26:42] ##### elig: host
+[08:26:42] ##### elig: guest
+[08:26:42] elig host rows=6 guest rc=0 bytes=499
+[08:26:42] $ pgrep -af 'cloud-hypervisor|valveprobe' | grep -v pgrep; true (rc=0)

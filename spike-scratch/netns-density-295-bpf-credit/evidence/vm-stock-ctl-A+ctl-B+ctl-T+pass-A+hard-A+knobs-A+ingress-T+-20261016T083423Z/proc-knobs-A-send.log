@@ -1,0 +1,4 @@
+{"ev":"send_ready","label":"knobs-A","uname":"7.0.0-29-generic","cid":3370,"port":7133,"bytes":268435456,"trials":3}
+{"ev":"send_end","label":"knobs-A","trial":0,"outcome":"err_32","sent":169101540,"secs":0.384,"mibps":419.5,"max_send_ms":2,"sent_at_longest_block_start":131989504,"blocks":[],"off_ns":-5425470915182633,"best_rtt_ns":54472,"t_start_ns":5425747923841270,"peer_closed_read":0}
+{"ev":"send_end","label":"knobs-A","trial":1,"outcome":"err_32","sent":169213952,"secs":0.390,"mibps":413.6,"max_send_ms":0,"sent_at_longest_block_start":0,"blocks":[],"off_ns":-5425470915180791,"best_rtt_ns":46259,"t_start_ns":5425749817764882,"peer_closed_read":0}
+{"ev":"send_end","label":"knobs-A","trial":2,"outcome":"err_32","sent":169891704,"secs":0.385,"mibps":421.1,"max_send_ms":0,"sent_at_longest_block_start":0,"blocks":[],"off_ns":-5425470915179831,"best_rtt_ns":55724,"t_start_ns":5425751717407826,"peer_closed_read":0}

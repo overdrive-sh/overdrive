@@ -1,0 +1,1631 @@
+{
+  "calibration": {
+    "clock_offset_error_bound_us": {
+      "max": 80.316,
+      "median": 53.861,
+      "n": 55
+    }
+  },
+  "cells": {
+    "g2h/both-unread/128KiB": {
+      "close_to_first_wake_us": {
+        "max": 67.557,
+        "min": 40.932,
+        "n": 3,
+        "p50": 42.84,
+        "p99": 67.557
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 41.194,
+        "min": 18.541,
+        "n": 3,
+        "p50": 19.784,
+        "p99": 41.194
+      },
+      "drain": {
+        "131072B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "131072": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 29.555,
+        "min": 18.008,
+        "n": 3,
+        "p50": 18.849,
+        "p99": 29.555
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "g2h/both-unread/1KiB": {
+      "close_to_first_wake_us": {
+        "max": 48.088,
+        "min": 42.444,
+        "n": 3,
+        "p50": 43.346,
+        "p99": 48.088
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 27.512,
+        "min": 19.584,
+        "n": 3,
+        "p50": 21.065,
+        "p99": 27.512
+      },
+      "drain": {
+        "1024B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "1024": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 17.506,
+        "min": 15.524,
+        "n": 3,
+        "p50": 16.836,
+        "p99": 17.506
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "g2h/clean": {
+      "close_to_first_wake_us": {
+        "max": 58.094,
+        "min": 45.824,
+        "n": 3,
+        "p50": 47.411,
+        "p99": 58.094
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 37.774,
+        "min": 22.61,
+        "n": 3,
+        "p50": 25.378,
+        "p99": 37.774
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 28.463,
+        "min": 14.562,
+        "n": 3,
+        "p50": 22.844,
+        "p99": 28.463
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "g2h/guest-unread/128KiB": {
+      "close_to_first_wake_us": {
+        "max": 64.553,
+        "min": 55.003,
+        "n": 3,
+        "p50": 61.222,
+        "p99": 64.553
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 37.232,
+        "min": 30.11,
+        "n": 3,
+        "p50": 31.891,
+        "p99": 37.232
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 18.718,
+        "min": 15.743,
+        "n": 3,
+        "p50": 18.138,
+        "p99": 18.718
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "g2h/guest-unread/1KiB": {
+      "close_to_first_wake_us": {
+        "max": 60.907,
+        "min": 56.555,
+        "n": 3,
+        "p50": 56.741,
+        "p99": 60.907
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 30.807,
+        "min": 27.575,
+        "n": 3,
+        "p50": 29.584,
+        "p99": 30.807
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 18.788,
+        "min": 17.697,
+        "n": 3,
+        "p50": 18.007,
+        "p99": 18.788
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "g2h/host-unread/128KiB": {
+      "close_to_first_wake_us": {
+        "max": 49.014,
+        "min": 43.841,
+        "n": 3,
+        "p50": 48.949,
+        "p99": 49.014
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 29.03,
+        "min": 23.221,
+        "n": 3,
+        "p50": 26.939,
+        "p99": 29.03
+      },
+      "drain": {
+        "131072B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "131072": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 19.649,
+        "min": 14.922,
+        "n": 3,
+        "p50": 17.136,
+        "p99": 19.649
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "g2h/host-unread/1KiB": {
+      "close_to_first_wake_us": {
+        "max": 80.342,
+        "min": 48.077,
+        "n": 3,
+        "p50": 64.712,
+        "p99": 80.342
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 41.023,
+        "min": 27.463,
+        "n": 3,
+        "p50": 39.066,
+        "p99": 41.023
+      },
+      "drain": {
+        "1024B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "1024": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 35.153,
+        "min": 17.286,
+        "n": 3,
+        "p50": 34.231,
+        "p99": 35.153
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "g2h/own-halfclose-first": {
+      "close_to_first_wake_us": {
+        "max": 61.047,
+        "min": 41.604,
+        "n": 3,
+        "p50": 45.608,
+        "p99": 61.047
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 20.694,
+        "min": 15.22,
+        "n": 3,
+        "p50": 19.627,
+        "p99": 20.694
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "['SHUTDOWN:0x2']": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 18.037,
+        "min": 14.272,
+        "n": 3,
+        "p50": 16.485,
+        "p99": 18.037
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "g2h/peer-halfclose-first": {
+      "close_to_first_wake_us": {
+        "max": 45.64,
+        "min": 41.633,
+        "n": 3,
+        "p50": 43.715,
+        "p99": 45.64
+      },
+      "close_to_hup_wake_us": {
+        "max": 45.64,
+        "min": 41.633,
+        "n": 3,
+        "p50": 43.715,
+        "p99": 45.64
+      },
+      "close_to_rx_record_us": {
+        "max": 21.148,
+        "min": 18.737,
+        "n": 3,
+        "p50": 20.008,
+        "p99": 21.148
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|HUP|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 18.638,
+        "min": 16.245,
+        "n": 3,
+        "p50": 17.887,
+        "p99": 18.638
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "0": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|HUP|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/both-unread/128KiB": {
+      "close_to_first_wake_us": {
+        "max": 49.79,
+        "min": 44.182,
+        "n": 3,
+        "p50": 44.737,
+        "p99": 49.79
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 21.666,
+        "min": 21.043,
+        "n": 3,
+        "p50": 21.242,
+        "p99": 21.666
+      },
+      "drain": {
+        "131072B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "131072": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 39.8,
+        "min": 39.098,
+        "n": 3,
+        "p50": 39.66,
+        "p99": 39.8
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/both-unread/1KiB": {
+      "close_to_first_wake_us": {
+        "max": 87.668,
+        "min": 49.585,
+        "n": 3,
+        "p50": 64.343,
+        "p99": 87.668
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 42.348,
+        "min": 25.724,
+        "n": 3,
+        "p50": 34.708,
+        "p99": 42.348
+      },
+      "drain": {
+        "1024B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "1024": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 51.838,
+        "min": 13.991,
+        "n": 3,
+        "p50": 16.525,
+        "p99": 51.838
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/clean": {
+      "close_to_first_wake_us": {
+        "max": 47.106,
+        "min": 43.154,
+        "n": 3,
+        "p50": 46.675,
+        "p99": 47.106
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 25.125,
+        "min": 21.242,
+        "n": 3,
+        "p50": 21.827,
+        "p99": 25.125
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 15.604,
+        "min": 13.63,
+        "n": 3,
+        "p50": 14.822,
+        "p99": 15.604
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/guest-unread/128KiB": {
+      "close_to_first_wake_us": {
+        "max": 69.8,
+        "min": 45.679,
+        "n": 3,
+        "p50": 66.541,
+        "p99": 69.8
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 38.511,
+        "min": 23.399,
+        "n": 3,
+        "p50": 36.013,
+        "p99": 38.511
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 28.193,
+        "min": 15.233,
+        "n": 3,
+        "p50": 16.545,
+        "p99": 28.193
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/guest-unread/1KiB": {
+      "close_to_first_wake_us": {
+        "max": 52.234,
+        "min": 47.492,
+        "n": 3,
+        "p50": 50.005,
+        "p99": 52.234
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 29.804,
+        "min": 13.461,
+        "n": 3,
+        "p50": 27.731,
+        "p99": 29.804
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 15.894,
+        "min": 15.233,
+        "n": 3,
+        "p50": 15.754,
+        "p99": 15.894
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/host-unread/128KiB": {
+      "close_to_first_wake_us": {
+        "max": 46.726,
+        "min": 43.787,
+        "n": 3,
+        "p50": 45.042,
+        "p99": 46.726
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 29.29,
+        "min": 17.823,
+        "n": 3,
+        "p50": 26.818,
+        "p99": 29.29
+      },
+      "drain": {
+        "131072B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "131072": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 51.367,
+        "min": 17.005,
+        "n": 3,
+        "p50": 17.526,
+        "p99": 51.367
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/host-unread/1KiB": {
+      "close_to_first_wake_us": {
+        "max": 42.975,
+        "min": 40.27,
+        "n": 3,
+        "p50": 41.552,
+        "p99": 42.975
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 23.288,
+        "min": 9.455,
+        "n": 3,
+        "p50": 20.986,
+        "p99": 23.288
+      },
+      "drain": {
+        "1024B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "1024": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 64.106,
+        "min": 16.214,
+        "n": 3,
+        "p50": 40.25,
+        "p99": 64.106
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/own-halfclose-first": {
+      "close_to_first_wake_us": {
+        "max": 56.555,
+        "min": 43.916,
+        "n": 3,
+        "p50": 52.314,
+        "p99": 56.555
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 30.705,
+        "min": 14.863,
+        "n": 3,
+        "p50": 25.193,
+        "p99": 30.705
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "['SHUTDOWN:0x2']": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 16.174,
+        "min": 13.831,
+        "n": 3,
+        "p50": 15.773,
+        "p99": 16.174
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "IN|OUT|RDHUP": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    },
+    "h2g/peer-halfclose-first": {
+      "close_to_first_wake_us": {
+        "max": 57.437,
+        "min": 48.749,
+        "n": 3,
+        "p50": 53.325,
+        "p99": 57.437
+      },
+      "close_to_hup_wake_us": {
+        "max": 57.437,
+        "min": 48.749,
+        "n": 3,
+        "p50": 53.325,
+        "p99": 57.437
+      },
+      "close_to_rx_record_us": {
+        "max": 27.913,
+        "min": 22.959,
+        "n": 3,
+        "p50": 25.382,
+        "p99": 27.913
+      },
+      "drain": {
+        "0B/EOF": 3
+      },
+      "early_end_records_pre_close": {
+        "[]": 3
+      },
+      "end_peek_bytes_unread": {
+        "0": 3
+      },
+      "end_poll": {
+        "IN|HUP|RDHUP": 3
+      },
+      "guest_close_rc_dur_us": {
+        "max": 49.455,
+        "min": 16.155,
+        "n": 3,
+        "p50": 42.634,
+        "p99": 49.455
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 3
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 3
+      },
+      "not_ok": {},
+      "ok": 3,
+      "pre_state_host_poll": {
+        "0": 3
+      },
+      "so_error": {
+        "0": 3
+      },
+      "trials": 3,
+      "wake_mask_sequence": {
+        "IN|HUP|RDHUP": 3
+      },
+      "wakes_in_window": {
+        "1": 3
+      },
+      "write": {
+        "EPIPE": 3
+      }
+    }
+  },
+  "cleanup": {
+    "modules_added_and_left": []
+  },
+  "done": {
+    "ok": true
+  },
+  "guest": {
+    "hello": {
+      "h": 5351961318306660,
+      "k": "hello",
+      "t": 318042286,
+      "uname_r": "7.0.0-29-generic"
+    },
+    "host_uname_r": "7.0.0-29-generic",
+    "serial_boot": "GUEST_BOOT uname_r=7.0.0-29-generic\n"
+  },
+  "long": {
+    "per_cell": {
+      "g2h/both-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8215.547,
+            "min": 8215.409,
+            "n": 2,
+            "p50": 8215.409,
+            "p99": 8215.547
+          },
+          "n": 2,
+          "which": {
+            "rx:RST:0x0": 2
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.059,
+          "min": 0.033,
+          "n": 2,
+          "p50": 0.033,
+          "p99": 0.059
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 131072, \"peek\": 131072, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "g2h/both-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8215.689,
+            "min": 8215.638,
+            "n": 2,
+            "p50": 8215.638,
+            "p99": 8215.689
+          },
+          "n": 2,
+          "which": {
+            "rx:RST:0x0": 2
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.054,
+          "min": 0.034,
+          "n": 2,
+          "p50": 0.034,
+          "p99": 0.054
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 1024, \"peek\": 1024, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "g2h/clean": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.108,
+          "min": 0.075,
+          "n": 2,
+          "p50": 0.075,
+          "p99": 0.108
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "g2h/guest-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.032,
+          "min": 0.031,
+          "n": 2,
+          "p50": 0.031,
+          "p99": 0.032
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "g2h/guest-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.098,
+          "min": 0.035,
+          "n": 2,
+          "p50": 0.035,
+          "p99": 0.098
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "g2h/host-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8215.853,
+            "min": 8215.791,
+            "n": 2,
+            "p50": 8215.791,
+            "p99": 8215.853
+          },
+          "n": 2,
+          "which": {
+            "rx:RST:0x0": 2
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.059,
+          "min": 0.044,
+          "n": 2,
+          "p50": 0.044,
+          "p99": 0.059
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 131072, \"peek\": 131072, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "g2h/host-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8215.904,
+            "min": 8215.867,
+            "n": 2,
+            "p50": 8215.867,
+            "p99": 8215.904
+          },
+          "n": 2,
+          "which": {
+            "rx:RST:0x0": 2
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.076,
+          "min": 0.049,
+          "n": 2,
+          "p50": 0.049,
+          "p99": 0.076
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 1024, \"peek\": 1024, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "g2h/own-halfclose-first": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.065,
+          "min": 0.059,
+          "n": 2,
+          "p50": 0.059,
+          "p99": 0.065
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "g2h/peer-halfclose-first": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.066,
+          "min": 0.066,
+          "n": 2,
+          "p50": 0.066,
+          "p99": 0.066
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|HUP|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/both-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8213.445,
+            "min": 8213.131,
+            "n": 2,
+            "p50": 8213.131,
+            "p99": 8213.445
+          },
+          "n": 2,
+          "which": {
+            "rx:RST:0x0": 2
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.064,
+          "min": 0.056,
+          "n": 2,
+          "p50": 0.056,
+          "p99": 0.064
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 131072, \"peek\": 131072, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/both-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8213.687,
+            "min": 8213.592,
+            "n": 2,
+            "p50": 8213.592,
+            "p99": 8213.687
+          },
+          "n": 2,
+          "which": {
+            "rx:RST:0x0": 2
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.058,
+          "min": 0.056,
+          "n": 2,
+          "p50": 0.056,
+          "p99": 0.058
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 1024, \"peek\": 1024, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/clean": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.089,
+          "min": 0.034,
+          "n": 2,
+          "p50": 0.034,
+          "p99": 0.089
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/guest-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.061,
+          "min": 0.034,
+          "n": 2,
+          "p50": 0.034,
+          "p99": 0.061
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/guest-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.072,
+          "min": 0.066,
+          "n": 2,
+          "p50": 0.066,
+          "p99": 0.072
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/host-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8214.017,
+            "min": 8213.818,
+            "n": 2,
+            "p50": 8213.818,
+            "p99": 8214.017
+          },
+          "n": 2,
+          "which": {
+            "rx:RST:0x0": 2
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.067,
+          "min": 0.064,
+          "n": 2,
+          "p50": 0.064,
+          "p99": 0.067
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 131072, \"peek\": 131072, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/host-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8214.183,
+            "min": 8214.108,
+            "n": 2,
+            "p50": 8214.108,
+            "p99": 8214.183
+          },
+          "n": 2,
+          "which": {
+            "rx:RST:0x0": 2
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.066,
+          "min": 0.056,
+          "n": 2,
+          "p50": 0.056,
+          "p99": 0.066
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 1024, \"peek\": 1024, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/own-halfclose-first": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.054,
+          "min": 0.045,
+          "n": 2,
+          "p50": 0.045,
+          "p99": 0.054
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      },
+      "h2g/peer-halfclose-first": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 2
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.069,
+          "min": 0.058,
+          "n": 2,
+          "p50": 0.058,
+          "p99": 0.069
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|HUP|RDHUP\", \"so_error\": \"0\"}": 2
+        },
+        "n_flows": 2
+      }
+    }
+  },
+  "preflight": {
+    "host_uname_r": "7.0.0-29-generic",
+    "kvm_api": 12,
+    "other_cloud_hypervisors_at_start": "",
+    "systemd_detect_virt": "none"
+  },
+  "trace": {
+    "buffer_size_kb": "1410",
+    "overrun_events_lost": 0,
+    "total_parsed_events": 3404,
+    "trace_clock": "local global counter uptime perf [mono] mono_raw boot tai x86-tsc"
+  }
+}

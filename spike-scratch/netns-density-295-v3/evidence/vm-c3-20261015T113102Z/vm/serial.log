@@ -1,0 +1,5 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}
+{"ev":"sink_ready","label":"c3","kind":"tcpsrc","uname":"7.0.0-29-generic","port":7000,"bytes":0,"abort_queued_mb":0,"mem_total_kb":977368,"mem_free_kb":875560,"mem_avail_kb":828112,"slab_kb":20780,"sunreclaim_kb":19444,"sreclaim_kb":1336,"tcp_mem_pages":0,"skbuff_head_active":340,"slab_top_mib":[["kernfs_node_cache",3],["task_struct",1],["kmalloc-rnd-08-4k",1]]}
+[    0.842725] Out of memory: Killed process 115 (v3probe) total-vm:73200kB, anon-rss:3308kB, file-rss:8kB, shmem-rss:1948kB, UID:0 pgtables:52kB oom_score_adj:0

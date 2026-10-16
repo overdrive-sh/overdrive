@@ -1,0 +1,2 @@
+{"ev":"send_ready","label":"c0","uname":"7.0.0-29-generic","cid":3370,"port":7001,"total":268435456,"trials":1}
+{"ev":"send_end","label":"c0","trial":0,"outcome":"err_32","sent":262144,"secs":4.559,"mbps":0.1,"max_send_ms":4558,"slow_sends":1,"sends":5,"peer_closed_read":0}

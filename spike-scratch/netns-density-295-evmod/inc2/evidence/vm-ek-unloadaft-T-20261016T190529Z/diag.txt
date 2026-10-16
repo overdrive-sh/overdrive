@@ -1,0 +1,157 @@
+PID   USER     COMMAND
+    1 0        {init} /bin/sh /init
+    2 0        [kthreadd]
+    3 0        [pool_workqueue_]
+    4 0        [kworker/R-rcu_g]
+    5 0        [kworker/R-sync_]
+    6 0        [kworker/R-kvfre]
+    7 0        [kworker/R-slub_]
+    8 0        [kworker/R-netns]
+    9 0        [kworker/0:0-eve]
+   10 0        [kworker/0:0H]
+   11 0        [kworker/0:1-vir]
+   12 0        [kworker/u16:0-p]
+   13 0        [kworker/R-mm_pe]
+   14 0        [ksoftirqd/0]
+   15 0        [rcu_preempt]
+   16 0        [rcu_exp_par_gp_]
+   17 0        [rcu_exp_gp_kthr]
+   18 0        [migration/0]
+   19 0        [kprobe-optimize]
+   20 0        [idle_inject/0]
+   21 0        [cpuhp/0]
+   22 0        [cpuhp/1]
+   23 0        [idle_inject/1]
+   24 0        [migration/1]
+   25 0        [ksoftirqd/1]
+   26 0        [kworker/1:0-slu]
+   27 0        [kworker/1:0H]
+   28 0        [cpuhp/2]
+   29 0        [idle_inject/2]
+   30 0        [migration/2]
+   31 0        [ksoftirqd/2]
+   32 0        [kworker/2:0-slu]
+   33 0        [kworker/2:0H]
+   34 0        [cpuhp/3]
+   35 0        [idle_inject/3]
+   36 0        [migration/3]
+   37 0        [ksoftirqd/3]
+   38 0        [kworker/3:0-eve]
+   39 0        [kworker/3:0H]
+   40 0        [kdevtmpfs]
+   41 0        [kworker/R-inet_]
+   42 0        [rcu_tasks_kthre]
+   43 0        [rcu_tasks_rude_]
+   44 0        [kauditd]
+   45 0        [khungtaskd]
+   46 0        [oom_reaper]
+   47 0        [kworker/u16:1-p]
+   48 0        [kworker/u16:2]
+   49 0        [kworker/R-write]
+   50 0        [kworker/3:1-vir]
+   51 0        [kcompactd0]
+   52 0        [ksmd]
+   53 0        [khugepaged]
+   54 0        [kworker/R-kbloc]
+   55 0        [kworker/R-blkcg]
+   56 0        [kworker/R-kinte]
+   57 0        [kworker/2:1-eve]
+   58 0        [kworker/1:1-mm_]
+   59 0        [kworker/R-tpm_d]
+   60 0        [kworker/R-ata_s]
+   61 0        [kworker/R-md_bi]
+   62 0        [kworker/R-md_ll]
+   63 0        [kworker/R-md_ll]
+   64 0        [kworker/R-edac-]
+   65 0        [kworker/R-devfr]
+   66 0        [watchdogd]
+   67 0        [kworker/R-quota]
+   68 0        [kswapd0]
+   69 0        [ecryptfs-kthrea]
+   70 0        [kworker/R-kthro]
+   71 0        [irq/25-ACPI:Ged]
+   72 0        [kworker/R-acpi_]
+   73 0        [kworker/R-mld]
+   74 0        [kworker/R-ipv6_]
+   75 0        [kworker/R-kstrp]
+   77 0        [kworker/u17:0]
+   88 0        [kworker/R-charg]
+  101 0        [kworker/3:2-eve]
+  105 0        /evprobe agent
+  106 0        {init} /bin/sh /init
+  108 0        sleep 3600
+  245 0        sleep 1
+  247 0        /bin/sh -c ps; ls -la /tmp | head; for p in $(pidof evprobe); do echo == pid $p; cat /proc/$p/status | grep -E 'State|Threads'; for t in /proc/$p/task/*; do echo task $(basename $t) $(cat $t/comm) $(cat $t/wchan 2>/dev/null); cat $t/stack 2>/dev/null | head -14; done; done; echo == evmod; cat /proc/evmod; echo == tls; cat /proc/net/tls_stat | grep -v ' 0$'; echo == ss; ss -tniea 2>/dev/null | head -40; echo == sinklog; tail -c 3000 /tmp/sink.log; echo == dmesg; dmesg | tail -40
+  248 0        {ps} /bin/sh -c ps; ls -la /tmp | head; for p in $(pidof evprobe); do echo == pid $p; cat /proc/$p/status | grep -E 'State|Threads'; for t in /proc/$p/task/*; do echo task $(basename $t) $(cat $t/comm) $(cat $t/wchan 2>/dev/null); cat $t/stack 2>/dev/null | head -14; done; done; echo == evmod; cat /proc/evmod; echo == tls; cat /proc/net/tls_stat | grep -v ' 0$'; echo == ss; ss -tniea 2>/dev/null | head -40; echo == sinklog; tail -c 3000 /tmp/sink.log; echo == dmesg; dmesg | tail -40
+total 0
+drwxrwxrwt    2 0        0               40 Oct 16 19:05 .
+drwxr-xr-x   13 0        0              340 Oct 16 19:05 ..
+== pid 105
+State:	S (sleeping)
+Threads:	2
+task 105 evprobe vsock_accept
+[<0>] vsock_accept+0xee/0x410 [vsock]
+[<0>] do_accept+0x104/0x1c0
+[<0>] __sys_accept4+0x86/0x110
+[<0>] __x64_sys_accept4+0x1c/0x30
+[<0>] x64_sys_call+0x188f/0x2390
+[<0>] do_syscall_64+0x105/0x5a0
+[<0>] entry_SYSCALL_64_after_hwframe+0x76/0x7e
+task 246 evprobe poll_schedule_timeout.constprop.0
+[<0>] poll_schedule_timeout.constprop.0+0x3e/0xa0
+[<0>] do_poll.constprop.0+0x240/0x340
+[<0>] do_sys_poll+0x1e5/0x290
+[<0>] __x64_sys_poll+0x4e/0x190
+[<0>] x64_sys_call+0xbe8/0x2390
+[<0>] do_syscall_64+0x105/0x5a0
+[<0>] entry_SYSCALL_64_after_hwframe+0x76/0x7e
+== evmod
+live=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=248 buf_bytes=65536
+== tls
+== ss
+State Recv-Q Send-Q Local Address:Port Peer Address:Port
+== sinklog
+== dmesg
+[    0.219459] Key type big_key registered
+[    0.291983] Freeing initrd memory: 13836K
+[    0.293072] Key type encrypted registered
+[    0.293080] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.293085] ima: No TPM chip found, activating TPM-bypass!
+[    0.293097] Loading compiled-in module X.509 certificates
+[    0.293579] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    0.293583] ima: Allocated hash algorithm: sha256
+[    0.293596] ima: No architecture policies found
+[    0.293628] evm: Initialising EVM extended attributes:
+[    0.293630] evm: security.selinux
+[    0.293633] evm: security.SMACK64
+[    0.293634] evm: security.SMACK64EXEC
+[    0.293636] evm: security.SMACK64TRANSMUTE
+[    0.293638] evm: security.SMACK64MMAP
+[    0.293639] evm: security.apparmor
+[    0.293641] evm: security.ima
+[    0.293643] evm: security.capability
+[    0.293644] evm: HMAC attrs: 0x1
+[    0.293966] PM:   Magic number: 14:755:91
+[    0.293971] memory_tiering memory_tier4: hash matches
+[    0.294323] RAS: Correctable Errors collector initialized.
+[    0.294906] clk: Disabling unused clocks
+[    0.294911] PM: genpd: Disabling unused power domains
+[    0.301853] Freeing unused decrypted memory: 2028K
+[    0.303063] Freeing unused kernel image (initmem) memory: 5292K
+[    0.303089] Write protecting the kernel read-only data: 43008k
+[    0.304177] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    0.304842] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    0.383510] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.383523] Run /init as init process
+[    0.383526]   with arguments:
+[    0.383528]     /init
+[    0.383530]   with environment:
+[    0.383532]     HOME=/
+[    0.383534]     TERM=linux
+[    0.403076] NET: Registered PF_VSOCK protocol family
+[    0.414431] evmod: loading out-of-tree module taints kernel.
+[    0.414443] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    0.415451] evmod: loaded (per-cpu workqueue)
+cat: can't open '/proc/net/tls_stat': No such file or directory
+tail: can't open '/tmp/sink.log': No such file or directory
+tail: no files

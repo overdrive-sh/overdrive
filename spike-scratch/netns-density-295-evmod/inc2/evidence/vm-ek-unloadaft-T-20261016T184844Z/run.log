@@ -1,0 +1,72 @@
+[18:48:44] === evmod vm ['ek-unloadaft-T'] {}
+[18:48:44] === preflight (fail closed)
+[18:48:44] substrate: {"host_uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16, "meminfo_head": ["MemTotal:       65401732 kB", "MemFree:        60013240 kB", "MemAvailable:   64175484 kB"]}
+[18:48:44] $ modprobe vhost_vsock; lsmod | grep -E 'vsock|vhost' | head (rc=0)
+[18:48:44]     vhost_vsock            28672  0
+[18:48:44]     vmw_vsock_virtio_transport_common    61440  1 vhost_vsock
+[18:48:44]     vhost                  69632  1 vhost_vsock
+[18:48:44]     vhost_iotlb            16384  1 vhost
+[18:48:44]     vsock                  73728  2 vmw_vsock_virtio_transport_common,vhost_vsock
+[18:48:44] === guest image
+[18:48:44] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "d758db08c0ec", "evprobe": "0d38614a22a6", "valveprobe": "bcae8c50f89e", "valve_bpf_obj": "f3a5e587c64d", "evmod.ko": "1eecbe0154f0", "cloud_hypervisor": "eadddf1bbcdc"}
+[18:48:44] launch VM: /var/tmp/evmod2-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /var/tmp/evmod2-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=1024M --serial file=/var/tmp/evmod2-work/out/vm-20261016T184844Z/serial.log --console off --vsock cid=3371,backend=vhost-kernel --log-file /var/tmp/evmod2-work/out/vm-20261016T184844Z/ch.log -v
+[18:48:45] guest ready: GUEST_BOOT uname_r=7.0.0-29-generic
+[18:48:45] 7.0.0-29-generic
+MemTotal:         977368 kB
+MemAvailable:     825932 kB
+evmod                  28672  0 
+vmw_vsock_virtio_transport    20480  1 
+vmw_vsock_virtio_transport_common    57344  1 vmw_vsock_virtio_transport
+vsock                  73728  7 vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common
+live=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=248 buf_bytes=65536
+crw-------    1 0        0          10, 263 Oct 16 18:48 /dev/evmod
+tcp_rmem=4096 131072 7284416
+tcp_wmem=4096 16384 4194304
+tcp_mem=10668 14227 21336
+rmem_max=4194304
+vsock_buf_default
+4
+0-3
+
+[18:48:45] ##### scenario ek-unloadaft-T: {"dir": "T", "n": 3, "bytes": 67108864, "app": "s2500,f", "sink": "--abort-queued-mb 160 --ktls 3 --ktls-order after --eof 1 --unload-after-ms 1200", "send": "--eof 1", "max_s": 30, "verbose": 1, "probe": "ev", "params": {}}
+[18:48:45] kTLS modules:
+aesni_intel            98304  0 
+tls                   163840  0 
+-rwxr-xr-x    1 0        0           136072 Apr  9  2026 /usr/bin/ss
+ss utility, iproute2-6.19.0
+name         : gcm(aes)
+driver       : generic-gcm-vaes-avx512
+priority     : 800
+name         : gcm(aes)
+driver       : generic-gcm-vaes-avx2
+priority     : 600
+name         : gcm(aes)
+driver       : generic-gcm-aesni-avx
+priority     : 500
+name         : gcm(aes)
+driver       : generic-gcm-aesni
+priority     : 400
+cpu MHz		: 2396.400
+flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_
+TlsCurrTxSw                     	0
+TlsCurrRxSw                     	0
+TlsCurrTxDevice                 	0
+TlsCurrRxDevice                 	0
+TlsTxSw                         	0
+TlsRxSw                         	0
+TlsTxDevice                     	0
+TlsRxDevice                     	0
+TlsDecryptError                 	0
+TlsRxDeviceResync               	0
+TlsDecryptRetry                 	0
+TlsRxNoPadViolation             	0
+TlsRxRekeyOk                    	0
+TlsRxRekeyError                 	0
+TlsTxRekeyOk                    	0
+TlsTxRekeyError                 	0
+TlsRxRekeyReceived              	0
+
+[18:52:15] SUMMARY {"unload_output": null, "scenario": "ek-unloadaft-T", "dir": "T", "probe": "ev", "wall_s": 210.2, "trials_planned": 3, "trial_end": 0, "send_end": 0, "vread_trial_end": 0, "outcomes": {}, "oom_or_bug_lines": [], "bad_json_lines": 0, "main_stream_ok": "0/0", "main_stream_first_bad": [], "main_hash_eq": "0/0", "eof_seen": "0/0", "extra_after_eof": 0, "bytes_verified_MiB": 0.0, "peak_pipe_MiB(src_inq+tgt_outq+peer_inq)": null, "peak_src_inq_KiB": null, "peak_tgt_outq_KiB": null, "peak_peer_inq_KiB": null, "peak_ap_outq_KiB": null, "guest_unreclaim_rise_MiB(max-start)": null, "guest_avail_drop_MiB(start-min)": null, "guest_unreclaim_after_close_minus_start_MiB": null, "max_skb_head": null, "module_moved_MiB": null, "module_stall_dst": null, "module_stall_src": null, "module_runs": null, "module_requeue": null, "module_err": 0, "pairs_aborted": 0, "pairs_completed": 0, "live_end": [], "short_consume": 0, "fault_hits": 0, "pair_self_completed_before_detach": 0, "tasks_start": null, "tasks_max": null, "reader_MiBps": null, "sys_busy_ms": null, "trial_secs": null, "cpu_core_s_per_GiB": null, "back_ok": "0/0", "sender_back_ok": "0/0", "sender_outcomes": {}, "sender_MiBps": null, "sender_max_send_ms": null, "sender_sent_at_longest_block_start_MiB": null, "writer_max_send_ms": null, "writer_sent_at_longest_block_start_MiB": null, "writer_outcomes": {}, "host_unreclaim_rise_MiB(max-start)": null, "host_peak_vsock_inq_KiB": null, "resume_latency_ms(stall_end->sender_unblocked)": null, "reader_end": {}, "writer_outcomes_all": {}}
+[18:52:15] module stats after: live=0 attached=0 detached=0 completed=0 aborted=0 err=0 runs=0 kicks=0 queued=0 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=0 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=248 buf_bytes=65536
+[18:52:15] $ pgrep -af 'cloud-hypervisor|evprobe|valveprobe' | grep -v pgrep; true (rc=0)
+[18:52:15] physical host module names+sizes unchanged: True diff=[] evmod/tls/shmproxy=[] raw_equal=False

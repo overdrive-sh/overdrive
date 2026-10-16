@@ -1,0 +1,7 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+{"ev":"agent_ready","uname":"7.0.0-29-generic"}
+HB up=0.45 1.05 MemAvailable:827980 SUnreclaim:19048 
+HB up=1.46 5.06 MemAvailable:827880 SUnreclaim:19048 
+HB up=2.47 8.99 MemAvailable:808680 SUnreclaim:19300 
+HB up=3.48 12.04 MemAvailable:800756 SUnreclaim:19628 

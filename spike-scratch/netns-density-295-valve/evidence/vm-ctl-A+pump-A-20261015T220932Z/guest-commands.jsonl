@@ -1,0 +1,3 @@
+{"t": 1792102173.6044915, "cmd": "uname -r; ls /sys/kernel/btf/vmlinux; grep -E 'MemTotal|MemAvailable' /proc/meminfo", "rc": 0, "out": "7.0.0-29-generic\n/sys/kernel/btf/vmlinux\nMemTotal:         977368 kB\nMemAvailable:     828324 kB\n"}
+{"t": 1792102173.6064491, "cmd": "/valveprobe sink --kind vsock --obj /valve-bpf.o --port 7100 --trials 3 --bytes 268435456 --label ctl-A --app s3000,f --max-s 90 --verbose-trials 1 --abort-queued-mb 160 > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}
+{"t": 1792102180.5889394, "cmd": "/valveprobe sink --kind vsock --obj /valve-bpf.o --port 7103 --trials 20 --bytes 268435456 --label pump-A --app s3000,f --max-s 90 --verbose-trials 1 --high-kb 4096 --low-kb 0 --resume pump > /dev/ttyS0 2>&1 < /dev/null &", "rc": 0, "out": ""}

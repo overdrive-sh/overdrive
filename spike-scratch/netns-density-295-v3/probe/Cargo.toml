@@ -1,0 +1,13 @@
+[package]
+name = "v3probe"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[dependencies]
+aya = "=0.13.1"
+libc = "0.2"
+[[bin]]
+name = "v3probe"
+path = "src/main.rs"
+[profile.release]
+debug = 1

@@ -1,0 +1,2237 @@
+{
+  "calibration": {
+    "clock_offset_error_bound_us": {
+      "max": 97.031,
+      "median": 46.475,
+      "n": 2001
+    }
+  },
+  "cells": {
+    "g2h/both-halfclosed": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 124.823,
+        "min": 33.375,
+        "n": 100,
+        "p50": 49.7,
+        "p99": 118.168
+      },
+      "close_to_hup_wake_us": {
+        "max": 124.823,
+        "min": 33.375,
+        "n": 100,
+        "p50": 49.7,
+        "p99": 118.168
+      },
+      "close_to_rx_record_us": {
+        "max": 35.628,
+        "min": 9.927,
+        "n": 100,
+        "p50": 22.865,
+        "p99": 35.474
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "['SHUTDOWN:0x2']": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|HUP|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 42.444,
+        "min": 11.898,
+        "n": 100,
+        "p50": 17.826,
+        "p99": 40.992
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 22.999999999999996,
+        "min": 4.0,
+        "n": 100,
+        "p50": 5.0,
+        "p99": 7.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "rx:SHUTDOWN:0x2",
+        "tx:RESPONSE",
+        "tx:SHUTDOWN:0x2"
+      ],
+      "pre_state_host_poll": {
+        "IN|HUP|RDHUP": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 101.14599999999999,
+        "min": 20.627000000000002,
+        "n": 100,
+        "p50": 25.01,
+        "p99": 99.893
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|HUP|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/both-unread/128KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 125.504,
+        "min": 34.291,
+        "n": 100,
+        "p50": 46.625,
+        "p99": 115.55
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 62.302,
+        "min": 15.966,
+        "n": 100,
+        "p50": 23.467,
+        "p99": 44.4
+      },
+      "drain": {
+        "131072B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "131072": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 84.407,
+        "min": 10.927,
+        "n": 100,
+        "p50": 17.807,
+        "p99": 80.421
+      },
+      "host_rst_tx_after_rx_record_us": null,
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "rx:RW",
+        "tx:RESPONSE",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 96.47300000000001,
+        "min": 17.987000000000002,
+        "n": 100,
+        "p50": 22.012,
+        "p99": 94.32499999999999
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/both-unread/1KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 128.318,
+        "min": 30.637,
+        "n": 100,
+        "p50": 46.07,
+        "p99": 110.337
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 39.431,
+        "min": 14.531,
+        "n": 100,
+        "p50": 23.066,
+        "p99": 35.538
+      },
+      "drain": {
+        "1024B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "1024": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 47.952,
+        "min": 11.247,
+        "n": 100,
+        "p50": 17.497,
+        "p99": 37.677
+      },
+      "host_rst_tx_after_rx_record_us": null,
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "rx:RW",
+        "tx:RESPONSE",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 104.09900000000002,
+        "min": 15.629999999999999,
+        "n": 100,
+        "p50": 21.919,
+        "p99": 88.02000000000001
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/clean": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 126.951,
+        "min": 31.083,
+        "n": 100,
+        "p50": 46.279,
+        "p99": 104.428
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 61.07,
+        "min": 8.781,
+        "n": 100,
+        "p50": 22.148,
+        "p99": 43.536
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 96.205,
+        "min": 14.773,
+        "n": 100,
+        "p50": 17.686,
+        "p99": 49.124
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 7.999999999999993,
+        "min": 2.0,
+        "n": 100,
+        "p50": 4.0,
+        "p99": 7.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:CREDIT_UPDATE",
+        "rx:REQUEST",
+        "rx:RW",
+        "tx:CREDIT_UPDATE",
+        "tx:RESPONSE",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 104.365,
+        "min": 18.586000000000006,
+        "n": 100,
+        "p50": 23.551,
+        "p99": 84.198
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/guest-unread/128KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 125.804,
+        "min": 41.182,
+        "n": 100,
+        "p50": 62.955,
+        "p99": 123.361
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 65.436,
+        "min": 14.934,
+        "n": 100,
+        "p50": 28.723,
+        "p99": 64.186
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 133.27,
+        "min": 14.372,
+        "n": 100,
+        "p50": 17.647,
+        "p99": 130.566
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 33.0,
+        "min": 3.0,
+        "n": 100,
+        "p50": 6.0,
+        "p99": 18.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "tx:RESPONSE",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 98.95500000000001,
+        "min": 21.472,
+        "n": 100,
+        "p50": 28.908999999999995,
+        "p99": 88.596
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/guest-unread/1KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 194.317,
+        "min": 15.814,
+        "n": 100,
+        "p50": 49.376,
+        "p99": 149.24
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 52.341,
+        "min": -9.961,
+        "n": 100,
+        "p50": 21.94,
+        "p99": 38.53
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 47.021,
+        "min": 14.872,
+        "n": 100,
+        "p50": 17.376,
+        "p99": 42.203
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 13.0,
+        "min": 3.9999999999999982,
+        "n": 100,
+        "p50": 5.0,
+        "p99": 9.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "tx:RESPONSE",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 155.787,
+        "min": 20.31,
+        "n": 100,
+        "p50": 26.811,
+        "p99": 124.16300000000001
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/host-unread/128KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 107.757,
+        "min": 29.775,
+        "n": 100,
+        "p50": 48.143,
+        "p99": 102.079
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 55.109,
+        "min": 9.766,
+        "n": 100,
+        "p50": 24.42,
+        "p99": 44.087
+      },
+      "drain": {
+        "131072B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "131072": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 49.785,
+        "min": 11.667,
+        "n": 100,
+        "p50": 17.667,
+        "p99": 38.448
+      },
+      "host_rst_tx_after_rx_record_us": null,
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "rx:RW",
+        "tx:RESPONSE"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 86.248,
+        "min": 18.641,
+        "n": 100,
+        "p50": 21.705,
+        "p99": 85.02
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/host-unread/1KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 116.972,
+        "min": 23.2,
+        "n": 100,
+        "p50": 44.106,
+        "p99": 114.662
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 40.161,
+        "min": 11.028,
+        "n": 100,
+        "p50": 21.744,
+        "p99": 38.306
+      },
+      "drain": {
+        "1024B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "1024": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 44.046,
+        "min": 11.217,
+        "n": 100,
+        "p50": 17.116,
+        "p99": 40.421
+      },
+      "host_rst_tx_after_rx_record_us": null,
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "rx:RW",
+        "tx:RESPONSE"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 94.68299999999999,
+        "min": 10.959,
+        "n": 100,
+        "p50": 22.185,
+        "p99": 91.803
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/own-halfclose-first": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 128.874,
+        "min": 4.106,
+        "n": 100,
+        "p50": 49.885,
+        "p99": 123.261
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 62.099,
+        "min": -21.93,
+        "n": 100,
+        "p50": 22.572,
+        "p99": 57.297
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "['SHUTDOWN:0x2']": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 117.688,
+        "min": 12.599,
+        "n": 100,
+        "p50": 18.007,
+        "p99": 102.364
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 20.999999999999996,
+        "min": 3.9999999999999964,
+        "n": 100,
+        "p50": 5.0,
+        "p99": 19.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "rx:SHUTDOWN:0x2",
+        "tx:RESPONSE"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 104.251,
+        "min": 21.084999999999997,
+        "n": 100,
+        "p50": 26.036,
+        "p99": 102.94
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 99,
+        "IN|RDHUP > IN|RDHUP": 1
+      },
+      "wakes_in_window": {
+        "1": 99,
+        "2": 1
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "g2h/peer-halfclose-first": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 128.218,
+        "min": 38.028,
+        "n": 100,
+        "p50": 47.401,
+        "p99": 93.751
+      },
+      "close_to_hup_wake_us": {
+        "max": 128.218,
+        "min": 38.028,
+        "n": 100,
+        "p50": 47.401,
+        "p99": 93.751
+      },
+      "close_to_rx_record_us": {
+        "max": 37.399,
+        "min": 12.793,
+        "n": 100,
+        "p50": 22.536,
+        "p99": 36.277
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|HUP|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 45.869,
+        "min": 16.074,
+        "n": 100,
+        "p50": 17.947,
+        "p99": 44.357
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 11.999999999999996,
+        "min": 3.0,
+        "n": 100,
+        "p50": 5.0,
+        "p99": 9.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:REQUEST",
+        "tx:RESPONSE",
+        "tx:SHUTDOWN:0x2"
+      ],
+      "pre_state_host_poll": {
+        "0": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 108.07999999999998,
+        "min": 20.365,
+        "n": 100,
+        "p50": 24.958,
+        "p99": 72.68900000000001
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|HUP|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/both-halfclosed": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 63.261,
+        "min": 33.335,
+        "n": 100,
+        "p50": 44.307,
+        "p99": 63.221
+      },
+      "close_to_hup_wake_us": {
+        "max": 63.261,
+        "min": 33.335,
+        "n": 100,
+        "p50": 44.307,
+        "p99": 63.221
+      },
+      "close_to_rx_record_us": {
+        "max": 41.49,
+        "min": 15.758,
+        "n": 100,
+        "p50": 22.8,
+        "p99": 38.02
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "['SHUTDOWN:0x2']": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|HUP|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 46.811,
+        "min": 13.33,
+        "n": 100,
+        "p50": 18.608,
+        "p99": 41.643
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 8.0,
+        "min": 1.9999999999999964,
+        "n": 100,
+        "p50": 3.0,
+        "p99": 7.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "rx:SHUTDOWN:0x2",
+        "tx:REQUEST",
+        "tx:SHUTDOWN:0x2"
+      ],
+      "pre_state_host_poll": {
+        "IN|HUP|RDHUP": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 34.637,
+        "min": 17.020000000000003,
+        "n": 100,
+        "p50": 21.654999999999998,
+        "p99": 33.917
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|HUP|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/both-unread/128KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 418.545,
+        "min": 32.424,
+        "n": 100,
+        "p50": 60.226,
+        "p99": 294.198
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 84.978,
+        "min": 9.332,
+        "n": 100,
+        "p50": 25.432,
+        "p99": 80.408
+      },
+      "drain": {
+        "131072B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "131072": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 105.949,
+        "min": 13.43,
+        "n": 100,
+        "p50": 55.603,
+        "p99": 100.311
+      },
+      "host_rst_tx_after_rx_record_us": null,
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "rx:RW",
+        "tx:REQUEST",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 396.67900000000003,
+        "min": 11.141000000000002,
+        "n": 100,
+        "p50": 24.130999999999993,
+        "p99": 271.952
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/both-unread/1KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 117.553,
+        "min": 22.785,
+        "n": 100,
+        "p50": 51.222,
+        "p99": 116.28
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 79.196,
+        "min": 5.539,
+        "n": 100,
+        "p50": 24.903,
+        "p99": 75.622
+      },
+      "drain": {
+        "1024B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "1024": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 104.397,
+        "min": 13.26,
+        "n": 100,
+        "p50": 19.4,
+        "p99": 104.307
+      },
+      "host_rst_tx_after_rx_record_us": null,
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "rx:RW",
+        "tx:REQUEST",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 95.229,
+        "min": 16.902,
+        "n": 100,
+        "p50": 22.619,
+        "p99": 88.225
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/clean": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 91.337,
+        "min": 36.766,
+        "n": 100,
+        "p50": 46.966,
+        "p99": 89.581
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 41.109,
+        "min": 15.628,
+        "n": 100,
+        "p50": 23.697,
+        "p99": 35.662
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 115.944,
+        "min": 14.452,
+        "n": 100,
+        "p50": 18.938,
+        "p99": 54.913
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 15.000000000000004,
+        "min": 3.0,
+        "n": 100,
+        "p50": 4.0,
+        "p99": 7.0000000000000036
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:CREDIT_UPDATE",
+        "rx:RESPONSE",
+        "rx:RW",
+        "tx:CREDIT_UPDATE",
+        "tx:REQUEST",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 68.284,
+        "min": 19.848000000000003,
+        "n": 100,
+        "p50": 22.875999999999998,
+        "p99": 56.453
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/guest-unread/128KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 73.335,
+        "min": 35.669,
+        "n": 100,
+        "p50": 46.525,
+        "p99": 61.784
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 36.578,
+        "min": 13.3,
+        "n": 100,
+        "p50": 23.285,
+        "p99": 33.495
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 42.785,
+        "min": 8.713,
+        "n": 100,
+        "p50": 14.692,
+        "p99": 36.605
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 7.0000000000000036,
+        "min": 2.0000000000000036,
+        "n": 100,
+        "p50": 4.0,
+        "p99": 7.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "tx:REQUEST",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 54.714,
+        "min": 18.953,
+        "n": 100,
+        "p50": 22.567000000000004,
+        "p99": 35.69500000000001
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/guest-unread/1KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 99.997,
+        "min": 33.115,
+        "n": 100,
+        "p50": 47.382,
+        "p99": 66.281
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 71.072,
+        "min": 13.238,
+        "n": 100,
+        "p50": 23.867,
+        "p99": 41.572
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 45.518,
+        "min": 12.388,
+        "n": 100,
+        "p50": 18.878,
+        "p99": 38.108
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 7.0,
+        "min": 2.9999999999999964,
+        "n": 100,
+        "p50": 4.0,
+        "p99": 7.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "tx:REQUEST",
+        "tx:RW"
+      ],
+      "pre_state_host_poll": {
+        "OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 44.325,
+        "min": 18.988,
+        "n": 100,
+        "p50": 22.419999999999998,
+        "p99": 31.206
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/host-unread/128KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 129.014,
+        "min": 29.219,
+        "n": 100,
+        "p50": 46.155,
+        "p99": 100.057
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 75.497,
+        "min": 10.45,
+        "n": 100,
+        "p50": 23.509,
+        "p99": 73.554
+      },
+      "drain": {
+        "131072B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "131072": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 98.459,
+        "min": 12.739,
+        "n": 100,
+        "p50": 19.079,
+        "p99": 97.897
+      },
+      "host_rst_tx_after_rx_record_us": null,
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "rx:RW",
+        "tx:REQUEST"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 97.671,
+        "min": 14.440000000000001,
+        "n": 100,
+        "p50": 21.015000000000004,
+        "p99": 81.86500000000001
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/host-unread/1KiB": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 326.727,
+        "min": 24.291,
+        "n": 100,
+        "p50": 44.463,
+        "p99": 128.169
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 57.695,
+        "min": 6.328,
+        "n": 100,
+        "p50": 23.556,
+        "p99": 54.881
+      },
+      "drain": {
+        "1024B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "1024": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 64.908,
+        "min": 8.192,
+        "n": 100,
+        "p50": 15.263,
+        "p99": 62.434
+      },
+      "host_rst_tx_after_rx_record_us": null,
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "[]": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "rx:RW",
+        "tx:REQUEST"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 289.37899999999996,
+        "min": 16.544999999999998,
+        "n": 100,
+        "p50": 21.478999999999996,
+        "p99": 91.65
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/own-halfclose-first": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 256.787,
+        "min": 30.636,
+        "n": 100,
+        "p50": 48.734,
+        "p99": 98.274
+      },
+      "close_to_hup_wake_us": null,
+      "close_to_rx_record_us": {
+        "max": 57.82,
+        "min": 9.329,
+        "n": 100,
+        "p50": 25.58,
+        "p99": 52.487
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "['SHUTDOWN:0x2']": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 249.155,
+        "min": 11.758,
+        "n": 100,
+        "p50": 18.438,
+        "p99": 120.752
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 10.0,
+        "min": 2.0,
+        "n": 100,
+        "p50": 4.0,
+        "p99": 8.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "rx:SHUTDOWN:0x2",
+        "tx:REQUEST"
+      ],
+      "pre_state_host_poll": {
+        "IN|OUT|RDHUP": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 237.54299999999998,
+        "min": 10.979,
+        "n": 100,
+        "p50": 22.600999999999996,
+        "p99": 72.149
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    },
+    "h2g/peer-halfclose-first": {
+      "close_rc": {
+        "0": 100
+      },
+      "close_to_first_wake_us": {
+        "max": 350.483,
+        "min": 29.425,
+        "n": 100,
+        "p50": 46.536,
+        "p99": 122.405
+      },
+      "close_to_hup_wake_us": {
+        "max": 350.483,
+        "min": 29.425,
+        "n": 100,
+        "p50": 46.536,
+        "p99": 122.405
+      },
+      "close_to_rx_record_us": {
+        "max": 40.948,
+        "min": 9.508,
+        "n": 100,
+        "p50": 24.024,
+        "p99": 39.946
+      },
+      "drain": {
+        "0B/EOF": 100
+      },
+      "early_end_records_pre_close": {
+        "[]": 100
+      },
+      "end_peek_bytes_unread": {
+        "0": 100
+      },
+      "end_poll": {
+        "IN|HUP|RDHUP": 100
+      },
+      "guest_close_rc_dur_us": {
+        "max": 55.874,
+        "min": 13.761,
+        "n": 100,
+        "p50": 19.129,
+        "p99": 51.617
+      },
+      "host_rst_tx_after_rx_record_us": {
+        "max": 80.0,
+        "min": 2.0,
+        "n": 100,
+        "p50": 4.0,
+        "p99": 6.0
+      },
+      "host_rx_end_records": {
+        "['SHUTDOWN:0x3']": 100
+      },
+      "host_tx_end_records_after_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "host_tx_end_records_before_hostclose": {
+        "['RST:0x0']": 100
+      },
+      "not_ok": {},
+      "ok": 100,
+      "pre_close_ops_seen_by_host": [
+        "rx:RESPONSE",
+        "tx:REQUEST",
+        "tx:SHUTDOWN:0x2"
+      ],
+      "pre_state_host_poll": {
+        "0": 100
+      },
+      "record_not_before_wake": 0,
+      "rx_record_to_first_wake_us": {
+        "max": 318.901,
+        "min": 15.016000000000002,
+        "n": 100,
+        "p50": 21.602999999999998,
+        "p99": 101.48400000000001
+      },
+      "so_error": {
+        "0": 100
+      },
+      "trials": 100,
+      "wake_mask_sequence": {
+        "IN|HUP|RDHUP": 100
+      },
+      "wakes_in_window": {
+        "1": 100
+      },
+      "write": {
+        "EPIPE": 100
+      }
+    }
+  },
+  "cleanup": {
+    "modules_added_and_left": []
+  },
+  "done": {
+    "ok": true
+  },
+  "guest": {
+    "hello": {
+      "h": 5352647053661191,
+      "k": "hello",
+      "t": 293953942,
+      "uname_r": "7.0.0-29-generic"
+    },
+    "host_uname_r": "7.0.0-29-generic",
+    "serial_boot": "GUEST_BOOT uname_r=7.0.0-29-generic\n"
+  },
+  "long": {
+    "per_cell": {
+      "g2h/both-halfclosed": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.012,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": -0.012
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|HUP|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/both-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8176.584,
+            "min": 8174.979,
+            "n": 50,
+            "p50": 8175.789,
+            "p99": 8176.584
+          },
+          "n": 50,
+          "which": {
+            "rx:RST:0x0": 50
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.004,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.022,
+          "p99": -0.004
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 131072, \"peek\": 131072, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/both-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8178.68,
+            "min": 8176.627,
+            "n": 50,
+            "p50": 8177.837,
+            "p99": 8178.68
+          },
+          "n": 50,
+          "which": {
+            "rx:RST:0x0": 50
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.0,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.022,
+          "p99": -0.0
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 1024, \"peek\": 1024, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/clean": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.11,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.023,
+          "p99": 0.11
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/guest-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.239,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": 0.239
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/guest-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.045,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.023,
+          "p99": 0.045
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/host-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8180.64,
+            "min": 8178.712,
+            "n": 50,
+            "p50": 8179.459,
+            "p99": 8180.64
+          },
+          "n": 50,
+          "which": {
+            "rx:RST:0x0": 50
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.0,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.023,
+          "p99": 0.0
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 131072, \"peek\": 131072, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/host-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8184.656,
+            "min": 8180.705,
+            "n": 50,
+            "p50": 8182.543,
+            "p99": 8184.656
+          },
+          "n": 50,
+          "which": {
+            "rx:RST:0x0": 50
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.049,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.022,
+          "p99": 0.049
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 1024, \"peek\": 1024, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/own-halfclose-first": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.008,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": -0.008
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "g2h/peer-halfclose-first": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.003,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": -0.003
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|HUP|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/both-halfclosed": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.004,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": 0.004
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|HUP|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/both-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8143.563,
+            "min": 8139.03,
+            "n": 50,
+            "p50": 8142.855,
+            "p99": 8143.563
+          },
+          "n": 50,
+          "which": {
+            "rx:RST:0x0": 50
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.013,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.023,
+          "p99": 0.013
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 131072, \"peek\": 131072, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/both-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8144.924,
+            "min": 8143.592,
+            "n": 50,
+            "p50": 8144.254,
+            "p99": 8144.924
+          },
+          "n": 50,
+          "which": {
+            "rx:RST:0x0": 50
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.013,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.022,
+          "p99": -0.013
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 1024, \"peek\": 1024, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/clean": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.034,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": 0.034
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/guest-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.187,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.022,
+          "p99": 0.187
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/guest-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.011,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": -0.011
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/host-unread/128KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8147.804,
+            "min": 8144.98,
+            "n": 50,
+            "p50": 8145.782,
+            "p99": 8147.804
+          },
+          "n": 50,
+          "which": {
+            "rx:RST:0x0": 50
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.148,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.022,
+          "p99": 0.148
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 131072, \"peek\": 131072, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/host-unread/1KiB": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , rx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": {
+            "max": 8151.834,
+            "min": 8147.849,
+            "n": 50,
+            "p50": 8149.744,
+            "p99": 8151.834
+          },
+          "n": 50,
+          "which": {
+            "rx:RST:0x0": 50
+          }
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": 0.34,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.021,
+          "p99": 0.34
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 1024, \"peek\": 1024, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/own-halfclose-first": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.016,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": -0.016
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|OUT|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      },
+      "h2g/peer-halfclose-first": {
+        "end_record_sequence_ops": {
+          "rx:SHUTDOWN:0x3 , tx:RST:0x0": 50
+        },
+        "end_records_after_1s": {
+          "ms_after_close": null,
+          "n": 0,
+          "which": {}
+        },
+        "first_end_record_rx_ms_after_close": {
+          "max": -0.016,
+          "min": -0.027,
+          "n": 50,
+          "p50": -0.024,
+          "p99": -0.016
+        },
+        "host_state_at_10s": {
+          "{\"drain_end\": \"EOF\", \"drained\": 0, \"peek\": 0, \"poll\": \"IN|HUP|RDHUP\", \"so_error\": \"0\"}": 50
+        },
+        "n_flows": 50
+      }
+    }
+  },
+  "preflight": {
+    "host_uname_r": "7.0.0-29-generic",
+    "kvm_api": 12,
+    "other_cloud_hypervisors_at_start": "",
+    "systemd_detect_virt": "none"
+  },
+  "trace": {
+    "buffer_size_kb": "1410",
+    "overrun_events_lost": 0,
+    "total_parsed_events": 117725,
+    "trace_clock": "local global counter uptime perf [mono] mono_raw boot tai x86-tsc"
+  }
+}
